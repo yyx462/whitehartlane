@@ -15,6 +15,10 @@ The fleet template is a prototype, not the spec. It showed the pain: a new proje
 ## Decisions so far
 
 - [Front door spec](spec.md) — the choices this map locked. Direct has no finish. Fan-out ends in a report.
+- [Hook contract] — manifest + scripts. `workflow.toml` in the task directory names the workflow, the worker kind, and the units, grade, and counts commands. Any language. A unit carries its own brief.
+- [Orchestrator host] — detached script (the campaign's launchd pattern) plus a recorded pane tailing its log via `shep record`. No agent wraps the rail.
+- [Direct machinery] — full: the front door resubmits a failed turn up to the cap and says "Stopped after 3 retries." in the same chat. Build it in the TUI phase.
+- [Verification] — real panes via `shep` at the fan-out and campaign phases; verify-to-zero quoted after each. The repo pushes to origin at each phase milestone.
 
 ## Not yet specified
 

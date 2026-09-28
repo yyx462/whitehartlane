@@ -1,20 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { hooksFromDir, type Hooks, type Manifest, type Unit } from "./hooks.ts"
+import { settleUnit, writeUnitsSnapshot } from "./state.ts"
+
+export type { Grade, Hooks, Unit } from "./hooks.ts"
 
 export type Judgment = {
   workflow: "fan-out" | "direct"
   confidence: number
-}
-
-export type Unit = { id: string; brief: string }
-
-export type Grade = { pass: boolean; row: string }
-
-export type Hooks = {
-  units: () => Unit[]
-  grade: (unit: Unit) => Grade
-  counts: (rows: { unit: string; result: string }[]) => Record<string, number>
-  workerKind: "opencode" | "pi"
 }
 
 export type Report = {
@@ -97,7 +90,8 @@ export async function standUp(input: {
   taskDir?: string
   cwd?: () => string
   jev: (task: string) => Promise<Judgment>
-  hooks: Hooks
+  hooks?: Hooks
+  runWorker?: (unit: Unit) => void | Promise<void>
   startWorker?: () => void
   provider?: Provider
   panes?: Panes
@@ -126,11 +120,17 @@ export async function standUp(input: {
       },
     }
   }
-  const units = input.hooks.units()
+  const loaded = input.hooks
+    ? { hooks: input.hooks, manifest: undefined as Manifest | undefined }
+    : hooksFromDir(taskDir)
+  const hooks = loaded.hooks
+  const units = hooks.units()
+  const where = loaded.manifest?.report?.where ?? taskDir
+  if (loaded.manifest) writeUnitsSnapshot(taskDir, units)
   if (input.runShep) {
     for (const argv of fanOutShepPlan({
       cwd: taskDir,
-      workerKind: input.hooks.workerKind,
+      workerKind: hooks.workerKind,
       units,
     })) {
       input.runShep(argv)
@@ -149,12 +149,14 @@ export async function standUp(input: {
   const table: { unit: string; result: string; pass: boolean }[] = []
   let index = 0
 
-  const take = (from: number): number | "refused" => {
+  const take = async (from: number): Promise<number | "refused"> => {
     for (let i = from; i < units.length; i++) {
       const unit = units[i]
       if (input.provider && input.provider.admit(unit) === "refused") return "refused"
-      const grade = input.hooks.grade(unit)
+      if (input.runWorker) await input.runWorker(unit)
+      const grade = hooks.grade(unit)
       table.push({ unit: unit.id, result: grade.row, pass: grade.pass })
+      if (loaded.manifest) settleUnit(taskDir, unit.id, grade.pass)
       index = i + 1
     }
     return index
@@ -164,21 +166,21 @@ export async function standUp(input: {
     const body: Report = {
       kind: "report",
       status: table.some((row) => !row.pass) ? "failed" : "done",
-      counts: input.hooks.counts(table),
+      counts: hooks.counts(table.map(({ unit, result }) => ({ unit, result }))),
       table: table.map(({ unit, result }) => ({ unit, result })),
-      where: taskDir,
+      where,
     }
     mkdirSync(taskDir, { recursive: true })
     writeFileSync(join(taskDir, "report.json"), JSON.stringify(body, null, 2))
     return body
   }
 
-  if (take(0) === "refused") {
+  if ((await take(0)) === "refused") {
     return {
       kind: "waiting",
       probe: async () => {
         if (!input.provider || input.provider.probe() === "refused") return
-        take(index)
+        await take(index)
       },
       report,
     }
