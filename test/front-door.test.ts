@@ -1,9 +1,18 @@
 import assert from "node:assert/strict"
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
+
+const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
+
+async function copyExample(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "agentic-os-proj-"))
+  cpSync(EXAMPLE, dir, { recursive: true })
+  return dir
+}
 
 test("three independent lookups finish as a fan-out report", async () => {
   const report = await standUp({
@@ -311,4 +320,87 @@ test("the task directory defaults to the directory the agent was opened in", asy
   assert.equal(report.kind, "report")
   if (report.kind !== "report") return
   assert.equal(report.where, opened)
+})
+
+test("project mode runs the example workflow from its manifest", async () => {
+  const dir = await copyExample()
+  mkdirSync(join(dir, "results"), { recursive: true })
+  for (const id of ["france", "japan", "peru"]) {
+    writeFileSync(join(dir, "results", `${id}.txt`), "capital\n")
+  }
+
+  const report = await standUp({
+    task: "look up three capitals",
+    taskDir: dir,
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+  })
+
+  assert.equal(report.kind, "report")
+  if (report.kind !== "report") return
+  assert.equal(report.status, "done")
+  assert.deepEqual(report.counts, { lookups: 3, failed: 0 })
+  assert.deepEqual(
+    report.table.map((row) => row.result),
+    ["found", "found", "found"],
+  )
+  assert.equal(report.where, "results/")
+
+  const snapshot = readFileSync(join(dir, "units.jsonl"), "utf8").trim().split("\n")
+  assert.equal(snapshot.length, 3)
+  assert.ok(snapshot[0].includes('"id":"france"'))
+  const state = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"))
+  assert.deepEqual(state, { done: ["france", "japan", "peru"], failed: [] })
+})
+
+test("project mode settles a missing artifact as failed", async () => {
+  const dir = await copyExample()
+  mkdirSync(join(dir, "results"), { recursive: true })
+  writeFileSync(join(dir, "results", "france.txt"), "Paris\n")
+  writeFileSync(join(dir, "results", "peru.txt"), "Lima\n")
+
+  const report = await standUp({
+    task: "look up three capitals",
+    taskDir: dir,
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+  })
+
+  assert.equal(report.kind, "report")
+  if (report.kind !== "report") return
+  assert.equal(report.status, "failed")
+  assert.deepEqual(report.counts, { lookups: 3, failed: 1 })
+  const state = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"))
+  assert.deepEqual(state, { done: ["france", "peru"], failed: ["japan"] })
+})
+
+test("a worker port runs before grade and produces the artifacts", async () => {
+  const dir = await copyExample()
+  const ran: string[] = []
+
+  const report = await standUp({
+    task: "look up three capitals",
+    taskDir: dir,
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    runWorker: async (unit) => {
+      ran.push(unit.id)
+      mkdirSync(join(dir, "results"), { recursive: true })
+      writeFileSync(join(dir, "results", `${unit.id}.txt`), "capital\n")
+    },
+  })
+
+  assert.deepEqual(ran, ["france", "japan", "peru"])
+  assert.equal(report.kind, "report")
+  if (report.kind !== "report") return
+  assert.equal(report.status, "done")
+})
+
+test("project mode without workflow.toml is a clean error", async () => {
+  const empty = await mkdtemp(join(tmpdir(), "agentic-os-none-"))
+  await assert.rejects(
+    standUp({
+      task: "look up three capitals",
+      taskDir: empty,
+      jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    }),
+    /no workflow\.toml/,
+  )
 })

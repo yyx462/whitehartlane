@@ -56,13 +56,13 @@ A pi TUI is the front door. Jev chooses one of two workflows. Fan-out runs indep
 - Two workflows are in this spec. Fan-out runs independent units. Direct runs one worker. A third workflow is not described.
 - A workflow receives an input and has an orchestrator. Fan-out must produce a report. Direct must not finish. Orchestrator method belongs to the workflow. This spec's fan-out orchestrator is a script that spawns, grades, and settles. This spec's direct orchestrator is a hidden script. A later workflow may use an agent, a script, or jev. That choice is not a rail.
 - Rails, which a project must not rewrite: the pane ledger, fail recovery, backpressure, and the retry cap. Fail recovery is the existing `shep` behavior, including adopt if the front door dies. The ledger may later point at a chosen file. It remains the pane owner.
-- Hooks, which a project fills: what one unit of work is, the worker brief, how to grade, where artifacts go, which counts the report shows, and the worker kind. Jev does not pick the worker kind.
+- Hooks are a manifest plus scripts in the task directory. `workflow.toml` names the workflow, the worker kind, and the units, grade, and counts commands. A unit carries its own brief. A project may write hooks in any language. Jev does not pick the worker kind.
 - The product retry maximum is 3. A workflow may use fewer. It may not use more. The cap covers orchestrator retries, including a worker that hits a token limit.
 - Backpressure is a provider refusal or a slow reply, from the LLM or from web-search MCP. The workflow stops opening new calls until a later probe succeeds. A hand-set concurrency number is not this policy.
 - Ownership is split. The `shep` ledger owns panes. The task directory the user names owns progress and output. A live worker owns neither.
-- Layout belongs to the workflow. Fan-out calls `shep`. The orchestrator pane is `shep spawn orchestrator --dir right`. Each worker is `shep spawn w-<id>`. `SHEP_STACK_MAX` stays 3, so a fourth worker opens shep's overflow tab. Direct opens no pane. The chat the user already has open is the worker. A hidden script retries in that same chat.
+- Layout belongs to the workflow. Fan-out's orchestrator runs detached (the campaign's launchd pattern). Its lane is a recorded pane tailing the orchestrator log via `shep record`. Each worker is `shep spawn w-<id>`. `SHEP_STACK_MAX` stays 3, so a fourth worker opens shep's overflow tab. Direct opens no pane. The chat the user already has open is the worker.
 - Fan-out's report has a status, named counts, a table, and where to check. The hook names the counts. The front door shows the report. It does not paste the raw work. For the seller-name test, the counts include chunks done, rows inserted, and the table name.
-- Direct has no report and no finish. The user stops when they want. If the worker blocks, the hidden script retries, up to the cap. If the cap is hit, the worker says so in that same chat.
+- Direct has no report and no finish. The user stops when they want. The front door resubmits a failed turn, up to the cap. If the cap is hit, the worker says so in that same chat.
 - The examples in the spec are three independent lookups, and one direct coding task. The seller-name campaign is a test that the same fan-out hooks must be able to carry. It is not the example the spec is written around.
 - Outliving memory is the directory the agent was opened in. The front door does not invent another folder.
 - Leader election is not in this spec. Leader-or-not remains a field a later workflow may declare. These two workflows do not elect one.
@@ -77,6 +77,7 @@ A pi TUI is the front door. Jev chooses one of two workflows. Fan-out runs indep
 - Backpressure tests must show that a refusal stops new calls, and that a successful probe allows them again.
 - Layout tests for fan-out must show the lane split, the cap of 3, and a new tab for a fourth worker.
 - There is no prior test suite in this repo. The fleet prototype's smoke is evidence of the pain, not a suite to extend.
+- Fan-out verification runs real panes via `shep` in herdr and quotes the verify-to-zero receipt. The repo pushes to origin at each phase milestone.
 
 ## Out of Scope
 
