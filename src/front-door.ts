@@ -1,21 +1,13 @@
-import { mkdirSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
 import { hooksFromDir, type Hooks, type Manifest, type Unit } from "./hooks.ts"
+import { writeReport, type Report } from "./report.ts"
 import { settleUnit, writeUnitsSnapshot } from "./state.ts"
 
 export type { Grade, Hooks, Unit } from "./hooks.ts"
+export type { Report } from "./report.ts"
 
 export type Judgment = {
   workflow: "fan-out" | "direct"
   confidence: number
-}
-
-export type Report = {
-  kind: "report"
-  status: "done" | "failed"
-  counts: Record<string, number>
-  table: { unit: string; result: string }[]
-  where: string
 }
 
 export type Session = {
@@ -162,18 +154,8 @@ export async function standUp(input: {
     return index
   }
 
-  const report = (): Report => {
-    const body: Report = {
-      kind: "report",
-      status: table.some((row) => !row.pass) ? "failed" : "done",
-      counts: hooks.counts(table.map(({ unit, result }) => ({ unit, result }))),
-      table: table.map(({ unit, result }) => ({ unit, result })),
-      where,
-    }
-    mkdirSync(taskDir, { recursive: true })
-    writeFileSync(join(taskDir, "report.json"), JSON.stringify(body, null, 2))
-    return body
-  }
+  const report = (): Report =>
+    writeReport(taskDir, where, table, hooks.counts)
 
   if ((await take(0)) === "refused") {
     return {
