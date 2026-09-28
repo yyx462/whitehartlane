@@ -37,7 +37,7 @@ The workflow for independent units. Workers do not depend on each other. The orc
 _Avoid_: fleet, hierarchy, swarm
 
 **Direct**:
-The workflow for one worker. The user talks to that worker as if it were opencode or pi. There is no finish and no report. A hidden script retries only when the worker is blocked, and only up to the cap. If the cap is hit, the worker says so in that same chat.
+The workflow for one worker. That worker is the chat the user already has open. No pane is opened. A hidden script retries only when the worker is blocked, and only up to the cap. If the cap is hit, the worker says so in that same chat. There is no finish and no report.
 _Avoid_: single agent, dummy workflow, fallback
 
 **Rail**:
@@ -69,5 +69,9 @@ The single member a workflow allows to append a shared log, only while the other
 _Avoid_: owner, orchestrator, front door
 
 **Layout**:
-How a workflow shows its panes. It belongs to that workflow. Fan-out uses a second tab: the orchestrator has one lane, and at most 3 workers share the other. Direct hides the machinery. Talking to it feels like talking to opencode or pi.
+How a workflow shows its panes. It belongs to that workflow. Fan-out calls `shep` and uses a second tab: the orchestrator has one lane, and at most 3 workers share the other. Direct opens no pane.
 _Avoid_: dashboard, one layout for every workflow
+
+**Task directory**:
+The directory the agent was opened in. Progress and output live there. The front door does not invent another folder.
+_Avoid_: a folder named from the task
