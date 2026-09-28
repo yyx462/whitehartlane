@@ -60,11 +60,11 @@ A pi TUI is the front door. Jev chooses one of two workflows. Fan-out runs indep
 - The product retry maximum is 3. A workflow may use fewer. It may not use more. The cap covers orchestrator retries, including a worker that hits a token limit.
 - Backpressure is a provider refusal or a slow reply, from the LLM or from web-search MCP. The workflow stops opening new calls until a later probe succeeds. A hand-set concurrency number is not this policy.
 - Ownership is split. The `shep` ledger owns panes. The task directory the user names owns progress and output. A live worker owns neither.
-- Layout belongs to the workflow. Fan-out opens another tab. The orchestrator has one lane. At most 3 worker panes share the other lane. A further worker opens a new tab. Direct hides the machinery. The spec requires that talking to direct feels like talking to opencode or pi. The spec does not choose the hiding trick.
+- Layout belongs to the workflow. Fan-out calls `shep`. The orchestrator pane is `shep spawn orchestrator --dir right`. Each worker is `shep spawn w-<id>`. `SHEP_STACK_MAX` stays 3, so a fourth worker opens shep's overflow tab. Direct opens no pane. The chat the user already has open is the worker. A hidden script retries in that same chat.
 - Fan-out's report has a status, named counts, a table, and where to check. The hook names the counts. The front door shows the report. It does not paste the raw work. For the seller-name test, the counts include chunks done, rows inserted, and the table name.
 - Direct has no report and no finish. The user stops when they want. If the worker blocks, the hidden script retries, up to the cap. If the cap is hit, the worker says so in that same chat.
 - The examples in the spec are three independent lookups, and one direct coding task. The seller-name campaign is a test that the same fan-out hooks must be able to carry. It is not the example the spec is written around.
-- Outliving memory is the task directory, not the worker's context window, and not an in-memory snapshot.
+- Outliving memory is the directory the agent was opened in. The front door does not invent another folder.
 - Leader election is not in this spec. Leader-or-not remains a field a later workflow may declare. These two workflows do not elect one.
 
 ## Testing Decisions

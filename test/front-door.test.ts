@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { show, standUp } from "../src/front-door.ts"
+import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
 
 test("three independent lookups finish as a fan-out report", async () => {
   const report = await standUp({
@@ -249,4 +249,66 @@ test("the front door shows the report as status, counts, a table, and where to c
       "check: /tmp/lookups",
     ].join("\n"),
   )
+})
+
+test("fan-out calls shep for an orchestrator lane and one worker per unit", () => {
+  assert.deepEqual(
+    fanOutShepPlan({
+      cwd: "/work",
+      workerKind: "opencode",
+      units: [
+        { id: "france", brief: "France" },
+        { id: "japan", brief: "Japan" },
+        { id: "peru", brief: "Peru" },
+        { id: "chile", brief: "Chile" },
+      ],
+    }),
+    [
+      ["shep", "spawn", "orchestrator", "--kind", "opencode", "--cwd", "/work", "--dir", "right", "--brief", "@/work/orchestrator.brief.md"],
+      ["shep", "spawn", "w-france", "--kind", "opencode", "--cwd", "/work", "--brief", "@/work/france.brief.md"],
+      ["shep", "spawn", "w-japan", "--kind", "opencode", "--cwd", "/work", "--brief", "@/work/japan.brief.md"],
+      ["shep", "spawn", "w-peru", "--kind", "opencode", "--cwd", "/work", "--brief", "@/work/peru.brief.md"],
+      ["shep", "spawn", "w-chile", "--kind", "opencode", "--cwd", "/work", "--brief", "@/work/chile.brief.md"],
+    ],
+  )
+})
+
+test("direct calls no shep", async () => {
+  const calls: string[][] = []
+  const session = await standUp({
+    task: "rename the helper",
+    taskDir: "/work",
+    jev: async () => ({ workflow: "direct", confidence: 0.9 }),
+    hooks: {
+      units: () => [{ id: "rename", brief: "rename the helper" }],
+      grade: () => ({ pass: true, row: "unused" }),
+      counts: () => ({ lookups: 1 }),
+      workerKind: "pi",
+    },
+    runShep: (argv) => {
+      calls.push(argv)
+    },
+  })
+
+  assert.equal(session.kind, "session")
+  assert.deepEqual(calls, [])
+})
+
+test("the task directory defaults to the directory the agent was opened in", async () => {
+  const opened = await mkdtemp(join(tmpdir(), "agentic-os-cwd-"))
+  const report = await standUp({
+    task: "look up one capital",
+    cwd: () => opened,
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [{ id: "france", brief: "France" }],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: (rows) => ({ lookups: rows.length }),
+      workerKind: "opencode",
+    },
+  })
+
+  assert.equal(report.kind, "report")
+  if (report.kind !== "report") return
+  assert.equal(report.where, opened)
 })

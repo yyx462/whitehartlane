@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Copied call shape from yyx_jev. Not the skill. The question is the product policy.
+# Auth is read from the same files jev uses. The value is never printed.
+set -uo pipefail
+
+QUESTION="Is this task a bag of independent units, such as separate web searches, where no unit needs another's result?"
+DRY=0
+STATE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=1; shift ;;
+    --state) STATE="${2:-}"; shift 2 ;;
+    *) STATE="$1"; shift ;;
+  esac
+done
+
+cfg() {
+  local var="$1" f line
+  [ -n "${!var:-}" ] && { printf '%s' "${!var}"; return; }
+  for f in "$HOME/.config/jev/env" "$HOME/.secrets/env"; do
+    [ -f "$f" ] || continue
+    line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${var}=" "$f" 2>/dev/null | tail -n 1)"
+    [ -n "$line" ] || continue
+    line="${line#*=}"
+    case "$line" in
+      \"*\") line="${line#\"}"; line="${line%\"}" ;;
+      \'*\') line="${line#\'}"; line="${line%\'}" ;;
+    esac
+    printf '%s' "$line"
+    return
+  done
+}
+
+REQ="$(jq -n --arg state "$STATE" --arg q "$QUESTION" '{
+  model: "jev-1.13",
+  state: $state,
+  questions: {
+    q: {
+      type: "choice",
+      instructions: $q,
+      criteria: {
+        "fan-out": "The task is independent units. No unit needs another unit'\''s result.",
+        "direct": "The task is one piece of work, like a coding change in one chat."
+      }
+    }
+  }
+}')"
+
+if [ "$DRY" = 1 ]; then
+  printf '%s\n' "$REQ"
+  exit 0
+fi
+
+KEY="$(cfg AIHUBMIX_API_KEY)"
+BASE="$(cfg JEV_BASE_URL)"
+[ -n "$BASE" ] || BASE="https://api.inferera.com/v1"
+[ -n "$KEY" ] || { printf 'error: AIHUBMIX_API_KEY unset\n' >&2; exit 1; }
+
+BODY="$(curl -sS --max-time 30 -X POST "$BASE/systemone" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $KEY" \
+  --data-binary "$REQ")" || { printf 'error: jev request failed\n' >&2; exit 1; }
+
+CHOICE="$(printf '%s' "$BODY" | jq -r '.answers.q.choice // empty')"
+CONF="$(printf '%s' "$BODY" | jq -r '.answers.q.confidence // empty')"
+[ -n "$CHOICE" ] || { printf 'error: jev returned no choice\n' >&2; exit 1; }
+printf '%s %s\n' "$CHOICE" "$CONF"
