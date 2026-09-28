@@ -1,0 +1,252 @@
+import assert from "node:assert/strict"
+import { mkdtemp, readFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import test from "node:test"
+import { show, standUp } from "../src/front-door.ts"
+
+test("three independent lookups finish as a fan-out report", async () => {
+  const report = await standUp({
+    task: "look up the capitals of France, Japan, and Peru",
+    taskDir: "/tmp/lookups",
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [
+        { id: "france", brief: "capital of France" },
+        { id: "japan", brief: "capital of Japan" },
+        { id: "peru", brief: "capital of Peru" },
+      ],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: (rows) => ({ lookups: rows.length }),
+      workerKind: "opencode",
+    },
+  })
+
+  assert.equal(report.kind, "report")
+  assert.equal(report.status, "done")
+  assert.deepEqual(report.counts, { lookups: 3 })
+  assert.deepEqual(
+    report.table.map((row) => row.unit),
+    ["france", "japan", "peru"],
+  )
+  assert.equal(report.where, "/tmp/lookups")
+})
+
+test("a coding task opens a direct chat and does not finish", async () => {
+  const session = await standUp({
+    task: "rename the helper",
+    taskDir: "/tmp/direct",
+    jev: async () => ({ workflow: "direct", confidence: 0.88 }),
+    hooks: {
+      units: () => [{ id: "rename", brief: "rename the helper" }],
+      grade: () => ({ pass: true, row: "unused" }),
+      counts: () => ({ lookups: 1 }),
+      workerKind: "pi",
+    },
+  })
+
+  assert.equal(session.kind, "session")
+  assert.equal("status" in session, false)
+})
+
+test("low confidence asks the user and does not stand up a workflow", async () => {
+  const asked = await standUp({
+    task: "maybe these can run apart",
+    taskDir: "/tmp/unsure",
+    jev: async () => ({ workflow: "fan-out", confidence: 0.4 }),
+    hooks: {
+      units: () => [{ id: "a", brief: "a" }],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: () => ({ lookups: 1 }),
+      workerKind: "opencode",
+    },
+  })
+
+  assert.equal(asked.kind, "ask")
+})
+
+test("direct retries a blocked worker three times and then says so", async () => {
+  let starts = 0
+  const session = await standUp({
+    task: "rename the helper",
+    taskDir: "/tmp/direct",
+    jev: async () => ({ workflow: "direct", confidence: 0.88 }),
+    hooks: {
+      units: () => [{ id: "rename", brief: "rename the helper" }],
+      grade: () => ({ pass: true, row: "unused" }),
+      counts: () => ({ lookups: 1 }),
+      workerKind: "pi",
+    },
+    startWorker: () => {
+      starts += 1
+    },
+  })
+
+  assert.equal(session.kind, "session")
+  if (session.kind !== "session") return
+  assert.equal(starts, 1)
+
+  session.blocked()
+  session.blocked()
+  session.blocked()
+  assert.equal(starts, 4)
+  assert.deepEqual(session.chat, [])
+
+  session.blocked()
+  assert.equal(starts, 4)
+  assert.deepEqual(session.chat, ["Stopped after 3 retries."])
+})
+
+test("a provider refusal stops new calls until a probe succeeds", async () => {
+  const admitted: string[] = []
+  let japanRefuses = true
+  const run = await standUp({
+    task: "look up the capitals of France, Japan, and Peru",
+    taskDir: "/tmp/lookups",
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [
+        { id: "france", brief: "capital of France" },
+        { id: "japan", brief: "capital of Japan" },
+        { id: "peru", brief: "capital of Peru" },
+      ],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: (rows) => ({ lookups: rows.length }),
+      workerKind: "opencode",
+    },
+    provider: {
+      admit: (unit) => {
+        admitted.push(unit.id)
+        if (unit.id === "japan" && japanRefuses) return "refused"
+        return "ok"
+      },
+      probe: () => {
+        japanRefuses = false
+        return "ok" as const
+      },
+    },
+  })
+
+  assert.equal(run.kind, "waiting")
+  if (run.kind !== "waiting") return
+  assert.deepEqual(admitted, ["france", "japan"])
+
+  await run.probe()
+  assert.deepEqual(admitted, ["france", "japan", "japan", "peru"])
+  assert.equal(run.report().status, "done")
+  assert.deepEqual(run.report().counts, { lookups: 3 })
+})
+
+test("fan-out gives the orchestrator its own lane and caps workers at 3 per tab", async () => {
+  const panes: { role: string; lane: string; tab: number }[] = []
+  await standUp({
+    task: "look up four capitals",
+    taskDir: "/tmp/lookups",
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [
+        { id: "france", brief: "France" },
+        { id: "japan", brief: "Japan" },
+        { id: "peru", brief: "Peru" },
+        { id: "chile", brief: "Chile" },
+      ],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: (rows) => ({ lookups: rows.length }),
+      workerKind: "opencode",
+    },
+    panes: {
+      open: (pane) => panes.push(pane),
+    },
+  })
+
+  assert.deepEqual(panes, [
+    { role: "orchestrator", lane: "orchestrator", tab: 1 },
+    { role: "worker", lane: "workers", tab: 1 },
+    { role: "worker", lane: "workers", tab: 1 },
+    { role: "worker", lane: "workers", tab: 1 },
+    { role: "worker", lane: "workers", tab: 2 },
+  ])
+})
+
+test("a failed grade is the unit result in the report", async () => {
+  const report = await standUp({
+    task: "look up three capitals",
+    taskDir: "/tmp/lookups",
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [
+        { id: "france", brief: "France" },
+        { id: "japan", brief: "Japan" },
+        { id: "peru", brief: "Peru" },
+      ],
+      grade: (unit) =>
+        unit.id === "japan"
+          ? { pass: false, row: "missing" }
+          : { pass: true, row: "found" },
+      counts: (rows) => ({
+        lookups: rows.length,
+        failed: rows.filter((row) => row.result === "missing").length,
+      }),
+      workerKind: "opencode",
+    },
+  })
+
+  assert.equal(report.kind, "report")
+  if (report.kind !== "report") return
+  assert.equal(report.status, "failed")
+  assert.deepEqual(report.counts, { lookups: 3, failed: 1 })
+  assert.deepEqual(report.table[1], { unit: "japan", result: "missing" })
+})
+
+test("fan-out writes the report into the task directory", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "agentic-os-"))
+  await standUp({
+    task: "look up the capitals of France, Japan, and Peru",
+    taskDir,
+    jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
+    hooks: {
+      units: () => [
+        { id: "france", brief: "capital of France" },
+        { id: "japan", brief: "capital of Japan" },
+        { id: "peru", brief: "capital of Peru" },
+      ],
+      grade: () => ({ pass: true, row: "found" }),
+      counts: (rows) => ({ lookups: rows.length }),
+      workerKind: "opencode",
+    },
+  })
+
+  const written = JSON.parse(await readFile(join(taskDir, "report.json"), "utf8"))
+  assert.equal(written.status, "done")
+  assert.deepEqual(written.counts, { lookups: 3 })
+  assert.equal(written.where, taskDir)
+})
+
+test("the front door shows the report as status, counts, a table, and where to check", () => {
+  const text = show({
+    kind: "report",
+    status: "done",
+    counts: { lookups: 3 },
+    table: [
+      { unit: "france", result: "found" },
+      { unit: "japan", result: "found" },
+      { unit: "peru", result: "found" },
+    ],
+    where: "/tmp/lookups",
+  })
+
+  assert.equal(
+    text,
+    [
+      "status: done",
+      "lookups: 3",
+      "",
+      "unit    result",
+      "france  found",
+      "japan   found",
+      "peru    found",
+      "",
+      "check: /tmp/lookups",
+    ].join("\n"),
+  )
+})
