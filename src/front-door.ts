@@ -36,6 +36,15 @@ export type Waiting = {
 const CONFIDENCE_BAR = 0.8
 const WORKERS_PER_TAB = 3
 
+export type RetryAction =
+  | { action: "continue" }
+  | { action: "stop"; message: string }
+
+export function nextRetryAction(resubmitsDone: number): RetryAction {
+  if (resubmitsDone < RETRY_CAP) return { action: "continue" }
+  return { action: "stop", message: "Stopped after 3 retries." }
+}
+
 export type Pane = { role: "orchestrator" | "worker"; lane: "orchestrator" | "workers"; tab: number }
 
 export type Panes = {
