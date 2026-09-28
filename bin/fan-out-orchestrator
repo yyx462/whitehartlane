@@ -1,0 +1,98 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// The fan-out rail. Runs detached; its log is the lane pane's content.
+// Plain JS on purpose: this file has no extension, so Node will not
+// type-strip it. The modules it imports are .ts and strip fine.
+// Usage: bin/fan-out-orchestrator <taskDir>
+import { execFileSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
+import { runOrchestrator } from "../src/orchestrator.ts"
+
+const taskDir = resolve(process.argv[2] ?? process.cwd())
+const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
+
+function run(cmd, args) {
+  try {
+    const stdout = execFileSync(cmd, args, { encoding: "utf8", timeout: 60_000 })
+    return { status: 0, stdout }
+  } catch (err) {
+    return { status: typeof err.status === "number" ? err.status : 1, stdout: err.stdout ?? "" }
+  }
+}
+
+const shep = (...args) => run("shep", args)
+const herdr = (...args) => run("herdr", args)
+const mine = new Set()
+
+const port = {
+  spawnWorker: (name, kind, briefPath, cwd) => {
+    const r = shep("spawn", name, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
+    if (r.status !== 0) {
+      shep("retire", name)
+      log(`spawn failed for ${name} (rc=${r.status}) — ghost cleared`)
+      return false
+    }
+    mine.add(name)
+    log(`spawned ${name} (${kind})`)
+    return true
+  },
+  paneAlive: (name) => herdr("agent", "get", name).status === 0,
+  retire: (name) => {
+    const r = shep("retire", name)
+    if (r.status !== 0) shep("prune")
+    mine.delete(name)
+    log(`retired ${name}`)
+  },
+  retireAll: () => {
+    for (const name of [...mine]) {
+      const r = shep("retire", name)
+      if (r.status !== 0) shep("prune")
+    }
+    mine.clear()
+    log("retired every pane this orchestrator spawned")
+  },
+  verify: () => {
+    const r = shep("verify")
+    const line = r.stdout.split("\n").find((l) => l.includes("pane-reap:"))
+    return (line ?? "pane-reap: ? remaining").trim()
+  },
+  wake: (label, kind, detail) => {
+    shep("wake", "queue", label, kind, detail)
+    log(`wake ${label} ${kind}: ${detail}`)
+  },
+  tailPane: (logPath) => {
+    // Display only. The rail is this detached script; the pane just shows it.
+    mkdirSync(join(taskDir, "briefs"), { recursive: true })
+    const briefPath = join(taskDir, "briefs", "orch-lane.md")
+    writeFileSync(
+      briefPath,
+      [
+        "You are a log viewer. Run exactly this one command, then do nothing:",
+        `tail -n +1 -F ${logPath}`,
+        "",
+        "Never do any other work. Never edit any file. If the tail command",
+        "exits, run it again and idle.",
+      ].join("\n"),
+    )
+    const r = shep(
+      "spawn", "orch-lane", "--kind", "pi", "--cwd", taskDir,
+      "--dir", "right", "--brief", `@${briefPath}`,
+    )
+    if (r.status !== 0) {
+      shep("retire", "orch-lane")  // a failed spawn keeps its ledger entry — clear the ghost
+      log("lane pane unavailable — read the orchestrator log instead")
+      return false
+    }
+    mine.add("orch-lane")
+    return true
+  },
+}
+
+try {
+  const report = await runOrchestrator({ taskDir, shep: port })
+  log(`done: ${report.status}`)
+} catch (err) {
+  log(`fatal: ${err instanceof Error ? err.message : String(err)}`)
+  port.wake("fan-out", "blocked", `orchestrator died: ${taskDir}/orchestrator.log`)
+  process.exit(1)
+}
