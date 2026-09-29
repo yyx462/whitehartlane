@@ -49,7 +49,9 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
       notes.push(`pick-workflow said: ${out}`)
     }
   } catch (err) {
-    notes.push(`jev unavailable (${err instanceof Error ? err.message : String(err)})`)
+    const raw = err instanceof Error ? err.message : String(err)
+    const first = raw.split("\n")[0] ?? raw
+    notes.push(`jev unavailable (${first.slice(0, 120)})`)
   }
 
   if (confidence < CONFIDENCE_BAR) {

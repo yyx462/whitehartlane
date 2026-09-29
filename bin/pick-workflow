@@ -56,10 +56,20 @@ BASE="$(cfg JEV_BASE_URL)"
 [ -n "$BASE" ] || BASE="https://api.inferera.com/v1"
 [ -n "$KEY" ] || { printf 'error: AIHUBMIX_API_KEY unset\n' >&2; exit 1; }
 
-BODY="$(curl -sS --max-time 30 -X POST "$BASE/systemone" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $KEY" \
-  --data-binary "$REQ")" || { printf 'error: jev request failed\n' >&2; exit 1; }
+post() { # post <extra curl args...> — response body or nothing on failure
+  curl -sS -m 12 -X POST "$BASE/systemone" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $KEY" \
+    --data-binary "$REQ" "$@" 2>/dev/null
+}
+
+BODY="$(post)" 
+if [ -z "$BODY" ]; then
+  # The env proxy (Clash) can kill the TLS tunnel while direct works;
+  # retry bypassing the proxy before giving up.
+  BODY="$(post --noproxy '*')"
+fi
+[ -n "$BODY" ] || { printf 'error: jev unreachable via proxy and direct (%s)\n' "$BASE" >&2; exit 1; }
 
 CHOICE="$(printf '%s' "$BODY" | jq -r '.answers.q.choice // empty')"
 CONF="$(printf '%s' "$BODY" | jq -r '.answers.q.confidence // empty')"
