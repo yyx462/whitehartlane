@@ -69,7 +69,7 @@ The single member a workflow allows to append a shared log, only while the other
 _Avoid_: owner, orchestrator, front door
 
 **Layout**:
-How a workflow shows its panes. It belongs to that workflow. Fan-out calls `shep` and uses a second tab: the orchestrator has one lane, and at most 3 workers share the other. Direct opens no pane.
+How a workflow shows its panes. It belongs to that workflow. Fan-out gets its own tab: the orchestrator lane is one full-height pane on its side, and the worker column (configurable cap, default 2) takes the rest, split to equal heights. Direct opens no pane.
 _Avoid_: dashboard, one layout for every workflow
 
 **Task directory**:

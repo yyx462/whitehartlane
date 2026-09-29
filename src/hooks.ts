@@ -1,7 +1,10 @@
 import { execSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
+
+const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 export type Unit = { id: string; brief: string }
 
@@ -20,7 +23,7 @@ export type Layout = {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi" }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number }
   hooks: { units: string; grade: string; counts: string }
   report?: { where?: string }
   layout?: Partial<Layout>
@@ -40,7 +43,7 @@ export function resolvedLayout(manifest: Manifest): Layout {
   }
   return {
     tab: layout.tab ?? "new",
-    orchestrator: layout.orchestrator ?? "right",
+    orchestrator: layout.orchestrator ?? "left",
   }
 }
 
@@ -76,8 +79,15 @@ export function loadManifest(taskDir: string): Manifest {
   if (workerKind !== "opencode" && workerKind !== "pi") {
     throw new HookError(`workflow.worker_kind must be opencode or pi: ${workerKind}`)
   }
+  let slots: number | undefined
+  if (workflow.slots !== undefined) {
+    slots = Number(workflow.slots)
+    if (!Number.isInteger(slots) || slots < 1 || slots > 9) {
+      throw new HookError(`workflow.slots must be an integer 1-9: ${workflow.slots}`)
+    }
+  }
   return {
-    workflow: { name, worker_kind: workerKind },
+    workflow: { name, worker_kind: workerKind, slots },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),
@@ -192,4 +202,23 @@ export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifes
       workerKind: manifest.workflow.worker_kind,
     },
   }
+}
+
+export type ManifestOrigin = "local" | "env" | "user-global" | "builtin"
+
+export function resolveManifestPath(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { path: string; origin: ManifestOrigin } | null {
+  const local = join(cwd, "workflow.toml")
+  if (existsSync(local)) return { path: local, origin: "local" }
+  if (env.AGENTIC_OS_WORKFLOW && existsSync(env.AGENTIC_OS_WORKFLOW)) {
+    return { path: resolve(env.AGENTIC_OS_WORKFLOW), origin: "env" }
+  }
+  if (env.AGENTIC_OS_GLOBAL === "0") return null
+  const userGlobal = join(env.HOME ?? "", ".config", "agentic-os", "workflow.toml")
+  if (existsSync(userGlobal)) return { path: userGlobal, origin: "user-global" }
+  const builtin = join(REPO_DIR, "global", "workflow.toml")
+  if (existsSync(builtin)) return { path: builtin, origin: "builtin" }
+  return null
 }

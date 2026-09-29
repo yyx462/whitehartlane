@@ -38,11 +38,45 @@ export type CycleDeps = {
   now?: () => number
 }
 
-const DEFAULT_SLOTS = 3
+const DEFAULT_SLOTS = 2
 const DEFAULT_STALL_MS = 10 * 60_000
 const DEFAULT_BRIEF_GRACE_MS = 90_000
 const DEFAULT_CHECK_MS = 10 * 60_000
 const RETRY_CAP = 3
+const SHEP_LABEL_MAX = 32
+
+// Pane labels are scoped per run: two ad-hoc runs that generate the same
+// unit ids must not collide in the shared shep ledger (2026-09-29
+// incident: "label already tracks pane" failed three units).
+export function paneLabeler(runId: string): (name: string) => string {
+  const assigned = new Map<string, string>()
+  return (name: string): string => {
+    const memo = assigned.get(name)
+    if (memo) return memo
+    const budget = SHEP_LABEL_MAX - runId.length - 1
+    let stem = name.slice(0, Math.max(1, budget)).replace(/[^a-z0-9_-]/g, "")
+    if (!/^[a-z]/.test(stem)) stem = `w${stem}`
+    let label = `${stem}-${runId}`
+    let n = 2
+    while (label.length > SHEP_LABEL_MAX || [...assigned.values()].includes(label)) {
+      const suffix = String(n)
+      stem = name.slice(0, Math.max(1, budget - suffix.length)).replace(/[^a-z0-9_-]/g, "")
+      if (!/^[a-z]/.test(stem)) stem = `w${stem}`
+      label = `${stem}${suffix}-${runId}`
+      n++
+    }
+    assigned.set(name, label)
+    return label
+  }
+}
+
+export function runIdFor(seed: string): string {
+  let hash = 0
+  for (const ch of seed) {
+    hash = (hash * 31 + ch.codePointAt(0)!) >>> 0
+  }
+  return `${Date.now().toString(36)}${hash.toString(36)}`.slice(0, 8)
+}
 
 export function loadUnitsFor(taskDir: string, hooks: Hooks): Unit[] {
   const path = join(taskDir, "units.jsonl")
@@ -204,6 +238,7 @@ export async function runOrchestrator(input: {
   const manifest = loaded.manifest ?? loadManifest(input.taskDir)
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
+  const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
   const stallMs = input.stallMs ?? DEFAULT_STALL_MS
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
@@ -253,7 +288,7 @@ export async function runOrchestrator(input: {
         shep: input.shep,
         inFlight,
         attempts,
-        slots: input.slots,
+        slots,
         stallMs,
         briefGraceMs,
         now,

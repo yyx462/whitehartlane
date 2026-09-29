@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -8,6 +8,7 @@ import {
   HookError,
   hooksFromDir,
   loadManifest,
+  resolveManifestPath,
   runCounts,
   runGrade,
   runUnits,
@@ -102,4 +103,45 @@ test("the settled table lands in results/table.json for the counts hook", async 
   runCounts(dir, manifest, [{ unit: "france", result: "found" }])
   const table = JSON.parse(readFileSync(join(dir, "results", "table.json"), "utf8"))
   assert.deepEqual(table, [{ unit: "france", result: "found" }])
+})
+
+test("the manifest resolution chain prefers local, then env, then user, then builtin", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "resolve-cwd-"))
+
+  // nothing anywhere except the builtin
+  const emptyHome = mkdtempSync(join(tmpdir(), "resolve-home-"))
+  assert.equal(resolveManifestPath(cwd, { HOME: emptyHome })?.origin, "builtin")
+
+  // user-global beats builtin
+  const userHome = mkdtempSync(join(tmpdir(), "resolve-userhome-"))
+  mkdirSync(join(userHome, ".config", "agentic-os"), { recursive: true })
+  const userToml = join(userHome, ".config", "agentic-os", "workflow.toml")
+  writeFileSync(userToml, "# user override\n")
+  assert.equal(resolveManifestPath(cwd, { HOME: userHome })?.path, userToml)
+
+  // env beats user-global
+  const envToml = join(mkdtempSync(join(tmpdir(), "resolve-env-")), "workflow.toml")
+  writeFileSync(envToml, "# env override\n")
+  assert.equal(
+    resolveManifestPath(cwd, { HOME: userHome, AGENTIC_OS_WORKFLOW: envToml })?.origin,
+    "env",
+  )
+
+  // local beats everything
+  writeFileSync(join(cwd, "workflow.toml"), "# local\n")
+  assert.equal(
+    resolveManifestPath(cwd, { HOME: userHome, AGENTIC_OS_WORKFLOW: envToml })?.origin,
+    "local",
+  )
+
+  // the global chain can be disabled entirely (a local manifest still wins)
+  const bare = mkdtempSync(join(tmpdir(), "resolve-bare-"))
+  assert.equal(
+    resolveManifestPath(bare, { HOME: userHome, AGENTIC_OS_GLOBAL: "0" }),
+    null,
+  )
+  assert.equal(
+    resolveManifestPath(cwd, { HOME: userHome, AGENTIC_OS_GLOBAL: "0" })?.origin,
+    "local",
+  )
 })
