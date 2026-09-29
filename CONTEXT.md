@@ -9,11 +9,15 @@ The pi chat the user works in — the shell. It talks, plans, and may propose pa
 _Avoid_: front door, orchestrator, scheduler, kernel
 
 **Session**:
-The conversation plus its worktree. Always in the product, always has an id and a log. May have no Job.
+The conversation plus its OS disk at `sessions/<sid>/` (trace, state, ledger, pane records) and a binding to a worktree in the target repo. May have no Job.
 _Avoid_: task, chat history, folder
 
+**Binding**:
+The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy.
+_Avoid_: snapshot, copy
+
 **Job**:
-The managed group of panes on a session, with state and policy. Created by the first admitted spawn. No Job, no panes.
+The managed group of panes on a session, with state and policy. Created by the first admitted spawn; `retired` is a state, not deletion. No Job, no panes.
 _Avoid_: fleet, run, campaign
 
 **Workflow**:
@@ -81,5 +85,13 @@ How a workflow shows its panes. It belongs to that workflow. Fan-out gets its ow
 _Avoid_: dashboard, one layout for every workflow
 
 **Task directory**:
-The directory the agent was opened in. Progress and output live there. The front door does not invent another folder.
-_Avoid_: a folder named from the task
+Superseded by zen 2 — OS state lives at `sessions/<sid>/`; project bytes live in the bound worktree.
+_Avoid_: (keep for history; use Session disk and Binding)
+
+**Wake**:
+A pane's claim on a parent's attention. First Mate's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake First Mate once at the end.
+_Avoid_: notification, ping
+
+**Receipt**:
+The Job's finish line: panes of that Job remaining = 0. Session, binding, and Job record remain. Merge and delete are separate commands.
+_Avoid_: cleanup done, scorched earth

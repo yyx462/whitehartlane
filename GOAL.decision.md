@@ -14,6 +14,33 @@ directory owns progress and output. Serves 2. Rejected: one store.
 the collision incident stranded fleets. Serves 5. Rejected: global
 names, manual cleanup.
 
+2026-09-29 — Zen 2: state splits, First Mate is not disposable. Workers
+are panes plus a relaunchable orchestrator; the shell is not a worker.
+OS disk is sessions/<sid>/ (trace, state, ledger, pane records); project
+bytes stay in a bound worktree in the target repo — a binding, never a
+copy. A pane's context is scratch. Retired is a Job state, not deletion;
+reopen on the same tree. Supersedes: "task directory" as one store,
+worktree-per-edit. Serves 2. Trail: docs/zen/2026-09-29-zen-2-5.md.
+
+2026-09-29 — Zen 3: the rails inventory is deferred. The core holds —
+rails do not change per Job, hooks do, a planner writes hooks and never
+rails — but which components are rails gets listed from use, not from
+the blog's nouns. Serves 3.
+
+2026-09-29 — Zen 4: two parents, two attention budgets. The global
+"failures wake, successes stay silent" was wrong about the shell: First
+Mate's direct panes (grill, summary) may report done. Orchestrator
+fan-out stays silent on success; failures and stuck wake the
+orchestrator. A Job may wake First Mate once at the end. JEV stamps
+parent: first_mate | orchestrator. Supersedes: the global silence rule
+(and zen 1's survival note about it). Serves 4.
+
+2026-09-29 — Zen 5: the receipt is per-Job panes, not scorched earth.
+A Job ends when its panes reach 0; session, worktree binding, and Job
+record remain so the work can reopen. Deleting a tree or merging to
+master is a separate command, never retire. Supersedes: retired-to-zero
+as everything-gone. Serves 5.
+
 2026-09-29 — Zen 1: the gate is pane birth, not task entry. The First
 Mate (the pi chat) is a shell, not a kernel — it talks, plans, and
 edits freely; a session may exist with no Job. A pane exists only
