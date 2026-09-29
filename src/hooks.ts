@@ -14,10 +14,34 @@ export type Hooks = {
   workerKind: "opencode" | "pi"
 }
 
+export type Layout = {
+  tab: "same" | "new"
+  orchestrator: "left" | "right"
+}
+
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi" }
   hooks: { units: string; grade: string; counts: string }
   report?: { where?: string }
+  layout?: Partial<Layout>
+}
+
+export function resolvedLayout(manifest: Manifest): Layout {
+  const layout = manifest.layout ?? {}
+  if (layout.tab !== undefined && layout.tab !== "same" && layout.tab !== "new") {
+    throw new HookError(`layout.tab must be same or new: ${layout.tab}`)
+  }
+  if (
+    layout.orchestrator !== undefined &&
+    layout.orchestrator !== "left" &&
+    layout.orchestrator !== "right"
+  ) {
+    throw new HookError(`layout.orchestrator must be left or right: ${layout.orchestrator}`)
+  }
+  return {
+    tab: layout.tab ?? "new",
+    orchestrator: layout.orchestrator ?? "right",
+  }
 }
 
 export class HookError extends Error {}
@@ -38,6 +62,15 @@ export function loadManifest(taskDir: string): Manifest {
   const workflow = m.workflow ?? {}
   const hooks = m.hooks ?? {}
   const report = m.report ?? {}
+  const layoutRaw = m.layout ?? {}
+  const tab = layoutRaw.tab
+  const side = layoutRaw.orchestrator
+  if (tab !== undefined && tab !== "same" && tab !== "new") {
+    throw new HookError(`layout.tab must be same or new: ${tab}`)
+  }
+  if (side !== undefined && side !== "left" && side !== "right") {
+    throw new HookError(`layout.orchestrator must be left or right: ${side}`)
+  }
   const name = str(workflow.name, "workflow.name")
   const workerKind = str(workflow.worker_kind, "workflow.worker_kind")
   if (workerKind !== "opencode" && workerKind !== "pi") {
@@ -51,6 +84,10 @@ export function loadManifest(taskDir: string): Manifest {
       counts: str(hooks.counts, "hooks.counts"),
     },
     report: report.where ? { where: str(report.where, "report.where") } : {},
+    layout: {
+      tab: tab as "same" | "new" | undefined,
+      orchestrator: side as "left" | "right" | undefined,
+    },
   }
 }
 

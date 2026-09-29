@@ -14,21 +14,26 @@ import { copyExample } from "./util.ts"
 
 type Wake = { label: string; kind: string; detail: string }
 
-function fakeShep(overrides: Partial<ShepPort> = {}) {
+function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {}) {
   const spawned: string[] = []
   const retired: string[] = []
   const wakes: Wake[] = []
   const calls: string[] = []
   const reprompts: string[] = []
+  const seq: string[] = []
   const port: ShepPort = {
-    spawnWorker: (name) => {
+    setLayout: (overrides.setLayout as ShepPort["setLayout"]) ?? (() => {}),
+    spawnWorker: (name, kind, briefPath, cwd) => {
       spawned.push(name)
-      return true
+      seq.push(`spawn:${name}`)
+      const fn = overrides.spawnWorker as ShepPort["spawnWorker"] | undefined
+      return fn ? fn(name, kind, briefPath, cwd) : true
     },
-    paneAlive: () => true,
-    reprompt: (name) => {
+    paneAlive: (overrides.paneAlive as ShepPort["paneAlive"]) ?? (() => true),
+    reprompt: (name, briefPath) => {
       reprompts.push(name)
-      return true
+      const fn = overrides.reprompt as ShepPort["reprompt"] | undefined
+      return fn ? fn(name, briefPath) : true
     },
     retire: (name) => {
       retired.push(name)
@@ -40,10 +45,13 @@ function fakeShep(overrides: Partial<ShepPort> = {}) {
     wake: (label, kind, detail) => {
       wakes.push({ label, kind, detail })
     },
-    tailPane: () => true,
-    ...overrides,
+    tailPane: (logPath) => {
+      seq.push("tail")
+      const fn = overrides.tailPane as ShepPort["tailPane"] | undefined
+      return fn ? fn(logPath) : true
+    },
   }
-  return { port, spawned, retired, wakes, calls, reprompts }
+  return { port, spawned, retired, wakes, calls, reprompts, seq }
 }
 
 function deps(
@@ -229,12 +237,12 @@ test("a unit whose spawn fails three times settles failed and wakes", async () =
   assert.equal(third, true)
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
   assert.equal(wakes.length, 3)
-  assert.equal(spawned.length, 0)
+  assert.equal(spawned.length, 9)
 })
 
 test("runOrchestrator settles everything, writes the report, and quotes the receipt", async () => {
   const dir = await copyExample("orch-full-")
-  const { port, wakes, calls, retired } = fakeShep({
+  const { port, wakes, calls, retired, seq } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       const id = name.slice(2)
       writeFileSync(join(cwd, "results", `${id}.txt`), "capital\n")
@@ -246,7 +254,7 @@ test("runOrchestrator settles everything, writes the report, and quotes the rece
   const report = await runOrchestrator({
     taskDir: dir,
     shep: port,
-    sleep: () => Promise.resolve(),
+    checkMs: 10,
     log: () => {},
   })
 
@@ -263,27 +271,67 @@ test("runOrchestrator settles everything, writes the report, and quotes the rece
   assert.ok(wakes[0].detail.includes("pane-reap: 0 remaining"))
   const written = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"))
   assert.equal(written.status, "done")
+  // default layout is new-tab with the orchestrator lane on the right:
+  // workers spawn first, the lane pane opens after them
+  assert.equal(seq.indexOf("spawn:w-france") < seq.indexOf("tail"), true)
 })
 
 test("runOrchestrator stops at the deadline, settles the rest failed, and wakes", async () => {
   const dir = await copyExample("orch-deadline-")
-  let clock = 0
   const { port, wakes } = fakeShep()
 
   const report = await runOrchestrator({
     taskDir: dir,
     shep: port,
-    deadlineMs: 1000,
-    pollMs: 500,
-    now: () => clock,
-    sleep: (ms) => {
-      clock += ms
-      return Promise.resolve()
-    },
+    deadlineMs: 50,
+    checkMs: 10,
     log: () => {},
   })
 
   assert.equal(report.status, "failed")
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
   assert.ok(wakes.length >= 1)
+})
+
+test("an orchestrator-side layout of left opens the lane before any worker", async () => {
+  const dir = await copyExample("orch-side-left-")
+  const { port, seq } = fakeShep({
+    spawnWorker: (name, _kind, _brief, cwd) => {
+      const id = name.slice(2)
+      writeFileSync(join(cwd, "results", `${id}.txt`), "capital\n")
+      appendFileSync(join(cwd, "logs", `${id}.log`), `done ${id}\n`)
+      return true
+    },
+  })
+
+  await runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    layout: { tab: "same", orchestrator: "left" },
+    checkMs: 10,
+    log: () => {},
+  })
+
+  assert.equal(seq.indexOf("tail") < seq.indexOf("spawn:w-france"), true)
+})
+
+test("the manifest layout section resolves with defaults and rejects bad values", async () => {
+  const dir = await copyExample("orch-layout-")
+  const { loadManifest, resolvedLayout } = await import("../src/hooks.ts")
+  const original = readFileSync(join(dir, "workflow.toml"), "utf8")
+
+  const flipped = original
+    .replace('tab = "new"', 'tab = "same"')
+    .replace('orchestrator = "right"', 'orchestrator = "left"')
+  writeFileSync(join(dir, "workflow.toml"), flipped)
+  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "same", orchestrator: "left" })
+
+  writeFileSync(join(dir, "workflow.toml"), original.replace('tab = "new"', 'tab = "middle"'))
+  assert.throws(() => resolvedLayout(loadManifest(dir)), /layout\.tab/)
+
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    original.replace(/\[layout\][\s\S]*$/, "").trim() + "\n",
+  )
+  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "new", orchestrator: "right" })
 })
