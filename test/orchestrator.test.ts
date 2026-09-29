@@ -19,12 +19,17 @@ function fakeShep(overrides: Partial<ShepPort> = {}) {
   const retired: string[] = []
   const wakes: Wake[] = []
   const calls: string[] = []
+  const reprompts: string[] = []
   const port: ShepPort = {
     spawnWorker: (name) => {
       spawned.push(name)
       return true
     },
     paneAlive: () => true,
+    reprompt: (name) => {
+      reprompts.push(name)
+      return true
+    },
     retire: (name) => {
       retired.push(name)
     },
@@ -38,7 +43,7 @@ function fakeShep(overrides: Partial<ShepPort> = {}) {
     tailPane: () => true,
     ...overrides,
   }
-  return { port, spawned, retired, wakes, calls }
+  return { port, spawned, retired, wakes, calls, reprompts }
 }
 
 function deps(
@@ -149,6 +154,55 @@ test("a worker whose log goes quiet past the stall window settles failed", async
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
   assert.equal(done, true)
   assert.equal(wakes.length, 3)
+})
+
+test("a worker whose log never appears gets exactly one reprompt after the grace window", async () => {
+  const dir = await copyExample("orch-reprompt-")
+  let clock = 0
+  const { port, reprompts, spawned } = fakeShep()
+  const base = deps(dir, port, { briefGraceMs: 60_000, now: () => clock })
+
+  cycle(base)
+  assert.deepEqual(reprompts, [])
+
+  clock = 30_000
+  cycle(base)
+  assert.deepEqual(reprompts, [])
+
+  clock = 90_000
+  cycle(base)
+  assert.deepEqual(reprompts, ["w-france", "w-japan", "w-peru"])
+
+  clock = 150_000
+  cycle(base)
+  assert.deepEqual(reprompts, ["w-france", "w-japan", "w-peru"])
+  assert.equal(spawned.length, 3)
+})
+
+test("a reprompted worker that then writes its sentinel settles normally", async () => {
+  const dir = await copyExample("orch-reprompt-ok-")
+  let clock = 0
+  const { port, reprompts, wakes } = fakeShep({
+    reprompt: (name) => {
+      reprompts.push(name)
+      const id = name.slice(2)
+      mkdirSync(join(dir, "logs"), { recursive: true })
+      writeFileSync(join(dir, "results", `${id}.txt`), "capital\n")
+      appendFileSync(join(dir, "logs", `${id}.log`), `done ${id}\n`)
+      return true
+    },
+  })
+  const base = deps(dir, port, { briefGraceMs: 60_000, now: () => clock })
+
+  cycle(base)
+  clock = 90_000
+  const settled = cycle(base)   // reprompt fires here, sentinels land
+  const done = cycle(base)      // next poll settles them
+
+  assert.equal(settled, false)
+  assert.equal(done, true)
+  assert.deepEqual(readState(dir).done, ["france", "japan", "peru"])
+  assert.deepEqual(wakes.filter((w) => w.kind === "blocked"), [])
 })
 
 test("cycle skips units already settled", async () => {
