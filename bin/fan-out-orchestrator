@@ -47,7 +47,9 @@ let layout = { tab: "same", orchestrator: "left" }
 let fleetRoot = null // root pane of the fleet tab (unused directly when split)
 let viewerPane = null // the orchestrator lane: full-height side pane
 let colPane = null // top pane of the worker column
-let workerTip = null // latest worker pane in the column
+let colUsed = false // has the column head been taken by the first worker?
+const liveWorkerPanes = [] // pane ids of settled-not-yet workers (splittable anchors)
+const paneOf = new Map() // scoped label -> pane id
 
 const WORKER_SHARE = 0.7
 
@@ -121,16 +123,33 @@ const port = {
   spawnWorker: (name, kind, briefPath, cwd) => {
     const label = scoped(name)
     if (layout.tab === "new" && colPane) {
-      // first worker takes the column head; each further worker halves the
-      // column tail downward (equal heights at the default 2 slots)
-      const pane = workerTip ? splitPane(workerTip, "down", cwd, 0.5) : colPane
+      // Split from a LIVE pane only: retired workers close their panes, so
+      // a stale anchor pane_not_found's (2026-09-29 09:41 run). Try the
+      // newest live worker downward, any older live worker, then a fresh
+      // column beside the lane pane.
+      let pane = null
+      if (!colUsed) {
+        pane = colPane
+      } else {
+        for (const anchor of [...liveWorkerPanes].reverse()) {
+          pane = splitPane(anchor, "down", cwd, 0.5)
+          if (pane) break
+        }
+        if (!pane && viewerPane) {
+          pane = splitPane(viewerPane, "right", cwd, 0.7)
+        }
+      }
       if (!pane) {
-        log(`pane split failed for ${label}`)
+        log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      workerTip = pane
+      colUsed = true
       const ok = inhabitPane(name, kind, pane, briefPath, cwd)
-      if (ok) log(`spawned ${label} (${kind}) in fleet tab pane ${pane}`)
+      if (ok) {
+        liveWorkerPanes.push(pane)
+        paneOf.set(label, pane)
+        log(`spawned ${label} (${kind}) in fleet tab pane ${pane}`)
+      }
       return ok
     }
     const r = shep("spawn", label, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
@@ -158,10 +177,17 @@ const port = {
   },
 
   retire: (name) => {
-    const r = shep("retire", scoped(name))
+    const label = scoped(name)
+    const r = shep("retire", label)
     if (r.status !== 0) shep("prune")
-    mine.delete(scoped(name))
-    log(`retired ${scoped(name)}`)
+    mine.delete(label)
+    const pane = paneOf.get(label)
+    paneOf.delete(label)
+    if (pane) {
+      const i = liveWorkerPanes.indexOf(pane)
+      if (i >= 0) liveWorkerPanes.splice(i, 1)
+    }
+    log(`retired ${label}`)
   },
 
   retireAll: () => {
@@ -170,6 +196,8 @@ const port = {
       if (r.status !== 0) shep("prune")
     }
     mine.clear()
+    paneOf.clear()
+    liveWorkerPanes.length = 0
     log("retired every pane this orchestrator spawned")
   },
 
