@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
-import { hooksFromDir, runUnits, loadManifest, type Hooks, type Manifest, type Unit } from "./hooks.ts"
+import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
 import { writeReport, type Report } from "./report.ts"
 import { readRows, readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
+  setLayout: (layout: Layout, taskDir: string) => void
   spawnWorker: (name: string, kind: string, briefPath: string, cwd: string) => boolean
   paneAlive: (name: string) => boolean
   reprompt: (name: string, briefPath: string) => boolean
@@ -40,6 +41,7 @@ export type CycleDeps = {
 const DEFAULT_SLOTS = 3
 const DEFAULT_STALL_MS = 10 * 60_000
 const DEFAULT_BRIEF_GRACE_MS = 90_000
+const DEFAULT_CHECK_MS = 10 * 60_000
 const RETRY_CAP = 3
 
 export function loadUnitsFor(taskDir: string, hooks: Hooks): Unit[] {
@@ -187,12 +189,13 @@ export async function runOrchestrator(input: {
   shep: ShepPort
   hooks?: Hooks
   manifest?: Manifest
+  layout?: Layout
   slots?: number
   stallMs?: number
-  pollMs?: number
+  briefGraceMs?: number
+  checkMs?: number
   deadlineMs?: number
   now?: () => number
-  sleep?: (ms: number) => Promise<void>
   log?: (msg: string) => void
 }): Promise<Report> {
   const loaded = input.hooks
@@ -200,54 +203,148 @@ export async function runOrchestrator(input: {
     : hooksFromDir(input.taskDir)
   const manifest = loaded.manifest ?? loadManifest(input.taskDir)
   const where = manifest.report?.where ?? input.taskDir
-  const pollMs = input.pollMs ?? 5_000
+  const layout = input.layout ?? resolvedLayout(manifest)
+  const stallMs = input.stallMs ?? DEFAULT_STALL_MS
+  const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
+  const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
   const deadlineMs = input.deadlineMs ?? 2 * 60 * 60_000
   const now = input.now ?? Date.now
-  const sleep = input.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
   const inFlight = new Map<string, Flight>()
   const attempts = new Map<string, number>()
   const started = now()
 
-  log(`orchestrator: started (taskDir=${input.taskDir})`)
-  const tailOk = input.shep.tailPane(join(input.taskDir, "orchestrator.log"))
-  log(tailOk ? "orchestrator: lane pane tailing this log" : "orchestrator: no lane pane; read this log")
+  log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, fallback check every ${checkMs}ms)`)
 
-  let done = false
-  while (!done) {
-    done = cycle({
-      taskDir: input.taskDir,
-      hooks: loaded.hooks,
-      shep: input.shep,
-      inFlight,
-      attempts,
-      slots: input.slots,
-      stallMs: input.stallMs,
-      now,
-    })
-    if (done) break
-    if (now() - started > deadlineMs) {
-      log("orchestrator: deadline passed; settling the rest failed")
-      for (const [id, flight] of [...inFlight]) {
-        settleUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
-        input.shep.retire(`w-${id}`)
-        inFlight.delete(id)
-      }
-      const state = readState(input.taskDir)
-      const units = loadUnitsFor(input.taskDir, loaded.hooks)
-      for (const unit of units) {
-        if (!state.done.includes(unit.id) && !state.failed.includes(unit.id)) {
-          settleUnit(input.taskDir, unit.id, false, {
-            unit: unit.id,
-            result: "deadline",
-            pass: false,
-          })
-        }
-      }
-      break
-    }
-    await sleep(pollMs)
+  input.shep.setLayout(layout, input.taskDir)
+  const logsDir = join(input.taskDir, "logs")
+  mkdirSync(logsDir, { recursive: true })
+
+  let laneOpened = false
+  const openLane = () => {
+    if (laneOpened) return
+    laneOpened = true
+    const ok = input.shep.tailPane(join(input.taskDir, "orchestrator.log"))
+    log(ok ? "orchestrator: lane pane tailing this log" : "orchestrator: no lane pane; read this log")
   }
+  if (layout.orchestrator === "left") openLane()
+
+  const timers = new Set<ReturnType<typeof setTimeout>>()
+  const watchers: FSWatcher[] = []
+  const watchedFiles = new Set<string>()
+  let running = false
+  let finished = false
+  let firstCycle = true
+
+  const cleanup = () => {
+    for (const t of timers) clearTimeout(t)
+    timers.clear()
+    for (const w of watchers) w.close()
+    watchers.length = 0
+  }
+
+  const run = (): void => {
+    if (running || finished) return
+    running = true
+    try {
+      const done = cycle({
+        taskDir: input.taskDir,
+        hooks: loaded.hooks,
+        shep: input.shep,
+        inFlight,
+        attempts,
+        slots: input.slots,
+        stallMs,
+        briefGraceMs,
+        now,
+      })
+      if (firstCycle) {
+        firstCycle = false
+        if (layout.orchestrator === "right") openLane()
+      }
+      if (done) {
+        finished = true
+        cleanup()
+        return
+      }
+      if (now() - started > deadlineMs) {
+        log("orchestrator: deadline passed; settling the rest failed")
+        for (const [id, flight] of [...inFlight]) {
+          settleUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
+          input.shep.retire(`w-${id}`)
+          inFlight.delete(id)
+        }
+        const state = readState(input.taskDir)
+        const units = loadUnitsFor(input.taskDir, loaded.hooks)
+        for (const unit of units) {
+          if (!state.done.includes(unit.id) && !state.failed.includes(unit.id)) {
+            settleUnit(input.taskDir, unit.id, false, {
+              unit: unit.id,
+              result: "deadline",
+              pass: false,
+            })
+          }
+        }
+        finished = true
+        cleanup()
+        return
+      }
+      watchFlights()
+      scheduleGrace()
+    } finally {
+      running = false
+    }
+  }
+
+  const queueRun = (): void => {
+    const t = setTimeout(() => {
+      timers.delete(t)
+      run()
+    }, 150)
+    timers.add(t)
+  }
+
+  const watchFlights = (): void => {
+    for (const flight of inFlight.values()) {
+      if (watchedFiles.has(flight.logPath)) continue
+      watchedFiles.add(flight.logPath)
+      try {
+        watchers.push(watch(flight.logPath, () => queueRun()))
+      } catch {
+        // the file may not exist yet; the fallback check covers it
+      }
+    }
+  }
+
+  const scheduleGrace = (): void => {
+    for (const flight of inFlight.values()) {
+      if (existsSync(flight.logPath) || flight.reprompted) continue
+      const wait = briefGraceMs - (now() - flight.spawnedAt) + 500
+      const t = setTimeout(() => {
+        timers.delete(t)
+        run()
+      }, Math.max(200, wait))
+      timers.add(t)
+    }
+  }
+
+  try {
+    watchers.push(watch(logsDir, () => queueRun()))
+  } catch {
+    log("orchestrator: logs watch unavailable — fallback check only")
+  }
+  const fallback = setInterval(run, checkMs)
+  run()
+
+  await new Promise<void>((resolve) => {
+    const poll = setInterval(() => {
+      if (finished) {
+        clearInterval(poll)
+        clearInterval(fallback)
+        resolve()
+      }
+    }, 20)
+  })
 
   const report = writeReport(input.taskDir, where, readRows(input.taskDir), loaded.hooks.counts)
   input.shep.retireAll()
