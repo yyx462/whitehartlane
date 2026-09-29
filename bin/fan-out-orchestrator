@@ -4,7 +4,7 @@
 // type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
 import { execFileSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { runOrchestrator } from "../src/orchestrator.ts"
 
@@ -37,6 +37,16 @@ const port = {
     return true
   },
   paneAlive: (name) => herdr("agent", "get", name).status === 0,
+  reprompt: (name, briefPath) => {
+    try {
+      const brief = readFileSync(briefPath, "utf8")
+      const r = herdr("agent", "prompt", name, brief)
+      if (r.status === 0) log(`reprompted ${name} (brief re-submitted)`)
+      return r.status === 0
+    } catch {
+      return false
+    }
+  },
   retire: (name) => {
     const r = shep("retire", name)
     if (r.status !== 0) shep("prune")

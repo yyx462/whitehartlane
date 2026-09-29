@@ -7,6 +7,7 @@ import { readRows, readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
 export type ShepPort = {
   spawnWorker: (name: string, kind: string, briefPath: string, cwd: string) => boolean
   paneAlive: (name: string) => boolean
+  reprompt: (name: string, briefPath: string) => boolean
   retire: (name: string) => void
   retireAll: () => void
   verify: () => string
@@ -17,8 +18,11 @@ export type ShepPort = {
 export type Flight = {
   unit: Unit
   logPath: string
+  briefPath: string
   lastSize: number
   lastChange: number
+  spawnedAt: number
+  reprompted: boolean
 }
 
 export type CycleDeps = {
@@ -29,11 +33,13 @@ export type CycleDeps = {
   attempts: Map<string, number>
   slots?: number
   stallMs?: number
+  briefGraceMs?: number
   now?: () => number
 }
 
 const DEFAULT_SLOTS = 3
 const DEFAULT_STALL_MS = 10 * 60_000
+const DEFAULT_BRIEF_GRACE_MS = 90_000
 const RETRY_CAP = 3
 
 export function loadUnitsFor(taskDir: string, hooks: Hooks): Unit[] {
@@ -71,6 +77,7 @@ function logText(path: string): string {
 export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
+  const briefGraceMs = deps.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const now = deps.now ?? Date.now
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
   mkdirSync(join(deps.taskDir, "briefs"), { recursive: true })
@@ -106,6 +113,18 @@ export function cycle(deps: CycleDeps): boolean {
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
       deps.shep.wake(id, "blocked", "pane not live in herdr")
+    } else if (
+      !existsSync(flight.logPath) &&
+      !flight.reprompted &&
+      now() - flight.spawnedAt > briefGraceMs
+    ) {
+      // The agent started but the brief never landed (a startup race shep
+      // cannot see). Submit it once more; the stall timer is the backstop.
+      flight.reprompted = true
+      const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
+      if (ok) {
+        flight.lastChange = now()
+      }
     } else if (size === flight.lastSize && now() - flight.lastChange > stallMs) {
       settleUnit(deps.taskDir, id, false, { unit: id, result: "stalled", pass: false })
       deps.shep.retire(`w-${id}`)
@@ -138,8 +157,11 @@ export function cycle(deps: CycleDeps): boolean {
       deps.inFlight.set(unit.id, {
         unit,
         logPath: join(deps.taskDir, "logs", `${unit.id}.log`),
+        briefPath,
         lastSize: 0,
         lastChange: now(),
+        spawnedAt: now(),
+        reprompted: false,
       })
     } else {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
