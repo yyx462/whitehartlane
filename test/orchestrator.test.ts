@@ -4,6 +4,7 @@ import { join } from "node:path"
 import test from "node:test"
 import {
   cycle,
+  paneLabeler,
   runOrchestrator,
   type CycleDeps,
   type ShepPort,
@@ -65,6 +66,7 @@ function deps(
     shep: port,
     inFlight: new Map(),
     attempts: new Map(),
+    slots: 3,
     ...extra,
   }
 }
@@ -78,6 +80,22 @@ test("cycle spawns one worker per unsettled unit, up to the slots", async () => 
   assert.equal(done, false)
   assert.deepEqual(spawned, ["w-france", "w-japan", "w-peru"])
   assert.deepEqual(readState(dir), { done: [], failed: [] })
+})
+
+test("the default slot cap is 2 — the third unit waits for a settle", async () => {
+  const dir = await copyExample("orch-slots-")
+  const { port, spawned } = fakeShep()
+  const base = deps(dir, port)
+  base.slots = undefined
+
+  cycle(base)
+  assert.deepEqual(spawned, ["w-france", "w-japan"])
+
+  mkdirSync(join(dir, "logs"), { recursive: true })
+  appendFileSync(join(dir, "logs", "france.log"), "done france\n")
+  writeFileSync(join(dir, "results", "france.txt"), "Paris\n")
+  cycle(base)
+  assert.deepEqual(spawned, ["w-france", "w-japan", "w-peru"])
 })
 
 test("a done sentinel grades the unit, settles it, and wakes nobody", async () => {
@@ -223,6 +241,31 @@ test("cycle skips units already settled", async () => {
   assert.deepEqual(spawned, ["w-japan", "w-peru"])
 })
 
+test("pane labels are run-scoped, idempotent, and shep-safe", () => {
+  const label = paneLabeler("k2x9f7ab")
+  const a = label("w-europe-capitals")
+  assert.equal(label("w-europe-capitals"), a) // idempotent per name
+  assert.match(a, /^w-europe-capitals-k2x9f7ab$/)
+  assert.ok(a.length <= 32, `label too long: ${a}`)
+
+  const other = label("w-asia-capitals")
+  assert.notEqual(other, a)
+
+  // long names are trimmed to fit the 32-char shep limit
+  const long = label("w-a-very-long-unit-name-exceeding-budget")
+  assert.ok(long.length <= 32, `long label: ${long}`)
+  assert.match(long, /-k2x9f7ab$/)
+
+  // two names that trim to the same stem get distinct labels within the run
+  const first = label("w-duplicate-stem-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  const second = label("w-duplicate-stem-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+  assert.notEqual(first, second)
+
+  // a different run id yields different labels for the same name
+  const otherRun = paneLabeler("zz99zz99")
+  assert.notEqual(otherRun("w-europe-capitals"), a)
+})
+
 test("a unit whose spawn fails three times settles failed and wakes", async () => {
   const dir = await copyExample("orch-spawnfail-")
   const { port, wakes, spawned } = fakeShep({ spawnWorker: () => false })
@@ -271,9 +314,9 @@ test("runOrchestrator settles everything, writes the report, and quotes the rece
   assert.ok(wakes[0].detail.includes("pane-reap: 0 remaining"))
   const written = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"))
   assert.equal(written.status, "done")
-  // default layout is new-tab with the orchestrator lane on the right:
-  // workers spawn first, the lane pane opens after them
-  assert.equal(seq.indexOf("spawn:w-france") < seq.indexOf("tail"), true)
+  // default layout is new-tab with the orchestrator lane on the left:
+  // the lane opens before any worker spawns
+  assert.equal(seq.indexOf("tail") < seq.indexOf("spawn:w-france"), true)
 })
 
 test("runOrchestrator stops at the deadline, settles the rest failed, and wakes", async () => {
@@ -293,8 +336,8 @@ test("runOrchestrator stops at the deadline, settles the rest failed, and wakes"
   assert.ok(wakes.length >= 1)
 })
 
-test("an orchestrator-side layout of left opens the lane before any worker", async () => {
-  const dir = await copyExample("orch-side-left-")
+test("an orchestrator-side layout of right opens the lane after the first cycle", async () => {
+  const pi = await copyExample("orch-side-right-")
   const { port, seq } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       const id = name.slice(2)
@@ -305,14 +348,14 @@ test("an orchestrator-side layout of left opens the lane before any worker", asy
   })
 
   await runOrchestrator({
-    taskDir: dir,
+    taskDir: pi,
     shep: port,
-    layout: { tab: "same", orchestrator: "left" },
+    layout: { tab: "same", orchestrator: "right" },
     checkMs: 10,
     log: () => {},
   })
 
-  assert.equal(seq.indexOf("tail") < seq.indexOf("spawn:w-france"), true)
+  assert.equal(seq.indexOf("spawn:w-france") < seq.indexOf("tail"), true)
 })
 
 test("the manifest layout section resolves with defaults and rejects bad values", async () => {
@@ -322,9 +365,9 @@ test("the manifest layout section resolves with defaults and rejects bad values"
 
   const flipped = original
     .replace('tab = "new"', 'tab = "same"')
-    .replace('orchestrator = "right"', 'orchestrator = "left"')
+    .replace('orchestrator = "left"', 'orchestrator = "right"')
   writeFileSync(join(dir, "workflow.toml"), flipped)
-  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "same", orchestrator: "left" })
+  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "same", orchestrator: "right" })
 
   writeFileSync(join(dir, "workflow.toml"), original.replace('tab = "new"', 'tab = "middle"'))
   assert.throws(() => resolvedLayout(loadManifest(dir)), /layout\.tab/)
@@ -333,5 +376,9 @@ test("the manifest layout section resolves with defaults and rejects bad values"
     join(dir, "workflow.toml"),
     original.replace(/\[layout\][\s\S]*$/, "").trim() + "\n",
   )
-  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "new", orchestrator: "right" })
+  assert.deepEqual(resolvedLayout(loadManifest(dir)), { tab: "new", orchestrator: "left" })
+  assert.equal(loadManifest(dir).workflow.slots, 2)
+
+  writeFileSync(join(dir, "workflow.toml"), original.replace("slots = 2", "slots = 0"))
+  assert.throws(() => loadManifest(dir), /slots must be an integer 1-9/)
 })

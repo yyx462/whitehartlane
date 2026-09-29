@@ -5,6 +5,7 @@
 [workflow]
 name = "three-lookups"
 worker_kind = "opencode"
+slots = 2
 
 [hooks]
 units = "bash hooks/units.sh"
@@ -16,5 +17,5 @@ where = "results/"
 
 [layout]
 tab = "new"            # "new" = the fleet gets its own tab; "same" = a column beside your pane
-orchestrator = "right" # which side the orchestrator lane sits on; workers take the other
+orchestrator = "left"  # which side the orchestrator lane sits on; workers take the other
 

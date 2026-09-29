@@ -8,10 +8,11 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import { runOrchestrator } from "../src/orchestrator.ts"
+import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
 
 const taskDir = resolve(process.argv[2] ?? process.cwd())
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
+const scoped = paneLabeler(runIdFor(taskDir))
 
 function run(cmd, args) {
   try {
@@ -42,33 +43,58 @@ function jsonAt(out, pick) {
 const START_TIMEOUT_MS = 60_000
 
 // -- fleet tab state (layout tab = "new") ------------------------------------
-let layout = { tab: "same", orchestrator: "right" }
-let fleetRoot = null
-let rootTaken = false
-let workerTip = null
+let layout = { tab: "same", orchestrator: "left" }
+let fleetRoot = null // root pane of the fleet tab (unused directly when split)
+let viewerPane = null // the orchestrator lane: full-height side pane
+let colPane = null // top pane of the worker column
+let workerTip = null // latest worker pane in the column
 
-function splitPane(fromPane, direction, cwd) {
-  const r = herdr("pane", "split", "--pane", fromPane, "--direction", direction, "--cwd", cwd, "--no-focus")
+const WORKER_SHARE = 0.7
+
+function splitPane(fromPane, direction, cwd, ratio) {
+  const r = herdr(
+    "pane", "split", "--pane", fromPane, "--direction", direction,
+    "--ratio", String(ratio), "--cwd", cwd, "--no-focus",
+  )
   return jsonAt(r.stdout, (d) => d?.result?.pane?.pane_id ?? null)
 }
 
 function openFleetTab(dir) {
   const label = `fan-out-${basename(dir)}`.slice(0, 40)
   const r = herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus")
-  fleetRoot = jsonAt(r.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
-  if (!fleetRoot) {
+  const root = jsonAt(r.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+  if (!root) {
     log(`fleet tab unavailable (rc=${r.status}) — falling back to same-tab layout`)
     layout = { ...layout, tab: "same" }
-  } else {
-    log(`fleet tab ${label} opened (root pane ${fleetRoot})`)
+    return
   }
+  fleetRoot = root
+  // Pre-split the tab: the worker column takes WORKER_SHARE of the width,
+  // the orchestrator lane takes the rest, full height on its side.
+  if (layout.orchestrator === "left") {
+    colPane = splitPane(root, "right", dir, WORKER_SHARE)
+    viewerPane = root
+  } else {
+    viewerPane = splitPane(root, "right", dir, 1 - WORKER_SHARE)
+    colPane = root
+  }
+  if (!colPane || !viewerPane) {
+    log("fleet pre-split failed — falling back to same-tab layout")
+    layout = { ...layout, tab: "same" }
+    fleetRoot = null
+    return
+  }
+  log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
 
 // start an agent in an existing pane, record it, submit the brief
-function inhabitPane(name, kind, pane, briefPath, cwd) {
+function inhabitPane(rawName, kind, pane, briefPath, cwd) {
+  const name = scoped(rawName)
   const rec = shep("record", pane, name)
   if (rec.status !== 0) {
-    log(`record failed for ${name} on pane ${pane}`)
+    // an unrecorded split pane would leak as a bare shell — close it
+    herdr("pane", "close", pane)
+    log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS))
@@ -93,45 +119,38 @@ const port = {
   },
 
   spawnWorker: (name, kind, briefPath, cwd) => {
-    if (layout.tab === "new" && fleetRoot) {
-      let pane
-      if (!rootTaken && layout.orchestrator === "right") {
-        pane = fleetRoot // first worker owns the root; the viewer splits beside it later
-        rootTaken = true
-      } else if (!rootTaken && layout.orchestrator === "left") {
-        pane = splitPane(fleetRoot, "right", cwd) // the viewer owns the root already
-        rootTaken = true
-      } else {
-        const from = workerTip ?? fleetRoot
-        pane = splitPane(from, workerTip ? "down" : "right", cwd)
-      }
+    const label = scoped(name)
+    if (layout.tab === "new" && colPane) {
+      // first worker takes the column head; each further worker halves the
+      // column tail downward (equal heights at the default 2 slots)
+      const pane = workerTip ? splitPane(workerTip, "down", cwd, 0.5) : colPane
       if (!pane) {
-        log(`pane split failed for ${name}`)
+        log(`pane split failed for ${label}`)
         return false
       }
       workerTip = pane
       const ok = inhabitPane(name, kind, pane, briefPath, cwd)
-      if (ok) log(`spawned ${name} (${kind}) in fleet tab pane ${pane}`)
+      if (ok) log(`spawned ${label} (${kind}) in fleet tab pane ${pane}`)
       return ok
     }
-    const r = shep("spawn", name, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
+    const r = shep("spawn", label, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
     if (r.status !== 0) {
-      shep("retire", name)
-      log(`spawn failed for ${name} (rc=${r.status}) — ghost cleared`)
+      shep("retire", label)
+      log(`spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
       return false
     }
-    mine.add(name)
-    log(`spawned ${name} (${kind})`)
+    mine.add(label)
+    log(`spawned ${label} (${kind})`)
     return true
   },
 
-  paneAlive: (name) => herdr("agent", "get", name).status === 0,
+  paneAlive: (name) => herdr("agent", "get", scoped(name)).status === 0,
 
   reprompt: (name, briefPath) => {
     try {
       const brief = readFileSync(briefPath, "utf8")
-      const r = herdr("agent", "prompt", name, brief)
-      if (r.status === 0) log(`reprompted ${name} (brief re-submitted)`)
+      const r = herdr("agent", "prompt", scoped(name), brief)
+      if (r.status === 0) log(`reprompted ${scoped(name)} (brief re-submitted)`)
       return r.status === 0
     } catch {
       return false
@@ -139,10 +158,10 @@ const port = {
   },
 
   retire: (name) => {
-    const r = shep("retire", name)
+    const r = shep("retire", scoped(name))
     if (r.status !== 0) shep("prune")
-    mine.delete(name)
-    log(`retired ${name}`)
+    mine.delete(scoped(name))
+    log(`retired ${scoped(name)}`)
   },
 
   retireAll: () => {
@@ -179,39 +198,30 @@ const port = {
         "exits, run it again and idle.",
       ].join("\n"),
     )
-    if (layout.tab === "new" && fleetRoot) {
-      let pane
-      if (layout.orchestrator === "left") {
-        pane = fleetRoot // the viewer owns the tab root; workers split beside it
-        rootTaken = true
-      } else {
-        pane = splitPane(fleetRoot, "right", taskDir) // beside the worker column
-      }
-      if (!pane) {
-        log("lane pane unavailable — read the orchestrator log instead")
-        return false
-      }
-      const ok = inhabitPane("orch-lane", "pi", pane, briefPath, taskDir)
-      if (ok) log(`lane pane tailing this log (fleet tab pane ${pane})`)
+    if (layout.tab === "new" && viewerPane) {
+      const ok = inhabitPane("orch-lane", "pi", viewerPane, briefPath, taskDir)
+      if (ok) log(`lane pane tailing this log (fleet tab pane ${viewerPane})`)
       return ok
     }
+    const label = scoped("orch-lane")
     const r = shep(
-      "spawn", "orch-lane", "--kind", "pi", "--cwd", taskDir,
+      "spawn", label, "--kind", "pi", "--cwd", taskDir,
       "--dir", "right", "--brief", `@${briefPath}`,
     )
     if (r.status !== 0) {
-      shep("retire", "orch-lane") // a failed spawn keeps its ledger entry — clear the ghost
+      shep("retire", label) // a failed spawn keeps its ledger entry — clear the ghost
       log("lane pane unavailable — read the orchestrator log instead")
       return false
     }
-    mine.add("orch-lane")
+    mine.add(label)
     return true
   },
 }
 
 try {
   const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
-  const report = await runOrchestrator({ taskDir, shep: port, checkMs })
+  const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
+  const report = await runOrchestrator({ taskDir, shep: port, checkMs, slots })
   log(`done: ${report.status}`)
 } catch (err) {
   log(`fatal: ${err instanceof Error ? err.message : String(err)}`)

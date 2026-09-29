@@ -1,0 +1,21 @@
+# The built-in global default for ad-hoc fan-outs in folders without
+# their own workflow.toml. The front door materializes a run manifest
+# from global/hooks/ for each ad-hoc task. To make it yours, copy this
+# to ~/.config/agentic-os/workflow.toml — that file is used verbatim,
+# so its hook commands need absolute paths.
+[workflow]
+name = "ad-hoc"
+worker_kind = "opencode"
+slots = 2
+
+[hooks]
+units = "bash units.sh"
+grade = "bash grade.sh"
+counts = "bash counts.sh"
+
+[report]
+where = "results/"
+
+[layout]
+tab = "new"
+orchestrator = "left"

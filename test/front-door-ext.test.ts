@@ -33,6 +33,7 @@ class FakePi {
   commands = new Map<string, { description: string; handler: (args: string, ctx: unknown) => Promise<void> }>()
   sent: { customType: string; content: string }[] = []
   sentUser: string[] = []
+  flags = new Map<string, boolean | string>()
 
   on(event: string, handler: Handler) {
     this.handlers.set(event, [...(this.handlers.get(event) ?? []), handler])
@@ -45,6 +46,14 @@ class FakePi {
 
   registerCommand(name: string, def: { description: string; handler: (args: string, ctx: unknown) => Promise<void> }) {
     this.commands.set(name, def)
+  }
+
+  registerFlag(name: string, _options: unknown) {
+    // value is set directly on this.flags by tests
+  }
+
+  getFlag(name: string) {
+    return this.flags.get(name)
   }
 
   sendMessage(message: { customType: string; content: string }) {
@@ -94,6 +103,8 @@ function fakeCtx(cwd: string) {
 test.afterEach(() => {
   delete process.env.AGENTIC_OS_PICK
   delete process.env.AGENTIC_OS_ORCHESTRATOR
+  delete process.env.AGENTIC_OS_GLOBAL
+  delete process.env.AGENTIC_OS_WORKFLOW
 })
 
 test("the extension registers the stand_up tool", async () => {
@@ -154,9 +165,10 @@ test("a low-confidence pick without UI defaults to direct and says so", async ()
   assert.match(result.content[0].text, /low confidence — defaulted to direct/)
 })
 
-test("fan-out without workflow.toml falls back to direct", async () => {
+test("fan-out with no manifest anywhere falls back to direct", async () => {
   const pi = await loadExtension()
   await stubPicker("fan-out 1")
+  process.env.AGENTIC_OS_GLOBAL = "0"
   const dir = await mkdtemp(join(tmpdir(), "ext-nomanifest-"))
 
   const result = await pi.tools.get("stand_up")!.execute(
@@ -169,6 +181,31 @@ test("fan-out without workflow.toml falls back to direct", async () => {
 
   assert.match(result.content[0].text, /cannot fan-out: no workflow\.toml/)
   assert.match(result.content[0].text, /runs direct/)
+})
+
+test("fan-out without a local manifest stands up ad-hoc from the global default", async () => {
+  const pi = await loadExtension()
+  await stubPicker("fan-out 1")
+  const { marker } = await stubOrchestrator()
+  const dir = await mkdtemp(join(tmpdir(), "ext-adhoc-"))
+
+  const result = await pi.tools.get("stand_up")!.execute(
+    "t1",
+    { task: "compare three web frameworks" },
+    undefined,
+    undefined,
+    fakeCtx(dir),
+  )
+
+  assert.match(result.content[0].text, /stood up: fan-out \(ad-hoc\)/)
+  assert.match(result.content[0].text, /planner will decompose the task/)
+  const runDir = (await waitFor(marker)).trim()
+  assert.match(runDir, /\.agentic-os\//)
+  assert.match(runDir, /compare-three-web/)
+  assert.equal(readFileSync(join(runDir, "task.txt"), "utf8").trim(), "compare three web frameworks")
+  const manifest = readFileSync(join(runDir, "workflow.toml"), "utf8")
+  assert.match(manifest, /units = "bash .*global\/hooks\/units\.sh"/)
+  assert.match(manifest, /name = "ad-hoc"/)
 })
 
 test("/standup routes fan-out with no model in the loop", async () => {
@@ -199,9 +236,10 @@ test("/standup direct warns and then submits the task itself", async () => {
   assert.deepEqual(pi.sentUser, ["rename the helper"])
 })
 
-test("/standup fan-out without workflow.toml falls back to submitting direct", async () => {
+test("/standup fan-out with no manifest anywhere falls back to submitting direct", async () => {
   const pi = await loadExtension()
   await stubPicker("fan-out 1")
+  process.env.AGENTIC_OS_GLOBAL = "0"
   const dir = await mkdtemp(join(tmpdir(), "ext-cmd-fallback-"))
 
   await pi.commands.get("standup")!.handler("look up three capitals", fakeCtx(dir))
@@ -229,6 +267,61 @@ test("the front-door guideline is pushed once, not once per turn", async () => {
 
   const pushed = options.promptGuidelines.filter((g) => g.includes("front door of agentic-os"))
   assert.equal(pushed.length, 1)
+})
+
+test("an unrouted prompt gets the routing order prepended until stand_up runs", async () => {
+  const pi = await loadExtension()
+  const handler = pi.handlers.get("before_agent_start")![0]
+
+  const event1 = { prompt: "look up capitals", systemPromptOptions: { promptGuidelines: [] } }
+  await handler(event1 as never, {} as never)
+
+  await pi.tools.get("stand_up")!.execute(
+    "t1",
+    { task: "look up capitals" },
+    undefined,
+    undefined,
+    fakeCtx("/tmp"),
+  )
+
+  const event2 = { prompt: "another task", systemPromptOptions: { promptGuidelines: [] } }
+  await handler(event2 as never, {} as never)
+  assert.equal(event2.prompt, "another task")
+})
+
+test("--route routes the prompt itself and suppresses the turn on fan-out", async () => {
+  const pi = await loadExtension()
+  await stubPicker("fan-out 1")
+  const { marker } = await stubOrchestrator()
+  const dir = await copyExample("ext-flag-route-")
+  pi.flags.set("route", true)
+
+  const handler = pi.handlers.get("before_agent_start")![0]
+  const result = (await handler(
+    { prompt: "look up the capitals", systemPromptOptions: { promptGuidelines: [] } },
+    { cwd: dir, hasUI: false },
+  )) as { systemPrompt?: string } | undefined
+
+  assert.ok(result?.systemPrompt)
+  assert.match(result!.systemPrompt!, /Reply with exactly the text/)
+  assert.match(result!.systemPrompt!, /stood up: fan-out/)
+  const runDir = (await waitFor(marker)).trim()
+  assert.equal(runDir, dir)
+  assert.ok(pi.sent.some((m) => m.customType === "agentic-os-route"))
+})
+
+test("--route lets a direct pick run as the worker", async () => {
+  const pi = await loadExtension()
+  await stubPicker("direct 1")
+  pi.flags.set("route", true)
+
+  const handler = pi.handlers.get("before_agent_start")![0]
+  const result = await handler(
+    { prompt: "rename the helper", systemPromptOptions: { promptGuidelines: [] } },
+    { cwd: "/tmp", hasUI: false },
+  )
+
+  assert.equal(result, undefined)
 })
 
 test("an error turn continues three times, then stops with the message", async () => {
