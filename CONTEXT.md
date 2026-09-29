@@ -1,12 +1,20 @@
 # Agentic OS
 
-A TUI the user types a task into. It stands up a workflow of sub-panes. It does not do the task itself.
+A shell and supervisor for subagent work. The user talks in the First Mate; panes are born only through JEV.
 
 ## Language
 
-**Front door**:
-The pi TUI the user types a task into.
-_Avoid_: orchestrator, shepherd, scheduler, product-as-worker
+**First Mate**:
+The pi chat the user works in — the shell. It talks, plans, and may propose panes. It is not itself a pane, and it never takes a pane's answer.
+_Avoid_: front door, orchestrator, scheduler, kernel
+
+**Session**:
+The conversation plus its worktree. Always in the product, always has an id and a log. May have no Job.
+_Avoid_: task, chat history, folder
+
+**Job**:
+The managed group of panes on a session, with state and policy. Created by the first admitted spawn. No Job, no panes.
+_Avoid_: fleet, run, campaign
 
 **Workflow**:
 A component that receives an input and has an orchestrator. Fan-out must produce a report. Direct must not finish. Orchestrator rules belong to that workflow. A project fills hooks. A project does not skip fan-out's report.
@@ -17,7 +25,7 @@ The part that picks a workflow for a task. It does not run the task and it does 
 _Avoid_: orchestrator, driver, jev
 
 **Jev**:
-A cheap typed judgment. Code sends it state and a question; it returns a calibrated pick or a probability. Not an agent and not a pane.
+The birth canal. The model proposes a pane; policy admits it. That pair is JEV. Cheap typed judgment, not an agent and not a pane.
 _Avoid_: router model, LLM scheduler, subagent
 
 **Pane**:
