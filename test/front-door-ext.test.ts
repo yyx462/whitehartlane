@@ -30,6 +30,7 @@ type Tool = {
 class FakePi {
   handlers = new Map<string, Handler[]>()
   tools = new Map<string, Tool>()
+  commands = new Map<string, { description: string; handler: (args: string, ctx: unknown) => Promise<void> }>()
   sent: { customType: string; content: string }[] = []
 
   on(event: string, handler: Handler) {
@@ -39,6 +40,10 @@ class FakePi {
 
   registerTool(tool: Tool) {
     this.tools.set(tool.name, tool)
+  }
+
+  registerCommand(name: string, def: { description: string; handler: (args: string, ctx: unknown) => Promise<void> }) {
+    this.commands.set(name, def)
   }
 
   sendMessage(message: { customType: string; content: string }) {
@@ -122,7 +127,8 @@ test("a direct pick makes the chat the worker", async () => {
     fakeCtx(dir),
   )
 
-  assert.match(result.content[0].text, /direct — you are the worker/)
+  assert.match(result.content[0].text, /direct — this chat is the worker/)
+  assert.match(result.content[0].text, /Do the task now, normally/)
 })
 
 test("a low-confidence pick without UI defaults to direct and says so", async () => {
@@ -138,7 +144,7 @@ test("a low-confidence pick without UI defaults to direct and says so", async ()
     fakeCtx(dir),
   )
 
-  assert.match(result.content[0].text, /direct — you are the worker/)
+  assert.match(result.content[0].text, /direct — this chat is the worker/)
   assert.match(result.content[0].text, /low confidence — defaulted to direct/)
 })
 
@@ -156,7 +162,40 @@ test("fan-out without workflow.toml falls back to direct", async () => {
   )
 
   assert.match(result.content[0].text, /cannot fan-out: no workflow\.toml/)
-  assert.match(result.content[0].text, /do it yourself now/)
+  assert.match(result.content[0].text, /runs direct/)
+})
+
+test("/standup routes fan-out with no model in the loop", async () => {
+  const pi = await loadExtension()
+  await stubPicker("fan-out 1")
+  const { marker } = await stubOrchestrator()
+  const dir = await copyExample("ext-cmd-")
+
+  await pi.commands.get("standup")!.handler("look up three capitals", fakeCtx(dir))
+
+  assert.equal((await waitFor(marker)).trim(), dir)
+  const message = pi.sent.find((m) => m.customType === "agentic-os-route")
+  assert.ok(message)
+  assert.match(message!.content, /stood up: fan-out — 3 units/)
+})
+
+test("/standup direct tells the user to send the task normally", async () => {
+  const pi = await loadExtension()
+  await stubPicker("direct 1")
+  const dir = await mkdtemp(join(tmpdir(), "ext-cmd-direct-"))
+
+  await pi.commands.get("standup")!.handler("rename the helper", fakeCtx(dir))
+
+  const message = pi.sent.find((m) => m.customType === "agentic-os-route")
+  assert.ok(message)
+  assert.match(message!.content, /this chat is the worker/)
+  assert.match(message!.content, /Just send the task as a normal message/)
+})
+
+test("/standup with no task sends nothing", async () => {
+  const pi = await loadExtension()
+  await pi.commands.get("standup")!.handler("", fakeCtx("/tmp"))
+  assert.deepEqual(pi.sent, [])
 })
 
 test("the front-door guideline is pushed once, not once per turn", async () => {
