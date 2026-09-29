@@ -176,16 +176,23 @@ export default function (pi: ExtensionAPI) {
         return
       }
       const outcome = await routeTask(task, { cwd: ctx.cwd, hasUI: ctx.hasUI })
-      let text = outcome.text
-      if (outcome.workflow === "direct" || outcome.workflow === "direct-fallback") {
-        text += " Just send the task as a normal message."
+      if (outcome.workflow === "fan-out") {
+        await pi.sendMessage({
+          customType: "agentic-os-route",
+          content: outcome.text,
+          display: true,
+        })
+        ctx.ui?.notify?.(outcome.text.slice(0, 100), "info")
+        return
       }
+      // direct (or fallback): warn, then continue — submit the task itself
       await pi.sendMessage({
         customType: "agentic-os-route",
-        content: text,
+        content: `${outcome.text} Submitting it as a direct message now.`,
         display: true,
       })
-      ctx.ui?.notify?.(text.slice(0, 100), outcome.workflow === "fan-out" ? "info" : "warning")
+      ctx.ui?.notify?.(outcome.text.slice(0, 100), "warning")
+      await pi.sendUserMessage(task)
     },
   })
 

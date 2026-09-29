@@ -32,6 +32,7 @@ class FakePi {
   tools = new Map<string, Tool>()
   commands = new Map<string, { description: string; handler: (args: string, ctx: unknown) => Promise<void> }>()
   sent: { customType: string; content: string }[] = []
+  sentUser: string[] = []
 
   on(event: string, handler: Handler) {
     this.handlers.set(event, [...(this.handlers.get(event) ?? []), handler])
@@ -48,6 +49,11 @@ class FakePi {
 
   sendMessage(message: { customType: string; content: string }) {
     this.sent.push(message)
+    return Promise.resolve()
+  }
+
+  sendUserMessage(content: string) {
+    this.sentUser.push(content)
     return Promise.resolve()
   }
 }
@@ -179,7 +185,7 @@ test("/standup routes fan-out with no model in the loop", async () => {
   assert.match(message!.content, /stood up: fan-out — 3 units/)
 })
 
-test("/standup direct tells the user to send the task normally", async () => {
+test("/standup direct warns and then submits the task itself", async () => {
   const pi = await loadExtension()
   await stubPicker("direct 1")
   const dir = await mkdtemp(join(tmpdir(), "ext-cmd-direct-"))
@@ -189,7 +195,22 @@ test("/standup direct tells the user to send the task normally", async () => {
   const message = pi.sent.find((m) => m.customType === "agentic-os-route")
   assert.ok(message)
   assert.match(message!.content, /this chat is the worker/)
-  assert.match(message!.content, /Just send the task as a normal message/)
+  assert.match(message!.content, /Submitting it as a direct message now/)
+  assert.deepEqual(pi.sentUser, ["rename the helper"])
+})
+
+test("/standup fan-out without workflow.toml falls back to submitting direct", async () => {
+  const pi = await loadExtension()
+  await stubPicker("fan-out 1")
+  const dir = await mkdtemp(join(tmpdir(), "ext-cmd-fallback-"))
+
+  await pi.commands.get("standup")!.handler("look up three capitals", fakeCtx(dir))
+
+  const message = pi.sent.find((m) => m.customType === "agentic-os-route")
+  assert.ok(message)
+  assert.match(message!.content, /cannot fan-out: no workflow\.toml/)
+  assert.match(message!.content, /Submitting it as a direct message now/)
+  assert.deepEqual(pi.sentUser, ["look up three capitals"])
 })
 
 test("/standup with no task sends nothing", async () => {
