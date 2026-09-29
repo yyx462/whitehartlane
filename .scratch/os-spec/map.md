@@ -14,6 +14,7 @@ The fleet template is a prototype, not the spec. It showed the pain: a new proje
 
 ## Decisions so far
 
+- [Zen 1](../../docs/zen/2026-09-29-zen-1.md) — the gate is pane birth, not task entry. First Mate is the shell; Session/Job/Pane is the object model; answers happen in panes; one worktree per session. Supersedes the task-gate and the always-intercept prompt gate.
 - [Front door spec](spec.md) — the choices this map locked. Direct has no finish. Fan-out ends in a report.
 - [Hook contract] — manifest + scripts. `workflow.toml` in the task directory names the workflow, the worker kind, and the units, grade, and counts commands. Any language. A unit carries its own brief.
 - [Orchestrator host] — detached script (the campaign's launchd pattern) plus a recorded pane tailing its log via `shep record`. No agent wraps the rail.
