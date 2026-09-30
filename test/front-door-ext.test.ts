@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { copyExample } from "./util.ts"
+
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-ext-"))
 
 async function waitFor(path: string, ms = 3000): Promise<string> {
   const deadline = Date.now() + ms
@@ -97,7 +99,14 @@ async function stubOrchestrator(): Promise<{ marker: string; dir: string }> {
 }
 
 function fakeCtx(cwd: string) {
-  return { cwd, hasUI: false }
+  return {
+    cwd,
+    hasUI: false,
+    sessionManager: {
+      getSessionId: () => "ext-test-pi-session",
+      getSessionFile: () => "/tmp/ext-test-session.jsonl",
+    },
+  }
 }
 
 test.afterEach(() => {
@@ -128,7 +137,10 @@ test("a high-confidence fan-out pick stands the orchestrator up", async () => {
 
   assert.match(result.content[0].text, /stood up: fan-out — 3 units \(france, japan, peru\)/)
   assert.match(result.content[0].text, /report will arrive in this chat/)
-  assert.equal((await waitFor(marker)).trim(), dir)
+  const runDir = (await waitFor(marker)).trim()
+  assert.match(runDir, /\/sessions\/s-[^/]+\/jobs\/j-[^/]+\/run$/)
+  assert.ok(existsSync(join(runDir, "workflow.toml")), "manifest snapshot materialized")
+  assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "hooks copied alongside")
 })
 
 test("a direct pick makes the chat the worker", async () => {
@@ -200,12 +212,13 @@ test("fan-out without a local manifest stands up ad-hoc from the global default"
   assert.match(result.content[0].text, /stood up: fan-out \(ad-hoc\)/)
   assert.match(result.content[0].text, /planner will decompose the task/)
   const runDir = (await waitFor(marker)).trim()
-  assert.match(runDir, /\.agentic-os\//)
-  assert.match(runDir, /compare-three-web/)
+  assert.match(runDir, /\/sessions\/s-[^/]+\/jobs\/j-[^/]+\/run$/)
+  assert.ok(!runDir.includes(".agentic-os"), "no runs materialize in the cwd anymore")
   assert.equal(readFileSync(join(runDir, "task.txt"), "utf8").trim(), "compare three web frameworks")
   const manifest = readFileSync(join(runDir, "workflow.toml"), "utf8")
-  assert.match(manifest, /units = "bash .*global\/hooks\/units\.sh"/)
+  assert.match(manifest, /units = "bash .*\/run\/hooks\/units\.sh"/)
   assert.match(manifest, /name = "ad-hoc"/)
+  assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "builtin hooks copied into the run")
 })
 
 test("/standup routes fan-out with no model in the loop", async () => {
@@ -216,7 +229,8 @@ test("/standup routes fan-out with no model in the loop", async () => {
 
   await pi.commands.get("standup")!.handler("look up three capitals", fakeCtx(dir))
 
-  assert.equal((await waitFor(marker)).trim(), dir)
+  const cmdDir = (await waitFor(marker)).trim()
+  assert.match(cmdDir, /\/sessions\/s-[^/]+\/jobs\/j-[^/]+\/run$/)
   const message = pi.sent.find((m) => m.customType === "agentic-os-route")
   assert.ok(message)
   assert.match(message!.content, /stood up: fan-out — 3 units/)
@@ -272,6 +286,7 @@ test("the front-door guideline is pushed once, not once per turn", async () => {
 test("an unrouted prompt gets the routing order prepended until stand_up runs", async () => {
   const pi = await loadExtension()
   const handler = pi.handlers.get("before_agent_start")![0]
+  await stubPicker("direct 1") // no orchestrator may be stood up by this test
 
   const event1 = { prompt: "look up capitals", systemPromptOptions: { promptGuidelines: [] } }
   await handler(event1 as never, {} as never)
@@ -299,14 +314,14 @@ test("--route routes the prompt itself and suppresses the turn on fan-out", asyn
   const handler = pi.handlers.get("before_agent_start")![0]
   const result = (await handler(
     { prompt: "look up the capitals", systemPromptOptions: { promptGuidelines: [] } },
-    { cwd: dir, hasUI: false },
+    fakeCtx(dir),
   )) as { systemPrompt?: string } | undefined
 
   assert.ok(result?.systemPrompt)
   assert.match(result!.systemPrompt!, /Reply with exactly the text/)
   assert.match(result!.systemPrompt!, /stood up: fan-out/)
   const runDir = (await waitFor(marker)).trim()
-  assert.equal(runDir, dir)
+  assert.match(runDir, /\/sessions\/s-[^/]+\/jobs\/j-[^/]+\/run$/)
   assert.ok(pi.sent.some((m) => m.customType === "agentic-os-route"))
 })
 
@@ -318,7 +333,7 @@ test("--route lets a direct pick run as the worker", async () => {
   const handler = pi.handlers.get("before_agent_start")![0]
   const result = await handler(
     { prompt: "rename the helper", systemPromptOptions: { promptGuidelines: [] } },
-    { cwd: "/tmp", hasUI: false },
+    fakeCtx("/tmp"),
   )
 
   assert.equal(result, undefined)

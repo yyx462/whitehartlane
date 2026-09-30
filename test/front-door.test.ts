@@ -324,9 +324,9 @@ test("the task directory defaults to the directory the agent was opened in", asy
 
 test("project mode runs the example workflow from its manifest", async () => {
   const dir = await copyExample()
-  mkdirSync(join(dir, "results"), { recursive: true })
   for (const id of ["france", "japan", "peru"]) {
-    writeFileSync(join(dir, "results", `${id}.txt`), "capital\n")
+    mkdirSync(join(dir, "units", id), { recursive: true })
+    writeFileSync(join(dir, "units", id, "result.md"), "capital\n")
   }
 
   const report = await standUp({
@@ -343,7 +343,7 @@ test("project mode runs the example workflow from its manifest", async () => {
     report.table.map((row) => row.result),
     ["found", "found", "found"],
   )
-  assert.equal(report.where, "results/")
+  assert.equal(report.where, "units/")
 
   const snapshot = readFileSync(join(dir, "units.jsonl"), "utf8").trim().split("\n")
   assert.equal(snapshot.length, 3)
@@ -354,9 +354,10 @@ test("project mode runs the example workflow from its manifest", async () => {
 
 test("project mode settles a missing artifact as failed", async () => {
   const dir = await copyExample()
-  mkdirSync(join(dir, "results"), { recursive: true })
-  writeFileSync(join(dir, "results", "france.txt"), "Paris\n")
-  writeFileSync(join(dir, "results", "peru.txt"), "Lima\n")
+  for (const id of ["france", "peru"]) {
+    mkdirSync(join(dir, "units", id), { recursive: true })
+    writeFileSync(join(dir, "units", id, "result.md"), id === "france" ? "Paris\n" : "Lima\n")
+  }
 
   const report = await standUp({
     task: "look up three capitals",
@@ -382,8 +383,8 @@ test("a worker port runs before grade and produces the artifacts", async () => {
     jev: async () => ({ workflow: "fan-out", confidence: 0.91 }),
     runWorker: async (unit) => {
       ran.push(unit.id)
-      mkdirSync(join(dir, "results"), { recursive: true })
-      writeFileSync(join(dir, "results", `${unit.id}.txt`), "capital\n")
+      mkdirSync(join(dir, "units", unit.id), { recursive: true })
+      writeFileSync(join(dir, "units", unit.id, "result.md"), "capital\n")
     },
   })
 

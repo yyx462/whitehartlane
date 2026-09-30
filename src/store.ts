@@ -1,21 +1,35 @@
-// The OS disk (zen 2): sessions/<sid>/ holds the session record, the
-// JEV trace, and one jobs/<jid>/job.json per Job. A Job record is a
-// state machine (running -> retired | aborted) with pane records and,
-// on retirement, a receipt (zen 5: panes of this Job = 0). Records are
-// never deleted; worktree binding is recorded, not copied.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+// The OS disk (zen 2): ~/.local/share/agentic-os (AGENTIC_OS_HOME).
+// sessions/<sid>/ holds the session record (with its host binding — a
+// pointer, never a copy), events.jsonl (THE trace: append-only, one
+// line per fact), and jobs/<jid>/{job.json,run/}. job.json is a
+// projection of events; records are never deleted (zen 5: retired is a
+// state, not rm).
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
+
+export type HostBinding = {
+  tool: string
+  session_id: string
+  session_file?: string
+}
 
 export type Parent = "first_mate" | "orchestrator"
 export type StoodUpBy = Parent | "standalone"
 export type JobState = "running" | "retired" | "aborted"
 
+export type TranscriptPointer = {
+  tool: string
+  cwd: string
+  since: string
+}
+
 export type PaneRecord = {
   label: string
   pane?: string
   unit?: string
+  transcript?: TranscriptPointer
   born: string
   died?: string
 }
@@ -54,20 +68,19 @@ export type SessionRecord = {
   cwd: string
   repo?: string
   worktree?: string
+  host?: HostBinding
 }
 
-export type TraceEntry = {
+export type OsEvent = {
   ts: string
-  sid: string
+  actor: string
+  kind: string
+  sid?: string
   jid?: string
-  parent: Parent
-  kind: "job" | "direct" | "worker"
-  action: "admit" | "reject"
-  detail: string
-}
+} & Record<string, unknown>
 
-export function stateRoot(): string {
-  return process.env.AGENTIC_OS_STATE ?? join(homedir(), ".local", "state", "agentic-os")
+export function homeRoot(): string {
+  return process.env.AGENTIC_OS_HOME ?? join(homedir(), ".local", "share", "agentic-os")
 }
 
 export function shortId(prefix: string): string {
@@ -75,15 +88,23 @@ export function shortId(prefix: string): string {
 }
 
 export function sessionsRoot(): string {
-  return join(stateRoot(), "sessions")
+  return join(homeRoot(), "sessions")
 }
 
 export function sessionDir(sid: string): string {
   return join(sessionsRoot(), sid)
 }
 
-function jobDir(sid: string, jid: string): string {
+export function eventsPath(sid: string): string {
+  return join(sessionDir(sid), "events.jsonl")
+}
+
+export function jobDir(sid: string, jid: string): string {
   return join(sessionDir(sid), "jobs", jid)
+}
+
+export function jobRunDir(sid: string, jid: string): string {
+  return join(jobDir(sid, jid), "run")
 }
 
 function readJson<T>(path: string): T {
@@ -95,13 +116,21 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-export function openSession(input: { cwd: string; repo?: string; worktree?: string }): SessionRecord {
+// -- sessions -----------------------------------------------------------------
+
+export function openSession(input: {
+  cwd: string
+  repo?: string
+  worktree?: string
+  host?: HostBinding
+}): SessionRecord {
   const rec: SessionRecord = {
-    id: shortId("s"),
+    id: shortId(input.host ? "s" : "auto"),
     created: new Date().toISOString(),
     cwd: input.cwd,
     repo: input.repo,
     worktree: input.worktree,
+    host: input.host,
   }
   mkdirSync(sessionDir(rec.id), { recursive: true })
   writeJson(join(sessionDir(rec.id), "session.json"), rec)
@@ -114,46 +143,75 @@ export function loadSession(sid: string): SessionRecord | null {
 }
 
 export function listSessions(): SessionRecord[] {
-  const root = sessionsRoot()
-  if (!existsSync(root)) return []
-  return readdirSync(root)
-    .filter((sid) => existsSync(join(root, sid, "session.json")))
-    .map((sid) => readJson<SessionRecord>(join(root, sid, "session.json")))
+  if (!existsSync(sessionsRoot())) return []
+  return readdirSync(sessionsRoot())
+    .filter((sid) => existsSync(join(sessionsRoot(), sid, "session.json")))
+    .map((sid) => readJson<SessionRecord>(join(sessionsRoot(), sid, "session.json")))
 }
 
-export function appendTrace(sid: string, entry: Omit<TraceEntry, "ts" | "sid">): TraceEntry {
-  const full: TraceEntry = { ts: new Date().toISOString(), sid, ...entry }
+// Duplicate rule 1: one OS session per host conversation. Find-or-create
+// keyed on (tool, host session id) — a host chat resumed or restarted
+// reuses its OS session; a new chat gets a new one.
+export function findSessionByHost(tool: string, sessionId: string): SessionRecord | null {
+  return listSessions().find((s) => s.host?.tool === tool && s.host.session_id === sessionId) ?? null
+}
+
+export function findOrOpenSession(input: {
+  cwd: string
+  repo?: string
+  worktree?: string
+  host?: HostBinding
+}): { session: SessionRecord; created: boolean } {
+  if (input.host) {
+    const found = findSessionByHost(input.host.tool, input.host.session_id)
+    if (found) return { session: found, created: false }
+  }
+  return { session: openSession(input), created: true }
+}
+
+// -- events (the trace) --------------------------------------------------------
+
+export function appendEvent(sid: string, event: Omit<OsEvent, "ts" | "sid"> & { ts?: string }): OsEvent {
+  const { ts, ...rest } = event
+  const full: OsEvent = { ts: ts ?? new Date().toISOString(), sid, ...rest }
   mkdirSync(sessionDir(sid), { recursive: true })
-  appendFileSync(join(sessionDir(sid), "trace.jsonl"), `${JSON.stringify(full)}\n`)
+  appendFileSync(eventsPath(sid), `${JSON.stringify(full)}\n`)
   return full
 }
 
-export function readTrace(sid: string): TraceEntry[] {
-  const path = join(sessionDir(sid), "trace.jsonl")
-  if (!existsSync(path)) return []
-  return readFileSync(path, "utf8")
+export function readEvents(sid: string): OsEvent[] {
+  if (!existsSync(eventsPath(sid))) return []
+  return readFileSync(eventsPath(sid), "utf8")
     .split("\n")
     .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as TraceEntry)
+    .map((line) => JSON.parse(line) as OsEvent)
 }
+
+export function readAllEvents(): { sid: string; events: OsEvent[] }[] {
+  return listSessions().map((s) => ({ sid: s.id, events: readEvents(s.id) }))
+}
+
+// -- jobs (records are projections of events) -----------------------------------
 
 export function createJob(input: {
   sid: string
   stoodUpBy: StoodUpBy
   workflow: string
   task: string
-  dir: string
+  dir?: string
+  runDir?: boolean
   pid?: number
   repo?: string
   worktree?: string
 }): JobRecord {
+  const id = shortId("j")
   const job: JobRecord = {
-    id: shortId("j"),
+    id,
     sid: input.sid,
     stoodUpBy: input.stoodUpBy,
     workflow: input.workflow,
     task: input.task,
-    dir: input.dir,
+    dir: input.dir ?? (input.runDir ? jobRunDir(input.sid, id) : ""),
     pid: input.pid,
     repo: input.repo,
     worktree: input.worktree,
@@ -161,6 +219,7 @@ export function createJob(input: {
     created: new Date().toISOString(),
     panes: [],
   }
+  appendEvent(input.sid, { actor: input.stoodUpBy, kind: "job.born", jid: job.id, dir: job.dir, task: job.task })
   writeJson(join(jobDir(input.sid, job.id), "job.json"), job)
   return job
 }
@@ -174,10 +233,23 @@ export function saveJob(job: JobRecord): void {
   writeJson(join(jobDir(job.sid, job.id), "job.json"), job)
 }
 
-export function attachPane(job: JobRecord, pane: Omit<PaneRecord, "born">): JobRecord {
+export function attachPane(
+  job: JobRecord,
+  pane: { label: string; pane?: string; unit?: string; transcript?: TranscriptPointer },
+): JobRecord {
   if (!job.panes.some((p) => p.label === pane.label)) {
-    job.panes.push({ born: new Date().toISOString(), ...pane })
+    const born = new Date().toISOString()
+    job.panes.push({ born, ...pane })
     saveJob(job)
+    appendEvent(job.sid, {
+      actor: "orchestrator",
+      kind: "pane.born",
+      jid: job.id,
+      label: pane.label,
+      pane: pane.pane,
+      unit: pane.unit,
+      transcript: pane.transcript,
+    })
   }
   return job
 }
@@ -187,6 +259,7 @@ export function killPane(job: JobRecord, label: string): JobRecord {
   if (pane && !pane.died) {
     pane.died = new Date().toISOString()
     saveJob(job)
+    appendEvent(job.sid, { actor: "orchestrator", kind: "pane.died", jid: job.id, label })
   }
   return job
 }
@@ -196,6 +269,7 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   job.finished = new Date().toISOString()
   job.receipt = { ...receipt, finished: job.finished }
   saveJob(job)
+  appendEvent(job.sid, { actor: "orchestrator", kind: "job.retired", jid: job.id, receipt: job.receipt })
   return job
 }
 
@@ -204,14 +278,60 @@ export function abortJob(job: JobRecord, reason: string, panesRemaining: number)
   job.finished = new Date().toISOString()
   job.abort = { reason, panesRemaining, finished: job.finished }
   saveJob(job)
+  appendEvent(job.sid, { actor: "sweep", kind: "job.aborted", jid: job.id, reason, panesRemaining })
+  return job
+}
+
+// Rebuild a Job record purely from the event log — proves the log is the
+// source and the record is a projection.
+export function projectJob(sid: string, jid: string): JobRecord | null {
+  const events = readEvents(sid).filter((e) => e.jid === jid)
+  if (events.length === 0) return null
+  const born = events.find((e) => e.kind === "job.born")
+  if (!born) return null
+  const job: JobRecord = {
+    id: jid,
+    sid,
+    stoodUpBy: (born.actor as StoodUpBy) ?? "standalone",
+    workflow: "fan-out",
+    task: String(born.task ?? ""),
+    dir: String(born.dir ?? ""),
+    state: "running",
+    created: born.ts,
+    panes: [],
+  }
+  for (const e of events) {
+    if (e.kind === "pane.born") {
+      job.panes.push({
+        label: String(e.label),
+        pane: e.pane as string | undefined,
+        unit: e.unit as string | undefined,
+        transcript: e.transcript as TranscriptPointer | undefined,
+        born: e.ts,
+      })
+    } else if (e.kind === "pane.died") {
+      const pane = job.panes.find((p) => p.label === e.label)
+      if (pane) pane.died = e.ts
+    } else if (e.kind === "job.retired") {
+      job.state = "retired"
+      job.finished = e.ts
+      job.receipt = e.receipt as Receipt
+    } else if (e.kind === "job.aborted") {
+      job.state = "aborted"
+      job.finished = e.ts
+      job.abort = e.abort as JobRecord["abort"]
+    }
+  }
   return job
 }
 
 export function listJobs(sid?: string): JobRecord[] {
   if (!existsSync(sessionsRoot())) return []
-  const sessions = sid ? [sid] : readdirSync(sessionsRoot(), { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name)
+  const sessions = sid
+    ? [sid]
+    : readdirSync(sessionsRoot(), { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
   const jobs: JobRecord[] = []
   for (const s of sessions) {
     const root = join(sessionDir(s), "jobs")
@@ -226,4 +346,45 @@ export function listJobs(sid?: string): JobRecord[] {
 
 export function findJobByDir(dir: string): JobRecord | null {
   return listJobs().find((job) => job.dir === dir) ?? null
+}
+
+// Materialize a run directory for a job: task.txt, a workflow.toml
+// snapshot, and the hooks it references copied alongside — self-contained.
+export function materializeRunDir(
+  runDir: string,
+  task: string,
+  manifestPath: string,
+): { taskPath: string; manifestPath: string } {
+  mkdirSync(runDir, { recursive: true })
+  const taskPath = join(runDir, "task.txt")
+  writeFileSync(taskPath, `${task}\n`)
+  const snapshot = join(runDir, "workflow.toml")
+  cpSync(manifestPath, snapshot)
+  const source = join(manifestPath, "..")
+  const hooksSrc = join(source, "hooks")
+  if (existsSync(hooksSrc)) cpSync(hooksSrc, join(runDir, "hooks"), { recursive: true })
+  writeWorkerPermissions(runDir)
+  return { taskPath, manifestPath: snapshot }
+}
+
+// Workers start in a unit dir; opencode's external-directory boundary is
+// its startup cwd, so touching anything outside the unit prompts every
+// time. A per-run opencode.json (project config, discovered by walking
+// up from cwd) allows exactly this run's tree — scoped, no global edit.
+export function writeWorkerPermissions(runDir: string): void {
+  try {
+    const real = realpathSync(runDir)
+    const config = {
+      $schema: "https://opencode.ai/config.json",
+      permission: {
+        external_directory: {
+          "*": "ask",
+          [`${real}/**`]: "allow",
+        },
+      },
+    }
+    writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
+  } catch {
+    // permissions scoping is best-effort; the run works without it
+  }
 }

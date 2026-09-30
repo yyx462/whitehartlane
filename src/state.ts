@@ -34,22 +34,5 @@ export function settleUnit(
   ;(pass ? state.done : state.failed).push(unitId)
   mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "state.json"), JSON.stringify(state, null, 2))
-  if (row) {
-    mkdirSync(join(taskDir, "results"), { recursive: true })
-    writeFileSync(
-      join(taskDir, "results", "rows.jsonl"),
-      `${JSON.stringify(row)}\n`,
-      { flag: "a" },
-    )
-  }
   return state
-}
-
-export function readRows(taskDir: string): ReportRow[] {
-  const path = join(taskDir, "results", "rows.jsonl")
-  if (!existsSync(path)) return []
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as ReportRow)
 }

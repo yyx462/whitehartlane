@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
-import { writeReport, type Report } from "./report.ts"
-import { readRows, readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
+import { writeReport, type Report, type ReportRow } from "./report.ts"
+import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
@@ -14,6 +14,18 @@ export type ShepPort = {
   verify: () => string
   wake: (label: string, kind: string, detail: string) => void
   tailPane: (logPath: string) => boolean
+}
+
+// Each worker owns one directory: units/<unit>/{brief.md, log.txt,
+// result.md}. It is the worker's cwd, its artifact home, and the key
+// that makes its host-tool transcript resolvable.
+export function unitDir(taskDir: string, unitId: string): string {
+  return join(taskDir, "units", unitId)
+}
+
+export function unitPaths(taskDir: string, unitId: string): { dir: string; briefPath: string; logPath: string; resultPath: string } {
+  const dir = unitDir(taskDir, unitId)
+  return { dir, briefPath: join(dir, "brief.md"), logPath: join(dir, "log.txt"), resultPath: join(dir, "result.md") }
 }
 
 export type Flight = {
@@ -36,6 +48,7 @@ export type CycleDeps = {
   stallMs?: number
   briefGraceMs?: number
   now?: () => number
+  emit?: (kind: string, payload: Record<string, unknown>) => void
 }
 
 const DEFAULT_SLOTS = 2
@@ -90,13 +103,16 @@ export function loadUnitsFor(taskDir: string, hooks: Hooks): Unit[] {
 }
 
 export function briefFor(unit: Unit, taskDir: string): string {
+  const paths = unitPaths(taskDir, unit.id)
   return [
-    `Work dir: ${taskDir}`,
+    `Work dir: ${paths.dir} (this is your cwd — write result.md here)`,
     "",
     unit.brief,
     "",
+    `Write your deliverable to ${paths.resultPath} unless the brief above says otherwise.`,
+    "",
     "When you finish the work, append exactly this line to the log file",
-    `${join(taskDir, "logs", `${unit.id}.log`)} :`,
+    `${paths.logPath} :`,
     `done ${unit.id}`,
     "",
     "If you cannot proceed, append exactly this line to the same file and stop:",
@@ -116,20 +132,20 @@ export function cycle(deps: CycleDeps): boolean {
   const briefGraceMs = deps.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const now = deps.now ?? Date.now
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
-  mkdirSync(join(deps.taskDir, "briefs"), { recursive: true })
-  mkdirSync(join(deps.taskDir, "logs"), { recursive: true })
-  mkdirSync(join(deps.taskDir, "results"), { recursive: true })
+
+  // Every settle flows through here: state.json (resume projection) plus
+  // the unit.settled event — the grade row's one and only home.
+  const settle = (id: string, pass: boolean, row: ReportRow): void => {
+    settleUnit(deps.taskDir, id, pass, row)
+    deps.emit?.("unit.settled", { unit: id, pass, result: row.result })
+  }
 
   for (const [id, flight] of [...deps.inFlight]) {
     const size = existsSync(flight.logPath) ? readFileSync(flight.logPath).length : 0
     const text = logText(flight.logPath)
     if (text.includes(`done ${id}`)) {
       const grade = deps.hooks.grade(flight.unit)
-      settleUnit(deps.taskDir, id, grade.pass, {
-        unit: id,
-        result: grade.row,
-        pass: grade.pass,
-      })
+      settle(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -138,13 +154,13 @@ export function cycle(deps: CycleDeps): boolean {
       }
     } else if (text.includes(`blocked ${id}`)) {
       const why = text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? ""
-      settleUnit(deps.taskDir, id, false, { unit: id, result: "blocked", pass: false })
+      settle(id, false, { unit: id, result: "blocked", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
       deps.shep.wake(id, "blocked", why)
     } else if (!deps.shep.paneAlive(`w-${id}`)) {
-      settleUnit(deps.taskDir, id, false, { unit: id, result: "pane dead", pass: false })
+      settle(id, false, { unit: id, result: "pane dead", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -160,9 +176,10 @@ export function cycle(deps: CycleDeps): boolean {
       const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
       if (ok) {
         flight.lastChange = now()
+        deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
       }
     } else if (size === flight.lastSize && now() - flight.lastChange > stallMs) {
-      settleUnit(deps.taskDir, id, false, { unit: id, result: "stalled", pass: false })
+      settle(id, false, { unit: id, result: "stalled", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -180,20 +197,21 @@ export function cycle(deps: CycleDeps): boolean {
   )
   while (deps.inFlight.size < slots && unsettled.length > 0) {
     const unit = unsettled.shift()!
-    const briefPath = join(deps.taskDir, "briefs", `${unit.id}.md`)
-    writeFileSync(briefPath, briefFor(unit, deps.taskDir))
+    const paths = unitPaths(deps.taskDir, unit.id)
+    mkdirSync(paths.dir, { recursive: true })
+    writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir))
     const ok = deps.shep.spawnWorker(
       `w-${unit.id}`,
       deps.hooks.workerKind,
-      briefPath,
-      deps.taskDir,
+      paths.briefPath,
+      paths.dir,
     )
     if (ok) {
       deps.attempts.delete(unit.id)
       deps.inFlight.set(unit.id, {
         unit,
-        logPath: join(deps.taskDir, "logs", `${unit.id}.log`),
-        briefPath,
+        logPath: paths.logPath,
+        briefPath: paths.briefPath,
         lastSize: 0,
         lastChange: now(),
         spawnedAt: now(),
@@ -203,7 +221,7 @@ export function cycle(deps: CycleDeps): boolean {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
       deps.attempts.set(unit.id, attempts)
       if (attempts >= RETRY_CAP) {
-        settleUnit(deps.taskDir, unit.id, false, {
+        settle(unit.id, false, {
           unit: unit.id,
           result: "spawn failed",
           pass: false,
@@ -231,6 +249,8 @@ export async function runOrchestrator(input: {
   deadlineMs?: number
   now?: () => number
   log?: (msg: string) => void
+  emit?: (kind: string, payload: Record<string, unknown>) => void
+  existingRows?: ReportRow[]
 }): Promise<Report> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
@@ -248,12 +268,16 @@ export async function runOrchestrator(input: {
   const inFlight = new Map<string, Flight>()
   const attempts = new Map<string, number>()
   const started = now()
+  // Rows accumulate here across cycles (the events carry each settle;
+  // existingRows covers a resumed orchestrator's earlier work).
+  const rows: ReportRow[] = [...(input.existingRows ?? [])]
+  const emit = input.emit ?? (() => {})
 
   log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, fallback check every ${checkMs}ms)`)
 
   input.shep.setLayout(layout, input.taskDir)
-  const logsDir = join(input.taskDir, "logs")
-  mkdirSync(logsDir, { recursive: true })
+  const unitsDir = join(input.taskDir, "units")
+  mkdirSync(unitsDir, { recursive: true })
 
   let laneOpened = false
   const openLane = () => {
@@ -292,6 +316,16 @@ export async function runOrchestrator(input: {
         stallMs,
         briefGraceMs,
         now,
+        emit: (kind, payload) => {
+          emit(kind, payload)
+          if (kind === "unit.settled" && typeof payload.unit === "string") {
+            rows.push({
+              unit: payload.unit,
+              result: String(payload.result ?? ""),
+              pass: payload.pass === true,
+            })
+          }
+        },
       })
       if (firstCycle) {
         firstCycle = false
@@ -306,6 +340,8 @@ export async function runOrchestrator(input: {
         log("orchestrator: deadline passed; settling the rest failed")
         for (const [id, flight] of [...inFlight]) {
           settleUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
+          emit("unit.settled", { unit: id, pass: false, result: "deadline" })
+          rows.push({ unit: id, result: "deadline", pass: false })
           input.shep.retire(`w-${id}`)
           inFlight.delete(id)
         }
@@ -318,6 +354,8 @@ export async function runOrchestrator(input: {
               result: "deadline",
               pass: false,
             })
+            emit("unit.settled", { unit: unit.id, pass: false, result: "deadline" })
+            rows.push({ unit: unit.id, result: "deadline", pass: false })
           }
         }
         finished = true
@@ -364,9 +402,9 @@ export async function runOrchestrator(input: {
   }
 
   try {
-    watchers.push(watch(logsDir, () => queueRun()))
+    watchers.push(watch(unitsDir, () => queueRun()))
   } catch {
-    log("orchestrator: logs watch unavailable — fallback check only")
+    log("orchestrator: units watch unavailable — fallback check only")
   }
   const fallback = setInterval(run, checkMs)
   run()
@@ -381,7 +419,7 @@ export async function runOrchestrator(input: {
     }, 20)
   })
 
-  const report = writeReport(input.taskDir, where, readRows(input.taskDir), loaded.hooks.counts)
+  const report = writeReport(input.taskDir, where, rows, loaded.hooks.counts)
   input.shep.retireAll()
   const receipt = input.shep.verify()
   log(`orchestrator: report ${report.status} at ${join(input.taskDir, "report.json")} — ${receipt}`)

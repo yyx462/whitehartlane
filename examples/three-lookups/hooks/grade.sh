@@ -3,7 +3,7 @@
 # the row the report table shows.
 set -uo pipefail
 id="${1:?unit id}"
-if [ -s "results/$id.txt" ]; then
+if [ -s "units/$id/result.md" ]; then
   printf 'found\n'
   exit 0
 fi

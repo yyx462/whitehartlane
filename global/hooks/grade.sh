@@ -3,7 +3,7 @@
 # markdown artifact. $1 = unit id.
 set -uo pipefail
 id="${1:?unit id}"
-if [ -s "results/$id.md" ]; then
+if [ -s "units/$id/result.md" ]; then
   printf 'written\n'
   exit 0
 fi

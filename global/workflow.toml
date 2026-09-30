@@ -14,7 +14,7 @@ grade = "bash grade.sh"
 counts = "bash counts.sh"
 
 [report]
-where = "results/"
+where = "units/"
 
 [layout]
 tab = "new"

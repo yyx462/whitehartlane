@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { abortJob, listJobs } from "../src/store.ts"
+import { abortJob, listJobs, readAllEvents, readEvents } from "../src/store.ts"
 
 /** @typedef {{ label: string, pane: string }} LivePane */
 
@@ -92,6 +92,20 @@ async function main() {
       return
     }
     console.log(fmtJobs(jobs))
+    return
+  }
+
+  if (cmd === "events") {
+    const sid = process.argv[3]
+    const streams = sid ? [{ sid, events: readEvents(sid) }] : readAllEvents()
+    let total = 0
+    for (const { sid: s, events } of streams) {
+      if (events.length === 0) continue
+      console.log(`== session ${s} (${events.length} events)`)
+      for (const e of events) console.log(JSON.stringify(e))
+      total += events.length
+    }
+    console.log(`events: ${total} across ${streams.filter((x) => x.events.length).length} session(s)`)
     return
   }
 
