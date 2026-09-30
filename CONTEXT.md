@@ -13,7 +13,7 @@ The First Mate conversation plus its OS disk at `sessions/<sid>/` (events, jobs,
 _Avoid_: task, chat history, folder
 
 **Binding**:
-The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy.
+The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy. Confirmed once per session and echoed in every report; a worktree already bound to a live session is refused — never two writers on one tree.
 _Avoid_: snapshot, copy
 
 **Job**:
@@ -61,8 +61,8 @@ The workflow for independent units. Workers do not depend on each other. The orc
 _Avoid_: fleet, hierarchy, swarm
 
 **Direct**:
-The workflow for one worker. That worker is the chat the user already has open. No pane is opened. A hidden script retries only when the worker is blocked, and only up to the cap. If the cap is hit, the worker says so in that same chat. There is no finish and no report.
-_Avoid_: single agent, dummy workflow, fallback
+The workflow for one worker. That worker is the chat the user already has open. No pane is opened. No retry: the open chat is the supervisor — a blocked turn is visible and the user resends; unattended work belongs to a Job, not Direct. There is no finish and no report.
+_Avoid_: single agent, dummy workflow, fallback, hidden retry script
 
 **Rail**:
 Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, backpressure, and the retry cap. Not the orchestrator's method. Not the layout.

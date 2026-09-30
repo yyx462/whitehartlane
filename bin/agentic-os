@@ -1,15 +1,28 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// agentic-os jobs | audit | sweep — read and settle the OS disk
-// (~/.local/state/agentic-os). jobs lists every Job record with its
-// state and receipt; audit diffs live shep panes against admitted
-// panes (the only door is JEV — a live pane no Job admits is a
-// violation); sweep marks running Jobs whose orchestrator is dead as
-// aborted, so a killed run reads as aborted instead of frozen.
-import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+// agentic-os jobs | events | audit | sweep | relaunch | abort — read
+// and settle the OS disk (~/.local/share/agentic-os). jobs lists every
+// Job record with its state and receipt; audit diffs live shep panes
+// against admitted panes (the only door is JEV — a live pane no Job
+// admits is a violation); sweep parks running Jobs whose orchestrator
+// died without a graceful stop in the ask-first relaunch queue —
+// orphaned, not aborted, never auto-resurrected; relaunch re-runs one
+// from its run dir (user-decided, capped at 2 tries per Job); abort
+// declines (or SIGTERMs a live orchestrator, which aborts itself).
+import { execFileSync, spawn } from "node:child_process"
+import { existsSync, openSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { abortJob, listJobs, readAllEvents, readEvents } from "../src/store.ts"
+import {
+  abortJob,
+  killPane,
+  listJobs,
+  orphanJob,
+  readAllEvents,
+  readEvents,
+  relaunchJob,
+} from "../src/store.ts"
+
+const RELAUNCH_CAP = 2
 
 /** @typedef {{ label: string, pane: string }} LivePane */
 
@@ -62,7 +75,9 @@ function fmtJobs(jobs) {
       ? `receipt ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
       : job.abort
         ? `aborted: ${job.abort.reason} (${job.abort.panesRemaining} left)`
-        : "in flight"
+        : job.orphan
+          ? `orphaned: ${job.orphan.reason} — relaunch?`
+          : "in flight"
     return [
       job.id.padEnd(9),
       job.state.padEnd(8),
@@ -136,18 +151,89 @@ async function main() {
         continue
       }
       const orphans = livePanesOf(job, live)
-      abortJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
+      orphanJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
       swept += 1
-      console.log(`${job.id} aborted — ${job.dir}`)
+      console.log(`${job.id} orphaned (parked, ask-first) — ${job.dir}`)
+      console.log(`  relaunch: agentic-os relaunch ${job.id} | decline: agentic-os abort ${job.id}`)
       if (orphans.length > 0) {
-        console.log(`  orphan panes still live (retire by hand): ${orphans.map((p) => p.label).join(", ")}`)
+        console.log(`  straggler panes still live (relaunch retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
     }
-    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) marked aborted`)
+    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for relaunch decision`)
     return
   }
 
-  console.error("usage: agentic-os jobs | audit | sweep")
+  if (cmd === "relaunch") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`relaunch: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      process.exitCode = 2
+      return
+    }
+    if (job.state !== "orphaned") {
+      console.error(`relaunch: ${job.id} is ${job.state}, not orphaned — run: agentic-os sweep`)
+      process.exitCode = 2
+      return
+    }
+    const tries = job.relaunches ?? 0
+    if (tries >= RELAUNCH_CAP) {
+      console.error(`relaunch: ${job.id} already relaunched ${tries}x (cap ${RELAUNCH_CAP}) — decline: agentic-os abort ${job.id}`)
+      process.exitCode = 2
+      return
+    }
+    // Stragglers first (2026-10-01 stress-test): a live pane from the
+    // dead generation would double-write a unit dir and poison the
+    // receipt. Retire every pane of the old generation, then relaunch.
+    for (const pane of job.panes.filter((p) => p.died === undefined)) {
+      try {
+        execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
+      } catch {}
+      killPane(job, pane.label)
+    }
+    const orchestrator = join(import.meta.dirname, "fan-out-orchestrator")
+    const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
+    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, job.dir], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env, AGENTIC_OS_SID: job.sid, AGENTIC_OS_JID: job.id },
+    })
+    child.unref()
+    relaunchJob(job, child.pid)
+    console.log(`relaunched ${job.id} (pid ${child.pid}, try ${tries + 1}/${RELAUNCH_CAP}) — log: ${join(job.dir, "orchestrator.log")}`)
+    return
+  }
+
+  if (cmd === "abort") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`abort: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      process.exitCode = 2
+      return
+    }
+    if (job.state === "retired") {
+      console.error(`abort: ${job.id} is already retired`)
+      process.exitCode = 2
+      return
+    }
+    if (job.state === "running" && pidAlive(job.pid)) {
+      // graceful stop: the orchestrator's signal handler books the abort
+      try {
+        process.kill(job.pid, "SIGTERM")
+        console.log(`abort: signalled orchestrator pid ${job.pid} — ${job.id} aborts itself`)
+        return
+      } catch (err) {
+        console.error(`abort: could not signal pid ${job.pid} (${err.message}) — declining on record`)
+      }
+    }
+    const live = shepStatus()
+    abortJob(job, "declined by user", livePanesOf(job, live).length, "first_mate")
+    console.log(`aborted ${job.id} (declined) — ${job.dir}`)
+    return
+  }
+
+  console.error("usage: agentic-os jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid>")
   process.exitCode = 2
 }
 

@@ -17,7 +17,9 @@ export type HostBinding = {
 
 export type Parent = "first_mate" | "orchestrator"
 export type StoodUpBy = Parent | "standalone"
-export type JobState = "running" | "retired" | "aborted"
+// orphaned: the orchestrator died without a graceful stop — the Job is
+// parked in the ask-first relaunch queue, not finished (zen 5).
+export type JobState = "running" | "orphaned" | "retired" | "aborted"
 
 export type TranscriptPointer = {
   tool: string
@@ -29,6 +31,7 @@ export type PaneRecord = {
   label: string
   pane?: string
   unit?: string
+  parent?: Parent
   transcript?: TranscriptPointer
   born: string
   died?: string
@@ -58,6 +61,8 @@ export type JobRecord = {
   created: string
   finished?: string
   panes: PaneRecord[]
+  relaunches?: number
+  orphan?: { reason: string; panesRemaining: number; at: string }
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
 }
@@ -235,7 +240,7 @@ export function saveJob(job: JobRecord): void {
 
 export function attachPane(
   job: JobRecord,
-  pane: { label: string; pane?: string; unit?: string; transcript?: TranscriptPointer },
+  pane: { label: string; pane?: string; unit?: string; parent?: Parent; transcript?: TranscriptPointer },
 ): JobRecord {
   if (!job.panes.some((p) => p.label === pane.label)) {
     const born = new Date().toISOString()
@@ -248,6 +253,7 @@ export function attachPane(
       label: pane.label,
       pane: pane.pane,
       unit: pane.unit,
+      parent: pane.parent,
       transcript: pane.transcript,
     })
   }
@@ -273,12 +279,49 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   return job
 }
 
-export function abortJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
+export function abortJob(
+  job: JobRecord,
+  reason: string,
+  panesRemaining: number,
+  actor: string = "sweep",
+): JobRecord {
   job.state = "aborted"
   job.finished = new Date().toISOString()
   job.abort = { reason, panesRemaining, finished: job.finished }
   saveJob(job)
-  appendEvent(job.sid, { actor: "sweep", kind: "job.aborted", jid: job.id, reason, panesRemaining })
+  appendEvent(job.sid, { actor, kind: "job.aborted", jid: job.id, reason, panesRemaining })
+  return job
+}
+
+// A dead orchestrator parks the Job in the ask-first queue: sweep
+// detects (running + dead pid), the user decides (relaunch or abort).
+// Graceful stops never orphan — the signal handler aborts on purpose.
+export function orphanJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
+  if (job.state !== "running") return job
+  const at = new Date().toISOString()
+  job.state = "orphaned"
+  job.orphan = { reason, panesRemaining, at }
+  saveJob(job)
+  appendEvent(job.sid, { actor: "sweep", kind: "job.orphaned", jid: job.id, reason, panesRemaining })
+  return job
+}
+
+// Relaunch is user-decided, never automatic, and capped (the cap lives
+// in the CLI; the record counts the tries so the receipt stays honest).
+export function relaunchJob(job: JobRecord, pid: number): JobRecord {
+  job.state = "running"
+  job.relaunches = (job.relaunches ?? 0) + 1
+  job.orphan = undefined
+  job.finished = undefined
+  job.pid = pid
+  saveJob(job)
+  appendEvent(job.sid, {
+    actor: "first_mate",
+    kind: "job.relaunched",
+    jid: job.id,
+    pid,
+    relaunches: job.relaunches,
+  })
   return job
 }
 
@@ -306,6 +349,7 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
         label: String(e.label),
         pane: e.pane as string | undefined,
         unit: e.unit as string | undefined,
+        parent: e.parent as Parent | undefined,
         transcript: e.transcript as TranscriptPointer | undefined,
         born: e.ts,
       })
@@ -319,7 +363,24 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
     } else if (e.kind === "job.aborted") {
       job.state = "aborted"
       job.finished = e.ts
-      job.abort = e.abort as JobRecord["abort"]
+      job.abort = {
+        reason: String(e.reason ?? ""),
+        panesRemaining: Number(e.panesRemaining ?? 0),
+        finished: e.ts,
+      }
+    } else if (e.kind === "job.orphaned") {
+      job.state = "orphaned"
+      job.orphan = {
+        reason: String(e.reason ?? ""),
+        panesRemaining: Number(e.panesRemaining ?? 0),
+        at: e.ts,
+      }
+    } else if (e.kind === "job.relaunched") {
+      job.state = "running"
+      job.relaunches = Number(e.relaunches ?? (job.relaunches ?? 0) + 1)
+      job.orphan = undefined
+      job.finished = undefined
+      job.pid = e.pid as number | undefined
     }
   }
   return job
@@ -371,17 +432,17 @@ export function materializeRunDir(
 // its startup cwd, so touching anything outside the unit prompts every
 // time. A per-run opencode.json (project config, discovered by walking
 // up from cwd) allows exactly this run's tree — scoped, no global edit.
+// Two spellings: the given path (what briefs quote) AND its realpath
+// (what opencode canonicalizes its project root to). On /tmp-style
+// symlinked roots the two differ and a one-form glob leaks prompts.
 export function writeWorkerPermissions(runDir: string): void {
   try {
     const real = realpathSync(runDir)
+    const external = { "*": "ask" } as Record<string, string>
+    for (const form of new Set([real, runDir])) external[`${form}/**`] = "allow"
     const config = {
       $schema: "https://opencode.ai/config.json",
-      permission: {
-        external_directory: {
-          "*": "ask",
-          [`${real}/**`]: "allow",
-        },
-      },
+      permission: { external_directory: external },
     }
     writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
   } catch {

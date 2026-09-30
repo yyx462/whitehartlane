@@ -3,12 +3,15 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
 import {
+  acquireUnits,
   cycle,
   paneLabeler,
   runOrchestrator,
   type CycleDeps,
   type ShepPort,
 } from "../src/orchestrator.ts"
+import { RefusedError } from "../src/backpressure.ts"
+import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
 import { readState, settleUnit } from "../src/state.ts"
 import { copyExample } from "./util.ts"
@@ -202,6 +205,53 @@ test("a worker whose log never appears gets exactly one reprompt after the grace
   cycle(base)
   assert.deepEqual(reprompts, ["w-france", "w-japan", "w-peru"])
   assert.equal(spawned.length, 3)
+})
+
+test("acquireUnits retries a provider refusal with backpressure events, then succeeds", async () => {
+  const dir = await copyExample("agentic-os-acq-")
+  process.env.AGENTIC_OS_BACKOFF_MS = "1" // no real sleeping in tests
+  let calls = 0
+  const events: { kind: string; payload: Record<string, unknown> }[] = []
+  const logs: string[] = []
+  try {
+    const hooks = {
+      ...hooksFromDir(dir).hooks,
+      units: () => {
+        calls += 1
+        if (calls < 3) throw new RefusedError("429 rate limited")
+        return [{ id: "a", brief: "do a" }]
+      },
+    }
+    const units = acquireUnits(dir, hooks, {
+      log: (m) => logs.push(m),
+      emit: (kind, payload) => events.push({ kind, payload }),
+    })
+    assert.equal(units.length, 1)
+    assert.equal(calls, 3)
+    assert.equal(events.length, 2)
+    assert.equal(events[0]!.kind, "backpressure")
+    assert.match(logs[0]!, /planner refused/)
+    // the units file landed: a second acquisition never calls the hook
+    const again = acquireUnits(dir, { ...hooks, units: () => { calls += 1; return [] } })
+    assert.equal(again.length, 1)
+    assert.equal(calls, 3)
+  } finally {
+    delete process.env.AGENTIC_OS_BACKOFF_MS
+  }
+})
+
+test("acquireUnits fails fast on a deterministic planner failure", async () => {
+  const dir = await copyExample("agentic-os-acq-")
+  let calls = 0
+  const hooks = {
+    ...hooksFromDir(dir).hooks,
+    units: () => {
+      calls += 1
+      throw new HookError("units hook exited 1: bad prompt")
+    },
+  }
+  assert.throws(() => acquireUnits(dir, hooks, {}), /bad prompt/)
+  assert.equal(calls, 1)
 })
 
 test("a reprompted worker that then writes its sentinel settles normally", async () => {

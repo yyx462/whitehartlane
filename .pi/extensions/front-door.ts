@@ -373,6 +373,7 @@ export default function (pi: ExtensionAPI) {
     if (wakeTimer) return
     wakeTimer = setInterval(() => {
       pollWakes(pi, ctx.cwd).catch(() => {})
+      announceOrphans(pi).catch(() => {})
     }, POLL_MS)
   })
 
@@ -401,7 +402,9 @@ export default function (pi: ExtensionAPI) {
                     ? `receipt: ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
                     : job.abort
                       ? `aborted: ${job.abort.reason}`
-                      : "in flight"
+                      : job.orphan
+                        ? `orphaned: ${job.orphan.reason} — relaunch?`
+                        : "in flight"
                   return [
                     job.id.padEnd(10),
                     job.state.padEnd(8),
@@ -503,4 +506,32 @@ async function pollWakes(pi: ExtensionAPI, cwd: string): Promise<void> {
   }
   await execFileP("shep", ["wake", "ack", "--through", String(maxId)])
   fmEmit("wake.consumed", { through: maxId }, { cwd })
+}
+
+// The relaunch queue is ask-first, announced on the periodic check —
+// never a wake (zen 4: no immediate answer owed) and never repeated
+// for the same generation of the same Job.
+const announcedOrphans = new Set<string>()
+
+async function announceOrphans(pi: ExtensionAPI): Promise<void> {
+  let jobs
+  try {
+    jobs = listJobs()
+  } catch {
+    return
+  }
+  for (const job of jobs) {
+    if (job.state !== "orphaned") continue
+    const key = `${job.id}#${job.relaunches ?? 0}`
+    if (announcedOrphans.has(key)) continue
+    announcedOrphans.add(key)
+    await pi.sendMessage({
+      customType: "agentic-os-orphan",
+      content: [
+        `Job ${job.id} orphaned (${job.orphan?.reason ?? "orchestrator gone"}) — parked, awaiting your call.`,
+        `relaunch: agentic-os relaunch ${job.id} | decline: agentic-os abort ${job.id}`,
+      ].join("\n"),
+      display: true,
+    })
+  }
 }

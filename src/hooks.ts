@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
+import { RefusedError } from "./backpressure.ts"
 
 const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -111,7 +112,7 @@ function str(value: unknown, field: string): string {
 function runHook(
   cmd: string,
   taskDir: string,
-): { stdout: string; status: number } {
+): { stdout: string; status: number; stderr: string } {
   try {
     const stdout = execSync(cmd, {
       cwd: taskDir,
@@ -119,12 +120,12 @@ function runHook(
       timeout: HOOK_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "pipe"],
     })
-    return { stdout: stdout ?? "", status: 0 }
+    return { stdout: stdout ?? "", status: 0, stderr: "" }
   } catch (err) {
-    const e = err as { stdout?: string; status?: number; killed?: boolean }
+    const e = err as { stdout?: string; stderr?: string; status?: number; killed?: boolean }
     if (e.killed) throw new HookError(`hook timed out after ${HOOK_TIMEOUT_MS}ms: ${cmd}`)
     if (typeof e.status !== "number") throw err
-    return { stdout: e.stdout ?? "", status: e.status }
+    return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "" }
   }
 }
 
@@ -133,8 +134,11 @@ function quote(value: string): string {
 }
 
 export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
-  const { stdout, status } = runHook(manifest.hooks.units, taskDir)
-  if (status !== 0) throw new HookError(`units hook exited ${status}: ${manifest.hooks.units}`)
+  const { stdout, status, stderr } = runHook(manifest.hooks.units, taskDir)
+  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "units hook exited 75")
+  if (status !== 0) {
+    throw new HookError(`units hook exited ${status}: ${manifest.hooks.units}\n${stderr.split("\n")[0] ?? ""}`)
+  }
   const units: Unit[] = []
   const seen = new Set<string>()
   const lines = stdout.split("\n")

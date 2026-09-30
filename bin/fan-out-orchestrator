@@ -70,7 +70,7 @@ const ledger = (() => {
       },
       attach(label, pane, unit, transcript) {
         try {
-          attachPane(job, { label, pane, unit, transcript })
+          attachPane(job, { label, pane, unit, parent: "orchestrator", transcript })
         } catch {}
       },
       kill(label) {
@@ -347,6 +347,7 @@ const port = {
       return ok
     }
     const label = scoped("orch-lane")
+    const since = new Date().toISOString()
     const r = shep(
       "spawn", label, "--kind", "pi", "--cwd", taskDir,
       "--dir", "right", "--brief", `@${briefPath}`,
@@ -357,6 +358,7 @@ const port = {
       return false
     }
     mine.add(label)
+    ledger?.attach(label, undefined, undefined, { tool: "pi", cwd: taskDir, since })
     return true
   },
 }

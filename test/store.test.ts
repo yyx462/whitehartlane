@@ -21,8 +21,10 @@ const {
   loadJob,
   findOrOpenSession,
   openSession,
+  orphanJob,
   projectJob,
   readEvents,
+  relaunchJob,
   shortId,
 } = await import("../src/store.ts")
 
@@ -141,7 +143,66 @@ test("materializeRunDir writes the per-run worker permission scope", async () =>
   const oc = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8"))
   assert.equal(oc.permission.external_directory["*"], "ask")
   assert.ok(`${realpathSync(runDir)}/**` in oc.permission.external_directory)
+  // both spellings: given path (what briefs quote) and realpath (what
+  // opencode canonicalizes to) — they differ on symlinked roots like /tmp
+  const tmpForm = mkdtempSync("/tmp/agentic-os-perm-")
+  try {
+    materializeRunDir(join(tmpForm, "run"), "t", exampleSrc)
+    assert.notEqual(realpathSync(join(tmpForm, "run")), join(tmpForm, "run"), "this platform splits /tmp (else the two-form test is vacuous)")
+    const oc2 = JSON.parse(readFileSync(join(tmpForm, "run", "opencode.json"), "utf8"))
+    assert.ok(`${tmpForm}/run/**` in oc2.permission.external_directory)
+    assert.ok(`${realpathSync(join(tmpForm, "run"))}/**` in oc2.permission.external_directory)
+  } finally {
+    rmSync(tmpForm, { recursive: true, force: true })
+  }
   assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "hooks copied")
+})
+
+test("a dead orchestrator parks the Job as orphaned; relaunch and decline are bookkept", () => {
+  const { session } = findOrOpenSession({ cwd: "/tmp/orphan-lifecycle" })
+  const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "t", dir: "/tmp/o" })
+  assert.equal(job.state, "running")
+
+  // graceful abort never orphans (the signal handler's path)
+  const graceful = createJob({ sid: session.id, stoodUpBy: "standalone", workflow: "fan-out", task: "g", dir: "/tmp/g" })
+  abortJob(graceful, "signal SIGTERM", 0, "orchestrator")
+  assert.equal(orphanJob(graceful, "pid gone", 0).state, "aborted")
+
+  // retired never orphans either
+  orphanJob(job, `orchestrator pid 4194300 gone`, 2)
+  assert.equal(loadJob(session.id, job.id)!.state, "orphaned")
+  assert.ok(readEvents(session.id).some((e) => e.kind === "job.orphaned" && e.jid === job.id))
+
+  const relaunched = relaunchJob(job, 99901)
+  assert.equal(relaunched.state, "running")
+  assert.equal(relaunched.relaunches, 1)
+  assert.equal(relaunched.orphan, undefined)
+  const relaunched2 = relaunchJob(relaunched, 99902)
+  assert.equal(relaunched2.relaunches, 2)
+
+  // the projection rebuilds the whole arc: born → orphaned → relaunched ×2
+  const projected = projectJob(session.id, job.id)!
+  assert.equal(projected.state, "running")
+  assert.equal(projected.relaunches, 2)
+  assert.equal(projected.orphan, undefined)
+  assert.equal(projected.pid, 99902)
+
+  // declining an orphaned job aborts with the user as actor
+  orphanJob(relaunched2, "pid gone again", 1)
+  abortJob(relaunched2, "declined by user", 1, "first_mate")
+  const declined = projectJob(session.id, job.id)!
+  assert.equal(declined.state, "aborted")
+  assert.equal(declined.abort!.reason, "declined by user")
+  assert.equal(declined.abort!.finished, declined.finished)
+})
+
+test("pane.born carries the JEV parent stamp", () => {
+  const { session } = findOrOpenSession({ cwd: "/tmp/parent-stamp" })
+  const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "t", dir: "/tmp/p" })
+  attachPane(job, { label: "w-capitals-xyz", parent: "orchestrator", transcript: { tool: "pi", cwd: "/tmp/p", since: new Date().toISOString() } })
+  const born = readEvents(session.id).find((e) => e.kind === "pane.born" && e.label === "w-capitals-xyz")!
+  assert.equal(born.parent, "orchestrator")
+  assert.equal(projectJob(session.id, job.id)!.panes[0]!.parent, "orchestrator")
 })
 
 test("cleanup: the temp home is disposable", () => {

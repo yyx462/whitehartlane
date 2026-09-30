@@ -3,6 +3,33 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-01 — Phase B.1: backpressure is real, relaunch is ask-first.
+The provider's refusal is information, not failure: the planner hook
+classifies (exit 75 = refused/slowed, anything else deterministic) and
+the rail retries — refusal only, exponential backoff with jitter, cap
+3, a visible line per wait (a silent backoff reads as a hang), a
+backpressure trace event. A dead orchestrator parks its Job `orphaned`
+in a derived ask-first queue: announced on the periodic check, never a
+wake, never auto-resurrected (what the user killed stays killed;
+graceful stops abort and never orphan). relaunch retires the dead
+generation's stragglers first (two generations must not double-write
+one unit dir), is capped at 2 tries, reconciles against events, and
+counts this Job's panes for its receipt. pane.born now carries the JEV
+parent stamp (first_mate | orchestrator). Direct has NO retry rail,
+deleted from its promise: the open chat is the supervisor — a blocked
+turn is visible, the user resends, unattended work belongs to a Job.
+Supersedes: the hidden retry script in CONTEXT.md's Direct. Serves 2,
+3, 4, 5. Inventory closed: docs/RAILS.md.
+
+2026-10-01 — binding confirms once per session, echoed in every
+report; a worktree already bound to a live session is refused (two
+writers on one tree is a zen 1 do-not-resurrect). Decided now, built
+in the project-binding era. Serves 1, 2.
+
+2026-10-01 — slots is a hook, not a rail: the per-task tunable may
+change per Job; the rail is that a cap exists and the ledger honors
+it. Serves 3.
+
 2026-09-29 — pane is the process. Agent CLI in a herdr pane = process:
 own context, disposable, visible. Serves 2. Rejected: in-process
 subagents (invisible, one runtime).
@@ -92,5 +119,7 @@ and ours. Serves all. Rejected: framework adoption.
 
 2026-09-29 — plan layer. Stages over the workflow catalog; hooks
 generated per task from grill context; canary before scale. Serves 1, 3.
-Open debts, tracked here until closed: real backpressure (provider
-signal, not slots), orchestrator-death relaunch.
+Open debts, tracked here until closed: ~~real backpressure (provider
+signal, not slots)~~ closed 2026-10-01 (refusal-only retry at the
+headless-call layer); ~~orchestrator-death relaunch~~ closed 2026-10-01
+(ask-first relaunch queue, cap 2).
