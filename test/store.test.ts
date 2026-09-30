@@ -121,11 +121,12 @@ test("events file lives at events.jsonl and never splits per job", () => {
   assert.equal(readEvents(session.id).length, 1)
 })
 
-test("listJobs spans sessions in creation order", () => {
+test("listJobs spans sessions in creation order", async () => {
   const before = listJobs().length
   const s1 = findOrOpenSession({ cwd: "/tmp/a" }).session
   const s2 = findOrOpenSession({ cwd: "/tmp/b" }).session
   createJob({ sid: s1.id, stoodUpBy: "standalone", workflow: "fan-out", task: "a", dir: "/tmp/a" })
+  await new Promise((r) => setTimeout(r, 3)) // distinct created timestamps
   createJob({ sid: s2.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "b", dir: "/tmp/b" })
   const dirs = listJobs().slice(before).map((job) => job.dir)
   assert.deepEqual(dirs, ["/tmp/a", "/tmp/b"])
