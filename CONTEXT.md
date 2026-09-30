@@ -9,7 +9,7 @@ The pi chat the user works in — the shell. It talks, plans, and may propose pa
 _Avoid_: front door, orchestrator, scheduler, kernel
 
 **Session**:
-The conversation plus its OS disk at `sessions/<sid>/` (trace, state, ledger, pane records) and a binding to a worktree in the target repo. May have no Job.
+The First Mate conversation plus its OS disk at `sessions/<sid>/` (events, jobs, pane records) and a binding to a worktree in the target repo. One session per host conversation, keyed by `(tool, host session id)`. May have no Job.
 _Avoid_: task, chat history, folder
 
 **Binding**:
@@ -33,8 +33,16 @@ The birth canal. The model proposes a pane; policy admits it. That pair is JEV. 
 _Avoid_: router model, LLM scheduler, subagent
 
 **Trace**:
-The append-only record of JEV admissions on a session disk: propose, admit or reject, parent, detail.
+The append-only `events.jsonl` on a session disk: every route, admission, pane birth and death, settle, retire, abort, wake. The single source; all records are projections of it.
 _Avoid_: log, history, audit log
+
+**Transcript**:
+A worker's conversation bytes, owned by its host tool (pi jsonl, opencode db). Recorded as a pointer `{tool, cwd, since}` in the pane event — never copied.
+_Avoid_: copy, mirror
+
+**Resolver**:
+The per-tool adapter that turns a transcript pointer into readable bytes: pi → the pinned file; opencode → `opencode export`.
+_Avoid_: parser, converter
 
 **Pane**:
 A herdr split the workflow's workers run in. `shep` opens and closes these. `shep` is not this product.

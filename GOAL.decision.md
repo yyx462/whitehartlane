@@ -14,6 +14,22 @@ directory owns progress and output. Serves 2. Rejected: one store.
 the collision incident stranded fleets. Serves 5. Rejected: global
 names, manual cleanup.
 
+2026-09-30 — Phase B: one home, one trace. The OS disk moved to
+~/.local/share/agentic-os (data, not state — traces are for training,
+not for disposal). Sessions bind to the host conversation keyed on
+(tool, host session id) — find-or-create, so a resumed chat never
+mints a duplicate; jobs reference the sid only (one hop to the host
+path). events.jsonl is THE trace: route/admit/reject, pane.born with a
+transcript pointer {tool, cwd, since}, unit.settled with the grade row,
+job.retired/aborted, wake.consumed. job.json, report.json, state.json
+are projections. Runs live at sessions/<sid>/jobs/<jid>/run/ with
+per-unit dirs (brief/log/result) that double as worker cwds — which
+makes both pi and opencode transcripts resolvable newest-for-cwd; the
+resolver layer reads them (pi file; opencode export). <cwd>/.agentic-os
+is dead; fresh start, nothing migrated. rows.jsonl died (grade rows
+live in events). Zen 3 note: the event schema is the first rail
+admitted from use. Serves 2, 3, 4, 5.
+
 2026-09-30 — Phase A: the OS disk exists; Jobs are records now. The
 front door opens a session per process, JEV admits or rejects before
 any pane is born (policy.ts), and an admitted fan-out creates the Job

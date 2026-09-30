@@ -11,44 +11,66 @@ import { basename, join, resolve } from "node:path"
 import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
 import {
   abortJob as abortJobRec,
-  appendTrace,
+  appendEvent,
   attachPane,
   createJob,
   finishJob as finishJobRec,
+  jobRunDir,
   killPane,
   loadJob,
   openSession,
+  readEvents,
   saveJob,
+  writeWorkerPermissions,
 } from "../src/store.ts"
 
-const taskDir = resolve(process.argv[2] ?? process.cwd())
+const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
-const scoped = paneLabeler(runIdFor(taskDir))
+
+function taskLine(dir) {
+  try {
+    return readFileSync(join(dir, "task.txt"), "utf8").split("\n")[0]?.slice(0, 120) || basename(dir)
+  } catch {
+    return basename(dir)
+  }
+}
 
 // The Job ledger (zen 2/5). Bookkeeping must never break the rail: every
 // ledger call is best-effort, and a run without a record still runs.
+// Events are the trace; job.json is the projection the store maintains.
 const ledger = (() => {
   try {
     let job = null
     const { AGENTIC_OS_SID: sid0, AGENTIC_OS_JID: jid0 } = process.env
     if (sid0 && jid0) job = loadJob(sid0, jid0)
     if (!job) {
-      const sess = openSession({ cwd: taskDir })
-      job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: taskLine(), dir: taskDir })
+      const sess = openSession({ cwd: argvDir ?? process.cwd() })
+      job = createJob({
+        sid: sess.id,
+        stoodUpBy: "standalone",
+        workflow: "fan-out",
+        task: argvDir ? taskLine(argvDir) : "standalone run",
+        dir: argvDir ?? jobRunDir(sess.id, "pending"),
+      })
+      if (!argvDir) {
+        job.dir = jobRunDir(sess.id, job.id)
+        job.task = "standalone run"
+        saveJob(job)
+      }
       log(`job ${job.id} self-opened on session ${job.sid} (no AGENTIC_OS_SID/JID passed)`)
     }
     job.pid = process.pid
     saveJob(job)
     return {
       job,
-      trace(entry) {
+      emit(kind, payload) {
         try {
-          appendTrace(job.sid, { jid: job.id, ...entry })
+          appendEvent(job.sid, { actor: "orchestrator", jid: job.id, kind, ...payload })
         } catch {}
       },
-      attach(label, pane, unit) {
+      attach(label, pane, unit, transcript) {
         try {
-          attachPane(job, { label, pane, unit })
+          attachPane(job, { label, pane, unit, transcript })
         } catch {}
       },
       kill(label) {
@@ -77,13 +99,9 @@ const ledger = (() => {
   }
 })()
 
-function taskLine() {
-  try {
-    return readFileSync(join(taskDir, "task.txt"), "utf8").split("\n")[0]?.slice(0, 120) || basename(taskDir)
-  } catch {
-    return basename(taskDir)
-  }
-}
+const taskDir = argvDir ?? ledger?.job.dir ?? resolve(process.cwd())
+const scoped = paneLabeler(runIdFor(taskDir))
+writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
 
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
@@ -167,21 +185,24 @@ function openFleetTab(dir) {
   log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
 
-// start an agent in an existing pane, record it, submit the brief
+// start an agent in an existing pane, record it, submit the brief.
+// since is stamped BEFORE the agent starts, so the host tool's session
+// (created during start) always falls inside the pointer's window.
 function inhabitPane(rawName, kind, pane, briefPath, cwd) {
+  const since = new Date().toISOString()
   const name = scoped(rawName)
   const rec = shep("record", pane, name)
   if (rec.status !== 0) {
     // an unrecorded split pane would leak as a bare shell — close it
     herdr("pane", "close", pane)
-    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${name}: record failed` })
+    ledger?.emit("reject", { label: name, why: "record failed" })
     log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS))
   if (start.status !== 0) {
     shep("retire", name)
-    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${name}: agent start failed` })
+    ledger?.emit("reject", { label: name, why: "agent start failed" })
     log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
     return false
   }
@@ -191,8 +212,12 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`brief submission failed for ${name} — the grace reprompt will retry`)
   }
   mine.add(name)
-  ledger?.attach(name, pane, name.startsWith("orch-lane") ? undefined : name)
-  ledger?.trace({ parent: "orchestrator", kind: "worker", action: "admit", detail: name })
+  ledger?.attach(
+    name,
+    pane,
+    name.startsWith("orch-lane") ? undefined : name,
+    { tool: kind, cwd, since },
+  )
   return true
 }
 
@@ -211,7 +236,12 @@ const port = {
       // column beside the lane pane.
       let pane = null
       if (!colUsed) {
-        pane = colPane
+        // Split the column head for the first worker too — a split sets
+        // the unit cwd deterministically (no cd race); the empty head
+        // closes and the worker takes the column.
+        pane = splitPane(colPane, "down", cwd, 0.5)
+        if (pane) herdr("pane", "close", colPane)
+        colUsed = true
       } else {
         for (const anchor of [...liveWorkerPanes].reverse()) {
           pane = splitPane(anchor, "down", cwd, 0.5)
@@ -225,7 +255,6 @@ const port = {
         log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      colUsed = true
       const ok = inhabitPane(name, kind, pane, briefPath, cwd)
       if (ok) {
         liveWorkerPanes.push(pane)
@@ -237,13 +266,12 @@ const port = {
     const r = shep("spawn", label, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
     if (r.status !== 0) {
       shep("retire", label)
-      ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${label}: spawn failed` })
+      ledger?.emit("reject", { label, why: "spawn failed" })
       log(`spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
       return false
     }
     mine.add(label)
-    ledger?.attach(label, undefined, name)
-    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "admit", detail: label })
+    ledger?.attach(label, undefined, name, { tool: kind, cwd, since: new Date().toISOString() })
     log(`spawned ${label} (${kind})`)
     return true
   },
@@ -336,11 +364,26 @@ const port = {
 try {
   const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
   const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
-  const report = await runOrchestrator({ taskDir, shep: port, checkMs, slots })
+  const existingRows = ledger
+    ? readEvents(ledger.job.sid)
+        .filter((e) => e.jid === ledger.job.id && e.kind === "unit.settled")
+        .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
+    : undefined
+  const report = await runOrchestrator({
+    taskDir,
+    shep: port,
+    checkMs,
+    slots,
+    emit: (kind, payload) => ledger?.emit(kind, payload),
+    existingRows,
+  })
   log(`done: ${report.status}`)
   const reap = port.verify()
+  // zen 5: the receipt counts THIS Job's panes, not the scope's
+  const panesLeft = ledger ? ledger.job.panes.filter((p) => p.died === undefined).length : NaN
+  log(`${reap} (scope); this job: ${panesLeft} of ${ledger?.job.panes.length ?? "?"} panes remain`)
   ledger?.finish({
-    panesRemaining: Number(reap.match(/pane-reap:\s+(\d+)/)?.[1] ?? NaN),
+    panesRemaining: panesLeft,
     panesTotal: ledger.job.panes.length,
     unitsDone: Number(report.counts?.units ?? NaN),
     unitsFailed: Number(report.counts?.failed ?? NaN),
@@ -349,6 +392,7 @@ try {
   })
 } catch (err) {
   log(`fatal: ${err instanceof Error ? err.message : String(err)}`)
+  ledger?.emit("fatal", { why: String(err instanceof Error ? err.message : err) })
   ledger?.abort(`fatal: ${err instanceof Error ? err.message : String(err)}`, mine.size)
   port.wake("fan-out", "blocked", `orchestrator died: ${taskDir}/orchestrator.log`)
   process.exit(1)

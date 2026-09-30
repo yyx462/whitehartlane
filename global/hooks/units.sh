@@ -13,7 +13,8 @@ Rules:
 - Produce 2 to 8 units. Each unit must be doable on its own; no unit
   needs another unit's result.
 - Each brief tells the worker exactly what to do, including writing its
-  result to results/<id>.md as markdown.
+  result to result.md in the worker's own working directory (its cwd)
+  as markdown.
 - Unit ids: lowercase a-z, 0-9 and hyphens only; unique; at most 24 chars.
 - Output STRICT JSONL: one JSON object per line with keys id and brief.
   No prose, no code fences, no trailing commentary. Nothing else."

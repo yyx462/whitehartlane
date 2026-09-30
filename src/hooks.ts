@@ -169,9 +169,7 @@ export function runCounts(
   manifest: Manifest,
   table: { unit: string; result: string }[],
 ): Record<string, number> {
-  const resultsDir = join(taskDir, "results")
-  mkdirSync(resultsDir, { recursive: true })
-  const tablePath = join(resultsDir, "table.json")
+  const tablePath = join(taskDir, "table.json")
   writeFileSync(tablePath, JSON.stringify(table))
   const { stdout, status } = runHook(`${manifest.hooks.counts} ${quote(tablePath)}`, taskDir)
   if (status !== 0) throw new HookError(`counts hook exited ${status}: ${manifest.hooks.counts}`)

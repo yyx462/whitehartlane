@@ -13,7 +13,7 @@ grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
 [report]
-where = "results/"
+where = "units/"
 
 [layout]
 tab = "new"            # "new" = the fleet gets its own tab; "same" = a column beside your pane

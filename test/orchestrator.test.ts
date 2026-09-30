@@ -10,7 +10,7 @@ import {
   type ShepPort,
 } from "../src/orchestrator.ts"
 import { hooksFromDir } from "../src/hooks.ts"
-import { readRows, readState, settleUnit } from "../src/state.ts"
+import { readState, settleUnit } from "../src/state.ts"
 import { copyExample } from "./util.ts"
 
 type Wake = { label: string; kind: string; detail: string }
@@ -59,7 +59,8 @@ function deps(
   dir: string,
   port: ShepPort,
   extra: Partial<CycleDeps> = {},
-): CycleDeps {
+): CycleDeps & { events: { kind: string; payload: Record<string, unknown> }[] } {
+  const events: { kind: string; payload: Record<string, unknown> }[] = []
   return {
     taskDir: dir,
     hooks: hooksFromDir(dir).hooks,
@@ -67,7 +68,9 @@ function deps(
     inFlight: new Map(),
     attempts: new Map(),
     slots: 3,
+    emit: (kind, payload) => events.push({ kind, payload }),
     ...extra,
+    events,
   }
 }
 
@@ -91,9 +94,8 @@ test("the default slot cap is 2 — the third unit waits for a settle", async ()
   cycle(base)
   assert.deepEqual(spawned, ["w-france", "w-japan"])
 
-  mkdirSync(join(dir, "logs"), { recursive: true })
-  appendFileSync(join(dir, "logs", "france.log"), "done france\n")
-  writeFileSync(join(dir, "results", "france.txt"), "Paris\n")
+    appendFileSync(join(dir, "units", "france", "log.txt"), "done france\n")
+  writeFileSync(join(dir, "units", "france", "result.md"), "Paris\n")
   cycle(base)
   assert.deepEqual(spawned, ["w-france", "w-japan", "w-peru"])
 })
@@ -105,15 +107,14 @@ test("a done sentinel grades the unit, settles it, and wakes nobody", async () =
   cycle(base)
 
   const id = "france"
-  mkdirSync(join(dir, "logs"), { recursive: true })
-  writeFileSync(join(dir, "results", `${id}.txt`), "Paris\n")
-  appendFileSync(join(dir, "logs", `${id}.log`), `done ${id}\n`)
+    writeFileSync(join(dir, "units", id, "result.md"), "Paris\n")
+  appendFileSync(join(dir, "units", id, "log.txt"), `done ${id}\n`)
 
   const done = cycle(base)
 
   assert.equal(done, false)
   assert.deepEqual(readState(dir).done, [id])
-  assert.deepEqual(readRows(dir), [{ unit: id, result: "found", pass: true }])
+  assert.deepEqual(base.events.find((e) => e.kind === "unit.settled")?.payload.result, "found")
   assert.ok(retired.includes(`w-${id}`))
   assert.deepEqual(wakes, [])
   assert.equal(spawned.length, 3)
@@ -126,13 +127,12 @@ test("a failed grade settles the unit failed and wakes the shepherd", async () =
   cycle(base)
 
   const id = "japan"
-  mkdirSync(join(dir, "logs"), { recursive: true })
-  appendFileSync(join(dir, "logs", `${id}.log`), `done ${id}\n`)
+    appendFileSync(join(dir, "units", id, "log.txt"), `done ${id}\n`)
 
   cycle(base)
 
   assert.deepEqual(readState(dir).failed, [id])
-  assert.deepEqual(readRows(dir), [{ unit: id, result: "missing", pass: false }])
+  assert.deepEqual(base.events.find((e) => e.kind === "unit.settled")?.payload.result, "missing")
   assert.equal(wakes.length, 1)
   assert.equal(wakes[0].kind, "blocked")
 })
@@ -144,8 +144,7 @@ test("a blocked line settles the unit failed and wakes the shepherd", async () =
   cycle(base)
 
   const id = "peru"
-  mkdirSync(join(dir, "logs"), { recursive: true })
-  appendFileSync(join(dir, "logs", `${id}.log`), `blocked ${id}: stuck on dialog\n`)
+    appendFileSync(join(dir, "units", id, "log.txt"), `blocked ${id}: stuck on dialog\n`)
 
   cycle(base)
 
@@ -212,9 +211,8 @@ test("a reprompted worker that then writes its sentinel settles normally", async
     reprompt: (name) => {
       reprompts.push(name)
       const id = name.slice(2)
-      mkdirSync(join(dir, "logs"), { recursive: true })
-      writeFileSync(join(dir, "results", `${id}.txt`), "capital\n")
-      appendFileSync(join(dir, "logs", `${id}.log`), `done ${id}\n`)
+            writeFileSync(join(dir, "units", id, "result.md"), "capital\n")
+      appendFileSync(join(dir, "units", id, "log.txt"), `done ${id}\n`)
       return true
     },
   })
@@ -288,8 +286,8 @@ test("runOrchestrator settles everything, writes the report, and quotes the rece
   const { port, wakes, calls, retired, seq } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       const id = name.slice(2)
-      writeFileSync(join(cwd, "results", `${id}.txt`), "capital\n")
-      appendFileSync(join(cwd, "logs", `${id}.log`), `done ${id}\n`)
+      writeFileSync(join(cwd, "result.md"), "capital\n")
+      appendFileSync(join(cwd, "log.txt"), `done ${id}\n`)
       return true
     },
   })
@@ -341,8 +339,8 @@ test("an orchestrator-side layout of right opens the lane after the first cycle"
   const { port, seq } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       const id = name.slice(2)
-      writeFileSync(join(cwd, "results", `${id}.txt`), "capital\n")
-      appendFileSync(join(cwd, "logs", `${id}.log`), `done ${id}\n`)
+      writeFileSync(join(cwd, "result.md"), "capital\n")
+      appendFileSync(join(cwd, "log.txt"), `done ${id}\n`)
       return true
     },
   })

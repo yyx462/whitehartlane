@@ -1,39 +1,58 @@
 import assert from "node:assert/strict"
-import { existsSync, readFileSync, rmSync } from "node:fs"
-import { mkdtemp } from "node:fs/promises"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-process.env.AGENTIC_OS_STATE = join(tmpdir(), "agentic-os-test-state")
-rmSync(process.env.AGENTIC_OS_STATE, { recursive: true, force: true })
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-store-"))
 
 const {
   abortJob,
-  appendTrace,
+  appendEvent,
   attachPane,
   createJob,
+  eventsPath,
   finishJob,
+  homeRoot,
+  jobRunDir,
   killPane,
   listJobs,
   listSessions,
   loadJob,
+  findOrOpenSession,
   openSession,
-  readTrace,
+  projectJob,
+  readEvents,
   shortId,
-  stateRoot,
 } = await import("../src/store.ts")
 
-test("state root honors AGENTIC_OS_STATE", () => {
-  assert.equal(stateRoot(), process.env.AGENTIC_OS_STATE)
+test("the home root honors AGENTIC_OS_HOME", () => {
+  assert.equal(homeRoot(), process.env.AGENTIC_OS_HOME)
 })
 
-test("a session opens with an id, a record, and no Jobs", () => {
-  const session = openSession({ cwd: "/tmp/somewhere" })
-  assert.match(session.id, /^s-/)
-  assert.ok(existsSync(join(stateRoot(), "sessions", session.id, "session.json")))
+test("a host-bound session is found, not duplicated (duplicate rule 1)", () => {
+  const host = { tool: "pi", session_id: "uuid-1", session_file: "~/.pi/agent/sessions/x.jsonl" }
+  const first = findOrOpenSession({ cwd: "/tmp/repo", host })
+  assert.equal(first.created, true)
+  // the same conversation resumes: same OS session, no duplicate
+  const again = findOrOpenSession({ cwd: "/tmp/repo", host })
+  assert.equal(again.created, false)
+  assert.equal(again.session.id, first.session.id)
   assert.equal(listSessions().length, 1)
-  assert.equal(listJobs(session.id).length, 0)
+  // a different host conversation is a different session
+  const other = findOrOpenSession({ cwd: "/tmp/repo", host: { ...host, session_id: "uuid-2" } })
+  assert.equal(other.created, true)
+  assert.equal(listSessions().length, 2)
+  // a different host tool with the same id is also distinct
+  const dsh = findOrOpenSession({ cwd: "/tmp/repo", host: { tool: "dsh", session_id: "uuid-1" } })
+  assert.equal(dsh.created, true)
+  assert.notEqual(dsh.session.id, first.session.id)
+})
+
+test("a session without a host is an auto session (standalone runs)", () => {
+  const session = openSession({ cwd: "/tmp/run" })
+  assert.match(session.id, /^auto-/)
+  assert.ok(existsSync(join(homeRoot(), "sessions", session.id, "session.json")))
 })
 
 test("shortIds do not collide", () => {
@@ -41,31 +60,50 @@ test("shortIds do not collide", () => {
   assert.equal(ids.size, 50)
 })
 
-test("a Job is born running, retires with a receipt, and is never deleted", () => {
-  const session = openSession({ cwd: "/tmp/repo" })
-  const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "look up capitals", dir: "/tmp/run" })
+test("a Job's life is events; the record is a faithful projection", () => {
+  const { session } = findOrOpenSession({ cwd: "/tmp/repo" })
+  const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "look up capitals", dir: jobRunDir(session.id, "x") })
   assert.equal(job.state, "running")
 
-  attachPane(job, { label: "w-europe-run1", pane: "p1", unit: "europe" })
-  attachPane(job, { label: "w-europe-run1", pane: "p1", unit: "europe" }) // idempotent
-  attachPane(job, { label: "w-asia-run1", pane: "p2", unit: "asia" })
-  assert.equal(job.panes.length, 2)
-
-  killPane(job, "w-europe-run1")
-  killPane(job, "w-asia-run1")
-
+  const since = new Date().toISOString()
+  attachPane(job, { label: "w-europe-r1", pane: "p1", unit: "europe", transcript: { tool: "pi", cwd: "/run/units/europe", since } })
+  attachPane(job, { label: "w-europe-r1", pane: "p1", unit: "europe", transcript: { tool: "pi", cwd: "/run/units/europe", since } }) // idempotent
+  attachPane(job, { label: "w-asia-r1", pane: "p2", unit: "asia", transcript: { tool: "opencode", cwd: "/run/units/asia", since } })
+  appendEvent(session.id, { actor: "orchestrator", kind: "unit.settled", jid: job.id, unit: "europe", pass: true, result: "Paris ✓" })
+  killPane(job, "w-europe-r1")
+  killPane(job, "w-asia-r1")
   finishJob(job, { panesRemaining: 0, panesTotal: 2, unitsDone: 2, unitsFailed: 0, status: "done" })
-  assert.equal(job.state, "retired")
-  assert.equal(job.receipt?.panesRemaining, 0)
 
+  // the record on disk
   const back = loadJob(session.id, job.id)
   assert.equal(back?.state, "retired")
+  assert.equal(back?.receipt?.panesRemaining, 0)
   assert.equal(back?.panes.length, 2)
-  assert.ok(existsSync(join(stateRoot(), "sessions", session.id, "jobs", job.id, "job.json")), "record survives retirement (zen 5)")
+  assert.equal(back?.panes[0].transcript?.tool, "pi")
+  assert.ok(existsSync(join(homeRoot(), "sessions", session.id, "jobs", job.id, "job.json")), "record survives retirement (zen 5)")
+
+  // the projection from events matches the record
+  const projected = projectJob(session.id, job.id)
+  assert.equal(projected?.state, "retired")
+  assert.equal(projected?.panes.length, 2)
+  assert.equal(projected?.panes[0].label, "w-europe-r1")
+  assert.equal(projected?.panes[0].transcript?.tool, "pi")
+  assert.equal(projected?.receipt?.panesRemaining, 0)
+  assert.deepEqual(
+    projected?.panes.map((p) => p.died !== undefined),
+    [true, true],
+  )
+
+  // the trace itself is ordered and append-only
+  const kinds = readEvents(session.id).map((e) => e.kind)
+  assert.deepEqual(
+    kinds.filter((k) => k !== "route"),
+    ["job.born", "pane.born", "pane.born", "unit.settled", "pane.died", "pane.died", "job.retired"],
+  )
 })
 
 test("abortJob keeps the record with a reason, not a receipt", () => {
-  const session = openSession({ cwd: "/tmp/repo2" })
+  const { session } = findOrOpenSession({ cwd: "/tmp/repo2" })
   const job = createJob({ sid: session.id, stoodUpBy: "standalone", workflow: "fan-out", task: "t", dir: "/tmp/run2", pid: 424242 })
   abortJob(job, "signal SIGTERM", 2)
   const back = loadJob(session.id, job.id)
@@ -73,27 +111,38 @@ test("abortJob keeps the record with a reason, not a receipt", () => {
   assert.equal(back?.abort?.reason, "signal SIGTERM")
   assert.equal(back?.abort?.panesRemaining, 2)
   assert.equal(back?.receipt, undefined)
+  assert.equal(projectJob(session.id, job.id)?.state, "aborted")
 })
 
-test("the trace is append-only and ordered", () => {
-  const session = openSession({ cwd: "/tmp/trace" })
-  appendTrace(session.id, { parent: "first_mate", kind: "direct", action: "admit", detail: "direct: hi" })
-  const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "t", dir: "/tmp/x" })
-  appendTrace(session.id, { jid: job.id, parent: "first_mate", kind: "job", action: "admit", detail: "fan-out: t" })
-  appendTrace(session.id, { jid: job.id, parent: "orchestrator", kind: "worker", action: "reject", detail: "w-x: slots full (2/2)" })
-  const trace = readTrace(session.id)
-  assert.equal(trace.length, 3)
-  assert.deepEqual(trace.map((e) => e.action), ["admit", "admit", "reject"])
-  assert.equal(trace[2].parent, "orchestrator")
-  assert.ok(trace.every((e) => e.ts <= new Date().toISOString()))
+test("events file lives at events.jsonl and never splits per job", () => {
+  const { session } = findOrOpenSession({ cwd: "/tmp/repo3" })
+  appendEvent(session.id, { actor: "first_mate", kind: "route", decision: "direct", confidence: 0.9 })
+  assert.ok(existsSync(eventsPath(session.id)))
+  assert.equal(readEvents(session.id).length, 1)
 })
 
 test("listJobs spans sessions in creation order", () => {
-  const s1 = listSessions()[0]
-  const s2 = openSession({ cwd: "/tmp/other" })
+  const before = listJobs().length
+  const s1 = findOrOpenSession({ cwd: "/tmp/a" }).session
+  const s2 = findOrOpenSession({ cwd: "/tmp/b" }).session
   createJob({ sid: s1.id, stoodUpBy: "standalone", workflow: "fan-out", task: "a", dir: "/tmp/a" })
   createJob({ sid: s2.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "b", dir: "/tmp/b" })
-  const dirs = listJobs().map((job) => job.dir)
-  assert.equal(dirs.indexOf("/tmp/a") < dirs.indexOf("/tmp/b"), true, "creation order holds")
-  assert.ok(dirs.includes("/tmp/a") && dirs.includes("/tmp/b"))
+  const dirs = listJobs().slice(before).map((job) => job.dir)
+  assert.deepEqual(dirs, ["/tmp/a", "/tmp/b"])
+})
+
+test("materializeRunDir writes the per-run worker permission scope", async () => {
+  const { materializeRunDir } = await import("../src/store.ts")
+  const { realpathSync } = await import("node:fs")
+  const exampleSrc = join(import.meta.dirname, "..", "examples", "three-lookups", "workflow.toml")
+  const runDir = join(process.env.AGENTIC_OS_HOME!, "sessions", "perm-test", "jobs", "j-x", "run")
+  materializeRunDir(runDir, "t", exampleSrc)
+  const oc = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8"))
+  assert.equal(oc.permission.external_directory["*"], "ask")
+  assert.ok(`${realpathSync(runDir)}/**` in oc.permission.external_directory)
+  assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "hooks copied")
+})
+
+test("cleanup: the temp home is disposable", () => {
+  rmSync(process.env.AGENTIC_OS_HOME!, { recursive: true, force: true })
 })

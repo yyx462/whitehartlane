@@ -29,7 +29,7 @@ test("the manifest names the workflow, worker kind, and hook commands", () => {
   assert.equal(manifest.hooks.units, "bash hooks/units.sh")
   assert.equal(manifest.hooks.grade, "bash hooks/grade.sh")
   assert.equal(manifest.hooks.counts, "bash hooks/counts.sh")
-  assert.equal(manifest.report?.where, "results/")
+  assert.equal(manifest.report?.where, "units/")
 })
 
 test("a task directory without workflow.toml is a clean error", async () => {
@@ -60,8 +60,8 @@ test("a unit id that is not shep-safe is rejected", async () => {
 test("grade passes when the worker artifact exists and fails when it does not", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
-  mkdirSync(join(dir, "results"), { recursive: true })
-  writeFileSync(join(dir, "results", "france.txt"), "Paris\n")
+  mkdirSync(join(dir, "units", "france"), { recursive: true })
+  writeFileSync(join(dir, "units", "france", "result.md"), "Paris\n")
 
   assert.deepEqual(runGrade(dir, manifest, { id: "france", brief: "" }), {
     pass: true,
@@ -85,8 +85,7 @@ test("counts summarizes the settled table", async () => {
 
 test("hooksFromDir binds the manifest into the Hooks shape", async () => {
   const dir = await copyExample()
-  mkdirSync(join(dir, "results"), { recursive: true })
-  const { hooks, manifest } = hooksFromDir(dir)
+    const { hooks, manifest } = hooksFromDir(dir)
   assert.equal(hooks.workerKind, "opencode")
   assert.equal(manifest.workflow.name, "three-lookups")
   assert.equal(hooks.units().length, 3)
@@ -97,11 +96,11 @@ test("hooksFromDir binds the manifest into the Hooks shape", async () => {
   })
 })
 
-test("the settled table lands in results/table.json for the counts hook", async () => {
+test("the settled table lands in table.json for the counts hook", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
   runCounts(dir, manifest, [{ unit: "france", result: "found" }])
-  const table = JSON.parse(readFileSync(join(dir, "results", "table.json"), "utf8"))
+  const table = JSON.parse(readFileSync(join(dir, "table.json"), "utf8"))
   assert.deepEqual(table, [{ unit: "france", result: "found" }])
 })
 
