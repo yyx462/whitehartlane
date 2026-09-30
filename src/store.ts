@@ -341,7 +341,7 @@ export function listJobs(sid?: string): JobRecord[] {
       if (existsSync(path)) jobs.push(readJson<JobRecord>(path))
     }
   }
-  return jobs.sort((a, b) => a.created.localeCompare(b.created))
+  return jobs.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id))
 }
 
 export function findJobByDir(dir: string): JobRecord | null {
