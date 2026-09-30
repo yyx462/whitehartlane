@@ -1,0 +1,140 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// agentic-os jobs | audit | sweep — read and settle the OS disk
+// (~/.local/state/agentic-os). jobs lists every Job record with its
+// state and receipt; audit diffs live shep panes against admitted
+// panes (the only door is JEV — a live pane no Job admits is a
+// violation); sweep marks running Jobs whose orchestrator is dead as
+// aborted, so a killed run reads as aborted instead of frozen.
+import { execFileSync } from "node:child_process"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+/** @typedef {import("../src/store.ts").JobRecord} JobRecord */
+import { abortJob, listJobs } from "../src/store.ts"
+
+/** @typedef {{ label: string, pane: string }} LivePane */
+
+/** @returns {LivePane[]} */
+function shepStatus() {
+  try {
+    const out = execFileSync("shep", ["status"], { encoding: "utf8", timeout: 30_000 })
+    return out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("name ") && !line.startsWith("status:"))
+      .map((line) => {
+        const [label, pane] = line.split(/\s+/)
+        return { label, pane }
+      })
+      .filter((p) => p.label && p.pane)
+  } catch {
+    return []
+  }
+}
+
+/** @param {number | undefined} pid */
+function pidAlive(pid) {
+  if (!pid) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err?.code === "EPERM"
+  }
+}
+
+/** @param {JobRecord} job */
+function unitsOf(job) {
+  try {
+    const state = JSON.parse(readFileSync(join(job.dir, "state.json"), "utf8"))
+    return { done: state.done?.length ?? 0, failed: state.failed?.length ?? 0 }
+  } catch {
+    return null
+  }
+}
+
+/** @param {JobRecord[]} jobs */
+function fmtJobs(jobs) {
+  const rows = jobs.map((job) => {
+    const units = unitsOf(job)
+    const born = job.panes.length
+    const dead = job.panes.filter((p) => p.died).length
+    const outcome = job.receipt
+      ? `receipt ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
+      : job.abort
+        ? `aborted: ${job.abort.reason} (${job.abort.panesRemaining} left)`
+        : "in flight"
+    return [
+      job.id.padEnd(9),
+      job.state.padEnd(8),
+      `${job.workflow} by ${job.stoodUpBy}`.padEnd(22),
+      units ? `u ${units.done}d/${units.failed}f` : "u -",
+      `p ${dead}/${born}`,
+      outcome,
+      job.dir,
+    ].join("  ")
+  })
+  return [`job      state    stood up by           units    panes   outcome                     dir`, ...rows].join("\n")
+}
+
+/** @param {JobRecord} job @param {LivePane[]} live */
+function livePanesOf(job, live) {
+  const labels = new Set(job.panes.map((p) => p.label))
+  return live.filter((p) => labels.has(p.label))
+}
+
+async function main() {
+  const cmd = process.argv[2]
+  const jobs = listJobs()
+
+  if (cmd === "jobs" || !cmd) {
+    if (jobs.length === 0) {
+      console.log("no Jobs on the OS disk")
+      return
+    }
+    console.log(fmtJobs(jobs))
+    return
+  }
+
+  if (cmd === "audit") {
+    const live = shepStatus()
+    const admitted = new Set(jobs.flatMap((job) => job.panes.map((p) => p.label)))
+    const bastards = live.filter((p) => !admitted.has(p.label))
+    const stalled = jobs.filter((job) => job.state === "running" && !pidAlive(job.pid))
+    console.log(`panes live in shep: ${live.length}; admitted by Jobs: ${live.length - bastards.length}`)
+    for (const pane of bastards) {
+      console.log(`UNADMITTED ${pane.label} (${pane.pane}) — born outside JEV; retire it: shep retire ${pane.label}`)
+    }
+    for (const job of stalled) {
+      console.log(`STALLED ${job.id} — orchestrator pid ${job.pid} is gone; run: agentic-os sweep`)
+    }
+    console.log(bastards.length === 0 && stalled.length === 0 ? "audit: clean" : `audit: ${bastards.length} unadmitted, ${stalled.length} stalled`)
+    process.exitCode = bastards.length === 0 && stalled.length === 0 ? 0 : 1
+    return
+  }
+
+  if (cmd === "sweep") {
+    const live = shepStatus()
+    let swept = 0
+    for (const job of jobs) {
+      if (job.state !== "running") continue
+      if (pidAlive(job.pid)) {
+        console.log(`${job.id} running (pid ${job.pid}) — left alone`)
+        continue
+      }
+      const orphans = livePanesOf(job, live)
+      abortJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
+      swept += 1
+      console.log(`${job.id} aborted — ${job.dir}`)
+      if (orphans.length > 0) {
+        console.log(`  orphan panes still live (retire by hand): ${orphans.map((p) => p.label).join(", ")}`)
+      }
+    }
+    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) marked aborted`)
+    return
+  }
+
+  console.error("usage: agentic-os jobs | audit | sweep")
+  process.exitCode = 2
+}
+
+await main()

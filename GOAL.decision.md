@@ -14,6 +14,20 @@ directory owns progress and output. Serves 2. Rejected: one store.
 the collision incident stranded fleets. Serves 5. Rejected: global
 names, manual cleanup.
 
+2026-09-30 — Phase A: the OS disk exists; Jobs are records now. The
+front door opens a session per process, JEV admits or rejects before
+any pane is born (policy.ts), and an admitted fan-out creates the Job
+before the orchestrator spawns — the first admitted spawn makes the
+Job. The orchestrator books every pane (born/died) and retires the Job
+with a receipt: panes remaining 0. A bare orchestrator run self-opens
+a standalone Job, so killed runs are sweepable: `agentic-os sweep`
+marks dead-pid Jobs aborted; `agentic-os audit` flags live panes no
+Job admits (the only door is JEV). Records are never deleted; the
+tree stays bound, not copied. Enforced in shell, not in policy: a
+determined shell can still call shep spawn — audit makes bastards
+visible. npm test now runs under the scratch scope so test fleets
+never land in a live scope. Serves 1, 2, 4, 5.
+
 2026-09-29 — Zen 2: state splits, First Mate is not disposable. Workers
 are panes plus a relaunchable orchestrator; the shell is not a worker.
 OS disk is sessions/<sid>/ (trace, state, ledger, pane records); project
