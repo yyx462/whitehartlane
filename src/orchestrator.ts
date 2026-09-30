@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
+import { withBackpressure } from "./backpressure.ts"
 import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
@@ -100,6 +101,23 @@ export function loadUnitsFor(taskDir: string, hooks: Hooks): Unit[] {
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line) as Unit)
+}
+
+// The units hook runs once per run, before any pane exists. A provider
+// refusal (RefusedError, exit 75 from the hook) is retried by the rail
+// with backoff — visible line per wait, trace event, hard cap. A
+// deterministic failure fails fast. Idempotent by construction: the
+// units file only lands after the hook succeeds.
+export function acquireUnits(
+  taskDir: string,
+  hooks: Hooks,
+  opts: { log?: (msg: string) => void; emit?: (kind: string, payload: Record<string, unknown>) => void } = {},
+): Unit[] {
+  return withBackpressure(() => loadUnitsFor(taskDir, hooks), {
+    who: "planner",
+    log: opts.log,
+    emit: opts.emit,
+  })
 }
 
 export function briefFor(unit: Unit, taskDir: string): string {
@@ -278,6 +296,10 @@ export async function runOrchestrator(input: {
   input.shep.setLayout(layout, input.taskDir)
   const unitsDir = join(input.taskDir, "units")
   mkdirSync(unitsDir, { recursive: true })
+  acquireUnits(input.taskDir, loaded.hooks, {
+    log,
+    emit: (kind, payload) => emit(kind, payload),
+  })
 
   let laneOpened = false
   const openLane = () => {

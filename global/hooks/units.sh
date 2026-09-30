@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Planner: the generic units hook. Decomposes the ad-hoc task (task.txt
-# in the run dir) into independent units via one headless pi call, and
-# emits STRICT JSONL {id, brief}. The rail validates every line.
+# in the run dir) into independent units via one headless call
+# (AGENTIC_OS_PLANNER, default pi), and emits STRICT JSONL {id, brief}.
+# The rail validates every line.
+#
+# Exit contract (backpressure, zen 3): 75 = the provider refused or
+# slowed (rate limit, overload, network) — the orchestrator's rail
+# retries with backoff. Any other failure is deterministic and fails
+# fast; retrying it would only show the user the same doom thrice.
 set -uo pipefail
 task="$(cat task.txt 2>/dev/null)" || { echo "error: no task.txt in $(pwd)" >&2; exit 1; }
 
@@ -19,11 +25,16 @@ Rules:
 - Output STRICT JSONL: one JSON object per line with keys id and brief.
   No prose, no code fences, no trailing commentary. Nothing else."
 
-pi -p "$prompt" > units-raw.txt 2>units-err.txt
+planner="${AGENTIC_OS_PLANNER:-pi}"
+"$planner" -p "$prompt" > units-raw.txt 2>units-err.txt
 rc=$?
 if [ $rc -ne 0 ] || [ ! -s units-raw.txt ]; then
-  echo "error: planner pi call failed (rc=$rc)" >&2
-  cat units-err.txt >&2 2>/dev/null
+  err="$(head -c 300 units-err.txt 2>/dev/null | tr '\n' ' ')"
+  if grep -qiE '429|rate.?limit|overload|too many requests|quota|50[023]|timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|network|fetch failed' units-err.txt 2>/dev/null; then
+    echo "planner refused: ${err:-rc=$rc}" >&2
+    exit 75
+  fi
+  echo "error: planner failed (rc=$rc): ${err:-no stderr}" >&2
   exit 1
 fi
 grep -E '^[[:space:]]*\{' units-raw.txt || {
