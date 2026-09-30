@@ -11,7 +11,9 @@ import { promisify } from "node:util"
 import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { nextRetryAction, show } from "../../src/front-door.ts"
-import { hooksFromDir, resolveManifestPath } from "../../src/hooks.ts"
+import { hooksFromDir, loadManifest, resolveManifestPath } from "../../src/hooks.ts"
+import { admitDirect, admitFanOut } from "../../src/policy.ts"
+import { appendTrace, createJob, listJobs, openSession, type SessionRecord } from "../../src/store.ts"
 import { extractReportPath, parseWakeList } from "../../src/wake-reader.ts"
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -22,6 +24,32 @@ const CONFIDENCE_BAR = 0.8
 const POLL_MS = 10_000
 
 const execFileP = promisify(execFile)
+
+// One session per front-door process (zen 1: a session always has an
+// id; zen 2: its OS disk lives in the state root, not the chat).
+let osSession: SessionRecord | null = null
+function ensureSession(cwd: string): SessionRecord | null {
+  if (osSession) return osSession
+  try {
+    osSession = openSession({ cwd })
+    return osSession
+  } catch {
+    return null
+  }
+}
+
+function traceAdmit(
+  cwd: string,
+  entry: { jid?: string; parent: "first_mate" | "orchestrator"; kind: "job" | "direct" | "worker"; action: "admit" | "reject"; detail: string },
+): void {
+  const session = ensureSession(cwd)
+  if (!session) return
+  try {
+    appendTrace(session.id, entry)
+  } catch {
+    // the trace is law for panes, not for the chat — never block on it
+  }
+}
 
 const GUIDELINE =
   "You are the front door of agentic-os. For EVERY task the user gives you — even a trivial one — your FIRST action must be to call the stand_up tool with the task text verbatim. Never answer, start, or plan a task before stand_up has routed it. If it answers direct, you are the worker: do the task normally. If it answers fan-out, do NOT do the task yourself: report what was stood up and that the report will arrive in this chat."
@@ -103,6 +131,7 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
   }
 
   if (choice !== "fan-out") {
+    traceAdmit(ctx.cwd, { parent: "first_mate", kind: "direct", action: "admit", detail: `direct: ${task.slice(0, 80)}` })
     return {
       workflow: "direct",
       text: `direct — this chat is the worker.${notes.length ? ` (${notes.join("; ")})` : ""}`,
@@ -116,6 +145,7 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
     if (!existsSync(join(ctx.cwd, "workflow.toml"))) {
       const resolved = resolveManifestPath(ctx.cwd)
       if (!resolved) {
+        traceAdmit(ctx.cwd, { parent: "first_mate", kind: "job", action: "reject", detail: `no workflow.toml resolves in ${ctx.cwd}` })
         return {
           workflow: "direct-fallback",
           text: `cannot fan-out: no workflow.toml in ${ctx.cwd} and no global default. This task runs direct.`,
@@ -139,7 +169,45 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
     const { hooks } = hooksFromDir(runDir)
     const units = adHoc ? [] : hooks.units()
 
+    // JEV (zen 1): the model proposed fan-out; policy admits or
+    // rejects before any pane is born. An admitted Job record is
+    // created here — the first admitted spawn makes the Job.
+    const manifest = loadManifest(runDir)
+    const admission = admitFanOut({
+      manifestResolved: true,
+      slots: manifest.workflow.slots ?? (Number(process.env.AGENTIC_OS_SLOTS ?? "") || 2),
+    })
+    if (!admission.admit) {
+      traceAdmit(ctx.cwd, { parent: "first_mate", kind: "job", action: "reject", detail: admission.why ?? "policy rejected" })
+      return {
+        workflow: "direct-fallback",
+        text: `cannot fan-out: ${admission.why}. This task runs direct.`,
+        details: { workflow: "direct-fallback" },
+      }
+    }
+    const session = ensureSession(ctx.cwd)
+    let jid: string | undefined
+    if (session) {
+      try {
+        const job = createJob({
+          sid: session.id,
+          stoodUpBy: "first_mate",
+          workflow: "fan-out",
+          task,
+          dir: runDir,
+        })
+        jid = job.id
+        traceAdmit(ctx.cwd, { jid, parent: "first_mate", kind: "job", action: "admit", detail: `fan-out: ${task.slice(0, 80)}` })
+      } catch {
+        // no Job record — the run still works, it just is not booked
+      }
+    }
+
     const env: Record<string, string> = { ...process.env }
+    if (session && jid) {
+      env.AGENTIC_OS_SID = session.id
+      env.AGENTIC_OS_JID = jid
+    }
     try {
       const scope = (await execFileP("shep", ["scope"])).stdout
       const match = scope.match(/^scope:\s+(\S+)/m)
@@ -174,6 +242,12 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
       },
     }
   } catch (err) {
+    traceAdmit(ctx.cwd, {
+      parent: "first_mate",
+      kind: "job",
+      action: "reject",
+      detail: `stand-up failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
     return {
       workflow: "error",
       text: `fan-out stand-up failed: ${err instanceof Error ? err.message : String(err)}. This task runs direct.`,
@@ -258,6 +332,43 @@ export default function (pi: ExtensionAPI) {
       clearInterval(wakeTimer)
       wakeTimer = null
     }
+  })
+
+  pi.registerCommand("jobs", {
+    description: "List Jobs on the OS disk with state, units, panes, and receipt",
+    handler: async (_args, ctx) => {
+      let table: string
+      try {
+        const jobs = listJobs()
+        table =
+          jobs.length === 0
+            ? "no Jobs on the OS disk"
+            : [
+                "job       state    stood up by           units     panes   outcome                      dir",
+                ...jobs.map((job) => {
+                  const born = job.panes.length
+                  const dead = job.panes.filter((p) => p.died).length
+                  const outcome = job.receipt
+                    ? `receipt: ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
+                    : job.abort
+                      ? `aborted: ${job.abort.reason}`
+                      : "in flight"
+                  return [
+                    job.id.padEnd(10),
+                    job.state.padEnd(8),
+                    `${job.workflow} by ${job.stoodUpBy}`.padEnd(22),
+                    `p ${dead}/${born}`.padEnd(8),
+                    outcome.padEnd(28),
+                    job.dir,
+                  ].join(" ")
+                }),
+              ].join("\n")
+      } catch (err) {
+        table = `cannot read the OS disk: ${err instanceof Error ? err.message : String(err)}`
+      }
+      await pi.sendMessage({ customType: "agentic-os-jobs", content: table, display: true })
+      ctx.ui?.notify?.("Jobs listed", "info")
+    },
   })
 
   pi.registerCommand("standup", {

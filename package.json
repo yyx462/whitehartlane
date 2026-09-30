@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test test/**/*.test.ts"
+    "test": "SHEP_SCOPE=agentic-os-test node --experimental-strip-types --test test/**/*.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1",

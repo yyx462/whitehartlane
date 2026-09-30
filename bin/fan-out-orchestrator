@@ -9,10 +9,88 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
+import {
+  abortJob as abortJobRec,
+  appendTrace,
+  attachPane,
+  createJob,
+  finishJob as finishJobRec,
+  killPane,
+  loadJob,
+  openSession,
+  saveJob,
+} from "../src/store.ts"
 
 const taskDir = resolve(process.argv[2] ?? process.cwd())
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
 const scoped = paneLabeler(runIdFor(taskDir))
+
+// The Job ledger (zen 2/5). Bookkeeping must never break the rail: every
+// ledger call is best-effort, and a run without a record still runs.
+const ledger = (() => {
+  try {
+    let job = null
+    const { AGENTIC_OS_SID: sid0, AGENTIC_OS_JID: jid0 } = process.env
+    if (sid0 && jid0) job = loadJob(sid0, jid0)
+    if (!job) {
+      const sess = openSession({ cwd: taskDir })
+      job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: taskLine(), dir: taskDir })
+      log(`job ${job.id} self-opened on session ${job.sid} (no AGENTIC_OS_SID/JID passed)`)
+    }
+    job.pid = process.pid
+    saveJob(job)
+    return {
+      job,
+      trace(entry) {
+        try {
+          appendTrace(job.sid, { jid: job.id, ...entry })
+        } catch {}
+      },
+      attach(label, pane, unit) {
+        try {
+          attachPane(job, { label, pane, unit })
+        } catch {}
+      },
+      kill(label) {
+        try {
+          killPane(job, label)
+        } catch {}
+      },
+      finish(receipt) {
+        try {
+          finishJobRec(job, receipt)
+          log(`job ${job.id} retired — receipt: panes remaining ${receipt.panesRemaining}/${job.panes.length}`)
+        } catch (err) {
+          log(`ledger: finish failed (${err.message})`)
+        }
+      },
+      abort(reason, panesRemaining) {
+        try {
+          abortJobRec(job, reason, panesRemaining)
+          log(`job ${job.id} aborted (${reason}) — panes remaining ${panesRemaining}`)
+        } catch {}
+      },
+    }
+  } catch (err) {
+    log(`ledger unavailable (${err.message}) — running without a Job record`)
+    return null
+  }
+})()
+
+function taskLine() {
+  try {
+    return readFileSync(join(taskDir, "task.txt"), "utf8").split("\n")[0]?.slice(0, 120) || basename(taskDir)
+  } catch {
+    return basename(taskDir)
+  }
+}
+
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => {
+    ledger?.abort(`signal ${sig}`, mine.size)
+    process.exit(0)
+  })
+}
 
 function run(cmd, args) {
   try {
@@ -96,12 +174,14 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
   if (rec.status !== 0) {
     // an unrecorded split pane would leak as a bare shell — close it
     herdr("pane", "close", pane)
+    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${name}: record failed` })
     log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS))
   if (start.status !== 0) {
     shep("retire", name)
+    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${name}: agent start failed` })
     log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
     return false
   }
@@ -111,6 +191,8 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`brief submission failed for ${name} — the grace reprompt will retry`)
   }
   mine.add(name)
+  ledger?.attach(name, pane, name.startsWith("orch-lane") ? undefined : name)
+  ledger?.trace({ parent: "orchestrator", kind: "worker", action: "admit", detail: name })
   return true
 }
 
@@ -155,10 +237,13 @@ const port = {
     const r = shep("spawn", label, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
     if (r.status !== 0) {
       shep("retire", label)
+      ledger?.trace({ parent: "orchestrator", kind: "worker", action: "reject", detail: `${label}: spawn failed` })
       log(`spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
       return false
     }
     mine.add(label)
+    ledger?.attach(label, undefined, name)
+    ledger?.trace({ parent: "orchestrator", kind: "worker", action: "admit", detail: label })
     log(`spawned ${label} (${kind})`)
     return true
   },
@@ -181,6 +266,7 @@ const port = {
     const r = shep("retire", label)
     if (r.status !== 0) shep("prune")
     mine.delete(label)
+    ledger?.kill(label)
     const pane = paneOf.get(label)
     paneOf.delete(label)
     if (pane) {
@@ -194,6 +280,7 @@ const port = {
     for (const name of [...mine]) {
       const r = shep("retire", name)
       if (r.status !== 0) shep("prune")
+      ledger?.kill(name)
     }
     mine.clear()
     paneOf.clear()
@@ -251,8 +338,18 @@ try {
   const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
   const report = await runOrchestrator({ taskDir, shep: port, checkMs, slots })
   log(`done: ${report.status}`)
+  const reap = port.verify()
+  ledger?.finish({
+    panesRemaining: Number(reap.match(/pane-reap:\s+(\d+)/)?.[1] ?? NaN),
+    panesTotal: ledger.job.panes.length,
+    unitsDone: Number(report.counts?.units ?? NaN),
+    unitsFailed: Number(report.counts?.failed ?? NaN),
+    status: report.status,
+    report: join(taskDir, "report.json"),
+  })
 } catch (err) {
   log(`fatal: ${err instanceof Error ? err.message : String(err)}`)
+  ledger?.abort(`fatal: ${err instanceof Error ? err.message : String(err)}`, mine.size)
   port.wake("fan-out", "blocked", `orchestrator died: ${taskDir}/orchestrator.log`)
   process.exit(1)
 }

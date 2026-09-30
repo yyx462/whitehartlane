@@ -32,6 +32,10 @@ _Avoid_: orchestrator, driver, jev
 The birth canal. The model proposes a pane; policy admits it. That pair is JEV. Cheap typed judgment, not an agent and not a pane.
 _Avoid_: router model, LLM scheduler, subagent
 
+**Trace**:
+The append-only record of JEV admissions on a session disk: propose, admit or reject, parent, detail.
+_Avoid_: log, history, audit log
+
 **Pane**:
 A herdr split the workflow's workers run in. `shep` opens and closes these. `shep` is not this product.
 _Avoid_: worker, subagent
