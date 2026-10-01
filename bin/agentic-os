@@ -21,6 +21,7 @@ import {
   readEvents,
   relaunchJob,
 } from "../src/store.ts"
+import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
 
 const RELAUNCH_CAP = 2
 
@@ -163,6 +164,44 @@ async function main() {
     return
   }
 
+  if (cmd === "promote") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`promote: no such Job '${jid ?? ""}'`)
+      process.exitCode = 2
+      return
+    }
+    const findings = promoteFindings({
+      job,
+      worktreeExists: job.worktree ? existsSync(job.worktree) : false,
+      hasWork: job.worktree ? worktreeHasWork(job.worktree) : false,
+    })
+    if (findings.length > 0) {
+      console.log(formatGate(job.id, findings))
+      process.exitCode = 1
+      return
+    }
+    const title = job.task.split("\n")[0].slice(0, 72)
+    const body = [
+      job.task,
+      "",
+      `Job ${job.id} retired ${job.receipt?.status}. Panes remaining ${job.receipt?.panesRemaining}.`,
+      "Opened by agentic-os promote. Not merged.",
+    ].join("\n")
+    let note = ""
+    try {
+      note = submitPr(job.worktree, title, body).split("\n").slice(-3).join(" ")
+    } catch (err) {
+      console.log(formatGate(job.id, [{ check: "pr", detail: err instanceof Error ? err.message.split("\n")[0] : String(err) }]))
+      process.exitCode = 1
+      return
+    }
+    markPromoted(job, note || "pr opened")
+    console.log(formatGate(job.id, [], note || "opened"))
+    return
+  }
+
   if (cmd === "relaunch") {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
@@ -233,7 +272,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid>")
+  console.error("usage: agentic-os jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid> | promote <jid>")
   process.exitCode = 2
 }
 

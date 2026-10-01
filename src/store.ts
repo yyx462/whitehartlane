@@ -65,6 +65,7 @@ export type JobRecord = {
   orphan?: { reason: string; panesRemaining: number; at: string }
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
+  promoted?: { at: string; note: string }
 }
 
 export type SessionRecord = {

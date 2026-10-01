@@ -10,10 +10,14 @@
 # fast; retrying it would only show the user the same doom thrice.
 set -uo pipefail
 task="$(cat task.txt 2>/dev/null)" || { echo "error: no task.txt in $(pwd)" >&2; exit 1; }
+context="$(cat context.md 2>/dev/null || true)"
 
 prompt="You decompose a task into independent work units.
 
 Task: ${task}
+
+Settled context (decisions already made — do not contradict them):
+${context:-none}
 
 Rules:
 - Produce 2 to 8 units. Each unit must be doable on its own; no unit
