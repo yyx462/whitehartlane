@@ -22,6 +22,11 @@ export function admitFanOut(input: {
   return { admit: true }
 }
 
+export function admitAnotherJob(running: number): Admission {
+  if (running > 0) return { admit: false, why: `a job is already running (${running})` }
+  return { admit: true }
+}
+
 export function admitWorkerSpawn(input: {
   settled: boolean
   shutdown: boolean

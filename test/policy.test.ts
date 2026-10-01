@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { admitDirect, admitFanOut, admitWorkerSpawn } from "../src/policy.ts"
+import { admitAnotherJob, admitDirect, admitFanOut, admitWorkerSpawn } from "../src/policy.ts"
 
 test("direct is always admitted — no pane is born, so nothing to check", () => {
   assert.deepEqual(admitDirect(), { admit: true })
@@ -25,4 +25,9 @@ test("worker spawns are refused when settled, full, capped, or shutting down", (
   assert.equal(admitWorkerSpawn({ ...base, attempts: 3 }).admit, false)
   const full = admitWorkerSpawn({ ...base, active: 2 })
   assert.match(full.why ?? "", /slots full \(2\/2\)/)
+})
+
+test("a second job waits while one is running", () => {
+  assert.equal(admitAnotherJob(0).admit, true)
+  assert.match(admitAnotherJob(1).why ?? "", /already running/)
 })

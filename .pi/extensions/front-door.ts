@@ -12,13 +12,16 @@ import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { nextRetryAction, show } from "../../src/front-door.ts"
 import { hooksFromDir, loadManifest, resolveManifestPath } from "../../src/hooks.ts"
-import { admitDirect, admitFanOut } from "../../src/policy.ts"
+import { admitAnotherJob, admitDirect, admitFanOut } from "../../src/policy.ts"
+import { bindWorktree, findGwtRoot, liveWorktrees } from "../../src/bind.ts"
+import { judgeEnough } from "../../src/grill.ts"
 import {
   appendEvent,
   createJob,
   findOrOpenSession,
   jobRunDir,
   listJobs,
+  listSessions,
   materializeRunDir,
   openSession,
   writeWorkerPermissions,
@@ -46,7 +49,7 @@ function smOf(ctx: unknown): SessionManagerLike | undefined {
 // to the host's session id — a pointer, never a copy (zen 2). Resuming
 // the conversation reuses the session; a new chat gets a new one.
 let osSession: SessionRecord | null = null
-let osSessionBound = false
+let boundHost: string | undefined
 
 type SessionManagerLike = {
   getSessionId?: () => string
@@ -54,10 +57,10 @@ type SessionManagerLike = {
 }
 
 function bindSession(cwd: string, sessionManager?: SessionManagerLike): SessionRecord | null {
-  if (osSessionBound) return osSession
-  osSessionBound = true
+  const id = sessionManager?.getSessionId?.()
+  if (osSession && boundHost === id) return osSession
+  if (osSession && !id && boundHost === undefined) return osSession
   try {
-    const id = sessionManager?.getSessionId?.()
     if (id) {
       const host = {
         tool: "pi",
@@ -65,9 +68,10 @@ function bindSession(cwd: string, sessionManager?: SessionManagerLike): SessionR
         session_file: sessionManager?.getSessionFile?.(),
       }
       osSession = findOrOpenSession({ cwd, host }).session
+      boundHost = id
     } else {
-      // no host binding available (tests, odd hosts) — host-less session
       osSession = openSession({ cwd })
+      boundHost = undefined
     }
   } catch {
     osSession = null
@@ -94,7 +98,7 @@ const GUIDELINE =
 
 type RouteCtx = { cwd: string; hasUI: boolean; sessionManager?: SessionManagerLike }
 type RouteOutcome = {
-  workflow: "fan-out" | "direct" | "direct-fallback" | "error"
+  workflow: "fan-out" | "direct" | "direct-fallback" | "grill" | "error"
   text: string
   details: Record<string, unknown>
 }
@@ -179,6 +183,16 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
     }
   }
 
+  const grill = judgeEnough(task)
+  fmEmit("grill", { enough: grill.enough, p: grill.p, task: task.slice(0, 120) }, ctx)
+  if (!grill.enough) {
+    return {
+      workflow: "grill",
+      text: grill.ask ?? "Not enough to run yet. Ask what is missing. Do not do the task.",
+      details: { workflow: "grill", p: grill.p },
+    }
+  }
+
   try {
     // Resolve a manifest: a local workflow.toml runs as a snapshot; any
     // other origin is materialized ad-hoc. Either way the run lives on
@@ -204,11 +218,55 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
     }
 
     const session = bindSession(ctx.cwd, ctx.sessionManager) ?? bindSession(ctx.cwd)
+    let worktree: string | undefined
+    let repo: string | undefined
+    if (session?.host) {
+      const running = listJobs(session.id).filter((job) => job.state === "running").length
+      const another = admitAnotherJob(running)
+      if (!another.admit) {
+        fmEmit("reject", { workflow: "fan-out", why: another.why }, ctx)
+        return {
+          workflow: "direct-fallback",
+          text: `cannot fan-out: ${another.why}. Wait for it, or stop it, then try again.`,
+          details: { workflow: "direct-fallback" },
+        }
+      }
+    }
+    if (session) {
+      const root = findGwtRoot(ctx.cwd)
+      if (root) {
+        const bound = bindWorktree({
+          session,
+          task,
+          root,
+          liveWorktrees: liveWorktrees(listSessions(), listJobs(), session.id),
+        })
+        if ("error" in bound) {
+          fmEmit("reject", { workflow: "fan-out", why: bound.error }, ctx)
+          return {
+            workflow: "direct-fallback",
+            text: `cannot fan-out: ${bound.error}`,
+            details: { workflow: "direct-fallback" },
+          }
+        }
+        worktree = bound.worktree
+        repo = bound.repo
+        notes.push(`worktree ${worktree}`)
+      }
+    }
     let runDir: string | null = null
     let jid: string | undefined
     if (session) {
       try {
-        const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task, runDir: true })
+        const job = createJob({
+          sid: session.id,
+          stoodUpBy: "first_mate",
+          workflow: "fan-out",
+          task,
+          runDir: true,
+          repo,
+          worktree,
+        })
         runDir = job.dir
         jid = job.id
       } catch {
@@ -228,6 +286,7 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
       writeFileSync(join(runDir, "workflow.toml"), adHocManifest(hooksDir))
       writeWorkerPermissions(runDir)
     }
+    if (worktree) writeWorkerPermissions(runDir, [worktree])
 
     const { hooks } = hooksFromDir(runDir)
     const manifest = loadManifest(runDir)
@@ -254,6 +313,7 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
       env.AGENTIC_OS_SID = session.id
       env.AGENTIC_OS_JID = jid
     }
+    if (worktree) env.AGENTIC_OS_WORKTREE = worktree
     try {
       const scope = (await execFileP("shep", ["scope"])).stdout
       const match = scope.match(/^scope:\s+(\S+)/m)
@@ -340,6 +400,13 @@ export default function (pi: ExtensionAPI) {
         })
         return {
           systemPrompt: `You already routed this task via agentic-os and a fan-out workflow was stood up. Reply with exactly the text between the markers and nothing else:\n<<<\n${outcome.text}\n>>>`,
+        }
+      }
+      if (outcome.workflow === "grill") {
+        routed = false
+        await pi.sendMessage({ customType: "agentic-os-grill", content: outcome.text, display: true })
+        return {
+          systemPrompt: `The task is not specified enough to run. Ask the user what is missing. Do not do the task. Do not spawn anything.\n${outcome.text}`,
         }
       }
     }
@@ -441,6 +508,11 @@ export default function (pi: ExtensionAPI) {
         ctx.ui?.notify?.(outcome.text.slice(0, 100), "info")
         return
       }
+      if (outcome.workflow === "grill") {
+        await pi.sendMessage({ customType: "agentic-os-grill", content: outcome.text, display: true })
+        ctx.ui?.notify?.("grill: not enough to run", "warning")
+        return
+      }
       // direct (or fallback): warn, then continue — submit the task itself
       await pi.sendMessage({
         customType: "agentic-os-route",
@@ -472,6 +544,8 @@ export default function (pi: ExtensionAPI) {
         text += " Do the task now, normally."
       } else if (outcome.workflow === "fan-out") {
         text += " Do not do the task yourself."
+      } else if (outcome.workflow === "grill") {
+        text += " Ask the questions. Do not do the task."
       }
       return {
         content: [{ type: "text" as const, text }],

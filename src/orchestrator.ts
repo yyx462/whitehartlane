@@ -29,6 +29,8 @@ export function unitPaths(taskDir: string, unitId: string): { dir: string; brief
   return { dir, briefPath: join(dir, "brief.md"), logPath: join(dir, "log.txt"), resultPath: join(dir, "result.md") }
 }
 
+export type CanaryState = { enabled: boolean; released: boolean; failed: boolean }
+
 export type Flight = {
   unit: Unit
   logPath: string
@@ -50,6 +52,8 @@ export type CycleDeps = {
   briefGraceMs?: number
   now?: () => number
   emit?: (kind: string, payload: Record<string, unknown>) => void
+  worktree?: string
+  canary?: CanaryState
 }
 
 const DEFAULT_SLOTS = 2
@@ -120,14 +124,22 @@ export function acquireUnits(
   })
 }
 
-export function briefFor(unit: Unit, taskDir: string): string {
+export function briefFor(unit: Unit, taskDir: string, worktree?: string): string {
   const paths = unitPaths(taskDir, unit.id)
+  const where = worktree
+    ? [
+        `Project dir: ${worktree} (this is your cwd — edit the project here)`,
+        `Write your deliverable to ${paths.resultPath}`,
+      ]
+    : [
+        `Work dir: ${paths.dir} (this is your cwd — write result.md here)`,
+        "",
+        `Write your deliverable to ${paths.resultPath} unless the brief above says otherwise.`,
+      ]
   return [
-    `Work dir: ${paths.dir} (this is your cwd — write result.md here)`,
+    ...where,
     "",
     unit.brief,
-    "",
-    `Write your deliverable to ${paths.resultPath} unless the brief above says otherwise.`,
     "",
     "When you finish the work, append exactly this line to the log file",
     `${paths.logPath} :`,
@@ -156,12 +168,19 @@ export function cycle(deps: CycleDeps): boolean {
   const settle = (id: string, pass: boolean, row: ReportRow): void => {
     settleUnit(deps.taskDir, id, pass, row)
     deps.emit?.("unit.settled", { unit: id, pass, result: row.result })
+    if (deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
+      if (pass) deps.canary.released = true
+      else deps.canary.failed = true
+    }
   }
 
   for (const [id, flight] of [...deps.inFlight]) {
     const size = existsSync(flight.logPath) ? readFileSync(flight.logPath).length : 0
     const text = logText(flight.logPath)
     if (text.includes(`done ${id}`)) {
+      if (deps.canary?.enabled && !deps.canary.released) {
+        writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
+      }
       const grade = deps.hooks.grade(flight.unit)
       settle(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
       deps.shep.retire(`w-${id}`)
@@ -213,17 +232,19 @@ export function cycle(deps: CycleDeps): boolean {
   const unsettled = units.filter(
     (unit) => !settledIds.has(unit.id) && !deps.inFlight.has(unit.id),
   )
-  while (deps.inFlight.size < slots && unsettled.length > 0) {
-    const unit = unsettled.shift()!
-    const paths = unitPaths(deps.taskDir, unit.id)
-    mkdirSync(paths.dir, { recursive: true })
-    writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir))
-    const ok = deps.shep.spawnWorker(
-      `w-${unit.id}`,
-      deps.hooks.workerKind,
-      paths.briefPath,
-      paths.dir,
-    )
+  const cap = deps.canary?.enabled && !deps.canary.released ? 1 : slots
+  if (!deps.canary?.failed) {
+    while (deps.inFlight.size < cap && unsettled.length > 0) {
+      const unit = unsettled.shift()!
+      const paths = unitPaths(deps.taskDir, unit.id)
+      mkdirSync(paths.dir, { recursive: true })
+      writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir, deps.worktree))
+      const ok = deps.shep.spawnWorker(
+        `w-${unit.id}`,
+        deps.hooks.workerKind,
+        paths.briefPath,
+        deps.worktree ?? paths.dir,
+      )
     if (ok) {
       deps.attempts.delete(unit.id)
       deps.inFlight.set(unit.id, {
@@ -247,10 +268,12 @@ export function cycle(deps: CycleDeps): boolean {
         deps.shep.wake(unit.id, "blocked", `spawn failed ${attempts} times`)
       }
     }
+    }
   }
 
   const finalState = readState(deps.taskDir)
   const finalSettled = new Set([...finalState.done, ...finalState.failed])
+  if (deps.canary?.failed && deps.inFlight.size === 0) return true
   return units.every((unit) => finalSettled.has(unit.id)) && deps.inFlight.size === 0
 }
 
@@ -269,6 +292,8 @@ export async function runOrchestrator(input: {
   log?: (msg: string) => void
   emit?: (kind: string, payload: Record<string, unknown>) => void
   existingRows?: ReportRow[]
+  worktree?: string
+  canary?: boolean
 }): Promise<Report> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
@@ -290,6 +315,7 @@ export async function runOrchestrator(input: {
   // existingRows covers a resumed orchestrator's earlier work).
   const rows: ReportRow[] = [...(input.existingRows ?? [])]
   const emit = input.emit ?? (() => {})
+  const canary: CanaryState = { enabled: input.canary === true, released: false, failed: false }
 
   log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, fallback check every ${checkMs}ms)`)
 
@@ -338,6 +364,8 @@ export async function runOrchestrator(input: {
         stallMs,
         briefGraceMs,
         now,
+        worktree: input.worktree,
+        canary,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.settled" && typeof payload.unit === "string") {
@@ -441,7 +469,13 @@ export async function runOrchestrator(input: {
     }, 20)
   })
 
-  const report = writeReport(input.taskDir, where, rows, loaded.hooks.counts)
+  const report = writeReport(
+    input.taskDir,
+    where,
+    rows,
+    loaded.hooks.counts,
+    canary.failed ? "canary-stopped" : undefined,
+  )
   input.shep.retireAll()
   const receipt = input.shep.verify()
   log(`orchestrator: report ${report.status} at ${join(input.taskDir, "report.json")} — ${receipt}`)

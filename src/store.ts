@@ -142,6 +142,10 @@ export function openSession(input: {
   return rec
 }
 
+export function saveSession(session: SessionRecord): void {
+  writeJson(join(sessionDir(session.id), "session.json"), session)
+}
+
 export function loadSession(sid: string): SessionRecord | null {
   const path = join(sessionDir(sid), "session.json")
   return existsSync(path) ? readJson<SessionRecord>(path) : null
@@ -435,11 +439,19 @@ export function materializeRunDir(
 // Two spellings: the given path (what briefs quote) AND its realpath
 // (what opencode canonicalizes its project root to). On /tmp-style
 // symlinked roots the two differ and a one-form glob leaks prompts.
-export function writeWorkerPermissions(runDir: string): void {
+export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
     const real = realpathSync(runDir)
     const external = { "*": "ask" } as Record<string, string>
-    for (const form of new Set([real, runDir])) external[`${form}/**`] = "allow"
+    const roots = [runDir, real, ...extraRoots]
+    for (const root of roots) {
+      try {
+        const forms = new Set([root, realpathSync(root)])
+        for (const form of forms) external[`${form}/**`] = "allow"
+      } catch {
+        external[`${root}/**`] = "allow"
+      }
+    }
     const config = {
       $schema: "https://opencode.ai/config.json",
       permission: { external_directory: external },
