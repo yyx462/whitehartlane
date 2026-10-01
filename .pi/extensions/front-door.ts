@@ -15,6 +15,7 @@ import { hooksFromDir, loadManifest, resolveManifestPath } from "../../src/hooks
 import { admitAnotherJob, admitDirect, admitFanOut } from "../../src/policy.ts"
 import { bindWorktree, findGwtRoot, liveWorktrees } from "../../src/bind.ts"
 import { judgeEnough } from "../../src/grill.ts"
+import { contextFor, writeRunContext } from "../../src/prep.ts"
 import {
   appendEvent,
   createJob,
@@ -24,6 +25,7 @@ import {
   listSessions,
   materializeRunDir,
   openSession,
+  readEvents,
   writeWorkerPermissions,
   type SessionRecord,
 } from "../../src/store.ts"
@@ -287,6 +289,7 @@ export async function routeTask(task: string, ctx: RouteCtx): Promise<RouteOutco
       writeWorkerPermissions(runDir)
     }
     if (worktree) writeWorkerPermissions(runDir, [worktree])
+    writeRunContext(runDir, contextFor(session, session ? readEvents(session.id) : []))
 
     const { hooks } = hooksFromDir(runDir)
     const manifest = loadManifest(runDir)

@@ -59,6 +59,22 @@ test("units.sh passes the JSONL through on success", () => {
   assert.match(r.stdout, /\{"id":"a","brief":"do a"\}/)
 })
 
+test("units.sh hands the planner the settled context", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-units-"))
+  writeFileSync(join(dir, "task.txt"), "add a flag\n")
+  writeFileSync(join(dir, "context.md"), "The flag is --dry-run. Do not touch billing.\n")
+  const planner = fixture(
+    dir,
+    "see.sh",
+    `case "$*" in
+  *"--dry-run"*) echo '{"id":"a","brief":"x"}' ;;
+  *) echo "context missing" >&2; exit 1 ;;
+esac`,
+  )
+  const r = run(dir, planner)
+  assert.equal(r.status, 0)
+})
+
 test("units.sh fails fast without task.txt", () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-units-"))
   const planner = fixture(dir, "ok.sh", `echo '{"id":"a","brief":"x"}'`)

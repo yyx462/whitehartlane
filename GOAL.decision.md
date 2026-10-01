@@ -3,6 +3,14 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-01 — Prep reads the compacted view. The planner gets
+context.md: the latest compaction summary plus what was kept, and
+failed units from the trace. Text the summary replaced is not handed
+over. Promote is a gate, not a push: `agentic-os promote <jid>` prints
+findings and stops, or calls `gwt submit-pr` and records job.promoted.
+It never merges. A clean receipt is not permission; the human runs the
+command. Serves 2, 3, 5.
+
 2026-10-01 — Phase C workflow, promote parked. A First Mate session is
 one OS session bound to one host id. Compact does not mint a new id.
 `/new` is a new First Mate session; it does not join the old task.
