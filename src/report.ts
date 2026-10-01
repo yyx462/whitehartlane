@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 export type Report = {
   kind: "report"
-  status: "done" | "failed"
+  status: "done" | "failed" | "canary-stopped"
   counts: Record<string, number>
   table: { unit: string; result: string }[]
   where: string
@@ -16,10 +16,11 @@ export function writeReport(
   where: string,
   rows: ReportRow[],
   counts: (rows: { unit: string; result: string }[]) => Record<string, number>,
+  status?: Report["status"],
 ): Report {
   const body: Report = {
     kind: "report",
-    status: rows.some((row) => !row.pass) ? "failed" : "done",
+    status: status ?? (rows.some((row) => !row.pass) ? "failed" : "done"),
     counts: counts(rows.map(({ unit, result }) => ({ unit, result }))),
     table: rows.map(({ unit, result }) => ({ unit, result })),
     where,

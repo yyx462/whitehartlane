@@ -13,7 +13,7 @@ The First Mate conversation plus its OS disk at `sessions/<sid>/` (events, jobs,
 _Avoid_: task, chat history, folder
 
 **Binding**:
-The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy. Confirmed once per session and echoed in every report; a worktree already bound to a live session is refused — never two writers on one tree.
+The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy. Confirmed once per session and echoed in every report; a worktree already bound to a live session is refused — never two writers on one tree. `gwt spawn` creates it inside the target repo. If that folder is later gone, the next job on the same session spawns a new one from master. The trace stays.
 _Avoid_: snapshot, copy
 
 **Job**:

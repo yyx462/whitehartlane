@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
 import {
@@ -76,6 +76,32 @@ function deps(
     events,
   }
 }
+
+test("canary runs one unit, stops the job on a fail, and scales on a pass", async () => {
+  const stopped = await copyExample("orch-canary-stop-")
+  const stopShep = fakeShep()
+  const failed = { enabled: true, released: false, failed: false }
+  const stopDeps = deps(stopped, stopShep.port, { canary: failed, slots: 3 })
+  cycle(stopDeps)
+  assert.deepEqual(stopShep.spawned, ["w-france"])
+  appendFileSync(join(stopped, "units", "france", "log.txt"), "done france\n")
+  cycle(stopDeps)
+  assert.equal(failed.failed, true)
+  assert.equal(existsSync(join(stopped, "units", "france", ".grade-jev")), true)
+  cycle(stopDeps)
+  assert.deepEqual(stopShep.spawned, ["w-france"])
+
+  const passed = await copyExample("orch-canary-go-")
+  const goShep = fakeShep()
+  const released = { enabled: true, released: false, failed: false }
+  const goDeps = deps(passed, goShep.port, { canary: released, slots: 3 })
+  cycle(goDeps)
+  appendFileSync(join(passed, "units", "france", "log.txt"), "done france\n")
+  writeFileSync(join(passed, "units", "france", "result.md"), "Paris\n")
+  cycle(goDeps)
+  assert.equal(released.released, true)
+  assert.deepEqual(goShep.spawned, ["w-france", "w-japan", "w-peru"])
+})
 
 test("cycle spawns one worker per unsettled unit, up to the slots", async () => {
   const dir = await copyExample("orch-spawn-")

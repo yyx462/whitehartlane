@@ -378,6 +378,8 @@ try {
     slots,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows,
+    worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
+    canary: process.env.AGENTIC_OS_CANARY !== "0",
   })
   log(`done: ${report.status}`)
   const reap = port.verify()

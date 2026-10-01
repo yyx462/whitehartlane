@@ -3,6 +3,20 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-01 — Phase C workflow, promote parked. A First Mate session is
+one OS session bound to one host id. Compact does not mint a new id.
+`/new` is a new First Mate session; it does not join the old task.
+Worker agent ids stay on pane events. Jev answers one question before
+a Job exists: enough to write hooks and run? Not enough stays in the
+chat. "just do it" skips; "grill me" forces the questions. The first
+admitted fan-out in a gwt project spawns one worktree and points the
+session at it. Workers edit that tree; briefs, logs, and result.md
+stay on the OS run dir. Canary is automatic: unit 1, jev inside the
+grade hook. Pass scales with no typing. Fail retires the Job
+canary-stopped and tells the First Mate. A retry is a new Job on the
+same session. One running Job per session. Promote waits: gwt may
+open a PR later, and it never merges. Serves 1, 2, 3.
+
 2026-10-01 — Phase B.1: backpressure is real, relaunch is ask-first.
 The provider's refusal is information, not failure: the planner hook
 classifies (exit 75 = refused/slowed, anything else deterministic) and

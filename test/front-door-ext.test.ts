@@ -7,6 +7,7 @@ import test from "node:test"
 import { copyExample } from "./util.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-ext-"))
+process.env.AGENTIC_OS_GRILL = "skip"
 
 async function waitFor(path: string, ms = 3000): Promise<string> {
   const deadline = Date.now() + ms
@@ -99,12 +100,13 @@ async function stubOrchestrator(): Promise<{ marker: string; dir: string }> {
 }
 
 function fakeCtx(cwd: string) {
+  const id = `ext-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`
   return {
     cwd,
     hasUI: false,
     sessionManager: {
-      getSessionId: () => "ext-test-pi-session",
-      getSessionFile: () => "/tmp/ext-test-session.jsonl",
+      getSessionId: () => id,
+      getSessionFile: () => `/tmp/${id}.jsonl`,
     },
   }
 }
