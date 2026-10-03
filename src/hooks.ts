@@ -24,7 +24,7 @@ export type Layout = {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string }
   hooks: { units: string; grade: string; counts: string }
   report?: { where?: string }
   layout?: Partial<Layout>
@@ -87,8 +87,15 @@ export function loadManifest(taskDir: string): Manifest {
       throw new HookError(`workflow.slots must be an integer 1-9: ${workflow.slots}`)
     }
   }
+  let model: string | undefined
+  if (workflow.model !== undefined) {
+    model = str(workflow.model, "workflow.model")
+    if (!/^[^/\s]+\/[^/\s]+$/.test(model)) {
+      throw new HookError(`workflow.model must be provider/model: ${model}`)
+    }
+  }
   return {
-    workflow: { name, worker_kind: workerKind, slots },
+    workflow: { name, worker_kind: workerKind, slots, model },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),

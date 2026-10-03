@@ -5,6 +5,7 @@
 // projection of events; records are never deleted (zen 5: retired is a
 // state, not rm).
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
+import { loadManifest } from "./hooks.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
@@ -440,6 +441,28 @@ export function materializeRunDir(
 // Two spellings: the given path (what briefs quote) AND its realpath
 // (what opencode canonicalizes its project root to). On /tmp-style
 // symlinked roots the two differ and a one-form glob leaks prompts.
+export function modelIn(dir: string): string | undefined {
+  try {
+    return loadManifest(dir).workflow.model
+  } catch {
+    return undefined
+  }
+}
+
+export function splitModel(model: string): { provider: string; id: string } {
+  const slash = model.indexOf("/")
+  return { provider: model.slice(0, slash), id: model.slice(slash + 1) }
+}
+
+export function writePiSettings(dir: string, model: string): void {
+  const { provider, id } = splitModel(model)
+  mkdirSync(join(dir, ".pi"), { recursive: true })
+  writeFileSync(
+    join(dir, ".pi", "settings.json"),
+    `${JSON.stringify({ defaultProvider: provider, defaultModel: id }, null, 2)}\n`,
+  )
+}
+
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
     const real = realpathSync(runDir)
@@ -453,10 +476,12 @@ export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []
         external[`${root}/**`] = "allow"
       }
     }
-    const config = {
+    const config: Record<string, unknown> = {
       $schema: "https://opencode.ai/config.json",
       permission: { external_directory: external },
     }
+    const model = modelIn(runDir)
+    if (model) config.model = model
     writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
   } catch {
     // permissions scoping is best-effort; the run works without it

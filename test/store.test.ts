@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -142,6 +142,7 @@ test("materializeRunDir writes the per-run worker permission scope", async () =>
   materializeRunDir(runDir, "t", exampleSrc)
   const oc = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8"))
   assert.equal(oc.permission.external_directory["*"], "ask")
+  assert.equal(oc.model, undefined)
   assert.ok(`${realpathSync(runDir)}/**` in oc.permission.external_directory)
   // both spellings: given path (what briefs quote) and realpath (what
   // opencode canonicalizes to) — they differ on symlinked roots like /tmp
@@ -156,6 +157,21 @@ test("materializeRunDir writes the per-run worker permission scope", async () =>
     rmSync(tmpForm, { recursive: true, force: true })
   }
   assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "hooks copied")
+})
+
+test("a model in workflow.toml lands in the project files, not the user pi dir", async () => {
+  const { writePiSettings, writeWorkerPermissions } = await import("../src/store.ts")
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-model-"))
+  writeFileSync(join(dir, "workflow.toml"), '[workflow]\nname = "t"\nworker_kind = "pi"\nmodel = "xai/grok-4.7"\n[hooks]\nunits = "u"\ngrade = "g"\ncounts = "c"\n')
+  writeWorkerPermissions(dir)
+  const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
+  assert.equal(oc.model, "xai/grok-4.7")
+  const unit = join(dir, "units", "france")
+  mkdirSync(unit, { recursive: true })
+  writePiSettings(unit, "xai/grok-4.7")
+  const pi = JSON.parse(readFileSync(join(unit, ".pi", "settings.json"), "utf8"))
+  assert.deepEqual(pi, { defaultProvider: "xai", defaultModel: "grok-4.7" })
+  assert.equal(existsSync(join(dir, ".pi", "auth.json")), false)
 })
 
 test("a dead orchestrator parks the Job as orphaned; relaunch and decline are bookkept", () => {

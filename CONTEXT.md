@@ -9,24 +9,39 @@ The pi chat the user works in — the shell. It talks, plans, and may propose pa
 _Avoid_: front door, orchestrator, scheduler, kernel
 
 **Session**:
-The First Mate conversation plus its OS disk at `sessions/<sid>/` (events, jobs, pane records) and a binding to a worktree in the target repo. One session per host conversation, keyed by `(tool, host session id)`. May have no Job.
-_Avoid_: task, chat history, folder
+The OS record on disk at `sessions/<sid>/`: events, jobs, pane records, and a binding. One per key. A First Mate chat is keyed by `(tool, host session id)`. A CLI start is keyed by `(agentic-os, folder path)`. May have no Job.
+Example: `s-a1b2` holds `events.jsonl` and `jobs/`.
+_Avoid_: host session, pi chat, opencode `ses_…`, task, chat history, folder
+
+**Host session**:
+The agent's own conversation, owned by pi or opencode. A Session stores a pointer to it (`tool`, `session_id`, `session_file`). The bytes are never copied.
+Example: pi's session file, or opencode `ses_01abc`.
+_Avoid_: Session, OS session, transcript
 
 **Binding**:
 The session's record of repo and worktree path. Project bytes live in the target repo's worktree, never as an OS copy. Confirmed once per session and echoed in every report; a worktree already bound to a live session is refused — never two writers on one tree. `gwt spawn` creates it inside the target repo. If that folder is later gone, the next job on the same session spawns a new one from master. The trace stays.
 _Avoid_: snapshot, copy
 
 **Job**:
-The managed group of panes on a session, with state and policy. Created by the first admitted spawn; `retired` is a state, not deletion. No Job, no panes.
-_Avoid_: fleet, run, campaign
+The managed group of panes on a session, with state and policy. Created by the first admitted spawn; `retired` is a state, not deletion. No Job, no panes. A Job started by `agentic-os run` can finish with no person in the loop. A quiet success is not a wake. A dead orchestrator waits for a person. Promote is never part of the Job.
+_Avoid_: fleet, run, campaign, host session, program
+
+**Unattended**:
+A Job path with no person in the loop. `agentic-os run` is that path. Direct is not. A dead orchestrator and promote still wait for a person, and neither is the happy path.
+_Avoid_: direct, grill, promote
+
+**Program**:
+Code outside this repo. It stands a Job up. The rails make that Job manageable. The program does not rewrite them. This repo does not import it. The typed command is `agentic-os run`.
+Example: skill-rsi.
+_Avoid_: workflow, Job, scheduler, pipeline, project
 
 **Workflow**:
-A component that receives an input and has an orchestrator. Fan-out must produce a report. Direct must not finish. Orchestrator rules belong to that workflow. A project fills hooks. A project does not skip fan-out's report.
-_Avoid_: hierarchy, fleet, driver, custom script
+A component that receives an input and has an orchestrator. The index is `workflow.toml`: it names the hook commands. It is not the loop. Fan-out must produce a report. Direct must not finish. A project fills hooks. A project does not skip fan-out's report, and it does not draw a graph.
+_Avoid_: hierarchy, fleet, driver, custom script, DAG file, program
 
 **Scheduler**:
 The part that picks a workflow for a task. It does not run the task and it does not elect a leader.
-_Avoid_: orchestrator, driver, jev
+_Avoid_: orchestrator, driver, jev, program
 
 **Jev**:
 The birth canal. The model proposes a pane; policy admits it. That pair is JEV. Cheap typed judgment, not an agent and not a pane.
@@ -69,20 +84,23 @@ Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, 
 _Avoid_: watcher, operator, script
 
 **Hook**:
-The task-specific part a project fills in: what one unit of work is, the worker brief, how to grade, where artifacts go, and which counts the report shows.
+The task-specific part a project fills in: what one unit of work is, the worker brief, how to grade, where artifacts go, and which counts the report shows. Each is a command string in `workflow.toml`. Any language. A `hooks/` folder beside the toml is a copy convention, not the contract.
 _Avoid_: workflow, rail, operator
 
 **Report**:
-The readable output fan-out must produce when it finishes. It has a status, named counts, a table, and where to check. The front door shows it. Direct does not produce one.
-_Avoid_: log, dashboard, one-line path
+The readable finish fan-out must produce. A `report.json` with a status, named counts, a table, and where to check. First Mate shows it. Direct does not produce one.
+Example: `{"status":"done","counts":{"lookups":3}}`.
+Not a report: the trace, the orchestrator log, a wake, the receipt, a pane's answer.
+_Avoid_: log, trace, receipt, wake, dashboard
 
 **Outliving memory**:
 State that remains after the worker that wrote it is gone, so another worker can resume. Not the context window.
 _Avoid_: snapshot, context, chat history
 
 **Ownership**:
-A recorded fact that one object is the parent of a worker or of an artifact. The `shep` ledger owns panes. The task directory owns progress and output. The two differ.
-_Avoid_: leader, lease, "I spawned it"
+A recorded fact that one object is the parent of a worker or of an artifact. Three owners, and they do not overlap. The `shep` ledger owns panes. The Job's dir owns progress and output. The worktree owns project bytes. A worker owns none of these.
+Example: `w-france` dies on the shep ledger. `report.json` lives in the Job dir. The repo the worker edits is the worktree.
+_Avoid_: leader, lease, "I spawned it", task directory
 
 **Backpressure**:
 The workflow stopping new provider calls when the provider refuses or slows, then opening them again when the provider can take more. A hand-set cap is not this.
@@ -97,8 +115,8 @@ How a workflow shows its panes. It belongs to that workflow. Fan-out gets its ow
 _Avoid_: dashboard, one layout for every workflow
 
 **Task directory**:
-Superseded by zen 2 — OS state lives at `sessions/<sid>/`; project bytes live in the bound worktree.
-_Avoid_: (keep for history; use Session disk and Binding)
+Superseded by zen 2. One folder used to hold both OS state and project bytes. Those split: OS state lives at `sessions/<sid>/`; project bytes live in the bound worktree. The name stays so it is not revived.
+_Avoid_: use Session and Binding
 
 **Wake**:
 A pane's claim on a parent's attention. First Mate's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake First Mate once at the end.
