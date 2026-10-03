@@ -3,6 +3,21 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-03 — One start door, and unattended is a first-class path.
+`agentic-os run <folder>` reads `workflow.toml`, books a fan-out Job,
+and starts the engine. No grill. No question. A second running Job on
+that session is refused. The chat still stands a Job up itself; it must
+call `run` (not built). A window may list folders and Jobs, and its
+button calls `run`. It is not a second OS (not built). A project does
+not draw a graph: that would be a second scheduler. LangChain is a
+library. LangGraph is the wheel we are not rebuilding. A program lives
+outside this repo. It stands a Job up. The rails make that Job
+manageable. The program does not rewrite them. This repo does not
+import it. The typed command is `agentic-os run`. The
+manifest stays toml, not a Python file. A Job on this path can finish
+with no person in the loop. A dead orchestrator still waits. Promote
+is never part of the Job. Serves 1, 3, 4, 5.
+
 2026-10-01 — Prep reads the compacted view. The planner gets
 context.md: the latest compaction summary plus what was kept, and
 failed units from the trace. Text the summary replaced is not handed

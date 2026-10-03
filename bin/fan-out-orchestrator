@@ -21,6 +21,9 @@ import {
   openSession,
   readEvents,
   saveJob,
+  modelIn,
+  splitModel,
+  writePiSettings,
   writeWorkerPermissions,
 } from "../src/store.ts"
 
@@ -101,6 +104,7 @@ const ledger = (() => {
 
 const taskDir = argvDir ?? ledger?.job.dir ?? resolve(process.cwd())
 const scoped = paneLabeler(runIdFor(taskDir))
+const workerModel = modelIn(taskDir)
 writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
 
 for (const sig of ["SIGTERM", "SIGINT"]) {
@@ -147,7 +151,7 @@ let colUsed = false // has the column head been taken by the first worker?
 const liveWorkerPanes = [] // pane ids of settled-not-yet workers (splittable anchors)
 const paneOf = new Map() // scoped label -> pane id
 
-const WORKER_SHARE = 0.7
+const WORKER_SHARE = 0.5
 
 function splitPane(fromPane, direction, cwd, ratio) {
   const r = herdr(
@@ -199,7 +203,15 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
-  const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS))
+  const startArgs = []
+  if (workerModel && kind === "pi") {
+    writePiSettings(cwd, workerModel)
+    const { provider, id } = splitModel(workerModel)
+    startArgs.push("--", "--approve", "--provider", provider, "--model", id)
+  } else if (workerModel && kind === "opencode") {
+    startArgs.push("--", "--model", workerModel)
+  }
+  const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
   if (start.status !== 0) {
     shep("retire", name)
     ledger?.emit("reject", { label: name, why: "agent start failed" })

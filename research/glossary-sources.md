@@ -1,3 +1,5 @@
+Not law. CONTEXT.md is the glossary. This file is the trail.
+
 # Glossary sources
 
 Concept kit before any code. Each idea is tagged **inherited** (operating systems, container orchestration, or distributed systems), **paper** (a blog or paper), or **invented** (ours; no source said it). Tony Chang's post is a spark, not a spec: [A Million Agents Is a Distributed Systems Problem](https://www.instacloud.com/blogs/a-million-agents-is-a-distributed-systems-problem).

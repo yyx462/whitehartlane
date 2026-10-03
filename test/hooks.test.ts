@@ -32,6 +32,15 @@ test("the manifest names the workflow, worker kind, and hook commands", () => {
   assert.equal(manifest.report?.where, "units/")
 })
 
+test("workflow.model is provider/model or absent", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('slots = 2\n', 'slots = 2\nmodel = "xai/grok-4.7"\n'))
+  assert.equal(loadManifest(dir).workflow.model, "xai/grok-4.7")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('model = "xai/grok-4.7"\n', 'model = "grok"\n'))
+  assert.throws(() => loadManifest(dir), /provider\/model/)
+})
+
 test("a task directory without workflow.toml is a clean error", async () => {
   const empty = await mkdtemp(join(tmpdir(), "agentic-os-empty-"))
   assert.throws(() => loadManifest(empty), HookError)
