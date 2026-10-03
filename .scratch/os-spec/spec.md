@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: not law. CONTEXT.md, docs/RAILS.md, and GOAL.decision.md are.
 
 # Front door
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// agentic-os jobs | events | audit | sweep | relaunch | abort — read
-// and settle the OS disk (~/.local/share/agentic-os). jobs lists every
+// agentic-os run <folder> | jobs | events | audit | sweep | relaunch | abort — the
+// start door is run. It reads workflow.toml and starts the fan-out engine.
+// The rest read and settle the OS disk (~/.local/share/agentic-os). jobs lists every
 // Job record with its state and receipt; audit diffs live shep panes
 // against admitted panes (the only door is JEV — a live pane no Job
 // admits is a violation); sweep parks running Jobs whose orchestrator
@@ -12,6 +13,7 @@ import { execFileSync, spawn } from "node:child_process"
 import { existsSync, openSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
+import { prepareRun } from "../src/run.ts"
 import {
   abortJob,
   killPane,
@@ -20,6 +22,7 @@ import {
   readAllEvents,
   readEvents,
   relaunchJob,
+  saveJob,
 } from "../src/store.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
 
@@ -101,6 +104,41 @@ function livePanesOf(job, live) {
 async function main() {
   const cmd = process.argv[2]
   const jobs = listJobs()
+
+  if (cmd === "run") {
+    const folder = process.argv[3]
+    if (!folder) {
+      console.error("usage: agentic-os run <folder>")
+      process.exitCode = 2
+      return
+    }
+    const ready = prepareRun(folder)
+    if (!ready.ok) {
+      console.error(`run: ${ready.why}`)
+      process.exitCode = ready.code
+      return
+    }
+    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, "fan-out-orchestrator")
+    if (!existsSync(orchestrator)) {
+      abortJob(ready.job, `no orchestrator at ${orchestrator}`, 0, "cli")
+      console.error(`run: no orchestrator at ${orchestrator}`)
+      process.exitCode = 1
+      return
+    }
+    const logFd = openSync(ready.log, "a")
+    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, ready.job.dir], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env, AGENTIC_OS_SID: ready.job.sid, AGENTIC_OS_JID: ready.job.id },
+    })
+    child.unref()
+    ready.job.pid = child.pid
+    saveJob(ready.job)
+    console.log(`job: ${ready.job.id}`)
+    console.log(`log: ${ready.log}`)
+    console.log(`trace: ${ready.trace}`)
+    return
+  }
 
   if (cmd === "jobs" || !cmd) {
     if (jobs.length === 0) {
@@ -272,7 +310,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid> | promote <jid>")
+  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid> | promote <jid>")
   process.exitCode = 2
 }
 
