@@ -1,3 +1,5 @@
+Not law. CONTEXT.md, docs/RAILS.md, and GOAL.decision.md are.
+
 # Agentic OS spec
 
 ## Destination

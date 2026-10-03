@@ -7,6 +7,16 @@ a planner call. This is the list that use produced. Rails do not change
 per Job; hooks do (GOAL 3). A planner may write hooks; it may never
 rewrite rails.
 
+## Start
+
+`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`.
+
+The chat still stands a Job up itself. That is a second door. It must call `run`. It does not, yet.
+
+`run` reads the folder you pass and writes the Job under the session disk. The source is code and config. A run does not write it. Hook commands in the Job dir are absolute paths back to that source. The chat's materialize still copies a hooks folder.
+
+A Job started this way can finish with no person in the loop. A dead orchestrator still waits: relaunch or abort. Promote is never part of the Job.
+
 ## Rails — machinery every workflow uses and none may rewrite
 
 - **The trace.** One `events.jsonl` per session, append-only, the
@@ -40,9 +50,11 @@ rewrite rails.
   is capped the same way: spawn attempts (3), grace reprompt (once),
   provider refusals (3).
 - **The session disk and bindings.** `~/.local/share/agentic-os`
-  (AGENTIC_OS_HOME), sessions keyed find-or-create on the host
-  conversation; project bindings confirmed once per session, a live
-  worktree never double-bound.
+  (AGENTIC_OS_HOME). A First Mate chat is keyed on the host session.
+  A CLI start is keyed on `(agentic-os, folder path)`. A host session
+  is the agent's own conversation; the Session stores a pointer, never
+  the bytes. Project bindings are confirmed once per session. A live
+  worktree is never double-bound.
 - **Scope hygiene.** Tests and live runs never share a shep scope
   (`SHEP_SCOPE`); test homes are temp dirs.
 
@@ -51,10 +63,11 @@ rewrite rails.
 - `units` (decompose the task), `brief` (worker instructions),
   `grade` (settle a unit), `report.where` + `counts` (named counts),
   `slots` (per-task concurrency, default 2).
-- Live in `workflow.toml` + `hooks/` beside it; materialized per run
-  into `run/hooks/` — a copy, so per-run hook mutation never touches
-  the source. That copy is the seam that makes planner-written hooks
-  safe (Phase C prep): hooks may vary per task, rails may not.
+- Named as command strings in `workflow.toml`. A path may be absolute.
+  A `hooks/` folder beside the toml is a copy convention, not the
+  contract. The chat's materialize copies that folder into `run/hooks/`
+  so a live Job cannot edit the source. `run` does not copy the scripts.
+  It points at them. Hooks may vary per task; rails may not.
 - Hook contract for the planner hook: STRICT JSONL on stdout; exit 75
   = provider refusal (the rail retries), other nonzero = deterministic
   (fail fast).
