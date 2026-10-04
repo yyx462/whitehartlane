@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { HookError, loadManifest } from "./hooks.ts"
+import { workflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
 import {
   appendEvent,
@@ -16,6 +17,7 @@ export type RunReady = {
   job: JobRecord
   log: string
   trace: string
+  kind: "fan-out" | "lab"
 }
 
 export type RunRefused = {
@@ -43,6 +45,8 @@ export function stageRun(source: string, store: string): void {
     raw = raw.replaceAll(cmd, absolutize(cmd, source))
   }
   writeFileSync(join(store, "workflow.toml"), raw)
+  const actorFile = join(source, "actor.md")
+  if (existsSync(actorFile)) writeFileSync(join(store, "actor.md"), readFileSync(actorFile))
   const taskFile = join(source, "task.txt")
   if (existsSync(taskFile)) writeFileSync(join(store, "task.txt"), readFileSync(taskFile))
 }
@@ -54,7 +58,9 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   }
   let slots = 2
   let task = basename(dir)
+  let kind: "fan-out" | "lab" = "fan-out"
   try {
+    kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
     const manifest = loadManifest(dir)
     slots = manifest.workflow.slots ?? 2
     task = manifest.workflow.name
@@ -78,17 +84,17 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   const running = listJobs(session.id).filter((job) => job.state === "running").length
   const another = admitAnotherJob(running)
   if (!another.admit) {
-    appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: "fan-out" })
+    appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: kind })
     return { ok: false, why: another.why ?? "a job is already running", code: 1 }
   }
   const job = createJob({
     sid: session.id,
     stoodUpBy: "standalone",
-    workflow: "fan-out",
+    workflow: kind,
     task,
     runDir: true,
   })
   stageRun(dir, job.dir)
-  appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: "fan-out" })
-  return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id) }
+  appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })
+  return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind }
 }
