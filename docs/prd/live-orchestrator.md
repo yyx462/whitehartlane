@@ -1,5 +1,7 @@
 # Live orchestrator
 
+Superseded by `docs/prd/skill-rsi.md`. Do not follow this picture. The Orchestrator does not write the Protocol.
+
 `agentic-os run` is the only entry. The Rail births panes, names Ends, stores results, and prompts. A workflow that must remember names one live Orchestrator. A workflow that does not still finishes when the Wave ends. That is today's fan-out. skill-rsi is the first workflow that uses the live pane.
 
 The words Operator and Watcher are not nouns. The glossary already lists them under Rail, to avoid. Splitting them into products is how the system diverges.

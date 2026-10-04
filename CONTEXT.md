@@ -68,15 +68,23 @@ An opencode or pi agent running in a pane. It does a unit of work. It does not o
 _Avoid_: orchestrator, subagent, pane, front door
 
 **Orchestrator**:
-The part of a workflow that makes sure the output exists. It may be absent, a script, jev, or one live pane born once. A live pane holds a Host session, writes a Protocol, and does not call shep.
+The live pane that watches the pane ledger. It knows its name. It wakes when a pane is blocked. It does not write a Protocol, and it does not call shep.
 _Avoid_: actor, babysitter, operator, front door, shepherd, worker
 
+**Actor**:
+The live pane that holds the Host session. It looks at the skill, writes prototypes, and writes the Protocol. It does not call shep.
+_Avoid_: orchestrator, mock, worker
+
+**Mock**:
+A named worker pane that runs the skill and writes what the skill generates. It is not the Actor and not the Orchestrator.
+_Avoid_: test, prototype, scenario pane
+
 **Protocol**:
-The file a live Orchestrator writes on the Job dir to name the next Wave. The Rail reads it. It is not a Hook.
+The file the Actor writes on the Job dir to name the next Wave of Mocks. The Rail reads it. The Orchestrator does not write it.
 _Avoid_: brief, DAG, queue, prompt
 
 **Wave**:
-The worker panes one Protocol births. The Rail waits until every pane in it has an End, then prompts the same Orchestrator.
+The Mock panes one Protocol births. The Rail waits until every pane in it has an End. A blocked pane wakes the Orchestrator.
 _Avoid_: iteration, job, chunk, fleet, pass
 
 **End**:
