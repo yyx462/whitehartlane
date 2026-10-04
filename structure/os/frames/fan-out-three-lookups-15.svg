@@ -1,0 +1,69 @@
+<svg viewBox="0 0 2107 120" role="img">
+  <title>os · T+21s</title>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="m-default"/>
+    </marker>
+    <marker id="arrow-live" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis"/>
+    </marker>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" class="c-grid" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <path data-edge-from="first-mate" data-edge-to="scheduler" d="M 188 55 L 276 55" class="a-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path data-edge-from="scheduler" data-edge-to="first-mate" d="M 276 69 L 188 69" class="a-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path data-edge-from="shep" data-edge-to="herdr" d="M 1370.7 62 L 1458.7 62" class="a-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path data-edge-from="herdr" data-edge-to="worker" d="M 1606.7 62 L 1694.7 62" class="a-default" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <g data-node-id="first-mate" data-node-label="first-mate">
+    <rect x="40" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="40" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="114" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">first-mate</text>
+  </g>
+  <g data-node-id="scheduler" data-node-label="scheduler">
+    <rect x="276" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="276" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="350" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">scheduler</text>
+  </g>
+  <g data-node-id="grill" data-node-label="grill">
+    <rect x="512" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="512" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="586" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">grill</text>
+  </g>
+  <g data-node-id="policy" data-node-label="policy">
+    <rect x="748" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="748" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="822" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">policy</text>
+  </g>
+  <g data-node-id="orchestrator-hooks" data-node-label="hooks">
+    <rect x="984" y="36" width="150.7" height="52" rx="6" class="c-mask"/>
+    <rect x="984" y="36" width="150.7" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="1059.3" y="57" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">hooks</text>
+    <text data-detail="fine" x="1059.3" y="75" class="t-backend" font-size="9" text-anchor="middle">found · → orchestrator</text>
+  </g>
+  <g data-node-id="shep" data-node-label="shep">
+    <rect x="1222.7" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="1222.7" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="1296.7" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">shep</text>
+  </g>
+  <g data-node-id="herdr" data-node-label="herdr">
+    <rect x="1458.7" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="1458.7" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="1532.7" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">herdr</text>
+  </g>
+  <g data-node-id="worker" data-node-label="worker">
+    <rect x="1694.7" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="1694.7" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="1768.7" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">worker</text>
+  </g>
+  <g data-node-id="system" data-node-label="—">
+    <rect x="1930.7" y="45" width="148" height="34" rx="6" class="c-mask"/>
+    <rect x="1930.7" y="45" width="148" height="34" rx="6" class="c-backend" stroke-width="1.5"/>
+    <text x="2004.7" y="66" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">—</text>
+  </g>
+  <text x="232" y="30" class="t-muted lbl-halo" font-size="8" text-anchor="middle">stand_up task text</text>
+  <text x="232" y="44" class="t-muted lbl-halo" font-size="8" text-anchor="middle">fan-out 0.91 or direct 0.84</text>
+  <text x="1414.7" y="37" class="t-muted lbl-halo" font-size="8" text-anchor="middle">splits a pane in</text>
+  <text x="1650.7" y="48" class="t-muted lbl-halo" font-size="8" text-anchor="middle">hosts</text>
+</svg>
