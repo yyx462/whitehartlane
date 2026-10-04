@@ -15,6 +15,9 @@ export type ShepPort = {
   verify: () => string
   wake: (label: string, kind: string, detail: string) => void
   tailPane: (logPath: string) => boolean
+  // Blocks until the pane is done, blocked, or the timeout hits.
+  // Absent in tests: file growth and the deadline timer are enough.
+  waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
 }
 
 // Each worker owns one directory: units/<unit>/{brief.md, log.txt,
@@ -317,7 +320,7 @@ export async function runOrchestrator(input: {
   const emit = input.emit ?? (() => {})
   const canary: CanaryState = { enabled: input.canary === true, released: false, failed: false }
 
-  log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, fallback check every ${checkMs}ms)`)
+  log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, idle until a queue message)`)
 
   input.shep.setLayout(layout, input.taskDir)
   const unitsDir = join(input.taskDir, "units")
@@ -342,10 +345,12 @@ export async function runOrchestrator(input: {
   let running = false
   let finished = false
   let firstCycle = true
+  let fallback: ReturnType<typeof setInterval> | null = null
 
   const cleanup = () => {
     for (const t of timers) clearTimeout(t)
     timers.clear()
+    if (fallback) clearInterval(fallback)
     for (const w of watchers) w.close()
     watchers.length = 0
   }
@@ -413,16 +418,29 @@ export async function runOrchestrator(input: {
         return
       }
       watchFlights()
-      scheduleGrace()
     } finally {
       running = false
     }
   }
 
-  const queueRun = (): void => {
+  let queued = false
+  let pending = false
+  let lastWhy = "start"
+  let wake: (() => void) | null = null
+  let idled = false
+  let armed: ReturnType<typeof setTimeout> | null = null
+  const waited = new Set<string>()
+
+  const enqueue = (why: string): void => {
+    if (finished) return
+    lastWhy = why
+    if (pending) return
+    pending = true
     const t = setTimeout(() => {
       timers.delete(t)
-      run()
+      pending = false
+      queued = true
+      wake?.()
     }, 150)
     timers.add(t)
   }
@@ -432,42 +450,84 @@ export async function runOrchestrator(input: {
       if (watchedFiles.has(flight.logPath)) continue
       watchedFiles.add(flight.logPath)
       try {
-        watchers.push(watch(flight.logPath, () => queueRun()))
+        watchers.push(watch(flight.logPath, () => enqueue("log")))
       } catch {
-        // the file may not exist yet; the fallback check covers it
+        // the file may not exist yet; the deadline timer covers it
       }
     }
   }
 
-  const scheduleGrace = (): void => {
+  const kickIfReady = (): void => {
     for (const flight of inFlight.values()) {
-      if (existsSync(flight.logPath) || flight.reprompted) continue
-      const wait = briefGraceMs - (now() - flight.spawnedAt) + 500
-      const t = setTimeout(() => {
-        timers.delete(t)
-        run()
-      }, Math.max(200, wait))
-      timers.add(t)
+      if (!existsSync(flight.logPath)) continue
+      if (readFileSync(flight.logPath).length > flight.lastSize) {
+        enqueue("log")
+        return
+      }
     }
+  }
+
+  const arm = (): void => {
+    if (armed) {
+      clearTimeout(armed)
+      timers.delete(armed)
+      armed = null
+    }
+    const waits = [deadlineMs - (now() - started)]
+    for (const flight of inFlight.values()) {
+      if (!existsSync(flight.logPath) && !flight.reprompted) {
+        waits.push(flight.spawnedAt + briefGraceMs - now())
+      }
+      waits.push(flight.lastChange + stallMs - now())
+    }
+    const ms = Math.max(1, Math.min(...waits))
+    armed = setTimeout(() => {
+      if (armed) timers.delete(armed)
+      armed = null
+      enqueue("timer")
+    }, ms)
+    timers.add(armed)
+  }
+
+  const watchPane = (id: string): void => {
+    if (!input.shep.waitWorker || waited.has(id)) return
+    waited.add(id)
+    void input.shep.waitWorker(`w-${id}`, stallMs).then((status) => {
+      waited.delete(id)
+      if (status === "woke" && inFlight.has(id)) enqueue("pane")
+    })
   }
 
   try {
-    watchers.push(watch(unitsDir, () => queueRun()))
+    watchers.push(watch(unitsDir, () => enqueue("units")))
   } catch {
-    log("orchestrator: units watch unavailable — fallback check only")
+    log("orchestrator: units watch unavailable — timer wakes only")
+    fallback = setInterval(() => enqueue("timer"), checkMs)
   }
-  const fallback = setInterval(run, checkMs)
   run()
-
-  await new Promise<void>((resolve) => {
-    const poll = setInterval(() => {
-      if (finished) {
-        clearInterval(poll)
-        clearInterval(fallback)
+  while (!finished) {
+    kickIfReady()
+    for (const id of inFlight.keys()) watchPane(id)
+    if (queued) {
+      queued = false
+      run()
+      continue
+    }
+    arm()
+    if (!idled) {
+      log("orchestrator: idle, waiting for a queue message")
+      idled = true
+    }
+    await new Promise<void>((resolve) => {
+      wake = () => {
+        wake = null
         resolve()
       }
-    }, 20)
-  })
+    })
+    queued = false
+    log(`orchestrator: woke (${lastWhy})`)
+    run()
+  }
 
   const report = writeReport(
     input.taskDir,

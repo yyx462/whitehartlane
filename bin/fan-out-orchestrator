@@ -1,11 +1,11 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // The fan-out rail. Runs detached; its log is the lane pane's content.
-// Idle and event-driven: fs.watch on worker logs, one-shot grace timers,
-// and a slow fallback check (AGENTIC_OS_CHECK_MS, default 10 minutes).
+// Idle until a queue message: a log line, a pane wait, or the next
+// deadline. No poll. AGENTIC_OS_CHECK_MS is only the watch-failure backstop.
 // Plain JS on purpose: this file has no extension, so Node will not
 // type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
@@ -171,20 +171,29 @@ function openFleetTab(dir) {
     return
   }
   fleetRoot = root
-  // Pre-split the tab: the worker column takes WORKER_SHARE of the width,
-  // the orchestrator lane takes the rest, full height on its side.
-  if (layout.orchestrator === "left") {
-    colPane = splitPane(root, "right", dir, WORKER_SHARE)
-    viewerPane = root
-  } else {
-    viewerPane = splitPane(root, "right", dir, 1 - WORKER_SHARE)
-    colPane = root
-  }
-  if (!colPane || !viewerPane) {
+  // The tab root is not a shell. Split a shell, close the root, then
+  // split that shell 50-50. The lane and the worker column are both new panes.
+  const shell = splitPane(root, "right", dir, 0.5)
+  if (!shell) {
     log("fleet pre-split failed — falling back to same-tab layout")
     layout = { ...layout, tab: "same" }
     fleetRoot = null
     return
+  }
+  herdr("pane", "close", root)
+  const side = splitPane(shell, "right", dir, WORKER_SHARE)
+  if (!side) {
+    log("fleet pre-split failed — falling back to same-tab layout")
+    layout = { ...layout, tab: "same" }
+    fleetRoot = null
+    return
+  }
+  if (layout.orchestrator === "left") {
+    viewerPane = shell
+    colPane = side
+  } else {
+    viewerPane = side
+    colPane = shell
   }
   log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
@@ -339,8 +348,32 @@ const port = {
     log(`wake ${label} ${kind}: ${detail}`)
   },
 
+  waitWorker: (name, timeoutMs) => new Promise((resolve) => {
+    const started = Date.now()
+    const child = spawn("herdr", [
+      "agent", "wait", scoped(name),
+      "--until", "done", "--until", "blocked",
+      "--timeout", String(timeoutMs),
+    ], { stdio: "ignore" })
+    child.on("error", () => resolve("miss"))
+    child.on("close", (code) => {
+      if (code === 0 || Date.now() - started >= 500) resolve("woke")
+      else resolve("miss")
+    })
+  }),
+
   tailPane: (logPath) => {
-    // Display only. The rail is this detached script; the pane just shows it.
+    // Display only. The rail is this script. The pane shows its log.
+    if (layout.tab === "new" && viewerPane) {
+      const child = spawn("herdr", ["pane", "run", viewerPane, "tail", "-n", "+1", "-F", logPath], {
+        detached: true,
+        stdio: "ignore",
+      })
+      child.on("error", () => {})
+      child.unref()
+      log(`lane pane tailing this log (fleet tab pane ${viewerPane})`)
+      return true
+    }
     mkdirSync(join(taskDir, "briefs"), { recursive: true })
     const briefPath = join(taskDir, "briefs", "orch-lane.md")
     writeFileSync(
@@ -353,11 +386,6 @@ const port = {
         "exits, run it again and idle.",
       ].join("\n"),
     )
-    if (layout.tab === "new" && viewerPane) {
-      const ok = inhabitPane("orch-lane", "pi", viewerPane, briefPath, taskDir)
-      if (ok) log(`lane pane tailing this log (fleet tab pane ${viewerPane})`)
-      return ok
-    }
     const label = scoped("orch-lane")
     const since = new Date().toISOString()
     const r = shep(
