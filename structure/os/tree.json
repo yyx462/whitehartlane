@@ -1,0 +1,67 @@
+{
+  "title": "os",
+  "systems": [
+    {
+      "id": "first-mate",
+      "label": "first-mate",
+      "actor": "first-mate",
+      "type": "backend"
+    },
+    {
+      "id": "scheduler",
+      "label": "scheduler",
+      "actor": "scheduler",
+      "type": "backend"
+    },
+    {
+      "id": "grill",
+      "label": "grill",
+      "actor": "grill",
+      "type": "backend"
+    },
+    {
+      "id": "policy",
+      "label": "policy",
+      "actor": "policy",
+      "type": "backend"
+    },
+    {
+      "id": "orchestrator",
+      "label": "orchestrator",
+      "actor": "orchestrator",
+      "type": "backend",
+      "children": [
+        {
+          "id": "orchestrator-hooks",
+          "label": "hooks",
+          "actor": "orchestrator↳hooks",
+          "type": "backend"
+        }
+      ]
+    },
+    {
+      "id": "shep",
+      "label": "shep",
+      "actor": "shep",
+      "type": "backend"
+    },
+    {
+      "id": "herdr",
+      "label": "herdr",
+      "actor": "herdr",
+      "type": "backend"
+    },
+    {
+      "id": "worker",
+      "label": "worker",
+      "actor": "worker",
+      "type": "backend"
+    },
+    {
+      "id": "system",
+      "label": "—",
+      "actor": "—",
+      "type": "backend"
+    }
+  ]
+}
