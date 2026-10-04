@@ -1,0 +1,742 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// The lab rail. A professor pane, then student panes. Not fan-out.
+// Idle until a queue message: a log line, a pane wait, or the next
+// deadline. No poll. AGENTIC_OS_CHECK_MS is only the watch-failure backstop.
+// Plain JS on purpose: this file has no extension, so Node will not
+// type-strip it. The modules it imports are .ts and strip fine.
+// Usage: bin/lab-orchestrator <taskDir>
+import { execFileSync, spawn } from "node:child_process"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
+import { basename, join, resolve } from "node:path"
+import { loadManifest, runCounts, runGrade } from "../src/hooks.ts"
+import { drop, emptyBoard, note, place } from "../src/lanes.ts"
+import { gradeCall } from "../src/live-grade.ts"
+import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
+import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
+import { writeReport } from "../src/report.ts"
+import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
+import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
+import {
+  abortJob as abortJobRec,
+  appendEvent,
+  attachPane,
+  createJob,
+  finishJob as finishJobRec,
+  jobRunDir,
+  killPane,
+  loadJob,
+  openSession,
+  readEvents,
+  saveJob,
+  modelIn,
+  splitModel,
+  writePiSettings,
+  writeWorkerPermissions,
+} from "../src/store.ts"
+
+const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
+const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
+
+function taskLine(dir) {
+  try {
+    return readFileSync(join(dir, "task.txt"), "utf8").split("\n")[0]?.slice(0, 120) || basename(dir)
+  } catch {
+    return basename(dir)
+  }
+}
+
+// The Job ledger (zen 2/5). Bookkeeping must never break the rail: every
+// ledger call is best-effort, and a run without a record still runs.
+// Events are the trace; job.json is the projection the store maintains.
+const ledger = (() => {
+  try {
+    let job = null
+    const { AGENTIC_OS_SID: sid0, AGENTIC_OS_JID: jid0 } = process.env
+    if (sid0 && jid0) job = loadJob(sid0, jid0)
+    if (!job) {
+      const sess = openSession({ cwd: argvDir ?? process.cwd() })
+      job = createJob({
+        sid: sess.id,
+        stoodUpBy: "standalone",
+        workflow: "fan-out",
+        task: argvDir ? taskLine(argvDir) : "standalone run",
+        dir: argvDir ?? jobRunDir(sess.id, "pending"),
+      })
+      if (!argvDir) {
+        job.dir = jobRunDir(sess.id, job.id)
+        job.task = "standalone run"
+        saveJob(job)
+      }
+      log(`job ${job.id} self-opened on session ${job.sid} (no AGENTIC_OS_SID/JID passed)`)
+    }
+    job.pid = process.pid
+    saveJob(job)
+    return {
+      job,
+      emit(kind, payload) {
+        try {
+          appendEvent(job.sid, { actor: "orchestrator", jid: job.id, kind, ...payload })
+        } catch {}
+      },
+      attach(label, pane, unit, transcript) {
+        try {
+          attachPane(job, { label, pane, unit, parent: "orchestrator", transcript })
+        } catch {}
+      },
+      kill(label) {
+        try {
+          killPane(job, label)
+        } catch {}
+      },
+      finish(receipt) {
+        try {
+          finishJobRec(job, receipt)
+          log(`job ${job.id} retired — receipt: panes remaining ${receipt.panesRemaining}/${job.panes.length}`)
+        } catch (err) {
+          log(`ledger: finish failed (${err.message})`)
+        }
+      },
+      abort(reason, panesRemaining) {
+        try {
+          abortJobRec(job, reason, panesRemaining)
+          log(`job ${job.id} aborted (${reason}) — panes remaining ${panesRemaining}`)
+        } catch {}
+      },
+    }
+  } catch (err) {
+    log(`ledger unavailable (${err.message}) — running without a Job record`)
+    return null
+  }
+})()
+
+const taskDir = argvDir ?? ledger?.job.dir ?? resolve(process.cwd())
+const scoped = paneLabeler(runIdFor(taskDir))
+const workerModel = modelIn(taskDir)
+writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
+
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => {
+    ledger?.abort(`signal ${sig}`, mine.size)
+    process.exit(0)
+  })
+}
+
+function run(cmd, args) {
+  try {
+    const stdout = execFileSync(cmd, args, { encoding: "utf8", timeout: 90_000 })
+    return { status: 0, stdout }
+  } catch (err) {
+    return { status: typeof err.status === "number" ? err.status : 1, stdout: err.stdout ?? "" }
+  }
+}
+
+const shep = (...args) => run("shep", args)
+const herdr = (...args) => run("herdr", args)
+const mine = new Set()
+
+function jsonAt(out, pick) {
+  for (const line of out.split("\n").reverse()) {
+    const t = line.trim()
+    if (!t.startsWith("{")) continue
+    try {
+      return pick(JSON.parse(t))
+    } catch {
+      // keep looking
+    }
+  }
+  return null
+}
+
+const START_TIMEOUT_MS = 60_000
+
+function liveWorkflow(dir) {
+  try {
+    return /^\s*live\s*=\s*true\s*$/m.test(readFileSync(join(dir, "workflow.toml"), "utf8"))
+  } catch {
+    return false
+  }
+}
+
+// -- fleet tab state (layout tab = "new") ------------------------------------
+let layout = { tab: "same", orchestrator: "left" }
+let fleetRoot = null // root pane of the fleet tab (unused directly when split)
+let viewerPane = null // the orchestrator lane: full-height side pane
+let actorPane = null
+let colPane = null // top pane of the worker column
+let colUsed = false // has the column head been taken by the first worker?
+const liveWorkerPanes = [] // pane ids of settled-not-yet workers (splittable anchors)
+const paneOf = new Map() // scoped label -> pane id
+
+const WORKER_SHARE = 0.5
+
+function splitPane(fromPane, direction, cwd, ratio) {
+  const r = herdr(
+    "pane", "split", "--pane", fromPane, "--direction", direction,
+    "--ratio", String(ratio), "--cwd", cwd, "--no-focus",
+  )
+  return jsonAt(r.stdout, (d) => d?.result?.pane?.pane_id ?? null)
+}
+
+function openFleetTab(dir) {
+  const label = `fan-out-${basename(dir)}`.slice(0, 40)
+  const r = herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus")
+  const root = jsonAt(r.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+  if (!root) {
+    log(`fleet tab unavailable (rc=${r.status}) — falling back to same-tab layout`)
+    layout = { ...layout, tab: "same" }
+    return
+  }
+  fleetRoot = root
+  // The tab root is not a shell. Split a shell, close the root, then
+  // split that shell 50-50. The lane and the worker column are both new panes.
+  const shell = splitPane(root, "right", dir, 0.5)
+  if (!shell) {
+    log("fleet pre-split failed — falling back to same-tab layout")
+    layout = { ...layout, tab: "same" }
+    fleetRoot = null
+    return
+  }
+  herdr("pane", "close", root)
+  const side = splitPane(shell, "right", dir, WORKER_SHARE)
+  if (!side) {
+    log("fleet pre-split failed — falling back to same-tab layout")
+    layout = { ...layout, tab: "same" }
+    fleetRoot = null
+    return
+  }
+  if (layout.orchestrator === "left") {
+    viewerPane = shell
+    colPane = side
+  } else {
+    viewerPane = side
+    colPane = shell
+  }
+  log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
+}
+
+// start an agent in an existing pane, record it, submit the brief.
+// since is stamped BEFORE the agent starts, so the host tool's session
+// (created during start) always falls inside the pointer's window.
+function inhabitPane(rawName, kind, pane, briefPath, cwd) {
+  const since = new Date().toISOString()
+  const name = scoped(rawName)
+  const rec = shep("record", pane, name)
+  if (rec.status !== 0) {
+    // an unrecorded split pane would leak as a bare shell — close it
+    herdr("pane", "close", pane)
+    ledger?.emit("reject", { label: name, why: "record failed" })
+    log(`record failed for ${name} on pane ${pane} — pane closed`)
+    return false
+  }
+  const startArgs = []
+  if (workerModel && kind === "pi") {
+    writePiSettings(cwd, workerModel)
+    const { provider, id } = splitModel(workerModel)
+    startArgs.push("--", "--approve", "--provider", provider, "--model", id)
+  } else if (workerModel && kind === "opencode") {
+    startArgs.push("--", "--model", workerModel)
+  }
+  const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
+  if (start.status !== 0) {
+    shep("retire", name)
+    ledger?.emit("reject", { label: name, why: "agent start failed" })
+    log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
+    return false
+  }
+  const brief = readFileSync(briefPath, "utf8")
+  const prompt = herdr("agent", "prompt", name, brief)
+  if (prompt.status !== 0) {
+    log(`brief submission failed for ${name} — the grace reprompt will retry`)
+  }
+  mine.add(name)
+  ledger?.attach(
+    name,
+    pane,
+    name.startsWith("orch-lane") ? undefined : name,
+    { tool: kind, cwd, since },
+  )
+  return true
+}
+
+const port = {
+  setLayout(want, dir) {
+    layout = want
+    if (want.tab === "new") openFleetTab(dir)
+  },
+
+  spawnWorker: (name, kind, briefPath, cwd) => {
+    const label = scoped(name)
+    if (layout.tab === "new" && colPane) {
+      // Split from a LIVE pane only: retired workers close their panes, so
+      // a stale anchor pane_not_found's (2026-09-29 09:41 run). Try the
+      // newest live worker downward, any older live worker, then a fresh
+      // column beside the lane pane.
+      let pane = null
+      if (!colUsed) {
+        // Split the column head for the first worker too — a split sets
+        // the unit cwd deterministically (no cd race); the empty head
+        // closes and the worker takes the column.
+        pane = splitPane(colPane, "down", cwd, 0.5)
+        if (pane) herdr("pane", "close", colPane)
+        colUsed = true
+      } else {
+        for (const anchor of [...liveWorkerPanes].reverse()) {
+          pane = splitPane(anchor, "down", cwd, 0.5)
+          if (pane) break
+        }
+        if (!pane && viewerPane) {
+          pane = splitPane(viewerPane, "right", cwd, 0.7)
+        }
+      }
+      if (!pane) {
+        log(`pane split failed for ${label} — no live anchor`)
+        return false
+      }
+      const ok = inhabitPane(name, kind, pane, briefPath, cwd)
+      if (ok) {
+        liveWorkerPanes.push(pane)
+        paneOf.set(label, pane)
+        log(`spawned ${label} (${kind}) in fleet tab pane ${pane}`)
+      }
+      return ok
+    }
+    const r = shep("spawn", label, "--kind", kind, "--cwd", cwd, "--brief", `@${briefPath}`)
+    if (r.status !== 0) {
+      shep("retire", label)
+      ledger?.emit("reject", { label, why: "spawn failed" })
+      log(`spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
+      return false
+    }
+    mine.add(label)
+    ledger?.attach(label, undefined, name, { tool: kind, cwd, since: new Date().toISOString() })
+    log(`spawned ${label} (${kind})`)
+    return true
+  },
+
+  paneAlive: (name) => herdr("agent", "get", scoped(name)).status === 0,
+
+  reprompt: (name, briefPath) => {
+    try {
+      const brief = readFileSync(briefPath, "utf8")
+      const r = herdr("agent", "prompt", scoped(name), brief)
+      if (r.status === 0) log(`reprompted ${scoped(name)} (brief re-submitted)`)
+      return r.status === 0
+    } catch {
+      return false
+    }
+  },
+
+  retire: (name) => {
+    const label = scoped(name)
+    const r = shep("retire", label)
+    if (r.status !== 0) shep("prune")
+    mine.delete(label)
+    ledger?.kill(label)
+    const pane = paneOf.get(label)
+    paneOf.delete(label)
+    if (pane) {
+      const i = liveWorkerPanes.indexOf(pane)
+      if (i >= 0) liveWorkerPanes.splice(i, 1)
+    }
+    log(`retired ${label}`)
+  },
+
+  retireAll: () => {
+    for (const name of [...mine]) {
+      const r = shep("retire", name)
+      if (r.status !== 0) shep("prune")
+      ledger?.kill(name)
+    }
+    mine.clear()
+    paneOf.clear()
+    liveWorkerPanes.length = 0
+    log("retired every pane this orchestrator spawned")
+  },
+
+  verify: () => {
+    const r = shep("verify")
+    const line = r.stdout.split("\n").find((l) => l.includes("pane-reap:"))
+    return (line ?? "pane-reap: ? remaining").trim()
+  },
+
+  wake: (label, kind, detail) => {
+    shep("wake", "queue", label, kind, detail)
+    log(`wake ${label} ${kind}: ${detail}`)
+  },
+
+  waitWorker: (name, timeoutMs) => new Promise((resolve) => {
+    const started = Date.now()
+    const child = spawn("herdr", [
+      "agent", "wait", scoped(name),
+      "--until", "done", "--until", "blocked",
+      "--timeout", String(timeoutMs),
+    ], { stdio: "ignore" })
+    child.on("error", () => resolve("miss"))
+    child.on("close", () => {
+      // A wait that returns at once is not an event. Re-arming it spins.
+      if (Date.now() - started < 1000) resolve("miss")
+      else resolve("woke")
+    })
+  }),
+
+  tailPane: (logPath) => {
+    if (layout.tab === "new" && viewerPane && liveWorkflow(taskDir)) {
+      mkdirSync(join(taskDir, "briefs"), { recursive: true })
+      const briefPath = join(taskDir, "briefs", "orch-lane.md")
+      writeFileSync(briefPath, orchestratorBrief())
+      const ok = inhabitPane("orch-lane", "pi", viewerPane, briefPath, taskDir)
+      log(ok ? `orchestrator pane born (fleet tab pane ${viewerPane})` : "orchestrator pane failed")
+      return ok
+    }
+    if (layout.tab === "new" && viewerPane) {
+      const child = spawn("herdr", ["pane", "run", viewerPane, "tail", "-n", "+1", "-F", logPath], {
+        detached: true,
+        stdio: "ignore",
+      })
+      child.on("error", () => {})
+      child.unref()
+      log(`lane pane tailing this log (fleet tab pane ${viewerPane})`)
+      return true
+    }
+    mkdirSync(join(taskDir, "briefs"), { recursive: true })
+    const briefPath = join(taskDir, "briefs", "orch-lane.md")
+    writeFileSync(
+      briefPath,
+      [
+        "You are a log viewer. Run exactly this one command, then do nothing:",
+        `tail -n +1 -F ${logPath}`,
+        "",
+        "Never do any other work. Never edit any file. If the tail command",
+        "exits, run it again and idle.",
+      ].join("\n"),
+    )
+    const label = scoped("orch-lane")
+    const since = new Date().toISOString()
+    const r = shep(
+      "spawn", label, "--kind", "pi", "--cwd", taskDir,
+      "--dir", "right", "--brief", `@${briefPath}`,
+    )
+    if (r.status !== 0) {
+      shep("retire", label) // a failed spawn keeps its ledger entry — clear the ghost
+      log("lane pane unavailable — read the orchestrator log instead")
+      return false
+    }
+    mine.add(label)
+    ledger?.attach(label, undefined, undefined, { tool: "pi", cwd: taskDir, since })
+    return true
+  },
+}
+
+function waitChange(dir, ms) {
+  return new Promise((resolve) => {
+    let done = false
+    let watcher = null
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      try { watcher?.close() } catch {}
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    try {
+      watcher = watch(dir, finish)
+    } catch {
+      // the timer is the backstop
+    }
+  })
+}
+
+function mockEnd(id, spawnedAt) {
+  const logPath = join(taskDir, "units", id, "log.txt")
+  const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : ""
+  return endOf(log, id, port.paneAlive(paneName("mock", id)), Date.now() - spawnedAt)
+}
+
+function layoutOf(pane) {
+  const r = herdr("pane", "layout", "--pane", pane)
+  return jsonAt(r.stdout, (d) => d?.result?.layout ?? null)
+}
+
+function equalize(ids, axis) {
+  if (ids.length < 2) return
+  for (let pass = 0; pass < 8; pass++) {
+    const lay = layoutOf(ids[0])
+    if (!lay) return
+    const total = axis === "x" ? lay.area.width : lay.area.height
+    const byId = new Map(lay.panes.map((pane) => [pane.pane_id, pane.rect]))
+    const target = total / ids.length
+    let moved = false
+    for (let i = 0; i < ids.length - 1; i++) {
+      const rect = byId.get(ids[i])
+      if (!rect) continue
+      const size = axis === "x" ? rect.width : rect.height
+      const delta = size - target
+      if (Math.abs(delta) < 2) continue
+      const amount = Math.min(0.4, Math.abs(delta) / total)
+      const dir = axis === "x" ? (delta > 0 ? "left" : "right") : (delta > 0 ? "up" : "down")
+      herdr("pane", "resize", "--pane", ids[i + 1], "--direction", dir, "--amount", String(amount))
+      moved = true
+      break
+    }
+    if (!moved) return
+  }
+}
+
+function wantVerbose(dir) {
+  if (process.env.AGENTIC_OS_VERBOSE === "1") return true
+  try {
+    return verboseOn(readFileSync(join(dir, "workflow.toml"), "utf8"))
+  } catch {
+    return false
+  }
+}
+
+const seen = new Map()
+let verbosePath = null
+let verbosePane = null
+
+function say(who, what) {
+  const line = sayOnce(seen, `${who} ${what}`, beat(who, what))
+  if (!line) return
+  log(line)
+  if (verbosePath) appendFileSync(verbosePath, `${new Date().toISOString()} ${line}\n`)
+}
+
+function openVerbose(dir) {
+  const path = join(dir, "verbose.log")
+  writeFileSync(path, "")
+  const pane = openShell(dir, "verbose")
+  if (!pane) {
+    log("verbose tab failed")
+    return
+  }
+  verbosePath = path
+  verbosePane = pane
+  herdr("pane", "rename", pane, "verbose")
+  const child = spawn("herdr", ["pane", "run", pane, "tail", "-n", "+1", "-F", path], {
+    detached: true,
+    stdio: "ignore",
+  })
+  child.on("error", () => {})
+  child.unref()
+  say("rail", "verbose tab open")
+}
+
+function openShell(dir, label) {
+  const r = herdr("tab", "create", "--label", label.slice(0, 40), "--cwd", dir, "--no-focus")
+  const root = jsonAt(r.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+  if (!root) return null
+  const shell = splitPane(root, "right", dir, 0.5)
+  if (!shell) return null
+  herdr("pane", "close", root)
+  return shell
+}
+
+function ensureRole(board, role, dir) {
+  const placed = place(board, role)
+  if (placed.kind === "first" || placed.kind === "overflow-tab") {
+    const pane = openShell(dir, role)
+    if (!pane) return { board, pane: null }
+    return { board: note(board, placed, pane), pane }
+  }
+  if (placed.kind === "have") {
+    return { board, pane: board.tabs[placed.tab].lanes[placed.lane].panes[0] }
+  }
+  if (placed.kind === "lane") {
+    const tab = board.tabs[placed.tab]
+    const from = tab.lanes[tab.lanes.length - 1].panes[0]
+    const pane = splitPane(from, "right", dir, 0.5)
+    if (!pane) return { board, pane: null }
+    const next = note(board, placed, pane)
+    equalize(next.tabs[placed.tab].lanes.map((lane) => lane.panes[0]), "x")
+    return { board: next, pane }
+  }
+  const lane = board.tabs[placed.tab].lanes[placed.lane]
+  const from = lane.panes[lane.panes.length - 1]
+  const pane = splitPane(from, "down", dir, 0.5)
+  if (!pane) return { board, pane: null }
+  const next = note(board, placed, pane)
+  equalize(next.tabs[placed.tab].lanes[placed.lane].panes, "y")
+  return { board: next, pane }
+}
+
+async function runLive() {
+  const target = process.env.SKILL_RSI_TARGET
+  let jobText = ""
+  try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
+  let board = emptyBoard()
+  if (wantVerbose(taskDir)) openVerbose(taskDir)
+  mkdirSync(join(taskDir, "briefs"), { recursive: true })
+  const orchPath = join(taskDir, "briefs", "orchestrator.md")
+  writeFileSync(orchPath, orchestratorBrief())
+  const orch = ensureRole(board, "orchestrator", taskDir)
+  board = orch.board
+  if (orch.pane && inhabitPane("orchestrator", "pi", orch.pane, orchPath, taskDir)) {
+    herdr("pane", "rename", orch.pane, "orchestrator")
+    log(`name orchestrator pane ${orch.pane}`)
+    say("rail", "birth orchestrator")
+  } else {
+    log("orchestrator pane failed")
+  }
+  const actorPath = join(taskDir, "briefs", "actor.md")
+  writeFileSync(actorPath, actorBrief(jobText, target))
+  const actor = ensureRole(board, "actor", taskDir)
+  board = actor.board
+  if (actor.pane && inhabitPane("actor", "pi", actor.pane, actorPath, taskDir)) {
+    herdr("pane", "rename", actor.pane, "actor")
+    log(`name actor pane ${actor.pane}`)
+    say("rail", "birth actor")
+  } else {
+    log("actor pane failed")
+  }
+  const born = new Map()
+  const mockPane = new Map()
+  const closed = new Set()
+  const graded = new Map()
+  const woke = []
+  let prompted = ""
+  const kind = (() => {
+    try {
+      return readFileSync(join(taskDir, "workflow.toml"), "utf8").match(/worker_kind\s*=\s*"([^"]+)"/)?.[1] ?? "opencode"
+    } catch {
+      return "opencode"
+    }
+  })()
+  const deadline = Date.now() + 2 * 60 * 60_000
+  while (Date.now() < deadline) {
+    const signal = readSignal(taskDir)
+    if (signal.kind === "stop") break
+    if (signal.kind === "wave") {
+      for (const unit of signal.wave.units) {
+        if (born.has(unit.id)) continue
+        const dir = join(taskDir, "units", unit.id)
+        mkdirSync(dir, { recursive: true })
+        const briefPath = join(dir, "brief.md")
+        const name = paneName("mock", unit.id)
+        writeFileSync(briefPath, [
+          unit.brief,
+          "",
+          "When you finish, append exactly this line to the log file",
+          `${join(dir, "log.txt")} :`,
+          `done ${unit.id}`,
+          "",
+          "If you cannot proceed, append exactly this line and stop:",
+          `blocked ${unit.id}: <why>`,
+          "",
+          `Write what you generated to ${join(dir, "result.md")}`,
+        ].join("\n"))
+        const roots = [taskDir]
+        if (target) roots.push(target)
+        if (process.env.SKILL_RSI_PROTOTYPE_ROOT) roots.push(process.env.SKILL_RSI_PROTOTYPE_ROOT)
+        writeWorkerPermissions(dir, roots)
+        const slot = ensureRole(board, "mock", dir)
+        board = slot.board
+        const ok = slot.pane ? inhabitPane(name, kind, slot.pane, briefPath, dir) : false
+        if (slot.pane) herdr("pane", "rename", slot.pane, name)
+        born.set(unit.id, Date.now())
+        if (slot.pane) mockPane.set(unit.id, slot.pane)
+        log(ok ? `name ${name} pane ${slot.pane}` : `mock ${name} failed to spawn`)
+        if (ok) say("rail", `birth ${name}`)
+      }
+    }
+    const ends = [...born].map(([id, at]) => {
+      let end = mockEnd(id, at)
+      if (!end && herdr("agent", "get", scoped(paneName("mock", id))).stdout.includes('"agent_status":"blocked"')) {
+        end = "blocked"
+      }
+      return { id, end }
+    })
+    for (const id of wakesFor(ends, woke)) {
+      woke.push(id)
+      herdr("agent", "prompt", scoped("orchestrator"), `${paneName("mock", id)} is blocked: waiting for a permission or a decision. Name that pane. Do not spawn.`)
+      log(`wake orchestrator ${paneName("mock", id)} blocked`)
+      say("watcher", `${paneName("mock", id)} blocked`)
+      say("rail", `prompt orchestrator ${paneName("mock", id)}`)
+    }
+    for (const row of ends) {
+      if (gradeCall(row.end, graded.has(row.id))) {
+        try {
+          graded.set(row.id, runGrade(taskDir, loadManifest(taskDir), { id: row.id, brief: "" }))
+          say("rail", `grade ${paneName("mock", row.id)}`)
+        } catch (err) {
+          graded.set(row.id, { pass: false, row: "fail grade" })
+          log(`grade ${row.id} failed: ${err instanceof Error ? err.message : err}`)
+        }
+      }
+      if (!closes(row.end) || closed.has(row.id)) continue
+      const pane = mockPane.get(row.id)
+      const name = paneName("mock", row.id)
+      closed.add(row.id)
+      if (pane) {
+        herdr("pane", "close", pane)
+        shep("retire", scoped(name))
+        ledger?.kill(scoped(name))
+        mine.delete(scoped(name))
+        board = drop(board, pane)
+      }
+      say("operator", `close ${name}`)
+    }
+    if (waveClosed(ends)) {
+      const mark = ends.map((row) => row.end).join(",")
+      if (prompted !== mark) {
+        prompted = mark
+        herdr("agent", "prompt", scoped("actor"), [
+          "Wave closed.",
+          ...ends.map((row) => `${paneName("mock", row.id)}: ${row.end}`),
+          "Results are under units/.",
+          "Write the next protocol.json, or {\"stop\":true}.",
+        ].join("\n"))
+        log("prompted actor")
+        say("rail", "prompt actor")
+      }
+    }
+    await waitChange(taskDir, 30_000)
+  }
+  const ends = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
+  const rows = ends.map((row) => {
+    const grade = graded.get(row.id)
+    return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
+  })
+  const stopped = readSignal(taskDir).kind === "stop"
+  const report = writeReport(
+    taskDir,
+    taskDir,
+    rows,
+    (table) => runCounts(taskDir, loadManifest(taskDir), table),
+    stopped && rows.every((row) => row.pass) ? "done" : rows.length === 0 && stopped ? "done" : undefined,
+  )
+  port.retireAll()
+  if (verbosePane) herdr("pane", "close", verbosePane)
+  return report
+}
+
+try {
+  const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
+  const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
+  const existingRows = ledger
+    ? readEvents(ledger.job.sid)
+        .filter((e) => e.jid === ledger.job.id && e.kind === "unit.settled")
+        .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
+    : undefined
+  const report = await runLive()
+  log(`done: ${report.status}`)
+  const reap = port.verify()
+  // zen 5: the receipt counts THIS Job's panes, not the scope's
+  const panesLeft = ledger ? ledger.job.panes.filter((p) => p.died === undefined).length : NaN
+  log(`${reap} (scope); this job: ${panesLeft} of ${ledger?.job.panes.length ?? "?"} panes remain`)
+  ledger?.finish({
+    panesRemaining: panesLeft,
+    panesTotal: ledger.job.panes.length,
+    unitsDone: Number(report.counts?.units ?? NaN),
+    unitsFailed: Number(report.counts?.failed ?? NaN),
+    status: report.status,
+    report: join(taskDir, "report.json"),
+  })
+} catch (err) {
+  log(`fatal: ${err instanceof Error ? err.message : String(err)}`)
+  ledger?.emit("fatal", { why: String(err instanceof Error ? err.message : err) })
+  ledger?.abort(`fatal: ${err instanceof Error ? err.message : String(err)}`, mine.size)
+  port.wake("fan-out", "blocked", `orchestrator died: ${taskDir}/orchestrator.log`)
+  process.exit(1)
+}

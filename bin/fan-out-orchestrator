@@ -6,9 +6,16 @@
 // type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
 import { execFileSync, spawn } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
+import { loadManifest, runCounts, runGrade } from "../src/hooks.ts"
+import { drop, emptyBoard, note, place } from "../src/lanes.ts"
+import { gradeCall } from "../src/live-grade.ts"
+import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
 import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
+import { writeReport } from "../src/report.ts"
+import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
+import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
 import {
   abortJob as abortJobRec,
   appendEvent,
@@ -142,10 +149,20 @@ function jsonAt(out, pick) {
 
 const START_TIMEOUT_MS = 60_000
 
+function liveWorkflow(dir) {
+  try {
+    const raw = readFileSync(join(dir, "workflow.toml"), "utf8")
+    return /^\s*kind\s*=\s*"lab"\s*$/m.test(raw) || /^\s*live\s*=\s*true\s*$/m.test(raw)
+  } catch {
+    return false
+  }
+}
+
 // -- fleet tab state (layout tab = "new") ------------------------------------
 let layout = { tab: "same", orchestrator: "left" }
 let fleetRoot = null // root pane of the fleet tab (unused directly when split)
 let viewerPane = null // the orchestrator lane: full-height side pane
+let actorPane = null
 let colPane = null // top pane of the worker column
 let colUsed = false // has the column head been taken by the first worker?
 const liveWorkerPanes = [] // pane ids of settled-not-yet workers (splittable anchors)
@@ -356,14 +373,14 @@ const port = {
       "--timeout", String(timeoutMs),
     ], { stdio: "ignore" })
     child.on("error", () => resolve("miss"))
-    child.on("close", (code) => {
-      if (code === 0 || Date.now() - started >= 500) resolve("woke")
-      else resolve("miss")
+    child.on("close", () => {
+      // A wait that returns at once is not an event. Re-arming it spins.
+      if (Date.now() - started < 1000) resolve("miss")
+      else resolve("woke")
     })
   }),
 
   tailPane: (logPath) => {
-    // Display only. The rail is this script. The pane shows its log.
     if (layout.tab === "new" && viewerPane) {
       const child = spawn("herdr", ["pane", "run", viewerPane, "tail", "-n", "+1", "-F", logPath], {
         detached: true,
@@ -403,6 +420,141 @@ const port = {
   },
 }
 
+function waitChange(dir, ms) {
+  return new Promise((resolve) => {
+    let done = false
+    let watcher = null
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      try { watcher?.close() } catch {}
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    try {
+      watcher = watch(dir, finish)
+    } catch {
+      // the timer is the backstop
+    }
+  })
+}
+
+function mockEnd(id, spawnedAt) {
+  const logPath = join(taskDir, "units", id, "log.txt")
+  const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : ""
+  return endOf(log, id, port.paneAlive(paneName("mock", id)), Date.now() - spawnedAt)
+}
+
+function layoutOf(pane) {
+  const r = herdr("pane", "layout", "--pane", pane)
+  return jsonAt(r.stdout, (d) => d?.result?.layout ?? null)
+}
+
+function equalize(ids, axis) {
+  if (ids.length < 2) return
+  for (let pass = 0; pass < 8; pass++) {
+    const lay = layoutOf(ids[0])
+    if (!lay) return
+    const total = axis === "x" ? lay.area.width : lay.area.height
+    const byId = new Map(lay.panes.map((pane) => [pane.pane_id, pane.rect]))
+    const target = total / ids.length
+    let moved = false
+    for (let i = 0; i < ids.length - 1; i++) {
+      const rect = byId.get(ids[i])
+      if (!rect) continue
+      const size = axis === "x" ? rect.width : rect.height
+      const delta = size - target
+      if (Math.abs(delta) < 2) continue
+      const amount = Math.min(0.4, Math.abs(delta) / total)
+      const dir = axis === "x" ? (delta > 0 ? "left" : "right") : (delta > 0 ? "up" : "down")
+      herdr("pane", "resize", "--pane", ids[i + 1], "--direction", dir, "--amount", String(amount))
+      moved = true
+      break
+    }
+    if (!moved) return
+  }
+}
+
+function wantVerbose(dir) {
+  if (process.env.AGENTIC_OS_VERBOSE === "1") return true
+  try {
+    return verboseOn(readFileSync(join(dir, "workflow.toml"), "utf8"))
+  } catch {
+    return false
+  }
+}
+
+const seen = new Map()
+let verbosePath = null
+let verbosePane = null
+
+function say(who, what) {
+  const line = sayOnce(seen, `${who} ${what}`, beat(who, what))
+  if (!line) return
+  log(line)
+  if (verbosePath) appendFileSync(verbosePath, `${new Date().toISOString()} ${line}\n`)
+}
+
+function openVerbose(dir) {
+  const path = join(dir, "verbose.log")
+  writeFileSync(path, "")
+  const pane = openShell(dir, "verbose")
+  if (!pane) {
+    log("verbose tab failed")
+    return
+  }
+  verbosePath = path
+  verbosePane = pane
+  herdr("pane", "rename", pane, "verbose")
+  const child = spawn("herdr", ["pane", "run", pane, "tail", "-n", "+1", "-F", path], {
+    detached: true,
+    stdio: "ignore",
+  })
+  child.on("error", () => {})
+  child.unref()
+  say("rail", "verbose tab open")
+}
+
+function openShell(dir, label) {
+  const r = herdr("tab", "create", "--label", label.slice(0, 40), "--cwd", dir, "--no-focus")
+  const root = jsonAt(r.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+  if (!root) return null
+  const shell = splitPane(root, "right", dir, 0.5)
+  if (!shell) return null
+  herdr("pane", "close", root)
+  return shell
+}
+
+function ensureRole(board, role, dir) {
+  const placed = place(board, role)
+  if (placed.kind === "first" || placed.kind === "overflow-tab") {
+    const pane = openShell(dir, role)
+    if (!pane) return { board, pane: null }
+    return { board: note(board, placed, pane), pane }
+  }
+  if (placed.kind === "have") {
+    return { board, pane: board.tabs[placed.tab].lanes[placed.lane].panes[0] }
+  }
+  if (placed.kind === "lane") {
+    const tab = board.tabs[placed.tab]
+    const from = tab.lanes[tab.lanes.length - 1].panes[0]
+    const pane = splitPane(from, "right", dir, 0.5)
+    if (!pane) return { board, pane: null }
+    const next = note(board, placed, pane)
+    equalize(next.tabs[placed.tab].lanes.map((lane) => lane.panes[0]), "x")
+    return { board: next, pane }
+  }
+  const lane = board.tabs[placed.tab].lanes[placed.lane]
+  const from = lane.panes[lane.panes.length - 1]
+  const pane = splitPane(from, "down", dir, 0.5)
+  if (!pane) return { board, pane: null }
+  const next = note(board, placed, pane)
+  equalize(next.tabs[placed.tab].lanes[placed.lane].panes, "y")
+  return { board: next, pane }
+}
+
+
 try {
   const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
   const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
@@ -411,6 +563,10 @@ try {
         .filter((e) => e.jid === ledger.job.id && e.kind === "unit.settled")
         .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
     : undefined
+  if (liveWorkflow(taskDir)) {
+    log("refusing: kind lab is bin/lab-orchestrator, not fan-out")
+    process.exit(2)
+  }
   const report = await runOrchestrator({
     taskDir,
     shep: port,
