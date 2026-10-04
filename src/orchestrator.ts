@@ -493,8 +493,9 @@ export async function runOrchestrator(input: {
     if (!input.shep.waitWorker || waited.has(id)) return
     waited.add(id)
     void input.shep.waitWorker(`w-${id}`, stallMs).then((status) => {
+      if (status !== "woke") return
       waited.delete(id)
-      if (status === "woke" && inFlight.has(id)) enqueue("pane")
+      if (inFlight.has(id)) enqueue("pane")
     })
   }
 

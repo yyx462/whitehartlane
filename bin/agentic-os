@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | relaunch | abort — the
-// start door is run. It reads workflow.toml and starts the fan-out engine.
+// start door is run. It reads workflow.toml and starts that workflow's engine.
 // The rest read and settle the OS disk (~/.local/share/agentic-os). jobs lists every
 // Job record with its state and receipt; audit diffs live shep panes
 // against admitted panes (the only door is JEV — a live pane no Job
@@ -14,6 +14,7 @@ import { existsSync, openSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun } from "../src/run.ts"
+import { orchestratorBin } from "../src/workflow-kind.ts"
 import {
   abortJob,
   killPane,
@@ -106,9 +107,11 @@ async function main() {
   const jobs = listJobs()
 
   if (cmd === "run") {
-    const folder = process.argv[3]
+    const args = process.argv.slice(3)
+    const verbose = args.includes("--verbose")
+    const folder = args.find((arg) => !arg.startsWith("-"))
     if (!folder) {
-      console.error("usage: agentic-os run <folder>")
+      console.error("usage: agentic-os run <folder> [--verbose]")
       process.exitCode = 2
       return
     }
@@ -118,7 +121,7 @@ async function main() {
       process.exitCode = ready.code
       return
     }
-    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, "fan-out-orchestrator")
+    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, orchestratorBin(ready.kind))
     if (!existsSync(orchestrator)) {
       abortJob(ready.job, `no orchestrator at ${orchestrator}`, 0, "cli")
       console.error(`run: no orchestrator at ${orchestrator}`)
@@ -129,12 +132,18 @@ async function main() {
     const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, ready.job.dir], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, AGENTIC_OS_SID: ready.job.sid, AGENTIC_OS_JID: ready.job.id },
+      env: {
+        ...process.env,
+        AGENTIC_OS_SID: ready.job.sid,
+        AGENTIC_OS_JID: ready.job.id,
+        ...(verbose ? { AGENTIC_OS_VERBOSE: "1" } : {}),
+      },
     })
     child.unref()
     ready.job.pid = child.pid
     saveJob(ready.job)
     console.log(`job: ${ready.job.id}`)
+    console.log(`workflow: ${ready.kind}`)
     console.log(`log: ${ready.log}`)
     console.log(`trace: ${ready.trace}`)
     return
