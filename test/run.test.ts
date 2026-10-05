@@ -89,3 +89,32 @@ test("a second Job does not see the first Job's progress", async () => {
   assert.equal(existsSync(join(second.job.dir, "state.json")), false)
   assert.equal(existsSync(join(second.job.dir, "units.jsonl")), false)
 })
+
+test("run books a lab Job from one dag file and stages it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-dag-"))
+  writeFileSync(
+    join(dir, "dag.mjs"),
+    'export const dag = {\n  name: "tiny-lab",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "grade", does: "grade", after: ["students"] },\n    { id: "report", does: "report", after: ["grade"] },\n  ],\n}\n',
+  )
+  const booked = prepareRun(join(dir, "dag.mjs"))
+  assert.equal(booked.ok, true)
+  if (!booked.ok) return
+  assert.equal(booked.kind, "lab")
+  assert.equal(booked.job.workflow, "lab")
+  assert.equal(booked.job.task, "tiny-lab")
+  assert.equal(existsSync(join(booked.job.dir, "dag.mjs")), true)
+  const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
+  assert.match(staged, /written by agentic-os/)
+  assert.match(staged, /name = "tiny-lab"/)
+  assert.equal(existsSync(join(dir, "workflow.toml")), false)
+  const { abortJob } = await import("../src/store.ts")
+  abortJob(booked.job, "test", 0, "cli")
+})
+
+test("run refuses a dag file that schedules or calls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-dag-bad-"))
+  writeFileSync(join(dir, "dag.mjs"), 'export const dag = { name: "x", steps: [{ id: "a", does: "actor", after: go() }] }\n')
+  const refused = prepareRun(join(dir, "dag.mjs"))
+  assert.equal(refused.ok, false)
+  if (!refused.ok) assert.match(refused.why, /does not call/)
+})
