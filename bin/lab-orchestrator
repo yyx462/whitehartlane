@@ -9,6 +9,7 @@ import { execFileSync, spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { loadManifest, runCounts, runGrade } from "../src/hooks.ts"
+import { loadDagFile, tick } from "../src/dag.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
@@ -565,6 +566,17 @@ async function runLive() {
   const target = process.env.SKILL_RSI_TARGET
   let jobText = ""
   try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
+  // A lab program is one dag file. When it is staged beside this run,
+  // the file is the scheduler's input: tick() decides every birth,
+  // grade, prompt, and reopen. No second scheduler exists — the file
+  // is read, never executed.
+  const dag = (() => {
+    try {
+      return loadDagFile(join(taskDir, "dag.mjs"))
+    } catch {
+      return null
+    }
+  })()
   let board = emptyBoard()
   if (wantVerbose(taskDir)) openVerbose(taskDir)
   mkdirSync(join(taskDir, "briefs"), { recursive: true })
@@ -581,20 +593,12 @@ async function runLive() {
   }
   const actorPath = join(taskDir, "briefs", "actor.md")
   writeFileSync(actorPath, actorBrief(jobText, target))
-  const actor = ensureRole(board, "actor", taskDir)
-  board = actor.board
-  if (actor.pane && inhabitPane("actor", "pi", actor.pane, actorPath, taskDir)) {
-    herdr("pane", "rename", actor.pane, "actor")
-    log(`name actor pane ${actor.pane}`)
-    say("rail", "birth actor")
-  } else {
-    log("actor pane failed")
-  }
   const born = new Map()
   const mockPane = new Map()
   const closed = new Set()
   const graded = new Map()
   const woke = []
+  const settled = []
   let prompted = ""
   const kind = (() => {
     try {
@@ -603,43 +607,84 @@ async function runLive() {
       return "opencode"
     }
   })()
+
+  function spawnWave(units) {
+    for (const unit of units) {
+      if (born.has(unit.id)) continue
+      const dir = join(taskDir, "units", unit.id)
+      mkdirSync(dir, { recursive: true })
+      const briefPath = join(dir, "brief.md")
+      const name = paneName("mock", unit.id)
+      writeFileSync(briefPath, [
+        unit.brief,
+        "",
+        "When you finish, append exactly this line to the log file",
+        `${join(dir, "log.txt")} :`,
+        `done ${unit.id}`,
+        "",
+        "If you cannot proceed, append exactly this line and stop:",
+        `blocked ${unit.id}: <why>`,
+        "",
+        `Write what you generated to ${join(dir, "result.md")}`,
+      ].join("\n"))
+      const roots = [taskDir]
+      if (target) roots.push(target)
+      if (process.env.SKILL_RSI_PROTOTYPE_ROOT) roots.push(process.env.SKILL_RSI_PROTOTYPE_ROOT)
+      writeWorkerPermissions(dir, roots)
+      const slot = ensureRole(board, "mock", dir)
+      board = slot.board
+      const ok = slot.pane ? inhabitPane(name, kind, slot.pane, briefPath, dir) : false
+      if (slot.pane) herdr("pane", "rename", slot.pane, name)
+      born.set(unit.id, Date.now())
+      if (slot.pane) mockPane.set(unit.id, slot.pane)
+      log(ok ? `name ${name} pane ${slot.pane}` : `mock ${name} failed to spawn`)
+      if (ok) say("rail", `birth ${name}`)
+    }
+  }
+
+  function gradeUnit(id) {
+    try {
+      graded.set(id, runGrade(taskDir, loadManifest(taskDir), { id, brief: "" }))
+      say("rail", `grade ${paneName("mock", id)}`)
+    } catch (err) {
+      graded.set(id, { pass: false, row: "fail grade" })
+      log(`grade ${id} failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
+  function promptActor(ends) {
+    herdr("agent", "prompt", scoped("actor"), [
+      "Wave closed.",
+      ...ends.map((row) => `${paneName("mock", row.id)}: ${row.end}`),
+      "Results are under units/.",
+      "Write the next protocol.json, or {\"stop\":true}.",
+    ].join("\n"))
+    log("prompted actor")
+    say("rail", "prompt actor")
+  }
+
+  function birthActor() {
+    const actor = ensureRole(board, "actor", taskDir)
+    board = actor.board
+    if (actor.pane && inhabitPane("actor", "pi", actor.pane, actorPath, taskDir)) {
+      herdr("pane", "rename", actor.pane, "actor")
+      log(`name actor pane ${actor.pane}`)
+      say("rail", "birth actor")
+    } else {
+      log("actor pane failed")
+    }
+  }
+
+  // dag drives the actor's birth; a workflow.toml lab births it here
+  if (!dag) birthActor()
+
+  const done = new Set()
+  let actorBorn = !!dag ? false : true
+  let openedWave = ""
+  let promptedDag = false
   const deadline = Date.now() + 2 * 60 * 60_000
   while (Date.now() < deadline) {
     const signal = readSignal(taskDir)
-    if (signal.kind === "stop") break
-    if (signal.kind === "wave") {
-      for (const unit of signal.wave.units) {
-        if (born.has(unit.id)) continue
-        const dir = join(taskDir, "units", unit.id)
-        mkdirSync(dir, { recursive: true })
-        const briefPath = join(dir, "brief.md")
-        const name = paneName("mock", unit.id)
-        writeFileSync(briefPath, [
-          unit.brief,
-          "",
-          "When you finish, append exactly this line to the log file",
-          `${join(dir, "log.txt")} :`,
-          `done ${unit.id}`,
-          "",
-          "If you cannot proceed, append exactly this line and stop:",
-          `blocked ${unit.id}: <why>`,
-          "",
-          `Write what you generated to ${join(dir, "result.md")}`,
-        ].join("\n"))
-        const roots = [taskDir]
-        if (target) roots.push(target)
-        if (process.env.SKILL_RSI_PROTOTYPE_ROOT) roots.push(process.env.SKILL_RSI_PROTOTYPE_ROOT)
-        writeWorkerPermissions(dir, roots)
-        const slot = ensureRole(board, "mock", dir)
-        board = slot.board
-        const ok = slot.pane ? inhabitPane(name, kind, slot.pane, briefPath, dir) : false
-        if (slot.pane) herdr("pane", "rename", slot.pane, name)
-        born.set(unit.id, Date.now())
-        if (slot.pane) mockPane.set(unit.id, slot.pane)
-        log(ok ? `name ${name} pane ${slot.pane}` : `mock ${name} failed to spawn`)
-        if (ok) say("rail", `birth ${name}`)
-      }
-    }
     const ends = [...born].map(([id, at]) => {
       let end = mockEnd(id, at)
       if (!end && herdr("agent", "get", scoped(paneName("mock", id))).stdout.includes('"agent_status":"blocked"')) {
@@ -647,6 +692,54 @@ async function runLive() {
       }
       return { id, end }
     })
+    let stopNow = false
+    let reopened = false
+    if (dag) {
+      const waveKey = signal.kind === "wave" ? signal.wave.units.map((unit) => unit.id).join(",") : ""
+      const actions = tick(dag, {
+        done: [...done],
+        actorBorn,
+        signal: signal.kind,
+        waveKey,
+        openedWave,
+        ends,
+        graded: [...graded.keys()],
+        prompted: promptedDag,
+      })
+      for (const action of actions) {
+        if (action.do === "birth-actor") {
+          birthActor()
+          actorBorn = true
+        } else if (action.do === "birth-wave") {
+          if (signal.kind === "wave") {
+            spawnWave(signal.wave.units)
+            openedWave = waveKey
+          }
+        } else if (action.do === "grade") {
+          gradeUnit(action.id)
+        } else if (action.do === "prompt-actor") {
+          promptActor(ends)
+          promptedDag = true
+        } else if (action.do === "finish") {
+          done.add(action.id)
+        } else if (action.do === "reopen") {
+          for (const id of action.ids) done.delete(id)
+          born.clear()
+          mockPane.clear()
+          closed.clear()
+          graded.clear()
+          promptedDag = false
+          reopened = true
+          say("rail", `reopen ${action.ids.join(", ")}`)
+        } else if (action.do === "report") {
+          stopNow = true
+        }
+      }
+      if (stopNow || signal.kind === "stop") break
+    } else {
+      if (signal.kind === "stop") break
+      if (signal.kind === "wave") spawnWave(signal.wave.units)
+    }
     for (const id of wakesFor(ends, woke)) {
       woke.push(id)
       herdr("agent", "prompt", scoped("orchestrator"), `${paneName("mock", id)} is blocked: waiting for a permission or a decision. Name that pane. Do not spawn.`)
@@ -654,20 +747,21 @@ async function runLive() {
       say("watcher", `${paneName("mock", id)} blocked`)
       say("rail", `prompt orchestrator ${paneName("mock", id)}`)
     }
+    if (reopened) {
+      await waitChange(taskDir, 30_000)
+      continue
+    }
     for (const row of ends) {
-      if (gradeCall(row.end, graded.has(row.id))) {
-        try {
-          graded.set(row.id, runGrade(taskDir, loadManifest(taskDir), { id: row.id, brief: "" }))
-          say("rail", `grade ${paneName("mock", row.id)}`)
-        } catch (err) {
-          graded.set(row.id, { pass: false, row: "fail grade" })
-          log(`grade ${row.id} failed: ${err instanceof Error ? err.message : err}`)
-        }
-      }
+      if (!dag && gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
       if (!closes(row.end) || closed.has(row.id)) continue
       const pane = mockPane.get(row.id)
       const name = paneName("mock", row.id)
       closed.add(row.id)
+      settled.push({
+        unit: row.id,
+        result: graded.get(row.id)?.row ?? row.end ?? "open",
+        pass: graded.has(row.id) ? graded.get(row.id).pass : row.end === "done",
+      })
       if (pane) {
         herdr("pane", "close", pane)
         shep("retire", scoped(name))
@@ -677,27 +771,24 @@ async function runLive() {
       }
       say("operator", `close ${name}`)
     }
-    if (waveClosed(ends)) {
+    if (!dag && waveClosed(ends)) {
       const mark = ends.map((row) => row.end).join(",")
       if (prompted !== mark) {
         prompted = mark
-        herdr("agent", "prompt", scoped("actor"), [
-          "Wave closed.",
-          ...ends.map((row) => `${paneName("mock", row.id)}: ${row.end}`),
-          "Results are under units/.",
-          "Write the next protocol.json, or {\"stop\":true}.",
-        ].join("\n"))
-        log("prompted actor")
-        say("rail", "prompt actor")
+        promptActor(ends)
       }
     }
     await waitChange(taskDir, 30_000)
   }
-  const ends = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
-  const rows = ends.map((row) => {
-    const grade = graded.get(row.id)
-    return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
-  })
+  const finalEnds = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
+  const rows = dag
+    ? [...settled, ...finalEnds
+        .filter((row) => !closes(row.end))
+        .map((row) => ({ unit: row.id, result: row.end ?? "open", pass: row.end === "done" }))]
+    : finalEnds.map((row) => {
+        const grade = graded.get(row.id)
+        return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
+      })
   const stopped = readSignal(taskDir).kind === "stop"
   const report = writeReport(
     taskDir,

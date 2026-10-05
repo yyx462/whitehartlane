@@ -1,2 +1,5 @@
 node_modules
 .yyx-meta.json
+structure/*/tree.json
+structure/*/stage.html
+structure/*/frames/
