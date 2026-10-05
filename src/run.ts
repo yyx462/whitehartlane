@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { basename, join, resolve } from "node:path"
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { basename, dirname, join, resolve } from "node:path"
+import { loadDagFile, type Dag } from "./dag.ts"
 import { HookError, loadManifest } from "./hooks.ts"
 import { workflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
@@ -45,29 +46,48 @@ export function stageRun(source: string, store: string): void {
     raw = raw.replaceAll(cmd, absolutize(cmd, source))
   }
   writeFileSync(join(store, "workflow.toml"), raw)
-  const actorFile = join(source, "actor.md")
-  if (existsSync(actorFile)) writeFileSync(join(store, "actor.md"), readFileSync(actorFile))
-  const taskFile = join(source, "task.txt")
-  if (existsSync(taskFile)) writeFileSync(join(store, "task.txt"), readFileSync(taskFile))
+  copyBeside(source, store)
 }
 
-export function prepareRun(folder: string): RunReady | RunRefused {
-  const dir = resolve(folder)
-  if (!existsSync(join(dir, "workflow.toml"))) {
-    return { ok: false, why: `no workflow.toml in ${dir}`, code: 1 }
+function copyBeside(source: string, store: string): void {
+  for (const name of ["actor.md", "task.txt", "dag.mjs"]) {
+    const file = join(source, name)
+    if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
-  let slots = 2
-  let task = basename(dir)
-  let kind: "fan-out" | "lab" = "fan-out"
-  try {
-    kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
-    const manifest = loadManifest(dir)
-    slots = manifest.workflow.slots ?? 2
-    task = manifest.workflow.name
-  } catch (err) {
-    const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
-    return { ok: false, why, code: 1 }
-  }
+}
+
+export function dagFileOf(input: string): string | null {
+  const resolved = resolve(input)
+  if (!existsSync(resolved)) return null
+  if (statSync(resolved).isFile()) return basename(resolved) === "dag.mjs" ? resolved : null
+  const nested = join(resolved, "dag.mjs")
+  return existsSync(nested) ? nested : null
+}
+
+function defaultManifest(dag: Dag): string {
+  const name = dag.name.replaceAll('"', "")
+  const counts = "node -p \"(r=>JSON.stringify({units:r.length,passed:r.filter(x=>x.pass).length,failed:r.filter(x=>!x.pass).length}))(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')))\""
+  return [
+    "# written by agentic-os: a dag-only program names steps; the OS supplies the hooks",
+    "[workflow]",
+    `name = "${name}"`,
+    'worker_kind = "opencode"',
+    "",
+    "[hooks]",
+    'units = "true"',
+    'grade = "true"',
+    `counts = "${counts}"`,
+    "",
+  ].join("\n")
+}
+
+function book(
+  dir: string,
+  kind: "fan-out" | "lab",
+  task: string,
+  slots: number,
+  stage: (store: string) => void,
+): RunReady | RunRefused {
   const taskFile = join(dir, "task.txt")
   if (existsSync(taskFile)) {
     const line = readFileSync(taskFile, "utf8").split("\n")[0]?.trim()
@@ -94,7 +114,64 @@ export function prepareRun(folder: string): RunReady | RunRefused {
     task,
     runDir: true,
   })
-  stageRun(dir, job.dir)
+  stage(job.dir)
   appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })
   return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind }
+}
+
+function stageDag(dag: Dag, dir: string, toml: boolean): (store: string) => void {
+  return (store) => {
+    if (toml) {
+      stageRun(dir, store)
+      return
+    }
+    mkdirSync(store, { recursive: true })
+    writeFileSync(join(store, "workflow.toml"), defaultManifest(dag))
+    copyBeside(dir, store)
+  }
+}
+
+export function prepareRun(folder: string): RunReady | RunRefused {
+  const dagFile = dagFileOf(folder)
+  if (dagFile) {
+    const dir = dirname(dagFile)
+    let dag: Dag
+    try {
+      dag = loadDagFile(dagFile)
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err)
+      return { ok: false, why, code: 1 }
+    }
+    let slots = 2
+    let task = dag.name
+    const toml = existsSync(join(dir, "workflow.toml"))
+    if (toml) {
+      try {
+        const manifest = loadManifest(dir)
+        slots = manifest.workflow.slots ?? 2
+        task = manifest.workflow.name
+      } catch (err) {
+        const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
+        return { ok: false, why, code: 1 }
+      }
+    }
+    return book(dir, "lab", task, slots, stageDag(dag, dir, toml))
+  }
+  const dir = resolve(folder)
+  if (!existsSync(join(dir, "workflow.toml"))) {
+    return { ok: false, why: `no workflow.toml in ${dir}`, code: 1 }
+  }
+  let slots = 2
+  let task = basename(dir)
+  let kind: "fan-out" | "lab" = "fan-out"
+  try {
+    kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
+    const manifest = loadManifest(dir)
+    slots = manifest.workflow.slots ?? 2
+    task = manifest.workflow.name
+  } catch (err) {
+    const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
+    return { ok: false, why, code: 1 }
+  }
+  return book(dir, kind, task, slots, (store) => stageRun(dir, store))
 }

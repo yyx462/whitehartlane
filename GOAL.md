@@ -9,3 +9,6 @@ Spark: instacloud.com — "A Million Agents Is a Distributed Systems Problem"
 3. Rails do not change per Job; hooks do.
 4. Attention is a budget; a quiet success is not an event; a wake must mean something.
 5. A Job ends when its receipt says panes of that Job remaining = 0.
+6. Agent work a person wants is one command away: scope it and steer it
+   with data files (a scenario id, an extension note) — never a script
+   or a doc of steps.
