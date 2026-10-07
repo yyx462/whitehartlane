@@ -34,6 +34,17 @@ test("a project is minted once, and a moved folder keeps its identity (path is n
   assert.notEqual(other.pid, first.pid)
 })
 
+test("a minted pid collides with the registry, the mint loops until unique", () => {
+  const home = process.env.AGENTIC_OS_HOME ?? ""
+  writeFileSync(join(home, "projects", "p-taken.json"), "{}\n")
+  let calls = 0
+  const mint = () => (calls++ === 0 ? "p-taken" : "p-fresh1")
+  const dir = programFolder("collide")
+  const got = ensureProject(dir, { mint })
+  assert.equal(got.pid, "p-fresh1")
+  assert.equal(calls, 2)
+})
+
 test("a worktree copies project.json — runs combine, no warning, labels differ", () => {
   const dir = programFolder("repo-copy")
   const first = ensureProject(dir)
