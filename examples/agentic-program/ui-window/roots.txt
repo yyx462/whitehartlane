@@ -1,1 +1,2 @@
 /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window
+/Users/sagebot/.local/share/agentic-os

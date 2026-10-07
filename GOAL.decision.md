@@ -3,6 +3,25 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-07 — The permission half of JEV, and members held idle. A
+blocked worker's dialog used to wait for a person (the ui-window run
+stuck on one for the job's own OS-disk paths). Now a dialog is a
+question to a typed decider (`src/permission.ts` — a script, not an
+agent): allow inside the member's roots (the root is also made durable
+in the sandbox permissions), deny dangerous patterns (secrets,
+outside-home) and deny unneeded wandering, each verdict injected as a
+message and booked as a `permission` event; asks are capped (6, then
+the member is dead). Worker permissions go back to restrictive by
+default — the decider, not a human, is the throughput. Same run
+taught the relay's wake discipline: exactly one member `initiates`
+(wakes on its brief); every other member is born idle and held, and
+its first prompt is brief + first message together, split by a -----
+line — no context-read turn, no polling, no sleep loop; the rail is
+the watcher. And mail is never delivered mid-turn: a working member
+takes its message on a later beat, delivered only when the prompt
+lands. Serves 2, 3, 4. Trail: docs/prd/coworker.md,
+src/permission.ts, test/permission.test.ts.
+
 2026-10-07 — Born booked; fork; coworker. JEV's gate half is retired:
 nothing in the rail needs a model's yes to birth a pane — the lab path
 already births from the professor's protocol and `src/policy.ts`

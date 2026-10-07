@@ -10,8 +10,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { basename, join, resolve } from "node:path"
 import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../src/hooks.ts"
 import { loadDagFile, tick } from "../src/dag.ts"
-import { memberProtocol, parseMembers, readMessages, relayPlan } from "../src/coworker.ts"
+import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt } from "../src/coworker.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
+import { decidePermission } from "../src/permission.ts"
 import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
@@ -22,6 +23,7 @@ import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
 import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
 import {
   abortJob as abortJobRec,
+  addWorkerRoot,
   appendEvent,
   attachPane,
   createJob,
@@ -235,7 +237,7 @@ function openFleetTab(dir) {
 // start an agent in an existing pane, record it, submit the brief.
 // since is stamped BEFORE the agent starts, so the host tool's session
 // (created during start) always falls inside the pointer's window.
-function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, seed = undefined) {
+function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, seed = undefined, hold = false) {
   const since = new Date().toISOString()
   const name = scoped(rawName)
   const rec = shep("record", pane, name)
@@ -261,10 +263,15 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, s
     log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
     return false
   }
-  const brief = readFileSync(briefPath, "utf8")
-  const prompt = herdr("agent", "prompt", name, brief)
-  if (prompt.status !== 0) {
-    log(`brief submission failed for ${name} — the grace reprompt will retry`)
+  // hold: a coworker member that does not initiate is born idle — its
+  // brief rides WITH the first relayed message (zen 6: the rail is the
+  // watcher; the member never polls, never sleeps, never waits)
+  if (!hold) {
+    const brief = readFileSync(briefPath, "utf8")
+    const prompt = herdr("agent", "prompt", name, brief)
+    if (prompt.status !== 0) {
+      log(`brief submission failed for ${name} — the grace reprompt will retry`)
+    }
   }
   mine.add(name)
   ledger?.attach(
@@ -886,13 +893,20 @@ async function runCoworker() {
   const manifest = loadManifest(taskDir)
   const memberKind = manifest.workflow.worker_kind
   const names = members.map((m) => m.name)
+  if (!members.some((m) => m.initiates)) {
+    log("coworker needs one member with initiates = true — otherwise everyone idles and the exchange never starts")
+    process.exit(1)
+  }
   let board = emptyBoard()
   if (wantVerbose(taskDir)) openVerbose(taskDir)
   mkdirSync(join(taskDir, "messages"), { recursive: true })
   mkdirSync(join(taskDir, "briefs"), { recursive: true })
   const bornAt = new Map()
+  const prompted = new Set()
+  const sandboxOf = new Map()
   for (const m of members) {
     const dir = join(taskDir, "sandboxes", m.name)
+    sandboxOf.set(m.name, dir)
     mkdirSync(dir, { recursive: true })
     writeWorkerPermissions(dir, [taskDir, ...programRoots])
     let brief = ""
@@ -908,12 +922,15 @@ async function runCoworker() {
     )
     const slot = ensureRole(board, m.name, dir)
     board = slot.board
+    // the initiator wakes on its brief alone; everyone else is held
+    // idle until the rail delivers brief + first message together
     const ok = slot.pane
-      ? inhabitPane(m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir, m.model, m.seed)
+      ? inhabitPane(m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir, m.model, m.seed, !m.initiates)
       : false
     if (slot.pane) herdr("pane", "rename", slot.pane, m.name)
+    if (ok && m.initiates) prompted.add(m.name)
     bornAt.set(m.name, Date.now())
-    log(ok ? `name ${m.name} pane ${slot.pane}` : `member ${m.name} failed to spawn`)
+    log(ok ? `name ${m.name} pane ${slot.pane}${m.initiates ? " (initiates)" : " (held idle)"}` : `member ${m.name} failed to spawn`)
     if (ok) say("rail", `birth ${m.name}`)
   }
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
@@ -921,6 +938,7 @@ async function runCoworker() {
   const delivered = []
   const refused = []
   const dead = []
+  const askedCount = new Map()
   let ended = null // "stop" | "cap" | "deadline" | "dead"
   while (!ended && Date.now() < deadline) {
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
@@ -933,7 +951,20 @@ async function runCoworker() {
     }
     const plan = relayPlan(messages, delivered, CAP)
     for (const r of plan.relays) {
-      herdr("agent", "prompt", scoped(r.to), `[relay] from ${r.from}:\n\n${r.body}`)
+      const target = scoped(r.to)
+      // a working member takes mail on a later beat — never mid-turn
+      const state = herdr("agent", "get", target).stdout
+      if (state.includes('"agent_status":"working"')) continue
+      let text = `[relay] from ${r.from}:\n\n${r.body}`
+      if (!prompted.has(r.to)) {
+        text = combineFirstPrompt(readFileSync(join(taskDir, "briefs", `${r.to}.md`), "utf8"), r.from, r.body)
+        prompted.add(r.to)
+      }
+      const rc = herdr("agent", "prompt", target, text)
+      if (rc.status !== 0) {
+        log(`relay ${r.file} could not reach ${r.to} (rc=${rc.status}) — retrying next beat`)
+        continue
+      }
       delivered.push(r.file)
       ledger?.emit("relay", { from: r.from, to: r.to, file: r.file })
       log(`relay ${r.file}: ${r.from} -> ${r.to}`)
@@ -942,6 +973,39 @@ async function runCoworker() {
     if (plan.stop) {
       ended = plan.why ?? "stop"
       break
+    }
+    // the permission half of JEV: a blocked member is a question, and
+    // the typed decider answers it — allow (roots), deny (dangerous),
+    // deny-unneeded (wandering) — with a message injected back. No
+    // dialog ever waits for a person. Capped like every retry surface.
+    for (const m of members) {
+      if (dead.includes(m.name)) continue
+      const out = herdr("agent", "get", scoped(m.name)).stdout
+      if (!out.includes('"agent_status":"blocked"')) continue
+      const term = herdr("agent", "read", scoped(m.name)).stdout
+      const at = term.lastIndexOf("Permission required")
+      const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
+      const verdict = decidePermission({
+        question,
+        allowedRoots: [taskDir, sandboxOf.get(m.name) ?? "", ...programRoots],
+      })
+      const asked = (askedCount.get(m.name) ?? 0) + 1
+      askedCount.set(m.name, asked)
+      if (verdict.decision === "allow" && verdict.path) {
+        addWorkerRoot(sandboxOf.get(m.name) ?? taskDir, verdict.path.replace(/\/[^/]*$/, ""))
+        herdr("agent", "send-keys", scoped(m.name), "enter")
+      } else {
+        herdr("agent", "send-keys", scoped(m.name), "esc")
+        herdr("agent", "prompt", scoped(m.name), `[permission] ${verdict.message}`)
+      }
+      ledger?.emit("permission", { member: m.name, decision: verdict.decision, path: verdict.path, ask: asked })
+      log(`permission ${m.name} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"}`)
+      say("watcher", `permission ${m.name} ${verdict.decision}`)
+      if (asked >= 6) {
+        dead.push(m.name)
+        ledger?.emit("wake", { why: `member ${m.name} blocked past the permission cap` })
+        log(`member ${m.name} hit the permission cap (6) — ending`)
+      }
     }
     for (const m of members) {
       if (dead.includes(m.name)) continue
