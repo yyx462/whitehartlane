@@ -48,6 +48,12 @@ test("a worktree copies project.json — runs combine, no warning, labels differ
   writeFileSync(join(dir, ".git", "HEAD"), "ref: refs/heads/feature/dark\n")
   assert.deepEqual(labelsFor(dir), { branch: "feature/dark" })
   assert.deepEqual(labelsFor(programFolder("no-git")), {})
+  // a program nested inside a repo walks up and labels by its checkout
+  const nestedRoot = join(mkdtempSync(join(tmpdir(), "agentic-os-nest-")), "repo")
+  const nested = join(nestedRoot, "programs", "deep", "dag")
+  mkdirSync(nested, { recursive: true })
+  writeFileSync(join(nestedRoot, ".git"), "gitdir: /somewhere/.bear/worktrees/nested-lane\n")
+  assert.deepEqual(labelsFor(nested), { branch: "nested-lane", worktree: "nested-lane" })
 })
 
 test("dag_id: explicit wins, the name groups silently, the hash is loud and derived", () => {

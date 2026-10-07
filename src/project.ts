@@ -95,22 +95,30 @@ export function contentHashOf(dir: string): string {
 
 // branch and worktree are labels, best-effort, never identity: a .git
 // FILE is a worktree (its gitdir basename names the lane); a .git dir
-// carries HEAD's branch. No git, no labels — no warning either.
+// carries HEAD's branch. A program folder often sits nested inside a
+// repo, so walk up for it. No git anywhere, no labels — no warning.
 export function labelsFor(dir: string): Record<string, string> {
   const labels: Record<string, string> = {}
-  try {
-    const dot = join(dir, ".git")
-    const st = statSync(dot)
-    if (st.isFile()) {
-      const gitdir = readFileSync(dot, "utf8").match(/gitdir:\s*(\S+)/)?.[1]
-      if (gitdir) labels.worktree = basename(gitdir.replace(/\/$/, ""))
-      labels.branch = labels.worktree ?? "worktree"
-    } else if (st.isDirectory()) {
-      const head = readFileSync(join(dot, "HEAD"), "utf8")
-      labels.branch = head.match(/ref:\s*refs\/heads\/(\S+)/)?.[1] ?? "detached"
+  let here = dir
+  for (let up = 0; up < 8; up++) {
+    const dot = join(here, ".git")
+    try {
+      const st = statSync(dot)
+      if (st.isFile()) {
+        const gitdir = readFileSync(dot, "utf8").match(/gitdir:\s*(\S+)/)?.[1]
+        if (gitdir) labels.worktree = basename(gitdir.replace(/\/$/, ""))
+        labels.branch = labels.worktree ?? "worktree"
+      } else if (st.isDirectory()) {
+        const head = readFileSync(join(dot, "HEAD"), "utf8")
+        labels.branch = head.match(/ref:\s*refs\/heads\/(\S+)/)?.[1] ?? "detached"
+      } else {
+        here = join(here, "..")
+        continue
+      }
+      return labels
+    } catch {
+      here = join(here, "..")
     }
-  } catch {
-    // no git, or unreadable — a project needs neither
   }
   return labels
 }
