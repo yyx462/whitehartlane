@@ -25,10 +25,13 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `route, admit, reject, job.born, job.orphaned, job.relaunched,
   pane.born, pane.died, reprompt, backpressure, unit.settled,
   job.retired, job.aborted, wake.consumed, fatal`.
-- **JEV admission.** Model proposes, `src/policy.ts` admits; every pane
-  is booked `pane.born` with a JEV `parent` stamp (`first_mate` |
-  `orchestrator` — zen 4's two wake budgets never mix). No JEV, no
-  pane; unadmitted live panes are audit findings, not workers.
+- **Booked birth (JEV).** `src/policy.ts` admits — deterministic checks
+  (slots, retry cap, one Job; a fork's seed must resolve); every pane
+  is booked `pane.born` with a `parent` stamp (`first_mate` |
+  `orchestrator` — zen 4's two wake budgets never mix) and, when
+  forked, a `seed` pointer into the seeded host session (zen 6). No
+  booked birth, no pane; unbooked live panes are audit findings, not
+  workers. A model proposal is an input to booking, never the booking.
 - **The pane ledger and the receipt.** Panes of a Job are booked
   born/died; retire = this Job's panes remaining 0 (`job.retired`).
   Records are never deleted — `retired` is a state.
