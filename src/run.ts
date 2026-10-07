@@ -58,7 +58,7 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "dag.mjs"]) {
+  for (const name of ["actor.md", "task.txt", "dag.mjs", "roots.txt"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }

@@ -18,14 +18,12 @@ export function orchestratorBrief(): string {
   ].join("\n")
 }
 
-export function actorBrief(jobText: string, target?: string): string {
+export function actorBrief(jobText: string): string {
   return [
     "You are the actor. You do not spawn panes. You do not call shep.",
     "Write protocol.json in this directory to name the next wave. Then stop and wait.",
     'A later prompt brings the results. To finish, write {"stop":true} as protocol.json.',
     "",
     jobText.trim(),
-    "",
-    target ? `Target: ${target}` : "Target: not given",
   ].join("\n")
 }
