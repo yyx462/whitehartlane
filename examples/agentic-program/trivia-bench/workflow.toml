@@ -1,0 +1,13 @@
+# trivia-bench — an agent evaluation harness.
+# The subject under test is the WORKER: swap `model` and rerun; the
+# report score is that agent's score. Defaults everywhere else: waves
+# arrive as protocol.json, ends as done-lines in units/<id>/log.txt.
+[workflow]
+name = "trivia-bench"
+worker_kind = "opencode"
+# model = "zai/glm-4.7"
+
+[hooks]
+units = "true"
+grade = "node hooks/grade.mjs"
+counts = "node hooks/counts.mjs"

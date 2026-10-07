@@ -63,6 +63,18 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - `units` (decompose the task), `brief` (worker instructions),
   `grade` (settle a unit), `report.where` + `counts` (named counts),
   `slots` (per-task concurrency, default 2).
+- `detectors` (`signal`, `end`) — the program's say in what the
+  photograph is made of: how a wave is recognized and how a unit's end
+  is read. Same contract as every hook (strict output, exit 75 =
+  refusal, retried by the rail); a deterministic failure degrades to
+  "no signal / still running" and logs once — a detector may slow the
+  rail, never kill it. Absent, the OS defaults run: `protocol.json`
+  and the unit `log.txt`. Pane liveness stays rail-owned either way:
+  a dead pane is dead even under a custom end detector.
+- `gates` — one command per `does: "gate"` step in `dag.mjs`; prints
+  `done` when the step may finish. The run door refuses a gate step
+  with no matching `[gates]` command — nothing is booked. Reopen,
+  retry, and the report still belong to `tick` and the rail.
 - Named as command strings in `workflow.toml`. A path may be absolute.
   A `hooks/` folder beside the toml is a copy convention, not the
   contract. The chat's materialize copies that folder into `run/hooks/`

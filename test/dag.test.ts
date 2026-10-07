@@ -22,6 +22,7 @@ function state(over: Partial<TickIn> = {}): TickIn {
     ends: [],
     graded: [],
     prompted: false,
+    gatesReady: [],
     ...over,
   }
 }
@@ -44,6 +45,33 @@ test("the file is not a second scheduler", () => {
   assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "actor", after: run() }] }\n'), /does not call/)
   assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }, { id: "a", does: "grade" }] }\n'), /duplicate/)
   assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "wave", after: ["b"] }, { id: "b", does: "grade", after: ["a"] }] }\n'), /cyclic/)
+})
+
+test("a program names one step per singleton verb; gates may be many", () => {
+  assert.throws(
+    () =>
+      parseDag(
+        'export const dag = { name: "x", steps: [{ id: "a", does: "wave" }, { id: "b", does: "wave", after: ["a"] }] }\n',
+      ),
+    /one wave step/,
+  )
+  assert.throws(
+    () =>
+      parseDag(
+        'export const dag = { name: "x", steps: [{ id: "a", does: "report" }, { id: "b", does: "report", after: ["a"] }] }\n',
+      ),
+    /one report step/,
+  )
+  const twoGates = parseDag(`export const dag = {
+    name: "gates",
+    steps: [
+      { id: "a", does: "wave" },
+      { id: "g1", does: "gate", after: ["a"] },
+      { id: "g2", does: "gate", after: ["a"] },
+      { id: "r", does: "report", after: ["g1", "g2"] },
+    ],
+  }\n`)
+  assert.equal(twoGates.steps.filter((step) => step.does === "gate").length, 2)
 })
 
 test("ready steps wait for the names in the file", () => {
@@ -112,4 +140,70 @@ test("a new protocol reopens students; the file does not loop", () => {
     prompted: true,
   }))
   assert.deepEqual(actions, [{ do: "reopen", ids: ["students", "grade"] }])
+})
+
+const gateProgram = `export const dag = {
+  name: "gate-run",
+  steps: [
+    { id: "professor", does: "actor" },
+    { id: "students", does: "wave", after: ["professor"] },
+    { id: "grade", does: "grade", after: ["students"] },
+    { id: "await-review", does: "gate", after: ["grade"] },
+    { id: "report", does: "report", after: ["await-review"] },
+  ],
+}\n`
+
+test("a gate holds the report until its detector says ready", () => {
+  const file = parseDag(gateProgram)
+  assert.deepEqual(order(file), ["professor", "students", "grade", "await-review", "report"])
+  const held = tick(file, state({
+    done: ["professor", "students", "grade"],
+    actorBorn: true,
+    signal: "stop",
+    ends: [{ id: "s1", end: "done" }],
+    graded: ["s1"],
+    gatesReady: [],
+  }))
+  assert.equal(held.some((action) => action.do === "finish" && action.id === "await-review"), false)
+  assert.equal(held.some((action) => action.do === "report"), false)
+  const released = tick(file, state({
+    done: ["professor", "students", "grade"],
+    actorBorn: true,
+    signal: "stop",
+    ends: [{ id: "s1", end: "done" }],
+    graded: ["s1"],
+    gatesReady: ["await-review"],
+  }))
+  assert.equal(released.some((action) => action.do === "finish" && action.id === "await-review"), true)
+  assert.equal(released.some((action) => action.do === "report"), true)
+})
+
+test("a gate with no after-edges waits only on its detector", () => {
+  const file = parseDag(`export const dag = {
+    name: "gate-only",
+    steps: [
+      { id: "await-review", does: "gate" },
+      { id: "report", does: "report", after: ["await-review"] },
+    ],
+  }\n`)
+  const waiting = tick(file, state({ signal: "stop", gatesReady: [] }))
+  assert.deepEqual(waiting, [])
+  const ready = tick(file, state({ signal: "stop", gatesReady: ["await-review"] }))
+  assert.equal(ready.some((action) => action.do === "report"), true)
+})
+
+test("a reopen clears the gates downstream of the wave", () => {
+  const file = parseDag(gateProgram)
+  const actions = tick(file, state({
+    done: ["professor", "students", "grade", "await-review"],
+    actorBorn: true,
+    signal: "wave",
+    waveKey: "s2",
+    openedWave: "s1",
+    ends: [{ id: "s1", end: "done" }],
+    graded: ["s1"],
+    prompted: true,
+    gatesReady: ["await-review"],
+  }))
+  assert.deepEqual(actions, [{ do: "reopen", ids: ["students", "grade", "await-review"] }])
 })

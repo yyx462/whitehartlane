@@ -8,8 +8,9 @@
 import { execFileSync, spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import { loadManifest, runCounts, runGrade } from "../src/hooks.ts"
+import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../src/hooks.ts"
 import { loadDagFile, tick } from "../src/dag.ts"
+import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
@@ -577,6 +578,37 @@ async function runLive() {
       return null
     }
   })()
+  // Detectors: the program's say in what a wave or an end is. Absent,
+  // the OS defaults (protocol.json, log.txt) run — a detector may
+  // slow or fail, never kill the rail: refusal retries, deterministic
+  // failure degrades and logs once.
+  const manifestEarly = (() => {
+    try {
+      return loadManifest(taskDir)
+    } catch {
+      return null
+    }
+  })()
+  const detectors = manifestEarly?.detectors
+  const gateSteps = dag ? dag.steps.filter((s) => s.does === "gate") : []
+  const gateMissed = gateSteps.filter((s) => !manifestEarly?.gates?.[s.id])
+  if (gateMissed.length > 0) {
+    log(`gate step ${gateMissed.map((s) => s.id).join(", ")} has no [gates] detector — refusing`)
+    process.exit(1)
+  }
+  const saidDetectorFailure = new Set()
+  function detectorCall(what, fn, fallback) {
+    try {
+      return withBackpressure(fn, { who: what, log })
+    } catch (err) {
+      const line = `${what} failed: ${err && err.message ? err.message : err}`
+      if (!saidDetectorFailure.has(line)) {
+        saidDetectorFailure.add(line)
+        log(line)
+      }
+      return fallback
+    }
+  }
   let board = emptyBoard()
   if (wantVerbose(taskDir)) openVerbose(taskDir)
   mkdirSync(join(taskDir, "briefs"), { recursive: true })
@@ -684,14 +716,30 @@ async function runLive() {
   let promptedDag = false
   const deadline = Date.now() + 2 * 60 * 60_000
   while (Date.now() < deadline) {
-    const signal = readSignal(taskDir)
+    const signal = detectors?.signal
+      ? detectorCall("signal detector", () => runSignalDetector(taskDir, manifestEarly), { kind: "missing" })
+      : readSignal(taskDir)
     const ends = [...born].map(([id, at]) => {
-      let end = mockEnd(id, at)
+      let end = detectors?.end
+        ? detectorCall(`end detector ${id}`, () => runEndDetector(taskDir, manifestEarly, id), null)
+        : mockEnd(id, at)
+      // liveness stays rail-owned: a dead pane is dead even under a
+      // custom end detector, and herdr still names the blocked
+      if (!end && Date.now() - at > 15_000 && !port.paneAlive(paneName("mock", id))) end = "dead"
       if (!end && herdr("agent", "get", scoped(paneName("mock", id))).stdout.includes('"agent_status":"blocked"')) {
         end = "blocked"
       }
       return { id, end }
     })
+    const gatesReady = []
+    for (const step of gateSteps) {
+      if (done.has(step.id) || !step.after.every((id) => done.has(id))) continue
+      const ready = detectorCall(`gate ${step.id}`, () => runGateDetector(taskDir, manifestEarly, step.id), false)
+      if (ready) {
+        gatesReady.push(step.id)
+        say("rail", `gate ${step.id} ready`)
+      }
+    }
     let stopNow = false
     let reopened = false
     if (dag) {
@@ -705,6 +753,7 @@ async function runLive() {
         ends,
         graded: [...graded.keys()],
         prompted: promptedDag,
+        gatesReady,
       })
       for (const action of actions) {
         if (action.do === "birth-actor") {
