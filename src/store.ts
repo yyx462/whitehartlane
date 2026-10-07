@@ -36,6 +36,18 @@ export type SeedPointer = {
   since: string
 }
 
+// Dag identity: the group a run belongs to. project is a minted pid
+// (project.json in the program folder); dag_id is unique inside it;
+// content_hash versions the staged program; branch/worktree are labels.
+export type DagIdentity = {
+  project: string
+  project_name: string
+  dag_id: string
+  content_hash: string
+  source: string
+  labels?: Record<string, string>
+}
+
 export type PaneRecord = {
   label: string
   pane?: string
@@ -67,6 +79,7 @@ export type JobRecord = {
   pid?: number
   repo?: string
   worktree?: string
+  dag?: DagIdentity
   state: JobState
   created: string
   finished?: string
@@ -223,6 +236,7 @@ export function createJob(input: {
   pid?: number
   repo?: string
   worktree?: string
+  dag?: DagIdentity
 }): JobRecord {
   const id = shortId("j")
   const job: JobRecord = {
@@ -235,11 +249,19 @@ export function createJob(input: {
     pid: input.pid,
     repo: input.repo,
     worktree: input.worktree,
+    dag: input.dag,
     state: "running",
     created: new Date().toISOString(),
     panes: [],
   }
-  appendEvent(input.sid, { actor: input.stoodUpBy, kind: "job.born", jid: job.id, dir: job.dir, task: job.task })
+  appendEvent(input.sid, {
+    actor: input.stoodUpBy,
+    kind: "job.born",
+    jid: job.id,
+    dir: job.dir,
+    task: job.task,
+    ...(job.dag ? { dag: job.dag } : {}),
+  })
   writeJson(join(jobDir(input.sid, job.id), "job.json"), job)
   return job
 }
@@ -355,6 +377,7 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
     workflow: "fan-out",
     task: String(born.task ?? ""),
     dir: String(born.dir ?? ""),
+    dag: born.dag as DagIdentity | undefined,
     state: "running",
     created: born.ts,
     panes: [],
