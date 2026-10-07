@@ -119,6 +119,21 @@ test("run refuses a dag file that schedules or calls", async () => {
   if (!refused.ok) assert.match(refused.why, /does not call/)
 })
 
+test("run stages a program's roots.txt beside the dag", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-roots-"))
+  writeFileSync(
+    join(dir, "dag.mjs"),
+    'export const dag = { name: "rooted", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }] }\n',
+  )
+  writeFileSync(join(dir, "roots.txt"), "/abs/target\n/abs/prototypes\n")
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  if (!booked.ok) return
+  assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n/abs/prototypes\n")
+  const { abortJob } = await import("../src/store.ts")
+  abortJob(booked.job, "test", 0, "cli")
+})
+
 test("run refuses a gate step with no [gates] detector and books nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-gate-"))
   writeFileSync(

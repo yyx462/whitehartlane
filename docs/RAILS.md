@@ -75,6 +75,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `done` when the step may finish. The run door refuses a gate step
   with no matching `[gates]` command — nothing is booked. Reopen,
   retry, and the report still belong to `tick` and the rail.
+- `roots.txt` — a program's named extra worker roots, one absolute
+  path per line, staged beside the dag; the rail folds them into the
+  per-run worker permissions. The rail knows no program's env names.
 - Named as command strings in `workflow.toml`. A path may be absolute.
   A `hooks/` folder beside the toml is a copy convention, not the
   contract. The chat's materialize copies that folder into `run/hooks/`
