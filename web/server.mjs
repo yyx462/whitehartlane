@@ -8,7 +8,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -97,6 +97,34 @@ function outcomeOf(job) {
   return "inflight";
 }
 
+function finishedOf(job) {
+  return job.finished || job.receipt?.finished || null;
+}
+
+function durationMsOf(job) {
+  const created = Date.parse(job.created || "");
+  const finished = Date.parse(finishedOf(job) || "");
+  if (!isFinite(created) || !isFinite(finished) || finished < created) return null;
+  return finished - created;
+}
+
+function jobFileOf(sid, jid) {
+  return path.join(SESSIONS_DIR, sid, "jobs", jid, "job.json");
+}
+
+// the staged program dir: job.dir when it is a dir, else the canonical
+// sessions/<sid>/jobs/<jid>/run
+function runDirOf(job, sid, jid) {
+  const canonical = path.join(SESSIONS_DIR, sid, "jobs", jid, "run");
+  const cands = [job?.dir, canonical];
+  for (const c of cands) {
+    try {
+      if (c && fs.statSync(c).isDirectory()) return c;
+    } catch {}
+  }
+  return canonical;
+}
+
 function flattenJob(job) {
   const panes = Array.isArray(job.panes) ? job.panes : [];
   const reportPath = path.join(job.dir || "", "report.json");
@@ -110,7 +138,9 @@ function flattenJob(job) {
     dir: job.dir || null,
     pid: job.pid ?? null,
     created: job.created || null,
-    finished: job.finished || job.receipt?.finished || null,
+    finished: finishedOf(job),
+    durationMs: durationMsOf(job), // finished - created, null while running
+    dag: job.dag || null, // {project,project_name,dag_id,content_hash,source,labels} | null
     outcome: outcomeOf(job), // receipt | abort | orphan | inflight
     panes: {
       dead: panes.filter((p) => p && p.died).length,
@@ -153,6 +183,223 @@ function countBy(items, fn) {
   }
   return m;
 }
+
+// ---- v2: DAG groups (Airflow-like) ------------------------------------
+
+const UNGROUPED = "(ungrouped)";
+
+function dagOf(job) {
+  return job && job.dag && typeof job.dag === "object" ? job.dag : null;
+}
+
+function buildDags() {
+  const groups = new Map();
+  for (const job of listAllJobs()) {
+    const dag = dagOf(job);
+    const key = dag ? `${dag.project || "?"}|${dag.dag_id || "?"}` : UNGROUPED;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        project: dag ? dag.project || null : null,
+        project_name: dag ? dag.project_name || dag.dag_id || "-" : "-",
+        dag_id: dag ? dag.dag_id || "(unknown)" : UNGROUPED,
+        source: dag ? dag.source || null : null,
+        versions: [],
+        runs: [],
+      };
+      groups.set(key, g);
+    }
+    if (dag && dag.content_hash && !g.versions.includes(dag.content_hash)) {
+      g.versions.push(dag.content_hash);
+    }
+    g.runs.push({
+      sid: job.sid,
+      jid: job.id,
+      state: job.state || "unknown",
+      workflow: job.workflow || null,
+      created: job.created || null,
+      finished: finishedOf(job),
+      durationMs: durationMsOf(job),
+      labels: dag?.labels || {},
+    });
+  }
+  const dags = [...groups.values()].map((g) => {
+    g.runs.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
+    return g;
+  });
+  // real dags first, ordered by their newest run; ungrouped pinned last
+  const real = dags
+    .filter((g) => g.dag_id !== UNGROUPED)
+    .sort((a, b) =>
+      ((b.runs[0]?.created || "")).localeCompare(a.runs[0]?.created || ""),
+    );
+  const rest = dags.filter((g) => g.dag_id === UNGROUPED);
+  return [...real, ...rest];
+}
+
+// ---- v2: dag shape (flow diagram data) --------------------------------
+
+const shapeCache = new Map(); // dag.mjs path -> {mtimeMs, payload}
+
+async function dagShape(job, sid, jid) {
+  const runDir = runDirOf(job, sid, jid);
+  const dagFile = path.join(runDir, "dag.mjs");
+
+  // lab job: the staged dag.mjs IS data — import() it
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(dagFile).mtimeMs;
+  } catch {
+    mtimeMs = -1;
+  }
+  if (mtimeMs >= 0) {
+    const hit = shapeCache.get(dagFile);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.payload;
+    let payload;
+    try {
+      const mod = await import(pathToFileURL(dagFile).href + "?v=" + mtimeMs);
+      const dag = mod.dag || mod.default?.dag || null;
+      const steps = Array.isArray(dag?.steps) ? dag.steps : [];
+      const nodes = [];
+      const edges = [];
+      for (const s of steps) {
+        if (!s || typeof s.id !== "string") continue;
+        nodes.push({ id: s.id, does: s.does ?? null });
+        const after = Array.isArray(s.after) ? s.after : s.after ? [s.after] : [];
+        for (const a of after) {
+          if (typeof a === "string") edges.push({ from: a, to: s.id });
+        }
+      }
+      payload = {
+        kind: "lab",
+        dagName: typeof dag?.name === "string" ? dag.name : null,
+        nodes,
+        edges,
+      };
+    } catch (e) {
+      payload = {
+        kind: "lab",
+        dagName: null,
+        nodes: [],
+        edges: [],
+        error: "dag.mjs import failed: " + (e && e.message ? e.message : String(e)),
+      };
+    }
+    shapeCache.set(dagFile, { mtimeMs, payload });
+    return payload;
+  }
+
+  // coworker job: members as nodes, relay edges between consecutive members
+  const membersDir = path.join(runDir, "members");
+  let memberFiles = [];
+  try {
+    memberFiles = fs
+      .readdirSync(membersDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort();
+  } catch {}
+  if (memberFiles.length) {
+    const nodes = memberFiles.map((f) => ({
+      id: f.replace(/\.md$/, ""),
+      does: "member",
+    }));
+    const edges = [];
+    for (let i = 1; i < nodes.length; i++) {
+      edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
+    }
+    return { kind: "coworker", nodes, edges };
+  }
+
+  return { kind: "none", nodes: [], edges: [] };
+}
+
+// ---- v2: source viewer -------------------------------------------------
+
+// pull `key = "cmd"` pairs out of the [hooks] table and return the first
+// absolute path token of each command (hook commands are absolute paths)
+function hookPaths(tomlText) {
+  const out = [];
+  let inHooks = false;
+  for (const raw of tomlText.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("[")) {
+      inHooks = /^\[\s*hooks\s*\]/.test(line);
+      continue;
+    }
+    if (!inHooks) continue;
+    const m = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*"(.*)"\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    for (const tok of m[2].split(/\s+/)) {
+      if (tok.startsWith("/") || tok.startsWith("~/")) {
+        out.push({ key, path: tok.replace(/^~(?=\/)/, process.env.HOME || "~") });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function cappedRead(file, cap = 4000) {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(cap);
+      const n = fs.readSync(fd, buf, 0, cap, 0);
+      return { text: buf.subarray(0, n).toString("utf8"), truncated: n === cap };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+function sourceOf(job, sid, jid) {
+  const runDir = runDirOf(job, sid, jid);
+  const files = [];
+  const seenPath = new Set();
+  const seenName = new Set();
+  const push = (name, p) => {
+    const rp = path.resolve(p);
+    if (seenPath.has(rp)) return;
+    let nm = name;
+    for (let i = 2; seenName.has(nm); i++) nm = name + "~" + i;
+    seenName.add(nm);
+    seenPath.add(rp);
+    const r = cappedRead(rp);
+    files.push({
+      name: nm,
+      path: rp,
+      text: r ? r.text : null,
+      truncated: r ? r.truncated : false,
+      missing: !r,
+    });
+  };
+
+  const dagFile = path.join(runDir, "dag.mjs");
+  if (fs.existsSync(dagFile)) push("dag.mjs", dagFile);
+
+  const wfFile = path.join(runDir, "workflow.toml");
+  let wfText = "";
+  try {
+    wfText = fs.readFileSync(wfFile, "utf8");
+  } catch {}
+  if (wfText) push("workflow.toml", wfFile);
+
+  const hooks = [];
+  for (const { key, path: p } of hookPaths(wfText)) {
+    let isFile = false;
+    try {
+      isFile = fs.statSync(p).isFile();
+    } catch {}
+    hooks.push({ key, path: p, found: isFile });
+    if (isFile) push(path.basename(p), p);
+  }
+
+  return { sid, jid, runDir, files, hooks };
+}
+
 
 function readEvents(sid) {
   const file = path.join(SESSIONS_DIR, sid, "events.jsonl");
@@ -303,6 +550,7 @@ async function handleApi(req, res, pathname) {
       generatedAt: new Date().toISOString(),
       sessionsTotal: sessions.length,
       jobsTotal: jobs.length,
+      dagsTotal: buildDags().filter((d) => d.dag_id !== "(ungrouped)").length,
       jobsByState: countBy(jobs, (j) => j.state),
       jobsByOutcome: countBy(jobs, (j) => j.outcome),
       sessions,
@@ -314,11 +562,39 @@ async function handleApi(req, res, pathname) {
     return sendJson(res, 200, { count: jobs.length, jobs });
   }
 
-  let m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)$/);
+  if (req.method === "GET" && pathname === "/api/dags") {
+    const dags = buildDags();
+    return sendJson(res, 200, {
+      generatedAt: new Date().toISOString(),
+      count: dags.length,
+      dags,
+    });
+  }
+
+  let m = pathname.match(/^\/api\/dag-shape\/([^/]+)\/([^/]+)$/);
   if (req.method === "GET" && m) {
     const [, sid, jid] = m;
     if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
-    const jobFile = path.join(SESSIONS_DIR, sid, "jobs", jid, "job.json");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
+    const shape = await dagShape(job, sid, jid);
+    return sendJson(res, 200, { sid, jid, ...shape });
+  }
+
+  m = pathname.match(/^\/api\/source\/([^/]+)\/([^/]+)$/);
+  if (req.method === "GET" && m) {
+    const [, sid, jid] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
+    return sendJson(res, 200, sourceOf(job, sid, jid));
+  }
+
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)$/);
+  if (req.method === "GET" && m) {
+    const [, sid, jid] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const jobFile = jobFileOf(sid, jid);
     const job = readJson(jobFile);
     if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
     const report = job.dir
