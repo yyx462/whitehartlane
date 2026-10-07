@@ -474,6 +474,26 @@ export function writePiSettings(dir: string, model: string): void {
   )
 }
 
+// Grant one more root to a live worker's permission file — durable for
+// the next session start; the current dialog is cleared by the rail.
+export function addWorkerRoot(runDir: string, root: string): void {
+  try {
+    const cfgPath = join(runDir, "opencode.json")
+    const cfg = existsSync(cfgPath)
+      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as { permission?: { external_directory?: Record<string, string> } })
+      : {}
+    cfg.permission ??= {}
+    cfg.permission.external_directory ??= { "*": "ask" }
+    for (const form of new Set([root, realpathSync(root)])) {
+      cfg.permission.external_directory[form] = "allow"
+      cfg.permission.external_directory[`${form}/**`] = "allow"
+    }
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+  } catch {
+    // permissions are best-effort; the dialog decision still applies
+  }
+}
+
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
     const real = realpathSync(runDir)

@@ -38,6 +38,15 @@ Rail writes report.json when the stop lands; the receipt as ever
 - A message is a file on the Job dir, addressed by pane label. What a
   message is, is a detector — the program's say. That it is relayed,
   not written peer-to-peer, is rail.
+- Exactly one member `initiates`: it wakes on its brief alone. Every
+  other member is born idle and held — its first prompt is brief and
+  first message together, split by a `-----` line. The rail is the
+  watcher; a member never polls, never waits in a loop.
+- A permission dialog is a question to JEV's permission half. The
+  typed decider answers — allow (in the member's roots), deny
+  (dangerous: secrets, outside home), deny-unneeded (wandering) — and
+  the rail injects the message. No dialog waits for a person. Capped
+  like every retry surface; over the cap the member is dead.
 - A fork is a birth mode, not an adoption: fresh pane, fresh record,
   fresh binding. The seed is booked on `pane.born`.
 - A fork passes the same admission as any birth, plus the seed must
@@ -72,6 +81,13 @@ on a red test.
    ends the exchange in the rail; `report.json` lands with counts from
    the counts hook, one row per member. Test: `test/coworker.test.ts`
    (the plan) + the rail's report path.
+6. **Held members wake straight into work.** A non-initiating member
+   is born idle; its first prompt is brief + first message, split by
+   `-----`. Test: `test/coworker.test.ts` (combineFirstPrompt).
+7. **Permission dialogs never wait for a person.** The typed decider
+   allows roots, denies danger, denies wandering with guidance; the
+   rail injects the message and clears the dialog. Test:
+   `test/permission.test.ts`.
 
 The remaining gap, named: a fork's seed is booked and admitted, but the
 host tool does not yet seed the new conversation from it — booking is

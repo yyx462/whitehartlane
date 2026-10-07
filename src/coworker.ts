@@ -8,7 +8,7 @@ import { join } from "node:path"
 
 export type SeedSpec = { tool: string; session_id: string; since?: string }
 
-export type Member = { name: string; model?: string; seed?: SeedSpec }
+export type Member = { name: string; model?: string; seed?: SeedSpec; initiates?: boolean }
 
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
@@ -41,6 +41,7 @@ export function parseMembers(toml: string): Member[] {
     const seedTool = body.match(/^\s*seed_tool\s*=\s*"([^"]+)"/m)?.[1]
     const seedSession = body.match(/^\s*seed_session\s*=\s*"([^"]+)"/m)?.[1]
     const seedSince = body.match(/^\s*seed_since\s*=\s*"([^"]+)"/m)?.[1]
+    const initiates = /^\s*initiates\s*=\s*true\s*$/m.test(body)
     let seed: SeedSpec | undefined
     if (seedTool !== undefined || seedSession !== undefined) {
       if (seedTool === undefined || seedSession === undefined) {
@@ -48,9 +49,17 @@ export function parseMembers(toml: string): Member[] {
       }
       seed = { tool: seedTool, session_id: seedSession, ...(seedSince ? { since: seedSince } : {}) }
     }
-    members.push({ name, ...(model ? { model } : {}), ...(seed ? { seed } : {}) })
+    members.push({ name, ...(model ? { model } : {}), ...(seed ? { seed } : {}), ...(initiates ? { initiates: true } : {}) })
   }
   return members
+}
+
+// The first prompt a non-initiating member ever receives: its brief and
+// the first relayed message arrive TOGETHER, split by a ----- line, so
+// the member wakes straight into work — no context read, no polling,
+// no sleep loop. The rail is the watcher; the member is idle until mail.
+export function combineFirstPrompt(brief: string, from: string, body: string): string {
+  return `${brief}\n\n-----\n\n[relay] from ${from}:\n\n${body}`
 }
 
 export type Message = {
@@ -143,6 +152,8 @@ export function memberProtocol(name: string, peers: string[], dir: string): stri
     "--- relay protocol (the rail appends this; it is law) ---",
     `You are member ${name} of a coworker job. Peers: ${peers.join(", ")}.`,
     `A message from a peer arrives as a prompt from the rail, prefixed [relay].`,
+    "You never poll messages/, never wait in a loop — the rail watches the",
+    "folder and wakes you. Between prompts: work, or idle.",
     "To reply, write a JSON file in messages/ (absolute path):",
     `${join(dir, "messages", "<seq>-${name}.json")}`,
     `with {"from":"${name}","to":"<peer>","type":"note","body":"..."}.`,

@@ -9,6 +9,7 @@ worker_kind = "opencode"
 
 [members.backend]
 model = "zai-coding-plan/glm-5.3"
+initiates = true
 
 [members.frontend]
 model = "zai-coding-plan/glm-5.3-flash"

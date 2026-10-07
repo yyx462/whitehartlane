@@ -3,9 +3,9 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/coworker.ts"
+import { combineFirstPrompt, memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/coworker.ts"
 
-test("members parse from [members.<name>] with model and optional seed", () => {
+test("members parse from [members.<name>] with model, seed, and initiates", () => {
   const toml = [
     '[workflow]',
     'name = "ui"',
@@ -13,6 +13,7 @@ test("members parse from [members.<name>] with model and optional seed", () => {
     "",
     '[members.backend]',
     'model = "opencode-go/glm-5.3"',
+    'initiates = true',
     "",
     '[members.frontend]',
     'model = "opencode-go/glm-5.3-flash"',
@@ -25,10 +26,20 @@ test("members parse from [members.<name>] with model and optional seed", () => {
     ["backend", "frontend"],
   )
   assert.equal(members[0].model, "opencode-go/glm-5.3")
+  assert.equal(members[0].initiates, true)
+  assert.equal(members[1].initiates, undefined)
   assert.equal(members[1].seed?.session_id, "uuid-old")
   assert.throws(() => parseMembers('[members."bad name"]\n'), /shep-safe/)
   assert.throws(() => parseMembers('[members.a]\nmodel = "glm53"\n'), /provider\/model/)
   assert.throws(() => parseMembers('[members.a]\nseed_tool = "pi"\n'), /seed_tool and seed_session/)
+})
+
+test("a held member wakes on brief + first message, split by -----", () => {
+  const text = combineFirstPrompt("You are frontend.", "backend", "server up on 8787")
+  const [brief, relay] = text.split("\n\n-----\n\n")
+  assert.equal(brief, "You are frontend.")
+  assert.match(relay, /\[relay\] from backend:/)
+  assert.match(relay, /server up on 8787/)
 })
 
 test("a message must come from a member, name a member, and match its filename", () => {
