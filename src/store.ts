@@ -28,12 +28,21 @@ export type TranscriptPointer = {
   since: string
 }
 
+// A fork's seed (zen 6): the host session a new pane's conversation
+// starts from — a pointer, never a copy; the original is never written.
+export type SeedPointer = {
+  tool: string
+  session_id: string
+  since: string
+}
+
 export type PaneRecord = {
   label: string
   pane?: string
   unit?: string
   parent?: Parent
   transcript?: TranscriptPointer
+  seed?: SeedPointer
   born: string
   died?: string
 }
@@ -246,7 +255,7 @@ export function saveJob(job: JobRecord): void {
 
 export function attachPane(
   job: JobRecord,
-  pane: { label: string; pane?: string; unit?: string; parent?: Parent; transcript?: TranscriptPointer },
+  pane: { label: string; pane?: string; unit?: string; parent?: Parent; transcript?: TranscriptPointer; seed?: SeedPointer },
 ): JobRecord {
   if (!job.panes.some((p) => p.label === pane.label)) {
     const born = new Date().toISOString()
@@ -261,6 +270,7 @@ export function attachPane(
       unit: pane.unit,
       parent: pane.parent,
       transcript: pane.transcript,
+      seed: pane.seed,
     })
   }
   return job
@@ -357,6 +367,7 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
         unit: e.unit as string | undefined,
         parent: e.parent as Parent | undefined,
         transcript: e.transcript as TranscriptPointer | undefined,
+        seed: e.seed as SeedPointer | undefined,
         born: e.ts,
       })
     } else if (e.kind === "pane.died") {

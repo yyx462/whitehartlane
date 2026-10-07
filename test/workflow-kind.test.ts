@@ -11,3 +11,9 @@ test("lab is its own workflow, not a flag inside fan-out", () => {
   assert.equal(orchestratorBin("fan-out"), "fan-out-orchestrator")
   assert.throws(() => workflowKind('kind = "swarm"\n'))
 })
+
+test("coworker is its own kind — panes that talk, one relay", () => {
+  assert.equal(workflowKind('kind = "coworker"\n'), "coworker")
+  assert.equal(workflowKind('[workflow]\nkind = "coworker"\n'), "coworker")
+  assert.equal(orchestratorBin("coworker"), "lab-orchestrator")
+})

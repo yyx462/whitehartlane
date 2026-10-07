@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } 
 import { basename, dirname, join, resolve } from "node:path"
 import { loadDagFile, type Dag } from "./dag.ts"
 import { HookError, loadManifest } from "./hooks.ts"
-import { workflowKind } from "./workflow-kind.ts"
+import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
 import {
   appendEvent,
@@ -18,7 +18,7 @@ export type RunReady = {
   job: JobRecord
   log: string
   trace: string
-  kind: "fan-out" | "lab"
+  kind: WorkflowKind
 }
 
 export type RunRefused = {
@@ -95,7 +95,7 @@ function defaultManifest(dag: Dag): string {
 
 function book(
   dir: string,
-  kind: "fan-out" | "lab",
+  kind: WorkflowKind,
   task: string,
   slots: number,
   stage: (store: string) => void,
@@ -186,7 +186,7 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   }
   let slots = 2
   let task = basename(dir)
-  let kind: "fan-out" | "lab" = "fan-out"
+  let kind: WorkflowKind = "fan-out"
   try {
     kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
     const manifest = loadManifest(dir)
