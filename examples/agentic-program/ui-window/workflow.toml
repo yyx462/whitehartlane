@@ -8,10 +8,10 @@ kind = "coworker"
 worker_kind = "opencode"
 
 [members.backend]
-model = "opencode-go/glm-5.3"
+model = "zai-coding-plan/glm-5.3"
 
 [members.frontend]
-model = "opencode-go/glm-5.3-flash"
+model = "zai-coding-plan/glm-5.3-flash"
 
 [hooks]
 units = "true"
