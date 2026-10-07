@@ -1,0 +1,19 @@
+# git-wave — the program owns its world's detectors, the OS owns tick.
+# A wave is whatever signal.mjs says it is; a student ends however
+# end.mjs says it ends; await-review finishes when review.mjs prints
+# done. Absent these, the OS defaults (protocol.json, log.txt) run.
+[workflow]
+name = "git-wave"
+worker_kind = "opencode"
+
+[hooks]
+units = "node hooks/true.mjs"
+grade = "node hooks/true.mjs"
+counts = "node hooks/counts.mjs"
+
+[detectors]
+signal = "node hooks/signal.mjs"
+end = "node hooks/end.mjs"
+
+[gates]
+await-review = "node hooks/review.mjs"

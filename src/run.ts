@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { loadDagFile, type Dag } from "./dag.ts"
 import { HookError, loadManifest } from "./hooks.ts"
@@ -42,8 +42,16 @@ export function stageRun(source: string, store: string): void {
   mkdirSync(store, { recursive: true })
   const manifest = loadManifest(source)
   let raw = readFileSync(join(source, "workflow.toml"), "utf8")
-  for (const cmd of [manifest.hooks.units, manifest.hooks.grade, manifest.hooks.counts]) {
-    raw = raw.replaceAll(cmd, absolutize(cmd, source))
+  const cmds = [
+    manifest.hooks.units,
+    manifest.hooks.grade,
+    manifest.hooks.counts,
+    manifest.detectors?.signal,
+    manifest.detectors?.end,
+    ...Object.values(manifest.gates ?? {}),
+  ]
+  for (const cmd of cmds) {
+    if (cmd) raw = raw.replaceAll(cmd, absolutize(cmd, source))
   }
   writeFileSync(join(store, "workflow.toml"), raw)
   copyBeside(source, store)
@@ -54,6 +62,10 @@ function copyBeside(source: string, store: string): void {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
+  // a program may carry a data/ folder — the files the briefs and hooks
+  // read; it is staged beside the dag so the run is self-contained
+  const data = join(source, "data")
+  if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
 }
 
 export function dagFileOf(input: string): string | null {
@@ -145,14 +157,25 @@ export function prepareRun(folder: string): RunReady | RunRefused {
     let slots = 2
     let task = dag.name
     const toml = existsSync(join(dir, "workflow.toml"))
+    let gates: Record<string, string> | undefined
     if (toml) {
       try {
         const manifest = loadManifest(dir)
         slots = manifest.workflow.slots ?? 2
         task = manifest.workflow.name
+        gates = manifest.gates
       } catch (err) {
         const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
         return { ok: false, why, code: 1 }
+      }
+    }
+    for (const step of dag.steps.filter((s) => s.does === "gate")) {
+      if (!gates?.[step.id]) {
+        return {
+          ok: false,
+          why: `gate step ${step.id} needs a [gates] ${step.id} detector command in workflow.toml`,
+          code: 1,
+        }
       }
     }
     return book(dir, "lab", task, slots, stageDag(dag, dir, toml))

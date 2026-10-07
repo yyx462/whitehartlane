@@ -10,9 +10,13 @@ import {
   loadManifest,
   resolveManifestPath,
   runCounts,
+  runEndDetector,
+  runGateDetector,
   runGrade,
+  runSignalDetector,
   runUnits,
 } from "../src/hooks.ts"
+import { RefusedError } from "../src/backpressure.ts"
 
 const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
 
@@ -152,4 +156,97 @@ test("the manifest resolution chain prefers local, then env, then user, then bui
     resolveManifestPath(cwd, { HOME: userHome, AGENTIC_OS_GLOBAL: "0" })?.origin,
     "local",
   )
+})
+
+function detectorDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-detectors-"))
+  mkdirSync(join(dir, "hooks"))
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    [
+      "[workflow]",
+      'name = "detected"',
+      'worker_kind = "opencode"',
+      "",
+      "[hooks]",
+      'units = "node hooks/true.mjs"',
+      'grade = "node hooks/true.mjs"',
+      'counts = "node hooks/true.mjs"',
+      "",
+      "[detectors]",
+      'signal = "node hooks/signal.mjs"',
+      'end = "node hooks/end.mjs"',
+      "",
+      "[gates]",
+      "await-review = \"node hooks/gate.mjs\"",
+      "",
+    ].join("\n"),
+  )
+  writeFileSync(join(dir, "hooks", "true.mjs"), "process.exit(0)\n")
+  writeFileSync(join(dir, "hooks", "signal.mjs"), "process.stdout.write(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
+  writeFileSync(join(dir, "hooks", "end.mjs"), "console.log(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
+  writeFileSync(join(dir, "hooks", "gate.mjs"), "console.log(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
+  return dir
+}
+
+function detectEnv(out: string, status = 0): Record<string, string> {
+  return { DETECT_OUT: out, DETECT_STATUS: String(status) }
+}
+
+function detect<T>(env: Record<string, string>, fn: () => T): T | Error {
+  const old = process.env
+  process.env = { ...process.env, ...env }
+  try {
+    return fn()
+  } catch (err) {
+    return err as Error
+  } finally {
+    process.env = old
+  }
+}
+
+test("the manifest names detectors and gates, or neither", () => {
+  const manifest = loadManifest(detectorDir())
+  assert.equal(manifest.detectors?.signal, "node hooks/signal.mjs")
+  assert.equal(manifest.detectors?.end, "node hooks/end.mjs")
+  assert.deepEqual(manifest.gates, { "await-review": "node hooks/gate.mjs" })
+  assert.equal(loadManifest(EXAMPLE).detectors, undefined)
+  assert.equal(loadManifest(EXAMPLE).gates, undefined)
+})
+
+test("a signal detector prints the wave or the stop, like protocol.json would", () => {
+  const dir = detectorDir()
+  const manifest = loadManifest(dir)
+  const kind = (env: Record<string, string>): string =>
+    (detect(env, () => runSignalDetector(dir, manifest)) as { kind: string }).kind
+  assert.equal(kind(detectEnv("")), "missing")
+  assert.equal(kind(detectEnv(JSON.stringify({ units: [{ id: "u1", brief: "go" }] }))), "wave")
+  assert.equal(kind(detectEnv(JSON.stringify({ stop: true }))), "stop")
+  assert.equal(kind(detectEnv("{not json")), "partial")
+})
+
+test("refusal from any detector is a RefusedError the rail can retry", () => {
+  const dir = detectorDir()
+  const manifest = loadManifest(dir)
+  assert.ok(detect(detectEnv("", 75), () => runSignalDetector(dir, manifest)) instanceof RefusedError)
+  assert.ok(detect(detectEnv("", 75), () => runEndDetector(dir, manifest, "u1")) instanceof RefusedError)
+  assert.ok(detect(detectEnv("", 75), () => runGateDetector(dir, manifest, "await-review")) instanceof RefusedError)
+})
+
+test("an end detector prints done, blocked, dead, or nothing", () => {
+  const dir = detectorDir()
+  const manifest = loadManifest(dir)
+  assert.equal(detect(detectEnv("done"), () => runEndDetector(dir, manifest, "u1")), "done")
+  assert.equal(detect(detectEnv("blocked"), () => runEndDetector(dir, manifest, "u1")), "blocked")
+  assert.equal(detect(detectEnv(""), () => runEndDetector(dir, manifest, "u1")), null)
+  assert.ok(detect(detectEnv("banana"), () => runEndDetector(dir, manifest, "u1")) instanceof HookError)
+})
+
+test("a gate detector is ready only when it prints done", () => {
+  const dir = detectorDir()
+  const manifest = loadManifest(dir)
+  assert.equal(detect(detectEnv("done"), () => runGateDetector(dir, manifest, "await-review")), true)
+  assert.equal(detect(detectEnv(""), () => runGateDetector(dir, manifest, "await-review")), false)
+  assert.equal(detect(detectEnv("pending"), () => runGateDetector(dir, manifest, "await-review")), false)
+  assert.ok(detect({}, () => runGateDetector(dir, manifest, "unknown-gate")) instanceof HookError)
 })

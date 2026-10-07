@@ -104,7 +104,7 @@ Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, 
 _Avoid_: watcher, operator, script
 
 **Hook**:
-The task-specific part a project fills in: what one unit of work is, the worker brief, how to grade, where artifacts go, and which counts the report shows. Each is a command string in `workflow.toml`. Any language. A `hooks/` folder beside the toml is a copy convention, not the contract.
+The task-specific part a project fills in: what one unit of work is, the worker brief, how to grade, where artifacts go, which counts the report shows, and — as detectors — what a wave, an end, or a gate looks like in the world. Each is a command string in `workflow.toml`. Any language. A `hooks/` folder beside the toml is a copy convention, not the contract.
 _Avoid_: workflow, rail, operator
 
 **Report**:

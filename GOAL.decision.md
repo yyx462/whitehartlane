@@ -3,6 +3,24 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-06 — Detectors and gates: the program owns the photograph's
+source, the OS owns tick. What a wave is, what an end is, and what a
+gate waits on are hook knowledge (`[detectors]` signal/end, `[gates]`
+in workflow.toml; a `gate` verb in dag.mjs) — they were rail-hardcoded
+(protocol.json, log.txt), which rule 3 could not allow forever. A
+detector may slow the rail (exit 75 = refusal, retried), never kill
+it; pane liveness stays rail-owned: a dead pane is dead even under a
+custom end detector. The run door refuses a gate step with no matching
+[gates] command, and a program names one step per singleton verb.
+A program may carry a data/ folder; the door stages it beside the dag
+— a program is data files and hook commands, nothing else. Rejected:
+program-supplied tick — a second scheduler per program; the rail could
+no longer promise one reopen rule, one retry cap, one receipt, and a
+dead orchestrator could not be relaunched into a loop it does not own.
+Airflow never let a DAG ship a scheduler; its sensors are the pluggable
+part. Serves 3, 6. Trail: docs/adr/0003-detectors-and-gates.md,
+examples/agentic-program/ (trivia-bench, inbox-zero, two-signoffs).
+
 2026-10-03 — One start door, and unattended is a first-class path.
 `agentic-os run <folder>` reads `workflow.toml`, books a fan-out Job,
 and starts the engine. No grill. No question. A second running Job on
