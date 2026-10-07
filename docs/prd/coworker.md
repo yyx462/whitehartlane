@@ -62,9 +62,17 @@ on a red test.
    Test: `test/fork.test.ts`.
 3. **The kind is named.** `kind = "coworker"` resolves at the door and
    books; its rail bin is named. Test: `test/workflow-kind.test.ts`.
-4. **The relay is the rail.** A photographed message becomes a prompt
-   to the named pane and no other; a worker-written prompt to another
-   worker fails. Test: `test/relay.test.ts` (not built).
-5. **A stop produces a report.** The stop message ends the exchange;
-   `report.json` lands with counts from the counts hook. Test:
-   `test/coworker-report.test.ts` (not built).
+4. **The relay is the rail.** `parseMembers` reads `[members.<name>]`
+   (model, optional seed); `parseMessage` refuses a message that is not
+   from a member, to a member, or that mismatches its filename;
+   `relayPlan` turns pending messages into prompts for the named pane
+   only — a worker never delivers another worker's words. Test:
+   `test/coworker.test.ts`.
+5. **A stop produces a report.** A stop message (or the relay cap)
+   ends the exchange in the rail; `report.json` lands with counts from
+   the counts hook, one row per member. Test: `test/coworker.test.ts`
+   (the plan) + the rail's report path.
+
+The remaining gap, named: a fork's seed is booked and admitted, but the
+host tool does not yet seed the new conversation from it — booking is
+truth, the seeding lands per tool (pi first).

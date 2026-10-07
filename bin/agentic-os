@@ -3,7 +3,7 @@
 // start door is run. It reads workflow.toml and starts that workflow's engine.
 // The rest read and settle the OS disk (~/.local/share/agentic-os). jobs lists every
 // Job record with its state and receipt; audit diffs live shep panes
-// against admitted panes (the only door is JEV — a live pane no Job
+// against booked panes (every pane is born booked — a live pane no Job
 // admits is a violation); sweep parks running Jobs whose orchestrator
 // died without a graceful stop in the ask-first relaunch queue —
 // orphaned, not aborted, never auto-resurrected; relaunch re-runs one
@@ -179,7 +179,7 @@ async function main() {
     const stalled = jobs.filter((job) => job.state === "running" && !pidAlive(job.pid))
     console.log(`panes live in shep: ${live.length}; admitted by Jobs: ${live.length - bastards.length}`)
     for (const pane of bastards) {
-      console.log(`UNADMITTED ${pane.label} (${pane.pane}) — born outside JEV; retire it: shep retire ${pane.label}`)
+      console.log(`UNADMITTED ${pane.label} (${pane.pane}) — no booked birth; retire it: shep retire ${pane.label}`)
     }
     for (const job of stalled) {
       console.log(`STALLED ${job.id} — orchestrator pid ${job.pid} is gone; run: agentic-os sweep`)
@@ -277,7 +277,7 @@ async function main() {
       } catch {}
       killPane(job, pane.label)
     }
-    const orchestrator = join(import.meta.dirname, "fan-out-orchestrator")
+    const orchestrator = join(import.meta.dirname, orchestratorBin(job.workflow))
     const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
     const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, job.dir], {
       detached: true,
