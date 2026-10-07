@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 // scheduler: it reads that file and says which step is ready. The file
 // is not executed, so it cannot start a second scheduler.
 
-export type StepDoes = "actor" | "wave" | "grade" | "report"
+export type StepDoes = "actor" | "wave" | "grade" | "report" | "gate"
 
 export type Step = {
   id: string
@@ -17,7 +17,7 @@ export type Dag = {
   steps: Step[]
 }
 
-const VERBS = new Set<StepDoes>(["actor", "wave", "grade", "report"])
+const VERBS = new Set<StepDoes>(["actor", "wave", "grade", "report", "gate"])
 
 const SCHEDULER = /fan-out-orchestrator|child_process|\bwhile\b|\bspawn\b|setInterval|setTimeout|\bscheduler\b/
 
@@ -68,6 +68,11 @@ export function parseDag(source: string): Dag {
       if (!ids.has(need)) throw new Error(`step ${step.id} needs missing step ${need}`)
     }
   }
+  for (const verb of ["actor", "wave", "grade", "report"] as StepDoes[]) {
+    if (parsed.filter((step) => step.does === verb).length > 1) {
+      throw new Error(`a program names one ${verb} step`)
+    }
+  }
   const dag = { name, steps: parsed }
   order(dag)
   return dag
@@ -106,6 +111,7 @@ export type TickIn = {
   ends: { id: string; end: string | null }[]
   graded: string[]
   prompted: boolean
+  gatesReady: string[]
 }
 
 export type TickAction =
@@ -119,6 +125,20 @@ export type TickAction =
 
 function byDoes(dag: Dag, does: StepDoes): Step | undefined {
   return dag.steps.find((step) => step.does === does)
+}
+
+function downstreamOf(dag: Dag, id: string): Set<string> {
+  const out = new Set<string>()
+  const grow = (from: string): void => {
+    for (const step of dag.steps) {
+      if (step.after.includes(from) && !out.has(step.id)) {
+        out.add(step.id)
+        grow(step.id)
+      }
+    }
+  }
+  grow(id)
+  return out
 }
 
 function depsDone(step: Step | undefined, done: Set<string>): boolean {
@@ -140,7 +160,12 @@ export function tick(dag: Dag, state: TickIn): TickAction[] {
     state.waveKey !== "" &&
     state.waveKey !== state.openedWave
   ) {
-    const ids = [wave.id, grade?.id].filter((id): id is string => !!id && done.has(id))
+    // a reopen clears everything that ran on the old wave: the wave, the
+    // grade, and every gate downstream of it — same rule for every verb
+    const gatesAfterWave = [...downstreamOf(dag, wave.id)].filter((id) =>
+      dag.steps.find((step) => step.id === id)?.does === "gate",
+    )
+    const ids = [wave.id, grade?.id, ...gatesAfterWave].filter((id): id is string => !!id && done.has(id))
     if (ids.length > 0) return [{ do: "reopen", ids }]
   }
 
@@ -173,6 +198,16 @@ export function tick(dag: Dag, state: TickIn): TickAction[] {
     }
     const finished = state.ends.filter((row) => row.end === "done").every((row) => state.graded.includes(row.id))
     if (waveClosed && finished) finish(grade)
+  }
+
+  // a gate waits on the world, not on a pane: the watcher gathers which
+  // gate detectors printed done, and tick finishes them when their
+  // after-edges allow it — the same finish, reopen, and report rules
+  // as every other verb
+  for (const gate of dag.steps.filter((step) => step.does === "gate")) {
+    if (!done.has(gate.id) && depsDone(gate, done) && state.gatesReady.includes(gate.id)) {
+      finish(gate)
+    }
   }
 
   const upstreamDone = (step: Step | undefined) => !!step && step.after.every((id) => done.has(id))
