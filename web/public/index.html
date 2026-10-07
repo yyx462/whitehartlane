@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agentic-os · jobs</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topnav">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="wordmark">agentic-os</span>
+        <span class="brand-sub">job window</span>
+      </div>
+      <form id="run-form" class="runbox" autocomplete="off">
+        <input
+          id="run-folder"
+          type="text"
+          placeholder="/absolute/path/to/workflow folder"
+          spellcheck="false"
+        />
+        <button id="run-btn" type="submit">Run</button>
+      </form>
+      <div class="nav-right">
+        <span id="refresh-note" class="muted" title="auto-refresh interval">5s</span>
+        <span id="clock" class="muted mono"></span>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section id="stats" class="stats">
+        <button class="stat" data-filter="">
+          <span class="stat-label">sessions</span>
+          <span class="stat-value" id="st-sessions">–</span>
+        </button>
+        <button class="stat" data-filter="">
+          <span class="stat-label">jobs</span>
+          <span class="stat-value" id="st-jobs">–</span>
+        </button>
+        <button class="stat chipable" data-filter="running">
+          <span class="stat-label"><i class="dot running"></i>running</span>
+          <span class="stat-value" id="st-running">–</span>
+        </button>
+        <button class="stat chipable" data-filter="retired">
+          <span class="stat-label"><i class="dot retired"></i>retired</span>
+          <span class="stat-value" id="st-retired">–</span>
+        </button>
+        <button class="stat chipable" data-filter="aborted">
+          <span class="stat-label"><i class="dot aborted"></i>aborted</span>
+          <span class="stat-value" id="st-aborted">–</span>
+        </button>
+        <button class="stat chipable" data-filter="orphaned">
+          <span class="stat-label"><i class="dot orphaned"></i>orphaned</span>
+          <span class="stat-value" id="st-orphaned">–</span>
+        </button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Jobs</h2>
+          <span id="jobs-filter-note" class="muted small"></span>
+        </div>
+        <div class="table-scroll">
+          <table id="jobs-table">
+            <thead>
+              <tr>
+                <th>state</th>
+                <th>workflow</th>
+                <th>task</th>
+                <th class="num">panes</th>
+                <th>outcome</th>
+                <th class="num">age</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-body">
+              <tr><td colspan="6" class="empty">loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div id="backdrop" class="backdrop hidden"></div>
+    <aside id="detail" class="detail hidden" aria-hidden="true">
+      <div class="detail-head">
+        <div>
+          <h2 id="d-title">job</h2>
+          <div id="d-sub" class="muted small mono"></div>
+        </div>
+        <button id="d-close" class="icon-btn" title="close">✕</button>
+      </div>
+      <div class="detail-body">
+        <section class="d-section">
+          <h3>receipt</h3>
+          <div id="d-receipt" class="kv"></div>
+        </section>
+        <section class="d-section">
+          <h3>report</h3>
+          <div id="d-report" class="kv"></div>
+          <table id="d-report-table" class="mini-table hidden">
+            <thead><tr><th>unit</th><th>result</th></tr></thead>
+            <tbody id="d-report-rows"></tbody>
+          </table>
+        </section>
+        <section class="d-section grow">
+          <h3>events <span id="d-ev-count" class="muted small"></span></h3>
+          <div id="d-events" class="events mono"></div>
+        </section>
+      </div>
+    </aside>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
