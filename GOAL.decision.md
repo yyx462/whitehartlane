@@ -3,6 +3,26 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-07 — Dag identity: the Project pid, the dag_id, the version
+hash. Runs group like Airflow's DAG runs, so a group key was needed
+that no path and no git provides. A Project is a pid minted once into
+`project.json` inside the program folder (indexed on the OS disk):
+worktrees and clones copy the file — runs combine silently, no
+warning; a moved folder keeps its identity (paths are never identity);
+git is never required (repo+branch rejected: not every project uses
+git; absolute path rejected: it breaks on move and double-counts
+worktrees). dag_id is explicit in workflow.toml, else the workflow
+name, else a hashed id with a loud warning — it always exists and
+grouping never silently falls apart. Duplicate protection is light
+and never a refusal: the same (project, dag_id) with different
+content from a different path warns. Every Job books the dag identity
+— project, dag_id, source content hash (the version), source path,
+and branch/worktree as labels that display but never identify. The
+run door prints `dag: <pid>/<dag_id> version <hash>` and the
+warnings. Programs may now live in any repo, not only
+agentic-program; the OS disk is the one storage. Serves 5, 6. Trail:
+src/project.ts, test/project.test.ts, CONTEXT.md (Project, Dag id).
+
 2026-10-07 — The permission half of JEV, and members held idle. A
 blocked worker's dialog used to wait for a person (the ui-window run
 stuck on one for the job's own OS-disk paths). Now a dialog is a

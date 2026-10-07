@@ -144,6 +144,12 @@ async function main() {
     saveJob(ready.job)
     console.log(`job: ${ready.job.id}`)
     console.log(`workflow: ${ready.kind}`)
+    if (ready.job.dag) {
+      const d = ready.job.dag
+      const labels = Object.entries(d.labels ?? {}).map(([k, v]) => ` ${k}:${v}`).join("")
+      console.log(`dag: ${d.project}/${d.dag_id} version ${d.content_hash}${labels}`)
+    }
+    for (const w of ready.warnings) console.error(`warning: ${w}`)
     console.log(`log: ${ready.log}`)
     console.log(`trace: ${ready.trace}`)
     return
