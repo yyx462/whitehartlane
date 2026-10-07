@@ -114,6 +114,20 @@ const ledger = (() => {
 const taskDir = argvDir ?? ledger?.job.dir ?? resolve(process.cwd())
 const scoped = paneLabeler(runIdFor(taskDir))
 const workerModel = modelIn(taskDir)
+// A program names extra roots its workers may touch: roots.txt beside
+// the dag, one absolute path per line, staged by the run door. No env
+// names — a program is data files, not shell plumbing; no tenant is
+// special to the rail.
+const programRoots = (() => {
+  try {
+    return readFileSync(join(taskDir, "roots.txt"), "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  } catch {
+    return []
+  }
+})()
 writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
 
 for (const sig of ["SIGTERM", "SIGINT"]) {
@@ -564,7 +578,6 @@ function ensureRole(board, role, dir) {
 }
 
 async function runLive() {
-  const target = process.env.SKILL_RSI_TARGET
   let jobText = ""
   try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
   // A lab program is one dag file. When it is staged beside this run,
@@ -624,7 +637,7 @@ async function runLive() {
     log("orchestrator pane failed")
   }
   const actorPath = join(taskDir, "briefs", "actor.md")
-  writeFileSync(actorPath, actorBrief(jobText, target))
+  writeFileSync(actorPath, actorBrief(jobText))
   const born = new Map()
   const mockPane = new Map()
   const closed = new Set()
@@ -659,9 +672,7 @@ async function runLive() {
         "",
         `Write what you generated to ${join(dir, "result.md")}`,
       ].join("\n"))
-      const roots = [taskDir]
-      if (target) roots.push(target)
-      if (process.env.SKILL_RSI_PROTOTYPE_ROOT) roots.push(process.env.SKILL_RSI_PROTOTYPE_ROOT)
+      const roots = [taskDir, ...programRoots]
       writeWorkerPermissions(dir, roots)
       const slot = ensureRole(board, "mock", dir)
       board = slot.board

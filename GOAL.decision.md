@@ -3,6 +3,16 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-07 — No first-tenant favors. The rail read SKILL_RSI_TARGET and
+SKILL_RSI_PROTOTYPE_ROOT — the first program's shell plumbing baked
+into the OS, four lines of special case. Gone: a program names the
+extra roots its workers may touch in `roots.txt` (one absolute path
+per line, staged beside the dag like task.txt), and the actor brief
+carries no OS-injected Target line — the program's own actor.md and
+task.txt say where its world lives. A program is data files and hook
+commands, never env-var names the rail knows. skill-rsi is now an
+ordinary tenant and the copyable template. Serves 3, 6.
+
 2026-10-06 — Detectors and gates: the program owns the photograph's
 source, the OS owns tick. What a wave is, what an end is, and what a
 gate waits on are hook knowledge (`[detectors]` signal/end, `[gates]`
