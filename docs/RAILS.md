@@ -68,9 +68,13 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   is read. Same contract as every hook (strict output, exit 75 =
   refusal, retried by the rail); a deterministic failure degrades to
   "no signal / still running" and logs once — a detector may slow the
-  rail, never kill it. Absent, the OS defaults run: `protocol.json`
-  and the unit `log.txt`. Pane liveness stays rail-owned either way:
-  a dead pane is dead even under a custom end detector.
+  rail, never kill it. A signal detector NAMES the wave: like
+  `protocol.json`, it keeps saying the current wave until a new one
+  replaces it — going silent once the work is done leaves the wave
+  unable to close (tick finishes a wave only on a beat that still
+  names it). Absent, the OS defaults run: `protocol.json` and the unit
+  `log.txt`. Pane liveness stays rail-owned either way: a dead pane is
+  dead even under a custom end detector.
 - `gates` — one command per `does: "gate"` step in `dag.mjs`; prints
   `done` when the step may finish. The run door refuses a gate step
   with no matching `[gates]` command — nothing is booked. Reopen,
