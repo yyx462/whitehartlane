@@ -3,172 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>agentic-os · dags</title>
+    <title>agentic-os · dag explorer</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header class="topnav">
-      <div class="brand">
+      <a class="brand" href="#/runs">
         <span class="brand-dot"></span>
         <span class="wordmark">agentic-os</span>
         <span class="brand-sub">dag explorer</span>
-      </div>
-      <form id="run-form" class="runbox" autocomplete="off">
-        <input
-          id="run-folder"
-          type="text"
-          placeholder="/absolute/path/to/workflow folder"
-          spellcheck="false"
-        />
-        <button id="run-btn" type="submit">Run</button>
-      </form>
+      </a>
+      <nav class="mainnav">
+        <a href="#/runs" data-nav="runs">All Runs</a>
+        <a href="#/dags" data-nav="dags">DAGs</a>
+      </nav>
       <div class="nav-right">
         <span id="refresh-note" class="muted" title="auto-refresh interval">5s</span>
         <span id="clock" class="muted mono"></span>
       </div>
     </header>
 
-    <main class="wrap">
-      <aside id="sidebar" class="panel sidebar">
-        <div class="panel-head">
-          <h2>DAGs</h2>
-          <span id="dags-note" class="muted small"></span>
-        </div>
-        <div id="dag-list" class="dag-list"></div>
-      </aside>
-
-      <div class="content">
-        <section id="stats" class="stats">
-          <button class="stat" data-filter="">
-            <span class="stat-label">sessions</span>
-            <span class="stat-value" id="st-sessions">–</span>
-          </button>
-          <button class="stat" data-filter="">
-            <span class="stat-label">jobs</span>
-            <span class="stat-value" id="st-jobs">–</span>
-          </button>
-          <button class="stat" data-filter="">
-            <span class="stat-label">dags</span>
-            <span class="stat-value" id="st-dags">–</span>
-          </button>
-          <button class="stat chipable" data-filter="running">
-            <span class="stat-label"><i class="dot running"></i>running</span>
-            <span class="stat-value" id="st-running">–</span>
-          </button>
-          <button class="stat chipable" data-filter="retired">
-            <span class="stat-label"><i class="dot retired"></i>retired</span>
-            <span class="stat-value" id="st-retired">–</span>
-          </button>
-          <button class="stat chipable" data-filter="aborted">
-            <span class="stat-label"><i class="dot aborted"></i>aborted</span>
-            <span class="stat-value" id="st-aborted">–</span>
-          </button>
-          <button class="stat chipable" data-filter="orphaned">
-            <span class="stat-label"><i class="dot orphaned"></i>orphaned</span>
-            <span class="stat-value" id="st-orphaned">–</span>
-          </button>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2 id="view-title">Jobs</h2>
-            <span id="jobs-filter-note" class="muted small"></span>
-          </div>
-          <div id="chart-block" class="chart-block hidden">
-            <div class="chart-caption">
-              duration per run <span class="muted">· scaled to longest · striped = still running</span>
-            </div>
-            <div id="dur-chart" class="dur-chart"></div>
-          </div>
-          <div class="table-scroll">
-            <table id="runs-table" class="hidden">
-              <thead>
-                <tr>
-                  <th>state</th>
-                  <th>run</th>
-                  <th>labels</th>
-                  <th>created</th>
-                  <th>finished</th>
-                  <th class="num">duration</th>
-                </tr>
-              </thead>
-              <tbody id="runs-body">
-                <tr><td colspan="6" class="empty">–</td></tr>
-              </tbody>
-            </table>
-            <table id="jobs-table">
-              <thead>
-                <tr>
-                  <th>state</th>
-                  <th>workflow</th>
-                  <th>task</th>
-                  <th class="num">panes</th>
-                  <th>outcome</th>
-                  <th class="num">age</th>
-                </tr>
-              </thead>
-              <tbody id="jobs-body">
-                <tr><td colspan="6" class="empty">loading…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
-
-    <div id="backdrop" class="backdrop hidden"></div>
-    <aside id="detail" class="detail hidden" aria-hidden="true">
-      <div class="detail-head">
-        <div>
-          <h2 id="d-title">job</h2>
-          <div id="d-sub" class="muted small mono"></div>
-        </div>
-        <button id="d-close" class="icon-btn" title="close">✕</button>
-      </div>
-      <nav class="d-tabs">
-        <button class="d-tab active" data-tab="overview">overview</button>
-        <button class="d-tab" data-tab="graph">graph</button>
-        <button class="d-tab" data-tab="source">source</button>
-      </nav>
-      <div class="detail-body">
-        <div id="tab-overview" class="tab-pane">
-          <section class="d-section">
-            <h3>receipt</h3>
-            <div id="d-receipt" class="kv"></div>
-          </section>
-          <section class="d-section">
-            <h3>report</h3>
-            <div id="d-report" class="kv"></div>
-            <table id="d-report-table" class="mini-table hidden">
-              <thead><tr><th>unit</th><th>result</th></tr></thead>
-              <tbody id="d-report-rows"></tbody>
-            </table>
-          </section>
-          <section class="d-section grow">
-            <h3>events <span id="d-ev-count" class="muted small"></span></h3>
-            <div id="d-events" class="events mono"></div>
-          </section>
-        </div>
-
-        <div id="tab-graph" class="tab-pane hidden">
-          <section class="d-section grow">
-            <h3>dag shape <span id="g-meta" class="muted small"></span></h3>
-            <div id="graph-view" class="graph-view">
-              <div class="empty">open a job to see its dag</div>
-            </div>
-          </section>
-        </div>
-
-        <div id="tab-source" class="tab-pane hidden">
-          <section class="d-section grow">
-            <h3>source <span id="s-meta" class="muted small"></span></h3>
-            <div id="source-view" class="source-view">
-              <div class="empty">open a job to see its source</div>
-            </div>
-          </section>
-        </div>
-      </div>
-    </aside>
+    <main id="view" class="view"></main>
 
     <div id="toast" class="toast hidden"></div>
 
