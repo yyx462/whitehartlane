@@ -66,6 +66,9 @@ function copyBeside(source: string, store: string): void {
   // read; it is staged beside the dag so the run is self-contained
   const data = join(source, "data")
   if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
+  // a coworker program carries member briefs in members/<name>.md
+  const members = join(source, "members")
+  if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
 }
 
 export function dagFileOf(input: string): string | null {
