@@ -118,3 +118,45 @@ test("run refuses a dag file that schedules or calls", async () => {
   assert.equal(refused.ok, false)
   if (!refused.ok) assert.match(refused.why, /does not call/)
 })
+
+test("run refuses a gate step with no [gates] detector and books nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-gate-"))
+  writeFileSync(
+    join(dir, "dag.mjs"),
+    'export const dag = {\n  name: "gated",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "await-review", does: "gate", after: ["students"] },\n    { id: "report", does: "report", after: ["await-review"] },\n  ],\n}\n',
+  )
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[hooks]\nunits = "true"\ngrade = "true"\ncounts = "true"\n',
+  )
+  const refused = prepareRun(dir)
+  assert.equal(refused.ok, false)
+  if (!refused.ok) assert.match(refused.why, /gate step await-review needs a \[gates\]/)
+  assert.equal(listJobs().filter((job) => job.task === "gated").length, 0)
+
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[hooks]\nunits = "true"\ngrade = "true"\ncounts = "true"\n\n[gates]\nawait-review = "true"\n',
+  )
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  if (booked.ok) {
+    const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
+    assert.match(staged, /\[gates\]/)
+    const { abortJob } = await import("../src/store.ts")
+    abortJob(booked.job, "test", 0, "cli")
+  }
+})
+
+test("run books git-wave and stages its detectors as absolute paths", async () => {
+  const dir = join(import.meta.dirname, "..", "examples", "git-wave")
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  if (!booked.ok) return
+  assert.equal(booked.kind, "lab")
+  const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
+  assert.match(staged, /signal = "node \//)
+  assert.match(staged, /await-review = "node \//)
+  const { abortJob } = await import("../src/store.ts")
+  abortJob(booked.job, "test", 0, "cli")
+})

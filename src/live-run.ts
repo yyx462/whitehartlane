@@ -3,13 +3,7 @@ import { protocolPath, type Wave } from "./protocol.ts"
 
 export type LiveSignal = { kind: "missing" } | { kind: "partial" } | { kind: "stop" } | { kind: "wave"; wave: Wave }
 
-export function readSignal(dir: string): LiveSignal {
-  let raw = ""
-  try {
-    raw = readFileSync(protocolPath(dir), "utf8")
-  } catch {
-    return { kind: "missing" }
-  }
+export function parseSignal(raw: string): LiveSignal {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -30,6 +24,16 @@ export function readSignal(dir: string): LiveSignal {
     wave.units.push({ id, brief })
   }
   return { kind: "wave", wave }
+}
+
+export function readSignal(dir: string): LiveSignal {
+  let raw = ""
+  try {
+    raw = readFileSync(protocolPath(dir), "utf8")
+  } catch {
+    return { kind: "missing" }
+  }
+  return parseSignal(raw)
 }
 
 export type MockEnd = { id: string; end: string | null }

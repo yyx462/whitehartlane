@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
 import { RefusedError } from "./backpressure.ts"
+import { parseSignal, type LiveSignal } from "./live-run.ts"
 
 const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -26,6 +27,8 @@ export type Layout = {
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string }
   hooks: { units: string; grade: string; counts: string }
+  detectors?: { signal?: string; end?: string }
+  gates?: Record<string, string>
   report?: { where?: string }
   layout?: Partial<Layout>
 }
@@ -67,6 +70,8 @@ export function loadManifest(taskDir: string): Manifest {
   const hooks = m.hooks ?? {}
   const report = m.report ?? {}
   const layoutRaw = m.layout ?? {}
+  const detectorsRaw = m.detectors ?? {}
+  const gatesRaw = m.gates ?? {}
   const tab = layoutRaw.tab
   const side = layoutRaw.orchestrator
   if (tab !== undefined && tab !== "same" && tab !== "new") {
@@ -94,6 +99,23 @@ export function loadManifest(taskDir: string): Manifest {
       throw new HookError(`workflow.model must be provider/model: ${model}`)
     }
   }
+  const detectors: { signal?: string; end?: string } = {}
+  const optCmd = (value: unknown, field: string): string | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value !== "string" || value.length === 0) {
+      throw new HookError(`${field} must be a command string: ${String(value)}`)
+    }
+    return value
+  }
+  const signal = optCmd(detectorsRaw.signal, "detectors.signal")
+  const end = optCmd(detectorsRaw.end, "detectors.end")
+  if (signal !== undefined) detectors.signal = signal
+  if (end !== undefined) detectors.end = end
+  const gates: Record<string, string> = {}
+  for (const [id, value] of Object.entries(gatesRaw)) {
+    const cmd = optCmd(value, `gates.${id}`)
+    if (cmd !== undefined) gates[id] = cmd
+  }
   return {
     workflow: { name, worker_kind: workerKind, slots, model },
     hooks: {
@@ -101,6 +123,8 @@ export function loadManifest(taskDir: string): Manifest {
       grade: str(hooks.grade, "hooks.grade"),
       counts: str(hooks.counts, "hooks.counts"),
     },
+    detectors: signal !== undefined || end !== undefined ? detectors : undefined,
+    gates: Object.keys(gates).length > 0 ? gates : undefined,
     report: report.where ? { where: str(report.where, "report.where") } : {},
     layout: {
       tab: tab as "same" | "new" | undefined,
@@ -198,6 +222,41 @@ export function runCounts(
     counts[name] = value
   }
   return counts
+}
+
+// Detectors: the program names where the photograph comes from; the
+// rail still decides. Same contract as every hook — exit 75 = the
+// provider refused (the rail retries), anything else is deterministic.
+export function runSignalDetector(taskDir: string, manifest: Manifest): LiveSignal {
+  const cmd = manifest.detectors?.signal
+  if (!cmd) throw new HookError("no signal detector in workflow.toml")
+  const { stdout, status, stderr } = runHook(cmd, taskDir)
+  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "signal detector exited 75")
+  if (status !== 0) throw new HookError(`signal detector exited ${status}: ${cmd}`)
+  // a detector that prints nothing has nothing to say yet — no signal
+  if (stdout.trim() === "") return { kind: "missing" }
+  return parseSignal(stdout)
+}
+
+export function runEndDetector(taskDir: string, manifest: Manifest, unitId: string): string | null {
+  const cmd = manifest.detectors?.end
+  if (!cmd) throw new HookError("no end detector in workflow.toml")
+  const { stdout, status, stderr } = runHook(`${cmd} ${quote(unitId)}`, taskDir)
+  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "end detector exited 75")
+  if (status !== 0) throw new HookError(`end detector exited ${status}: ${cmd}`)
+  const line = stdout.split("\n")[0]?.trim() ?? ""
+  if (line === "") return null
+  if (line === "done" || line === "blocked" || line === "dead") return line
+  throw new HookError(`end detector must print done, blocked, dead, or nothing: ${line.slice(0, 60)}`)
+}
+
+export function runGateDetector(taskDir: string, manifest: Manifest, gateId: string): boolean {
+  const cmd = manifest.gates?.[gateId]
+  if (!cmd) throw new HookError(`no [gates] ${gateId} detector in workflow.toml`)
+  const { stdout, status, stderr } = runHook(cmd, taskDir)
+  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || `gate ${gateId} exited 75`)
+  if (status !== 0) throw new HookError(`gate ${gateId} detector exited ${status}: ${cmd}`)
+  return stdout.split("\n")[0]?.trim() === "done"
 }
 
 export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifest } {
