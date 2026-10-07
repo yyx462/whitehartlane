@@ -939,6 +939,14 @@ async function runCoworker() {
   const refused = []
   const dead = []
   const askedCount = new Map()
+  // verdicts that arrived while the member was blocked — herdr refuses
+  // to prompt a blocked pane, so the note waits for the next beat
+  const pendingNote = new Map()
+  // the ball: whose turn the exchange waits on. Idle too long → one
+  // nudge, then a second, then the member is dead. A silent member
+  // must never stall the exchange forever.
+  const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
+  const nudged = new Map()
   let ended = null // "stop" | "cap" | "deadline" | "dead"
   while (!ended && Date.now() < deadline) {
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
@@ -948,6 +956,15 @@ async function runCoworker() {
       ledger?.emit("reject", { why: `message ${b.file}: ${b.why}` })
       log(`refused message ${b.file}: ${b.why}`)
       say("watcher", `refuse ${b.file}`)
+    }
+    // flush queued permission notes into panes that can take them
+    for (const [held, note] of pendingNote) {
+      const st = herdr("agent", "get", scoped(held)).stdout
+      if (st.includes('"agent_status":"blocked"') || st.includes('"agent_status":"working"')) continue
+      if (herdr("agent", "prompt", scoped(held), note).status === 0) {
+        pendingNote.delete(held)
+        log(`injected queued note into ${held}`)
+      }
     }
     const plan = relayPlan(messages, delivered, CAP)
     for (const r of plan.relays) {
@@ -966,6 +983,8 @@ async function runCoworker() {
         continue
       }
       delivered.push(r.file)
+      ballOn.name = r.to
+      ballOn.since = Date.now()
       ledger?.emit("relay", { from: r.from, to: r.to, file: r.file })
       log(`relay ${r.file}: ${r.from} -> ${r.to}`)
       say("rail", `relay ${r.from} -> ${r.to}`)
@@ -996,7 +1015,9 @@ async function runCoworker() {
         herdr("agent", "send-keys", scoped(m.name), "enter")
       } else {
         herdr("agent", "send-keys", scoped(m.name), "esc")
-        herdr("agent", "prompt", scoped(m.name), `[permission] ${verdict.message}`)
+        const note = `[permission] ${verdict.message}`
+        const rc = herdr("agent", "prompt", scoped(m.name), note)
+        if (rc.status !== 0) pendingNote.set(m.name, note)
       }
       ledger?.emit("permission", { member: m.name, decision: verdict.decision, path: verdict.path, ask: asked })
       log(`permission ${m.name} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"}`)
@@ -1005,6 +1026,32 @@ async function runCoworker() {
         dead.push(m.name)
         ledger?.emit("wake", { why: `member ${m.name} blocked past the permission cap` })
         log(`member ${m.name} hit the permission cap (6) — ending`)
+      }
+    }
+    // the stall guard: whoever holds the ball and idles too long gets
+    // nudged — twice, then the exchange ends. Working resets the clock.
+    if (ballOn.name && !dead.includes(ballOn.name)) {
+      const st = herdr("agent", "get", scoped(ballOn.name)).stdout
+      if (st.includes('"agent_status":"working"')) {
+        ballOn.since = Date.now()
+      } else if (Date.now() - ballOn.since > 120_000) {
+        const used = nudged.get(ballOn.name) ?? 0
+        if (used < 2) {
+          nudged.set(ballOn.name, used + 1)
+          herdr(
+            "agent", "prompt", scoped(ballOn.name),
+            used === 0
+              ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
+              : `Second and final nudge, ${ballOn.name}: the exchange waits on you. Act now or the job ends unresolved.`,
+          )
+          ballOn.since = Date.now()
+          log(`nudge ${ballOn.name} (${used + 1}/2)`)
+          ledger?.emit("reprompt", { member: ballOn.name, nudge: used + 1 })
+        } else {
+          dead.push(ballOn.name)
+          ledger?.emit("wake", { why: `member ${ballOn.name} stalled past the nudge cap` })
+          log(`member ${ballOn.name} stalled past the nudge cap — ending`)
+        }
       }
     }
     for (const m of members) {
