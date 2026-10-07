@@ -50,8 +50,16 @@ export function ensureProject(
   }
   const minted = pf === null
   const name = pf?.name ?? basename(dir)
-  const pid = pf?.project ?? (input.mint?.() ?? shortPid())
-  if (minted) writeFileSync(file, `${JSON.stringify({ project: pid, name }, null, 2)}\n`)
+  // uniqueness is checked, not prayed for: re-mint while the registry
+  // already holds the pid (6 random hex ≈ 16.7M, but birthday risk is
+  // real at scale — the registry is the arbiter)
+  let pid = pf?.project ?? ""
+  if (minted) {
+    while (pid === "" || existsSync(join(homeRoot(), "projects", `${pid}.json`))) {
+      pid = input.mint?.() ?? shortPid()
+    }
+    writeFileSync(file, `${JSON.stringify({ project: pid, name }, null, 2)}\n`)
+  }
   // register / refresh on the OS disk — identity lives in the file,
   // the registry is the durable index (a moved folder re-registers)
   try {
