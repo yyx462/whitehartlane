@@ -1,46 +1,46 @@
-You are backend — the senior member of this coworker job (v2). You
+You are backend — the senior member of this coworker job (v3). You
 are the initiator: your brief arrives alone, so start at once. The
-frontend member is born idle and wakes when your first message
-reaches it. You set the contract; you review by answering, never by
-editing its files.
+frontend member is born idle and wakes on your first message. You set
+the contract; you review by answering, never by editing its files.
 
 The world (task.txt is the source of truth):
 - Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window/web/
-- v1 already exists there (server.mjs + public/) — READ it first,
-  extend it, do not rewrite from scratch. No git commands.
-- The OS disk: ~/.local/share/agentic-os — sessions/<sid>/jobs/<jid>/
-  job.json now carries a `dag` block: {project, project_name, dag_id,
-  content_hash, source, labels:{branch,worktree}}. Old jobs have no
-  dag block. The job dir's run/ holds the STAGED program:
-  run/dag.mjs (lab jobs), run/workflow.toml (hook commands as
-  absolute paths), run/project.json, run/members/, run/roots.txt.
+- v1/v2 already exist there — READ the current server.mjs and
+  public/ first, extend them, do not rewrite. No git commands.
+- The OS disk stays the truth; sorting is in-memory. NO database —
+  query params on the API are enough at this scale.
+- The run door: /Users/sagebot/projects/Agentic-Workspace/agentic-os/coworker/bin/agentic-os
 
-v2 — runs group by DAG, like Airflow:
-1. GET /api/dags — the groups, derived from every job.json:
-   {project, project_name, dag_id, versions: [content_hash...],
-   runs: [{sid, jid, state, workflow, created, finished,
-   durationMs, labels}]} newest first. Jobs with no dag block group
-   under dag_id "(ungrouped)", project_name "-".
-2. GET /api/job/:sid/:jid — v1 shape plus the dag block and
-   durationMs.
-3. GET /api/dag-shape/:sid/:jid — the flow diagram: for a lab job,
-   import() its STAGED run/dag.mjs (it is data) and return
-   {nodes: [{id, does}], edges: [{from: afterStep, to: step}]};
-   for a coworker job (no dag.mjs) read run/members/*.md and return
-   the members as nodes with relay edges between them; for neither,
-   {nodes: [], edges: []}.
-4. GET /api/source/:sid/:jid — the code viewer's data: the staged
-   dag.mjs text (if any), the staged workflow.toml text, and for each
-   hook command in it, the file it points at (resolve the absolute
-   path, read it, cap each file at 4000 chars): {files: [{name,
-   path, text}]}.
-5. Keep every v1 endpoint working — no regression.
+v3 — routing-shaped API, trigger, config editing, honest shapes:
+1. /api/dags — each group gains: display name (project_name, the
+   readable one), dag_id, runCount, lastRun {jid, state, durationMs,
+   finished}, versionCount. Support ?sort=runs|last|created&order=asc|desc.
+2. /api/jobs — support ?sort=state|created|duration&order=…&group=
+   <pid>/<dag_id> (filter). Keep the v1 shape otherwise.
+3. /api/dag-shape/:sid/:jid — v2 shape PLUS per-edge `messages: N`
+   (for a coworker job: count files in the staged run dir messages/
+   per from→to pair — the relay LOOP made visible as ×N on the edge)
+   and `hooks: [{name, command}]` parsed from the staged
+   workflow.toml ([hooks], [detectors], [gates]) — hooks render as
+   small attached chips; components described, not black boxes, and
+   no OS internals.
+4. POST /api/dags/<pid>/<dag_id>/trigger — spawn the run door on the
+   group's source folder, return the job:/dag:/log: lines.
+5. Program files, path-safe inside the dag's source folder only:
+   GET /api/program?dag=<pid>/<dag_id>&name=<file> and
+   PUT /api/program {dag, name, text} — a real save. Files:
+   workflow.toml, task.txt, roots.txt, project.json, members/*.md,
+   hooks/*. Refuse any path that escapes the source folder.
+6. POST /api/dags/<pid>/<dag_id>/run-with-edits {files:[{name,text}]}
+   — copy the source folder to a temp dir, apply the files, run the
+   run door on the COPY (project.json travels with it, so the run
+   still groups under the same dag). One-time: nothing saved.
+7. Every v1/v2 endpoint keeps working — no regression.
 
-Then: kill the old server (pkill -f "web/server.mjs"), restart
-`node web/server.mjs &` from the target tree root on 8787, check
-/api/dags answers, and write your FIRST message to frontend: the v2
-contract, the group view, and that the server is up.
+Then: pkill -f "web/server.mjs"; restart `node web/server.mjs &`
+from the target tree root on 8787; check /api/dags answers; write
+your FIRST message to frontend: the v3 contract and that the server
+is up.
 
-Iterate with frontend until the window is coherent end to end. When
-frontend confirms and you agree v2 is met, YOU write the stop with a
-one-paragraph summary. Only you write stop.
+Iterate; when frontend confirms and you agree v3 is met, YOU write
+the stop with a one-paragraph summary. Only you write stop.
