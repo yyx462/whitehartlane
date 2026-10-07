@@ -1,0 +1,19 @@
+# ui-window — a coworker program: the window that lists Jobs and can run.
+# Two members: backend (the senior, GLM-5.3) designs and serves;
+# frontend (GLM-5.3-Flash) builds the pages and tunes them with vista.
+# They talk through the rail — message files on the job dir.
+[workflow]
+name = "ui-window"
+kind = "coworker"
+worker_kind = "opencode"
+
+[members.backend]
+model = "opencode-go/glm-5.3"
+
+[members.frontend]
+model = "opencode-go/glm-5.3-flash"
+
+[hooks]
+units = "true"
+grade = "true"
+counts = "node hooks/counts.mjs"
