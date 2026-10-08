@@ -2,8 +2,9 @@ import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } 
 import { basename, dirname, join, resolve } from "node:path"
 import { loadDagFile, type Dag } from "./dag.ts"
 import { HookError, loadManifest } from "./hooks.ts"
-import { workflowKind } from "./workflow-kind.ts"
+import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
+import { contentHashOf, dagIdOf, ensureProject, labelsFor, registerDag } from "./project.ts"
 import {
   appendEvent,
   createJob,
@@ -18,7 +19,8 @@ export type RunReady = {
   job: JobRecord
   log: string
   trace: string
-  kind: "fan-out" | "lab"
+  kind: WorkflowKind
+  warnings: string[]
 }
 
 export type RunRefused = {
@@ -58,7 +60,7 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "dag.mjs", "roots.txt"]) {
+  for (const name of ["actor.md", "task.txt", "dag.mjs", "roots.txt", "project.json"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
@@ -66,6 +68,9 @@ function copyBeside(source: string, store: string): void {
   // read; it is staged beside the dag so the run is self-contained
   const data = join(source, "data")
   if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
+  // a coworker program carries member briefs in members/<name>.md
+  const members = join(source, "members")
+  if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
 }
 
 export function dagFileOf(input: string): string | null {
@@ -95,7 +100,7 @@ function defaultManifest(dag: Dag): string {
 
 function book(
   dir: string,
-  kind: "fan-out" | "lab",
+  kind: WorkflowKind,
   task: string,
   slots: number,
   stage: (store: string) => void,
@@ -119,16 +124,59 @@ function book(
     appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: kind })
     return { ok: false, why: another.why ?? "a job is already running", code: 1 }
   }
+  const warnings: string[] = []
+  // dag identity: project pid (minted once into project.json), dag_id
+  // (explicit, else the name, else a hashed id + a loud warning), the
+  // source content hash as the version, branch/worktree as labels.
+  // Paths are never identity; worktrees copy project.json and combine.
+  const proj = ensureProject(dir)
+  if (proj.minted) warnings.push(`no project.json in ${dir} — minted ${proj.pid} and wrote it there`)
+  const dagId = dagIdOf({
+    dagId: (() => {
+      try {
+        return loadManifest(dir).workflow.dag_id
+      } catch {
+        return undefined
+      }
+    })(),
+    name: task,
+    toml: (() => {
+      try {
+        return readFileSync(join(dir, "workflow.toml"), "utf8")
+      } catch {
+        try {
+          return readFileSync(join(dir, "dag.mjs"), "utf8")
+        } catch {
+          return task
+        }
+      }
+    })(),
+  })
+  if (dagId.derived) {
+    warnings.push(`no dag_id (and no name) in ${dir} — derived ${dagId.dagId} from content; define workflow.dag_id to group runs`)
+  }
+  const version = contentHashOf(dir)
+  const dup = registerDag(proj.pid, dagId.dagId, version, dir)
+  if (dup) warnings.push(dup)
+  const dag = {
+    project: proj.pid,
+    project_name: proj.name,
+    dag_id: dagId.dagId,
+    content_hash: version,
+    source: dir,
+    labels: labelsFor(dir),
+  }
   const job = createJob({
     sid: session.id,
     stoodUpBy: "standalone",
     workflow: kind,
     task,
     runDir: true,
+    dag,
   })
   stage(job.dir)
   appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })
-  return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind }
+  return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind, warnings }
 }
 
 function stageDag(dag: Dag, dir: string, toml: boolean): (store: string) => void {
@@ -186,7 +234,7 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   }
   let slots = 2
   let task = basename(dir)
-  let kind: "fan-out" | "lab" = "fan-out"
+  let kind: WorkflowKind = "fan-out"
   try {
     kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
     const manifest = loadManifest(dir)
