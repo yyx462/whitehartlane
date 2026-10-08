@@ -1,0 +1,1 @@
+Is this task specified enough to start work with no follow-up questions: it names the exact change or artifact to produce, the done shape (what proves it finished), and what must not be touched?

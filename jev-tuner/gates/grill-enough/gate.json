@@ -1,0 +1,13 @@
+{
+  "id": "grill-enough",
+  "kind": "noul",
+  "min_cases": 50,
+  "margin": 0.02,
+  "positive": "enough",
+  "negative": "not-enough",
+  "state": "task",
+  "describes": "whether a task text is specified enough to write worker hooks and run without more questions",
+  "input_fields": {
+    "task": "the task text exactly as the user typed it at the front door"
+  }
+}

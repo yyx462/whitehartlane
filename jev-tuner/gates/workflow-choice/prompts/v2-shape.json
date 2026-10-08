@@ -1,0 +1,7 @@
+{
+  "question": "Should this task run as parallel independent units, or as one directed piece of work?",
+  "options": {
+    "fan-out": "The task splits into units where no unit needs another's result — each can run alone, like separate lookups or separate files to check.",
+    "direct": "The task is one connected piece of work where later steps need earlier results, like a coding change or one investigation in a single chat."
+  }
+}

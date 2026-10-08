@@ -1,0 +1,61 @@
+{
+  "gate": "permission-needed",
+  "at": "2026-10-08T06:14:02.815Z",
+  "cases": 60,
+  "candidates": [
+    {
+      "name": "v2-toolstate",
+      "accuracy": 0.95,
+      "threshold": 0.7,
+      "confusion": {
+        "hit": 57,
+        "miss": 3
+      },
+      "misses": [
+        null,
+        null,
+        null
+      ],
+      "errors": []
+    },
+    {
+      "name": "v3-skeptic",
+      "accuracy": 0.9333333333333333,
+      "threshold": 0.55,
+      "confusion": {
+        "hit": 56,
+        "miss": 4
+      },
+      "misses": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "errors": []
+    },
+    {
+      "name": "v1-baseline",
+      "accuracy": 0.9166666666666666,
+      "threshold": 0.7,
+      "confusion": {
+        "hit": 55,
+        "miss": 5
+      },
+      "misses": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "errors": []
+    }
+  ],
+  "winner": {
+    "name": "v2-toolstate",
+    "accuracy": 0.95,
+    "threshold": 0.7
+  },
+  "landed": true
+}

@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
 # Copied call shape from yyx_jev. Not the skill. The question is the product policy.
+# The question and criteria are the jev-tuner's landed winner
+# (src/jev-prompts/workflow-choice.*) — fallback embedded below.
 # Auth is read from the same files jev uses. The value is never printed.
 set -uo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+PROMPT_FILE="$HERE/../src/jev-prompts/workflow-choice.txt"
+META_FILE="$HERE/../src/jev-prompts/workflow-choice.json"
 QUESTION="Is this task a bag of independent units, such as separate web searches, where no unit needs another's result?"
+CRIT_FANOUT="The task is independent units. No unit needs another unit's result."
+CRIT_DIRECT="The task is one piece of work, like a coding change in one chat."
+[ -s "$PROMPT_FILE" ] && QUESTION="$(tr -d '\n' < "$PROMPT_FILE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+if [ -s "$META_FILE" ]; then
+  J="$(jq -r '.options["fan-out"] // empty' "$META_FILE")"; [ -n "$J" ] && CRIT_FANOUT="$J"
+  J="$(jq -r '.options.direct // empty' "$META_FILE")"; [ -n "$J" ] && CRIT_DIRECT="$J"
+fi
 DRY=0
 STATE=""
 while [ $# -gt 0 ]; do
@@ -31,7 +43,7 @@ cfg() {
   done
 }
 
-REQ="$(jq -n --arg state "$STATE" --arg q "$QUESTION" '{
+REQ="$(jq -n --arg state "$STATE" --arg q "$QUESTION" --arg fanout "$CRIT_FANOUT" --arg direct "$CRIT_DIRECT" '{
   model: "jev-1.13",
   state: $state,
   questions: {
@@ -39,8 +51,8 @@ REQ="$(jq -n --arg state "$STATE" --arg q "$QUESTION" '{
       type: "choice",
       instructions: $q,
       criteria: {
-        "fan-out": "The task is independent units. No unit needs another unit'\''s result.",
-        "direct": "The task is one piece of work, like a coding change in one chat."
+        "fan-out": $fanout,
+        "direct": $direct
       }
     }
   }
