@@ -49,8 +49,8 @@ paused | aborted | orphaned ── continue (typed) ─────────�
 
 ## Continue, mechanically
 
-1. Retire stragglers of the old generation (existing machinery,
-   `bin/agentic-os` relaunch path).
+1. Retire stragglers of the old generation (the absorbed relaunch
+   machinery, `bin/agentic-os` continue path).
 2. For each pane record with unfinished work: respawn via shep with
    the host session resumed from `{tool, session_id}`; the rail
    prompts `continue` (+ worktree/folder path context). A member
