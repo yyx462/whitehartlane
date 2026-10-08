@@ -15,7 +15,7 @@ The chat still stands a Job up itself. That is a second door. It must call `run`
 
 `run` reads the folder you pass and writes the Job under the session disk. The source is code and config. A run does not write it. Hook commands in the Job dir are absolute paths back to that source. The chat's materialize still copies a hooks folder.
 
-A Job started this way can finish with no person in the loop. A dead orchestrator still waits: relaunch or abort. Promote is never part of the Job.
+A Job started this way can finish with no person in the loop. A dead orchestrator still waits: continue or abort. Promote is never part of the Job.
 
 ## Rails — machinery every workflow uses and none may rewrite
 
@@ -56,10 +56,12 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `sweep` (running Job, dead orchestrator pid). Recover, ask-first: a
   dead orchestrator parks the Job `orphaned` in a derived queue —
   announced on the periodic check, never a wake, never
-  auto-resurrected (what you killed stays killed); graceful stops abort
-  and never orphan. `relaunch` is user-decided, retires stragglers of
-  the dead generation first, capped at 2 tries per Job; `abort`
-  declines.
+  auto-resurrected (what you killed stays killed); graceful stops pause
+  or abort and never orphan. `pause` drains to the workflow's boundary
+  and books `paused` (ADR 5); `abort` kills now (SIGKILL — booked
+  sessions survive); `continue` is user-decided, retires stragglers of
+  the parked generation first, and rebirths unfinished work from booked
+  session pointers — never capped, a soft `continued ×N` counter.
 - **Backpressure and the retry cap.** Backpressure is the provider's
   refusal treated as information: the hook classifies (exit 75 =
   refused/slowed; anything else is deterministic), the rail retries —

@@ -10,6 +10,7 @@ const {
   abortJob,
   appendEvent,
   attachPane,
+  continueJob,
   createJob,
   eventsPath,
   finishJob,
@@ -24,7 +25,6 @@ const {
   orphanJob,
   projectJob,
   readEvents,
-  relaunchJob,
   shortId,
 } = await import("../src/store.ts")
 
@@ -176,7 +176,7 @@ test("a model in workflow.toml lands in the project files, not the user pi dir",
   assert.equal(existsSync(join(dir, ".pi", "auth.json")), false)
 })
 
-test("a dead orchestrator parks the Job as orphaned; relaunch and decline are bookkept", () => {
+test("a dead orchestrator parks the Job as orphaned; continue and decline are bookkept", () => {
   const { session } = findOrOpenSession({ cwd: "/tmp/orphan-lifecycle" })
   const job = createJob({ sid: session.id, stoodUpBy: "first_mate", workflow: "fan-out", task: "t", dir: "/tmp/o" })
   assert.equal(job.state, "running")
@@ -191,23 +191,23 @@ test("a dead orchestrator parks the Job as orphaned; relaunch and decline are bo
   assert.equal(loadJob(session.id, job.id)!.state, "orphaned")
   assert.ok(readEvents(session.id).some((e) => e.kind === "job.orphaned" && e.jid === job.id))
 
-  const relaunched = relaunchJob(job, 99901)
-  assert.equal(relaunched.state, "running")
-  assert.equal(relaunched.relaunches, 1)
-  assert.equal(relaunched.orphan, undefined)
-  const relaunched2 = relaunchJob(relaunched, 99902)
-  assert.equal(relaunched2.relaunches, 2)
+  const continued = continueJob(job, 99901)
+  assert.equal(continued.state, "running")
+  assert.equal(continued.continues, 1)
+  assert.equal(continued.orphan, undefined)
+  const continued2 = continueJob(continued, 99902)
+  assert.equal(continued2.continues, 2)
 
-  // the projection rebuilds the whole arc: born → orphaned → relaunched ×2
+  // the projection rebuilds the whole arc: born → orphaned → continued ×2
   const projected = projectJob(session.id, job.id)!
   assert.equal(projected.state, "running")
-  assert.equal(projected.relaunches, 2)
+  assert.equal(projected.continues, 2)
   assert.equal(projected.orphan, undefined)
   assert.equal(projected.pid, 99902)
 
   // declining an orphaned job aborts with the user as actor
-  orphanJob(relaunched2, "pid gone again", 1)
-  abortJob(relaunched2, "declined by user", 1, "first_mate")
+  orphanJob(continued2, "pid gone again", 1)
+  abortJob(continued2, "declined by user", 1, "first_mate")
   const declined = projectJob(session.id, job.id)!
   assert.equal(declined.state, "aborted")
   assert.equal(declined.abort!.reason, "declined by user")

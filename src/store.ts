@@ -19,7 +19,7 @@ export type HostBinding = {
 export type Parent = "first_mate" | "orchestrator"
 export type StoodUpBy = Parent | "standalone"
 // orphaned: the orchestrator died without a graceful stop — the Job is
-// parked in the ask-first relaunch queue, not finished (zen 5).
+// parked in the ask-first continue queue, not finished (zen 5).
 // paused: the orchestrator drained to its boundary and parked on
 // purpose (ADR 5) — not a finish; continue resumes it.
 export type JobState = "running" | "paused" | "orphaned" | "retired" | "aborted"
@@ -340,8 +340,9 @@ export function abortJob(
 }
 
 // A dead orchestrator parks the Job in the ask-first queue: sweep
-// detects (running + dead pid), the user decides (relaunch or abort).
-// Graceful stops never orphan — the signal handler aborts on purpose.
+// detects (running + dead pid), the user decides (continue or abort).
+// Graceful stops never orphan — pause drains on purpose, and the
+// signal handler aborts on purpose.
 export function orphanJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
   if (job.state !== "running") return job
   const at = new Date().toISOString()
@@ -349,25 +350,6 @@ export function orphanJob(job: JobRecord, reason: string, panesRemaining: number
   job.orphan = { reason, panesRemaining, at }
   saveJob(job)
   appendEvent(job.sid, { actor: "sweep", kind: "job.orphaned", jid: job.id, reason, panesRemaining })
-  return job
-}
-
-// Relaunch is user-decided, never automatic, and capped (the cap lives
-// in the CLI; the record counts the tries so the receipt stays honest).
-export function relaunchJob(job: JobRecord, pid: number): JobRecord {
-  job.state = "running"
-  job.relaunches = (job.relaunches ?? 0) + 1
-  job.orphan = undefined
-  job.finished = undefined
-  job.pid = pid
-  saveJob(job)
-  appendEvent(job.sid, {
-    actor: "first_mate",
-    kind: "job.relaunched",
-    jid: job.id,
-    pid,
-    relaunches: job.relaunches,
-  })
   return job
 }
 
@@ -488,6 +470,8 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
         at: e.ts,
       }
     } else if (e.kind === "job.relaunched") {
+      // historical: relaunch was absorbed into continue (ADR 5, M3) —
+      // old traces still replay
       job.state = "running"
       job.relaunches = Number(e.relaunches ?? (job.relaunches ?? 0) + 1)
       job.orphan = undefined

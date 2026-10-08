@@ -1,18 +1,17 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
-// continue | relaunch | promote — the start door is run. It reads
-// workflow.toml and starts that workflow's engine. The rest read and
-// settle the OS disk (~/.local/share/agentic-os). jobs lists every
-// Job record with its state and receipt; audit diffs live shep panes
-// against booked panes (every pane is born booked — a live pane no Job
-// admits is a violation); sweep parks running Jobs whose orchestrator
-// died without a graceful stop in the ask-first queue — orphaned, not
-// aborted, never auto-resurrected; pause SIGTERMs a live orchestrator,
-// which drains to a unit boundary and books paused (ADR 5); abort kills
-// immediately (SIGKILL — sessions stay booked for a later continue);
-// continue rebirths a paused/aborted/orphaned Job from its booked
-// session pointers; relaunch re-runs one from its run dir (user-decided,
-// capped at 2 tries per Job — superseded by continue).
+// continue | promote — the start door is run. It reads workflow.toml and
+// starts that workflow's engine. The rest read and settle the OS disk
+// (~/.local/share/agentic-os). jobs lists every Job record with its state
+// and receipt; audit diffs live shep panes against booked panes (every
+// pane is born booked — a live pane no Job admits is a violation); sweep
+// parks running Jobs whose orchestrator died without a graceful stop in
+// the ask-first queue — orphaned, not aborted, never auto-resurrected;
+// pause SIGTERMs a live orchestrator, which drains to its boundary and
+// books paused (ADR 5); abort kills immediately (SIGKILL — sessions stay
+// booked for a later continue); continue rebirths a paused/aborted/
+// orphaned Job from its booked session pointers (the old relaunch,
+// absorbed — M3: no cap, a soft continued ×N counter).
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -27,12 +26,9 @@ import {
   orphanJob,
   readAllEvents,
   readEvents,
-  relaunchJob,
   saveJob,
 } from "../src/store.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
-
-const RELAUNCH_CAP = 2
 
 // "90s", "2m", "1h", "5000" (ms) — the pause --wait one-shot ceiling.
 function parseDuration(raw) {
@@ -224,12 +220,12 @@ async function main() {
       orphanJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
       swept += 1
       console.log(`${job.id} orphaned (parked, ask-first) — ${job.dir}`)
-      console.log(`  relaunch: agentic-os relaunch ${job.id} | decline: agentic-os abort ${job.id}`)
+      console.log(`  continue: agentic-os continue ${job.id} | decline: agentic-os abort ${job.id}`)
       if (orphans.length > 0) {
-        console.log(`  straggler panes still live (relaunch retires them): ${orphans.map((p) => p.label).join(", ")}`)
+        console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
     }
-    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for relaunch decision`)
+    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for a continue decision`)
     return
   }
 
@@ -307,52 +303,13 @@ async function main() {
     return
   }
 
-  if (cmd === "relaunch") {
-    const jid = process.argv[3]
-    const job = jobs.find((j) => j.id === jid)
-    if (!jid || !job) {
-      console.error(`relaunch: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
-      process.exitCode = 2
-      return
-    }
-    if (job.state !== "orphaned") {
-      console.error(`relaunch: ${job.id} is ${job.state}, not orphaned — run: agentic-os sweep`)
-      process.exitCode = 2
-      return
-    }
-    const tries = job.relaunches ?? 0
-    if (tries >= RELAUNCH_CAP) {
-      console.error(`relaunch: ${job.id} already relaunched ${tries}x (cap ${RELAUNCH_CAP}) — decline: agentic-os abort ${job.id}`)
-      process.exitCode = 2
-      return
-    }
-    // Stragglers first (2026-10-01 stress-test): a live pane from the
-    // dead generation would double-write a unit dir and poison the
-    // receipt. Retire every pane of the old generation, then relaunch.
-    for (const pane of job.panes.filter((p) => p.died === undefined)) {
-      try {
-        execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
-      } catch {}
-      killPane(job, pane.label)
-    }
-    const orchestrator = join(import.meta.dirname, orchestratorBin(job.workflow))
-    const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
-    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, job.dir], {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, AGENTIC_OS_SID: job.sid, AGENTIC_OS_JID: job.id },
-    })
-    child.unref()
-    relaunchJob(job, child.pid)
-    console.log(`relaunched ${job.id} (pid ${child.pid}, try ${tries + 1}/${RELAUNCH_CAP}) — log: ${join(job.dir, "orchestrator.log")}`)
-    return
-  }
-
   // continue (ADR 5): the reborn verb — paused, aborted, and orphaned
   // all continue the same way. Stragglers retire first (a live pane
   // from the parked generation would double-write a unit dir), then
   // the orchestrator resumes unfinished units from booked session
   // pointers. Deliberate and typed; the counter warns, never blocks.
+  // (Absorbs the old relaunch: same straggler-retire + respawn path,
+  // no cap — M3.)
   if (cmd === "continue") {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
@@ -425,7 +382,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | relaunch <jid> | promote <jid>")
+  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | promote <jid>")
   process.exitCode = 2
 }
 

@@ -207,6 +207,35 @@ test("continueBriefFor restates the settle protocol for both resume shapes", () 
   assert.match(takeover, /could not be resumed/)
 })
 
+test("the relay ledger round-trips deliveries and refusals", async () => {
+  const { interruptedMember, readRelayLedger, writeRelayLedger } = await import("../src/coworker.ts")
+  const dir = mkdtempSync(join(tmpdir(), "pause-relay-"))
+  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [] })
+  writeRelayLedger(dir, { delivered: ["3-alice.json"], refused: ["2-bad.json"] })
+  assert.deepEqual(readRelayLedger(dir), { delivered: ["3-alice.json"], refused: ["2-bad.json"] })
+  // a corrupt ledger degrades to empty — mail re-delivers, never lost
+  writeFileSync(join(dir, "relay.json"), "{oops")
+  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [] })
+})
+
+test("interruptedMember derives the mid-turn member from disk alone", async () => {
+  const { interruptedMember } = await import("../src/coworker.ts")
+  const msg = (file: string, seq: number, from: string, to: string) => ({ file, seq, from, to, type: "note" as const, body: "b" })
+  const messages = [
+    msg("1-alice.json", 1, "alice", "bob"),
+    msg("2-bob.json", 2, "bob", "carol"),
+    msg("3-carol.json", 3, "carol", "alice"),
+  ]
+  // carol took the last delivered mail and never answered — mid-turn
+  assert.equal(interruptedMember(messages, ["1-alice.json", "3-carol.json"]), "alice")
+  // answered after the last delivery: nobody mid-turn
+  assert.equal(interruptedMember(messages, ["1-alice.json", "2-bob.json"]), null)
+  // no deliveries yet: the initiator holds the ball
+  assert.equal(interruptedMember(messages, [], "dora"), "dora")
+  // a delivered file with no matching message: nothing derivable
+  assert.equal(interruptedMember(messages, ["9-ghost.json"]), null)
+})
+
 test("the store books pause, continue, and pane sessions — and the trace replays them", async () => {
   process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-pause-store-"))
   const { attachPane, continueJob, createJob, openSession, pauseJob, projectJob, setPaneSession } =
