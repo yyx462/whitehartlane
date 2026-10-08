@@ -1,0 +1,1 @@
+Is this task specified enough to write worker hooks and run without more questions?

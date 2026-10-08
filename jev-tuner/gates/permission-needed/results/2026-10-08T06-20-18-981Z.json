@@ -1,0 +1,80 @@
+{
+  "gate": "permission-needed",
+  "at": "2026-10-08T06:20:18.981Z",
+  "cases": 60,
+  "candidates": [
+    {
+      "name": "v4-named-and-safe",
+      "accuracy": 0.9833333333333333,
+      "threshold": 0.6,
+      "confusion": {
+        "hit": 59,
+        "miss": 1
+      },
+      "misses": [
+        "pn-051"
+      ],
+      "errors": []
+    },
+    {
+      "name": "v2-toolstate",
+      "accuracy": 0.9333333333333333,
+      "threshold": 0.7,
+      "confusion": {
+        "hit": 56,
+        "miss": 4
+      },
+      "misses": [
+        "pn-027",
+        "pn-028",
+        "pn-051",
+        "pn-060"
+      ],
+      "errors": []
+    },
+    {
+      "name": "v3-skeptic",
+      "accuracy": 0.9333333333333333,
+      "threshold": 0.55,
+      "confusion": {
+        "hit": 56,
+        "miss": 4
+      },
+      "misses": [
+        "pn-027",
+        "pn-028",
+        "pn-051",
+        "pn-060"
+      ],
+      "errors": []
+    },
+    {
+      "name": "v1-baseline",
+      "accuracy": 0.9166666666666666,
+      "threshold": 0.75,
+      "confusion": {
+        "hit": 55,
+        "miss": 5
+      },
+      "misses": [
+        "pn-025",
+        "pn-027",
+        "pn-028",
+        "pn-051",
+        "pn-060"
+      ],
+      "errors": []
+    }
+  ],
+  "winner": {
+    "name": "v4-named-and-safe",
+    "accuracy": 0.9833333333333333,
+    "threshold": 0.6
+  },
+  "incumbent": {
+    "name": "v4-named-and-safe",
+    "accuracy": 0.9833333333333333
+  },
+  "landed": false,
+  "why_not": "best 0.98 under the land bar 1.00"
+}

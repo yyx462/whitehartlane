@@ -12,7 +12,7 @@ import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, run
 import { loadDagFile, tick } from "../src/dag.ts"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt } from "../src/coworker.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
-import { decidePermission } from "../src/permission.ts"
+import { decidePermission, tunedPermissionJudge } from "../src/permission.ts"
 import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
@@ -1004,10 +1004,18 @@ async function runCoworker() {
       const term = herdr("agent", "read", scoped(m.name)).stdout
       const at = term.lastIndexOf("Permission required")
       const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
-      const verdict = decidePermission({
-        question,
-        allowedRoots: [taskDir, sandboxOf.get(m.name) ?? "", ...programRoots],
-      })
+      // the gray zone is a jev question: the judge reads the ask plus
+      // the member's brief, with the tuner's landed prompt
+      const briefFile = join(taskDir, "briefs", `${m.name}.md`)
+      const context = existsSync(briefFile) ? readFileSync(briefFile, "utf8").slice(0, 2000) : undefined
+      const verdict = decidePermission(
+        {
+          question,
+          allowedRoots: [taskDir, sandboxOf.get(m.name) ?? "", ...programRoots],
+          context,
+        },
+        tunedPermissionJudge(),
+      )
       const asked = (askedCount.get(m.name) ?? 0) + 1
       askedCount.set(m.name, asked)
       if (verdict.decision === "allow" && verdict.path) {

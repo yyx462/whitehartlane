@@ -1,0 +1,4 @@
+{
+  "threshold": 0.6,
+  "gate": "permission-needed"
+}

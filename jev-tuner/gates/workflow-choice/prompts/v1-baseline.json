@@ -1,0 +1,7 @@
+{
+  "question": "Is this task a bag of independent units, such as separate web searches, where no unit needs another's result?",
+  "options": {
+    "fan-out": "The task is independent units. No unit needs another unit's result.",
+    "direct": "The task is one piece of work, like a coding change in one chat."
+  }
+}
