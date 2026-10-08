@@ -25,7 +25,7 @@ export type Layout = {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; dag_id?: string }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; dag_id?: string; drain_timeout_ms?: number }
   hooks: { units: string; grade: string; counts: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
@@ -92,6 +92,13 @@ export function loadManifest(taskDir: string): Manifest {
       throw new HookError(`workflow.slots must be an integer 1-9: ${workflow.slots}`)
     }
   }
+  let drainTimeoutMs: number | undefined
+  if (workflow.drain_timeout_ms !== undefined) {
+    drainTimeoutMs = Number(workflow.drain_timeout_ms)
+    if (!Number.isInteger(drainTimeoutMs) || drainTimeoutMs < 1_000 || drainTimeoutMs > 3_600_000) {
+      throw new HookError(`workflow.drain_timeout_ms must be an integer 1000-3600000 (ms): ${workflow.drain_timeout_ms}`)
+    }
+  }
   let model: string | undefined
   if (workflow.model !== undefined) {
     model = str(workflow.model, "workflow.model")
@@ -124,7 +131,7 @@ export function loadManifest(taskDir: string): Manifest {
     if (cmd !== undefined) gates[id] = cmd
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(dagId ? { dag_id: dagId } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(dagId ? { dag_id: dagId } : {}), drain_timeout_ms: drainTimeoutMs },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),

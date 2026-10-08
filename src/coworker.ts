@@ -3,7 +3,7 @@
 // (birth, prompt, retire, report) lives in bin/lab-orchestrator.
 // A worker never writes another worker: the plan only ever names
 // prompts the RAIL delivers.
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 export type SeedSpec = { tool: string; session_id: string; since?: string }
@@ -142,6 +142,38 @@ export function relayPlan(messages: Message[], delivered: string[], cap: number)
     stop: stopMsg !== undefined || capped,
     why: stopMsg ? "stop" : capped ? "cap" : undefined,
   }
+}
+
+// The relay delivery ledger (ADR 5 / M2): outliving memory for the
+// relay — which message files have already been injected into panes,
+// and which were refused. Committed after each delivery, so a crash
+// re-delivers at worst (a duplicate prompt), never loses mail.
+export type RelayLedger = { delivered: string[]; refused: string[] }
+
+export function readRelayLedger(taskDir: string): RelayLedger {
+  try {
+    const parsed = JSON.parse(readFileSync(join(taskDir, "relay.json"), "utf8")) as Partial<RelayLedger>
+    return { delivered: parsed.delivered ?? [], refused: parsed.refused ?? [] }
+  } catch {
+    return { delivered: [], refused: [] }
+  }
+}
+
+export function writeRelayLedger(taskDir: string, ledger: RelayLedger): void {
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "relay.json"), JSON.stringify(ledger, null, 2))
+}
+
+// Who was mid-turn when the run parked (ADR 5): the member that took
+// the last delivered mail and never answered. Derived purely from disk
+// — no booking needed at park time, so even a SIGKILLed orchestrator
+// yields the answer. No deliveries yet: the initiator holds the ball.
+export function interruptedMember(messages: Message[], delivered: string[], initiator?: string): string | null {
+  if (delivered.length === 0) return initiator ?? null
+  const last = messages.find((m) => m.file === delivered[delivered.length - 1])
+  if (!last) return null
+  const answered = messages.some((m) => m.from === last.to && m.seq > last.seq)
+  return answered ? null : last.to
 }
 
 // The protocol every member brief carries: how to talk. The program's
