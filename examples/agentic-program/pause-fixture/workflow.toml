@@ -1,0 +1,19 @@
+# pause-fixture — the smallest coworker exchange: one note, one
+# answer, stop. A live fixture for pause/continue smoke tests: trigger
+# it, pause mid-exchange, continue, abort — the whole verb loop on a
+# run that costs two small agent turns.
+[workflow]
+name = "pause-fixture"
+dag_id = "pause-fixture"
+kind = "coworker"
+worker_kind = "opencode"
+
+[members.alpha]
+initiates = true
+
+[members.beta]
+
+[hooks]
+units = "true"
+grade = "true"
+counts = "node hooks/counts.mjs"

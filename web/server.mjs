@@ -17,7 +17,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const OS_ROOT = path.join(process.env.HOME, ".local/share/agentic-os");
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const RUN_DOOR =
-  "/Users/sagebot/projects/Agentic-Workspace/agentic-os/coworker/bin/agentic-os";
+  "/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
 
@@ -119,8 +119,12 @@ function jobFileOf(sid, jid) {
 //   retired + report failed / any failed rows  -> "failed"
 //   aborted                                    -> "failed"
 //   running                                    -> "running"
+//   paused (v5)                                -> "paused"
 //   orphaned                                   -> "orphaned"
 // The raw state always travels alongside (detail views show reasons).
+// v5: paused is an intentional park — never red, never "running". The
+// drain may take up to the ceiling, so the state flips a beat after
+// the POST /pause returns; until the booking lands it reads running.
 
 function reportOf(job) {
   if (!job?.dir) return null;
@@ -141,6 +145,7 @@ function reportHasFailures(report) {
 function statusOf(job, report) {
   const st = job?.state || "";
   if (st === "running") return "running";
+  if (st === "paused" || job?.pause) return "paused";
   if (job?.orphan || st === "orphaned") return "orphaned";
   if (st === "aborted" || job?.abort) return "failed";
   if (st === "retired") {
@@ -151,11 +156,18 @@ function statusOf(job, report) {
     }
     return job?.receipt?.status === "done" ? "success" : "failed";
   }
-  return "running"; // unknown / inflight reads as running
+  return "unknown"; // unknown states never masquerade as running
 }
 
-// semantic order for ?sort=status (running -> orphaned -> failed -> success)
-const STATUS_RANK = { running: 0, orphaned: 1, failed: 2, success: 3 };
+// semantic order for ?sort=status
+// (running -> paused -> orphaned -> failed -> success; unknown last)
+const STATUS_RANK = {
+  running: 0,
+  paused: 1,
+  orphaned: 2,
+  failed: 3,
+  success: 4,
+};
 
 // the staged program dir: job.dir when it is a dir, else the canonical
 // sessions/<sid>/jobs/<jid>/run
@@ -180,7 +192,7 @@ function flattenJob(job) {
     workflow: job.workflow || null,
     stoodUpBy: job.stoodUpBy || null,
     state: job.state || "unknown", // raw state, kept alongside the mapping
-    status: statusOf(job, report), // v4 vocabulary: success|failed|running|orphaned
+    status: statusOf(job, report), // v4 vocabulary: success|failed|running|paused|orphaned
     reportStatus: report?.status ?? null,
     legacy: !job.dag, // v4: no dag block -> legacy, never shown as a dag
     task: job.task || null,
@@ -208,6 +220,8 @@ function flattenJob(job) {
     receipt: job.receipt || null, // {panesRemaining,panesTotal,unitsDone,unitsFailed,status,report,finished}
     abort: job.abort || null, // {reason,panesRemaining,finished}
     orphan: job.orphan || null, // {reason,panesRemaining,at}
+    pause: job.pause || null, // v5: {reason,panesRemaining,at} — the park receipt
+    continues: job.continues ?? null, // v5: soft continued ×N counter (no cap)
     hasReport: job.dir ? fs.existsSync(reportPath) : false,
   };
 }
@@ -1119,6 +1133,54 @@ function spawnRun(folder) {
   });
 }
 
+// v5: run one rail verb (pause|abort|continue) against a Job. These are
+// one-shot CLI calls: refusals land on stderr with a non-zero exit (the
+// CLI's words are the truth — surfaced verbatim), success on stdout.
+// Unlike `run` the child is NOT detached and is never killed on cap —
+// abort/continue may spend tens of seconds retiring straggler panes
+// (shep retire, 30s each); on cap we answer with what we have and let
+// the one-shot CLI finish on its own.
+function spawnVerb(verb, jid, extraArgs = [], capMs = 120_000) {
+  return new Promise((resolve) => {
+    const child = spawn(RUN_DOOR, [verb, jid, ...extraArgs], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin" },
+    });
+    const out = [];
+    const err = [];
+    let settled = false;
+    const timer = setTimeout(() => finish("timeout"), capMs);
+    function finish(reason) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        lines: out,
+        stderr: err,
+        exitCode: child.exitCode,
+        reason,
+      });
+    }
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d) => {
+      for (const line of d.split(/\r?\n/)) {
+        if (line.trim()) out.push(line.trimEnd());
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d) => {
+      for (const line of d.split(/\r?\n/)) {
+        if (line.trim()) err.push(line.trimEnd());
+      }
+    });
+    child.on("error", (e) => {
+      err.push(String(e && e.message ? e.message : e));
+      finish("error");
+    });
+    child.on("close", () => finish("exit"));
+  });
+}
+
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const q = url.searchParams;
@@ -1349,6 +1411,74 @@ async function handleApi(req, res, url) {
       ? readJson(path.join(job.dir, "report.json"))
       : readJson(path.join(SESSIONS_DIR, sid, "jobs", jid, "run", "report.json"));
     return sendJson(res, 200, { job: flattenJob(job), report });
+  }
+
+  // v5 (ADR 5): the rail verbs — pause parks a live run (SIGTERM, drains
+  // to a unit boundary, books paused), abort kills it (SIGKILL, booked
+  // sessions survive), continue rebirths a paused|aborted|orphaned run.
+  // The CLI is the truth: server-side we only check the Job exists, the
+  // CLI's own refusal line rides back verbatim as an honest 4xx.
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/(pause|abort|continue)$/);
+  if (req.method === "POST" && m) {
+    const [, sid, jid, verb] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
+    const raw = await readBody(req);
+    let body = {};
+    if (raw.trim()) {
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return sendError(res, 400, "invalid JSON body");
+      }
+    }
+    const extraArgs = [];
+    if (verb === "pause" && body?.wait != null) {
+      if (typeof body.wait !== "string" || !body.wait.trim() || body.wait.length > 16) {
+        return sendError(res, 400, "'wait' wants a duration like 2m or 90s");
+      }
+      extraArgs.push("--wait", body.wait.trim());
+    }
+    const r = await spawnVerb(verb, jid, extraArgs);
+    if (r.reason === "error") {
+      return sendJson(res, 500, {
+        ok: false,
+        error: r.stderr[0] || "could not run the door: " + RUN_DOOR,
+        ...r,
+      });
+    }
+    if (r.reason === "timeout") {
+      return sendJson(res, 504, {
+        ok: false,
+        verb,
+        sid,
+        jid,
+        error: "door still running — the verb was signalled, watch the run",
+        ...r,
+      });
+    }
+    if (r.exitCode !== 0) {
+      // the CLI's refusal, verbatim — stderr first (refusals print
+      // there), else its last stdout word
+      const line = r.stderr[0] || r.lines[r.lines.length - 1] ||
+        `door exited ${r.exitCode} without a word`;
+      return sendJson(res, 409, {
+        ok: false,
+        verb,
+        sid,
+        jid,
+        error: line,
+        ...r,
+      });
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      verb,
+      sid,
+      jid,
+      ...r,
+    });
   }
 
   // v4.1: the live events stream — one snapshot on connect, then one
