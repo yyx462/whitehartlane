@@ -20,12 +20,18 @@ export type Parent = "first_mate" | "orchestrator"
 export type StoodUpBy = Parent | "standalone"
 // orphaned: the orchestrator died without a graceful stop — the Job is
 // parked in the ask-first relaunch queue, not finished (zen 5).
-export type JobState = "running" | "orphaned" | "retired" | "aborted"
+// paused: the orchestrator drained to its boundary and parked on
+// purpose (ADR 5) — not a finish; continue resumes it.
+export type JobState = "running" | "paused" | "orphaned" | "retired" | "aborted"
 
 export type TranscriptPointer = {
   tool: string
   cwd: string
   since: string
+  // The host session id, booked the moment the tool reports it — the
+  // handle a Continue resumes (ADR 5). Absent when the tool never
+  // reported one; continue then degrades to a briefed fresh worker.
+  session_id?: string
 }
 
 // A fork's seed (zen 6): the host session a new pane's conversation
@@ -85,7 +91,9 @@ export type JobRecord = {
   finished?: string
   panes: PaneRecord[]
   relaunches?: number
+  continues?: number
   orphan?: { reason: string; panesRemaining: number; at: string }
+  pause?: { reason: string; panesRemaining: number; at: string }
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
   promoted?: { at: string; note: string }
@@ -363,6 +371,51 @@ export function relaunchJob(job: JobRecord, pid: number): JobRecord {
   return job
 }
 
+// Pause parks a drained Job (ADR 5): panes retired, settled units stay
+// settled, in-flight units stay open for a resumed session. Not a
+// finish — no receipt.
+export function pauseJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
+  job.state = "paused"
+  job.finished = undefined
+  job.pause = { reason, panesRemaining, at: new Date().toISOString() }
+  saveJob(job)
+  appendEvent(job.sid, { actor: "orchestrator", kind: "job.paused", jid: job.id, reason, panesRemaining })
+  return job
+}
+
+// Continue is user-decided, never automatic, and never hard-capped —
+// the counter is a soft warning in `jobs`, not a gate (the relaunch
+// cap guarded crash-loops; a typed continue is deliberate).
+export function continueJob(job: JobRecord, pid: number): JobRecord {
+  job.state = "running"
+  job.continues = (job.continues ?? 0) + 1
+  job.pause = undefined
+  job.abort = undefined
+  job.orphan = undefined
+  job.finished = undefined
+  job.pid = pid
+  saveJob(job)
+  appendEvent(job.sid, {
+    actor: "first_mate",
+    kind: "job.continued",
+    jid: job.id,
+    pid,
+    continues: job.continues,
+  })
+  return job
+}
+
+// The session id is booked the moment the host tool reports it —
+// write-ahead, so even a SIGKILLed orchestrator leaves a resumable pane.
+export function setPaneSession(job: JobRecord, label: string, sessionId: string): JobRecord {
+  const pane = job.panes.find((p) => p.label === label)
+  if (!pane?.transcript || pane.transcript.session_id === sessionId) return job
+  pane.transcript.session_id = sessionId
+  saveJob(job)
+  appendEvent(job.sid, { actor: "orchestrator", kind: "pane.session", jid: job.id, label, session_id: sessionId })
+  return job
+}
+
 // Rebuild a Job record purely from the event log — proves the log is the
 // source and the record is a projection.
 export function projectJob(sid: string, jid: string): JobRecord | null {
@@ -396,6 +449,25 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
     } else if (e.kind === "pane.died") {
       const pane = job.panes.find((p) => p.label === e.label)
       if (pane) pane.died = e.ts
+    } else if (e.kind === "pane.session") {
+      const pane = job.panes.find((p) => p.label === e.label)
+      if (pane?.transcript) pane.transcript.session_id = String(e.session_id)
+    } else if (e.kind === "job.paused") {
+      job.state = "paused"
+      job.finished = undefined
+      job.pause = {
+        reason: String(e.reason ?? ""),
+        panesRemaining: Number(e.panesRemaining ?? 0),
+        at: e.ts,
+      }
+    } else if (e.kind === "job.continued") {
+      job.state = "running"
+      job.continues = Number(e.continues ?? (job.continues ?? 0) + 1)
+      job.pause = undefined
+      job.abort = undefined
+      job.orphan = undefined
+      job.finished = undefined
+      job.pid = e.pid as number | undefined
     } else if (e.kind === "job.retired") {
       job.state = "retired"
       job.finished = e.ts

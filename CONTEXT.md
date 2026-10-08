@@ -65,7 +65,7 @@ The append-only `events.jsonl` on a session disk: every route, admission, pane b
 _Avoid_: log, history, audit log
 
 **Transcript**:
-A worker's conversation bytes, owned by its host tool (pi jsonl, opencode db). Recorded as a pointer `{tool, cwd, since}` in the pane event — never copied.
+A worker's conversation bytes, owned by its host tool (pi jsonl, opencode db). Recorded as a pointer `{tool, cwd, since, session_id}` in the pane event — never copied. The `session_id` is booked at birth, before work starts: it is the handle a Continue resumes.
 _Avoid_: copy, mirror
 
 **Resolver**:
@@ -133,6 +133,26 @@ _Avoid_: log, trace, receipt, wake, dashboard
 **Outliving memory**:
 State that remains after the worker that wrote it is gone, so another worker can resume. Not the context window.
 _Avoid_: snapshot, context, chat history
+
+**Resumable**:
+A Job property: it can park — pause or abort — and a later Continue picks up from outliving memory, not from scratch. The pane records with their session pointers, the settle projection, and the mail make a Job resumable. The context window never does.
+_Avoid_: statefulness, checkpointable, durable
+
+**Pause**:
+The graceful park: stop taking new work, drain in-flight work to its boundary, retire the panes, book `paused`. SIGTERM. Bounded by the drain ceiling — past it the straggler aborts, the wait never extends.
+_Avoid_: suspend, freeze, hibernate
+
+**Drain**:
+The wait inside a Pause. In-flight work finishes to its boundary: a unit settles in fan-out, a member ends its turn in Coworker. Pending mail is not drained; it waits. Not backpressure, not a concurrency cap.
+_Avoid_: graceful shutdown, cooldown
+
+**Abort**:
+The immediate park: book `aborted` now, kill the panes now, keep every booked pointer. An unbooked death is an orphan; Continue treats both the same. Nothing auto-continues — a dead orchestrator waits for a person.
+_Avoid_: force stop, destroy, kill -9
+
+**Continue**:
+The reborn verb: retire stragglers, respawn each pane of unfinished work with its host session resumed, prompt it "continue", restart the orchestrator. Accepts `paused`, `aborted`, and `orphaned` alike. Deliberate and human-typed, never automatic.
+_Avoid_: relaunch, restart, auto-recover
 
 **Ownership**:
 A recorded fact that one object is the parent of a worker or of an artifact. Three owners, and they do not overlap. The trace owns pane records. The Job's dir owns progress and output. The worktree owns project bytes. shep and herdr are mechanisms, not owners. A worker owns none of these.

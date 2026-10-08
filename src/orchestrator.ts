@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
@@ -8,6 +8,17 @@ import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
   spawnWorker: (name: string, kind: string, briefPath: string, cwd: string) => boolean
+  // Resume a parked unit (ADR 5): same pane lifecycle as spawnWorker,
+  // but the host session continues from the booked pointer and the
+  // brief is the continue brief. Absent or failing, the caller falls
+  // back to spawnWorker with the continue brief (outliving memory:
+  // the unit dir tells a fresh worker everything).
+  resumeWorker?: (
+    name: string,
+    session: ResumePointer,
+    briefPath: string,
+    cwd: string,
+  ) => boolean
   paneAlive: (name: string) => boolean
   reprompt: (name: string, briefPath: string) => boolean
   retire: (name: string) => void
@@ -19,6 +30,9 @@ export type ShepPort = {
   // Absent in tests: file growth and the deadline timer are enough.
   waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
 }
+
+// The booked pointer a continued pane resumes from (ADR 5).
+export type ResumePointer = { tool: string; session_id?: string; cwd: string }
 
 // Each worker owns one directory: units/<unit>/{brief.md, log.txt,
 // result.md}. It is the worker's cwd, its artifact home, and the key
@@ -57,6 +71,13 @@ export type CycleDeps = {
   emit?: (kind: string, payload: Record<string, unknown>) => void
   worktree?: string
   canary?: CanaryState
+  // Pause drain (ADR 5): while draining, no new panes are claimed and a
+  // dead or stalled pane does not settle — the drain ceiling decides,
+  // and the unit stays open for a resumed session.
+  draining?: boolean
+  // Units parked mid-flight on an earlier generation, keyed by unit id:
+  // respawn them with the booked session pointer instead of a fresh brief.
+  resumes?: Map<string, ResumePointer>
 }
 
 const DEFAULT_SLOTS = 2
@@ -155,8 +176,70 @@ export function briefFor(unit: Unit, taskDir: string, worktree?: string): string
   ].join("\n")
 }
 
+// The brief a reborn pane receives (ADR 5): the session (when it could
+// be resumed) already knows the work; the unit dir is the outliving
+// memory a session-less takeover reads instead.
+export function continueBriefFor(
+  unit: Unit,
+  session: ResumePointer,
+  paths: { dir: string; briefPath: string; logPath: string },
+): string {
+  return [
+    `You are continuing unit ${unit.id} — the run was parked mid-unit and has been continued.`,
+    session.session_id
+      ? "Your previous session was resumed: pick up exactly where you left off."
+      : "Your predecessor's session could not be resumed: read the unit dir (log.txt, result.md, brief.md) and take the work over.",
+    "",
+    `Unit dir: ${paths.dir}`,
+    `Working directory: ${session.cwd}`,
+    `The original brief, if you need it: ${paths.briefPath}`,
+    "",
+    "When you finish the work, append exactly this line to the log file",
+    `${paths.logPath} :`,
+    `done ${unit.id}`,
+    "",
+    "If you cannot proceed, append exactly this line to the same file and stop:",
+    `blocked ${unit.id}: <one line saying why>`,
+    "",
+    "Do not write anything else to that log. Do not do any other work.",
+  ].join("\n")
+}
+
+// The drain ceiling (ADR 5): `pause --wait` writes a one-shot deadline
+// into the Job dir — read and cleared at the first drain. Anything
+// missing or unparsable falls back to now + the configured ceiling.
+export function drainDeadline(taskDir: string, nowMs: number, ceilingMs: number): number {
+  const path = join(taskDir, "drain.deadline")
+  try {
+    const at = Date.parse(readFileSync(path, "utf8").trim())
+    rmSync(path, { force: true })
+    if (Number.isFinite(at)) return at
+  } catch {
+    // no override file — the configured ceiling applies
+  }
+  return nowMs + ceilingMs
+}
+
 function logText(path: string): string {
   return existsSync(path) ? readFileSync(path, "utf8") : ""
+}
+
+// Respawn a parked unit (ADR 5): the continue brief goes to the resumed
+// session when the port can resume, else to a fresh worker — the brief
+// covers both (the session knows; the unit dir tells a takeover all).
+function resumeSpawn(
+  deps: CycleDeps,
+  unit: Unit,
+  resume: ResumePointer,
+  paths: { dir: string; briefPath: string; logPath: string },
+): boolean {
+  const continuePath = join(paths.dir, "continue.md")
+  writeFileSync(continuePath, continueBriefFor(unit, resume, paths))
+  const cwd = deps.worktree ?? resume.cwd ?? paths.dir
+  if (deps.shep.resumeWorker) {
+    return deps.shep.resumeWorker(`w-${unit.id}`, resume, continuePath, cwd)
+  }
+  return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd)
 }
 
 export function cycle(deps: CycleDeps): boolean {
@@ -200,11 +283,18 @@ export function cycle(deps: CycleDeps): boolean {
       deps.attempts.delete(id)
       deps.shep.wake(id, "blocked", why)
     } else if (!deps.shep.paneAlive(`w-${id}`)) {
-      settle(id, false, { unit: id, result: "pane dead", pass: false })
-      deps.shep.retire(`w-${id}`)
-      deps.inFlight.delete(id)
-      deps.attempts.delete(id)
-      deps.shep.wake(id, "blocked", "pane not live in herdr")
+      if (deps.draining) {
+        // draining: leave the unit open — continue resumes its session
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+      } else {
+        settle(id, false, { unit: id, result: "pane dead", pass: false })
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+        deps.shep.wake(id, "blocked", "pane not live in herdr")
+      }
     } else if (
       !existsSync(flight.logPath) &&
       !flight.reprompted &&
@@ -218,7 +308,7 @@ export function cycle(deps: CycleDeps): boolean {
         flight.lastChange = now()
         deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
       }
-    } else if (size === flight.lastSize && now() - flight.lastChange > stallMs) {
+    } else if (!deps.draining && size === flight.lastSize && now() - flight.lastChange > stallMs) {
       settle(id, false, { unit: id, result: "stalled", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
@@ -237,18 +327,21 @@ export function cycle(deps: CycleDeps): boolean {
   )
   const cap = deps.canary?.enabled && !deps.canary.released ? 1 : slots
   if (!deps.canary?.failed) {
-    while (deps.inFlight.size < cap && unsettled.length > 0) {
+    while (!deps.draining && deps.inFlight.size < cap && unsettled.length > 0) {
       const unit = unsettled.shift()!
       const paths = unitPaths(deps.taskDir, unit.id)
       mkdirSync(paths.dir, { recursive: true })
       writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir, deps.worktree))
-      const ok = deps.shep.spawnWorker(
-        `w-${unit.id}`,
-        deps.hooks.workerKind,
-        paths.briefPath,
-        deps.worktree ?? paths.dir,
-      )
-    if (ok) {
+      const resume = deps.resumes?.get(unit.id)
+      const ok = resume
+        ? resumeSpawn(deps, unit, resume, paths)
+        : deps.shep.spawnWorker(
+            `w-${unit.id}`,
+            deps.hooks.workerKind,
+            paths.briefPath,
+            deps.worktree ?? paths.dir,
+          )
+      if (ok) {
       deps.attempts.delete(unit.id)
       deps.inFlight.set(unit.id, {
         unit,
@@ -280,6 +373,9 @@ export function cycle(deps: CycleDeps): boolean {
   return units.every((unit) => finalSettled.has(unit.id)) && deps.inFlight.size === 0
 }
 
+// Runs the fan-out rail. Resolves with the Report on finish, or null
+// when the run parked (SIGTERM drained to its boundary — ADR 5): no
+// report is written, the caller books the pause.
 export async function runOrchestrator(input: {
   taskDir: string
   shep: ShepPort
@@ -297,7 +393,13 @@ export async function runOrchestrator(input: {
   existingRows?: ReportRow[]
   worktree?: string
   canary?: boolean
-}): Promise<Report> {
+  // Pause drain (ADR 5): the drain ceiling defaults to the manifest's
+  // drain_timeout_ms, then the stall timeout. SIGTERM starts the drain
+  // unless trapSignals is false (tests drive the loop another way).
+  drainMs?: number
+  trapSignals?: boolean
+  resumes?: Map<string, ResumePointer>
+}): Promise<Report | null> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
     : hooksFromDir(input.taskDir)
@@ -344,6 +446,10 @@ export async function runOrchestrator(input: {
   const watchedFiles = new Set<string>()
   let running = false
   let finished = false
+  let parked = false
+  let draining = false
+  let drainUntil: number | null = null
+  const drainMs = input.drainMs ?? manifest.workflow.drain_timeout_ms ?? stallMs
   let firstCycle = true
   let fallback: ReturnType<typeof setInterval> | null = null
 
@@ -371,6 +477,8 @@ export async function runOrchestrator(input: {
         now,
         worktree: input.worktree,
         canary,
+        draining,
+        resumes: input.resumes,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.settled" && typeof payload.unit === "string") {
@@ -390,6 +498,26 @@ export async function runOrchestrator(input: {
         finished = true
         cleanup()
         return
+      }
+      if (draining) {
+        if (inFlight.size === 0) {
+          log("orchestrator: drained — parking paused")
+          parked = true
+          finished = true
+          cleanup()
+          return
+        }
+        if (drainUntil !== null && now() > drainUntil) {
+          log("orchestrator: drain ceiling passed — retiring in-flight panes unsettled (sessions stay booked)")
+          for (const [id] of [...inFlight]) {
+            input.shep.retire(`w-${id}`)
+            inFlight.delete(id)
+          }
+          parked = true
+          finished = true
+          cleanup()
+          return
+        }
       }
       if (now() - started > deadlineMs) {
         log("orchestrator: deadline passed; settling the rest failed")
@@ -445,6 +573,20 @@ export async function runOrchestrator(input: {
     timers.add(t)
   }
 
+  // SIGTERM is the drain (ADR 5): stop claiming, let in-flight units
+  // settle, then park. SIGINT stays an immediate stop (the bin books
+  // the abort); SIGKILL cannot be caught and is the abort verb's own.
+  const requestPause = (): void => {
+    if (finished || draining) return
+    draining = true
+    drainUntil = drainDeadline(input.taskDir, now(), drainMs)
+    log(`orchestrator: pause requested — draining (ceiling ${new Date(drainUntil).toISOString()})`)
+    enqueue("pause")
+  }
+  if (input.trapSignals !== false) {
+    process.on("SIGTERM", requestPause)
+  }
+
   const watchFlights = (): void => {
     for (const flight of inFlight.values()) {
       if (watchedFiles.has(flight.logPath)) continue
@@ -474,6 +616,7 @@ export async function runOrchestrator(input: {
       armed = null
     }
     const waits = [deadlineMs - (now() - started)]
+    if (draining && drainUntil !== null) waits.push(drainUntil - now())
     for (const flight of inFlight.values()) {
       if (!existsSync(flight.logPath) && !flight.reprompted) {
         waits.push(flight.spawnedAt + briefGraceMs - now())
@@ -530,6 +673,11 @@ export async function runOrchestrator(input: {
     run()
   }
 
+  if (parked) {
+    input.shep.retireAll()
+    log("orchestrator: parked — paused; a typed continue resumes the unfinished units from booked sessions")
+    return null
+  }
   const report = writeReport(
     input.taskDir,
     where,
