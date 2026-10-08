@@ -779,6 +779,129 @@ function readEvents(sid) {
   return events;
 }
 
+// ---- v4.1: events as a stream (SSE) ------------------------------------
+//
+// GET /api/events/stream?sid=<sid>&jid=<jid> — text/event-stream:
+//   event: snapshot  data: {sid, jid, count, events:[...]}  on connect
+//   event: append    data: <one event object>                as it lands
+//   `: ping` heartbeat every 15s; the watcher dies with its last sub.
+//
+// One watcher per session's events.jsonl, fanned out to all subscribers
+// of that file; jid filtering happens per subscriber, server-side. The
+// one-shot GET /api/events stays the first-paint / finished-run path.
+
+const SSE_HEADERS = {
+  "content-type": "text/event-stream; charset=utf-8",
+  "cache-control": "no-store",
+  connection: "keep-alive",
+  "x-accel-buffering": "no",
+};
+
+function sseSend(res, event, obj) {
+  res.write("event: " + event + "\ndata: " + JSON.stringify(obj) + "\n\n");
+}
+
+// dedupe key for the connect seam: an event that lands between the
+// snapshot read and the watcher's not-yet-parsed bytes would otherwise
+// be delivered twice (ts is ms-precise write time; collisions do not
+// happen in practice for distinct lines)
+function evKey(e) {
+  return (e.ts || "") + "|" + (e.kind || "") + "|" + (e.jid || "") +
+    "|" + (e.label || e.pane || "");
+}
+
+const eventWatchers = new Map(); // sid -> watcher
+
+// read only NEW bytes [offset, eof): complete lines only — a torn
+// trailing line waits for its newline. Truncation resets and re-reads.
+function readNewEvents(file, offset) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return { events: [], offset }; // file gone for now; keep position
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size < offset) offset = 0; // truncated/rotated: re-read from start
+    if (size === offset) return { events: [], offset };
+    const buf = Buffer.alloc(size - offset);
+    fs.readSync(fd, buf, 0, buf.length, offset);
+    const lastNl = buf.lastIndexOf(0x0a);
+    if (lastNl === -1) return { events: [], offset }; // no complete line yet
+    const events = [];
+    for (const line of buf.subarray(0, lastNl).toString("utf8").split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        events.push(JSON.parse(t));
+      } catch {
+        /* skip torn/partial line */
+      }
+    }
+    return { events, offset: offset + lastNl + 1 };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function ensureEventWatcher(sid) {
+  let w = eventWatchers.get(sid);
+  if (w) return w;
+  const sdir = path.join(SESSIONS_DIR, sid);
+  const file = path.join(sdir, "events.jsonl");
+  w = { sid, file, offset: 0, subs: new Set(), fsWatcher: null, safety: null };
+  // start at EOF: history travels in the snapshot, only NEW bytes stream
+  try {
+    w.offset = fs.statSync(file).size;
+  } catch {
+    /* no events.jsonl yet: every future line is new */
+  }
+  const poll = () => {
+    const { events, offset } = readNewEvents(w.file, w.offset);
+    w.offset = offset;
+    for (const e of events) {
+      for (const sub of w.subs) {
+        if (sub.jid && e.jid !== sub.jid) continue; // per-subscriber jid filter
+        if (!sub.seedKeys || !sub.seedKeys.has(evKey(e))) {
+          sseSend(sub.res, "append", e);
+        }
+      }
+    }
+    // the connect seam has passed once a poll ran: drop the seed sets
+    if (events.length) for (const sub of w.subs) sub.seedKeys = null;
+  };
+  w.poll = poll;
+  try {
+    // watch the session DIR (not the file): survives create + replace
+    w.fsWatcher = fs.watch(sdir, { persistent: false }, (evt, name) => {
+      if (!name || name === "events.jsonl") poll();
+    });
+  } catch {
+    /* dir vanished; the safety poll keeps trying */
+  }
+  // safety net: fs.watch can drop events (esp. over network fs) — a
+  // cheap unref'd 2s poll guarantees liveness without busy work
+  w.safety = setInterval(poll, 2000);
+  w.safety.unref();
+  eventWatchers.set(sid, w);
+  log("event watcher up:", sid);
+  return w;
+}
+
+function destroyEventWatcher(sid) {
+  const w = eventWatchers.get(sid);
+  if (!w) return;
+  eventWatchers.delete(sid);
+  if (w.fsWatcher) {
+    try {
+      w.fsWatcher.close();
+    } catch {}
+  }
+  if (w.safety) clearInterval(w.safety);
+  log("event watcher down:", sid);
+}
+
 // ---- v4: home (the Home page in one call) ------------------------------
 
 function dayKeyOf(iso) {
@@ -1226,6 +1349,52 @@ async function handleApi(req, res, url) {
       ? readJson(path.join(job.dir, "report.json"))
       : readJson(path.join(SESSIONS_DIR, sid, "jobs", jid, "run", "report.json"));
     return sendJson(res, 200, { job: flattenJob(job), report });
+  }
+
+  // v4.1: the live events stream — one snapshot on connect, then one
+  // append per new event as it lands in the session's events.jsonl.
+  // Must run BEFORE the /api/events/:sid regex (that would eat "stream").
+  if (req.method === "GET" && pathname === "/api/events/stream") {
+    const sid = q.get("sid");
+    const jid = q.get("jid");
+    if (!sid || !ID_RE.test(sid)) return sendError(res, 400, "bad or missing sid");
+    if (jid && !ID_RE.test(jid)) return sendError(res, 400, "bad jid");
+    const sdir = path.join(SESSIONS_DIR, sid);
+    if (!fs.existsSync(sdir)) return sendError(res, 404, "no such session: " + sid);
+
+    res.writeHead(200, SSE_HEADERS);
+    res.flushHeaders();
+    res.on("error", () => {}); // torn sockets surface via "close"
+
+    const watcher = ensureEventWatcher(sid);
+    const sub = { res, jid: jid || null, seedKeys: null };
+
+    // snapshot: the run's current events — same ?sid/&jid scope as the
+    // one-shot GET /api/events (the selected run's own history only)
+    const all = readEvents(sid) || [];
+    const scoped = jid ? all.filter((e) => e.jid === jid) : all;
+    // seed dedupe keys from the tail: events sitting in the watcher's
+    // un-parsed byte window are already inside this snapshot
+    sub.seedKeys = new Set(scoped.slice(-100).map(evKey));
+    watcher.subs.add(sub);
+    sseSend(res, "snapshot", {
+      sid,
+      jid: jid || null,
+      count: scoped.length,
+      events: scoped,
+    });
+
+    const ping = setInterval(() => {
+      if (!res.writableEnded) res.write(": ping\n\n");
+    }, 15000);
+    log("sse open:", sid, jid || "(all)", "subs:", watcher.subs.size);
+    res.on("close", () => {
+      clearInterval(ping);
+      watcher.subs.delete(sub);
+      log("sse close:", sid, jid || "(all)", "subs:", watcher.subs.size);
+      if (!watcher.subs.size) destroyEventWatcher(sid); // no leaked watchers
+    });
+    return; // the stream stays open
   }
 
   m = pathname.match(/^\/api\/events\/([^/]+)$/);
