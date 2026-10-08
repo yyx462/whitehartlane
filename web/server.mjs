@@ -12,7 +12,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || "127.0.0.1";
+// bind the tailnet by default (Tailscale 100.x reach); set HOST=127.0.0.1 to go local-only
+const HOST = process.env.HOST || "0.0.0.0";
 const OS_ROOT = path.join(process.env.HOME, ".local/share/agentic-os");
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const RUN_DOOR =
