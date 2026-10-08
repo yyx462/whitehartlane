@@ -1,6 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { decidePermission, escalateOnRepeat } from "../src/permission.ts"
+
+// the judge branch reads the landed threshold; point at an empty tmp
+// dir so the compiled default (0.5) applies, whatever has been landed
+process.env.AGENTIC_OS_JEV_PROMPTS_DIR = mkdtempSync(join(tmpdir(), "aos-prompts-"))
 
 const roots = ["/Users/me/proj/ui-window", "/Users/me/.local/share/agentic-os"]
 
@@ -20,6 +27,21 @@ test("secrets are denied outright, even inside the roots", () => {
   })
   assert.equal(v.decision, "deny")
   assert.match(v.message, /secrets or credentials/)
+})
+
+test("auth-bearing configs are denied outright, not judged", () => {
+  for (const p of [
+    "/Users/me/.config/jev/env",
+    "/Users/me/.secrets/env",
+    "/Users/me/.config/gnupg/trustdb.gpg",
+  ]) {
+    const v = decidePermission({
+      question: `Access external directory ${p}`,
+      allowedRoots: roots,
+      context: "check the model api key is configured",
+    })
+    assert.equal(v.decision, "deny", p)
+  }
 })
 
 test("outside the home tree is denied", () => {
@@ -42,6 +64,55 @@ test("home-but-unrooted wandering is denied as unneeded, with guidance", () => {
 
 test("a question with no path is denied as unneeded", () => {
   const v = decidePermission({ question: "Permission required: run command", allowedRoots: roots })
+  assert.equal(v.decision, "deny-unneeded")
+})
+
+test("the gray zone: a judge that sees the need allows the vista shots", () => {
+  const v = decidePermission(
+    {
+      question: "Permission required: Access external directory /Users/me/.vista/sessions/99a14ca0/shots/home.png",
+      allowedRoots: roots,
+      context: "Use yyx-vista to screenshot the built page and judge its spacing against the design.",
+    },
+    () => 0.9,
+  )
+  assert.equal(v.decision, "allow")
+  assert.match(v.message, /needed for this job/)
+})
+
+test("the gray zone: a low judge score stays deny-unneeded", () => {
+  const v = decidePermission(
+    {
+      question: "Permission required: Access external directory /Users/me/.vista/sessions/99a14ca0/shots/home.png",
+      allowedRoots: roots,
+      context: "Refactor the auth module in this repo.",
+    },
+    () => 0.3,
+  )
+  assert.equal(v.decision, "deny-unneeded")
+  assert.match(v.message, /ask again/)
+})
+
+test("a dead judge fails restrictive, never blocks the rail", () => {
+  const v = decidePermission(
+    {
+      question: "Access external directory /Users/me/Documents/notes/release-checklist.md",
+      allowedRoots: roots,
+      context: "Cut the release following my checklist in Documents/notes.",
+    },
+    () => {
+      throw new Error("jev unreachable")
+    },
+  )
+  assert.equal(v.decision, "deny-unneeded")
+})
+
+test("no judge keeps the legacy flat deny-unneeded", () => {
+  const v = decidePermission({
+    question: "Access external directory /Users/me/.vista/sessions/99a14ca0/shots/home.png",
+    allowedRoots: roots,
+    context: "Use yyx-vista to screenshot the built page.",
+  })
   assert.equal(v.decision, "deny-unneeded")
 })
 
@@ -71,4 +142,19 @@ test("a repeat ask escalates to allow — persistence is the asserted need", () 
     escalateOnRepeat(decidePermission({ question: "no path here", allowedRoots: roots }), 3).decision,
     "deny-unneeded",
   )
+})
+
+test("a judge miss is still covered: the judge's deny-unneeded escalates on repeat", () => {
+  const first = decidePermission(
+    {
+      question: "Access external directory /Users/me/projects/inventory-app/src/app/page.tsx",
+      allowedRoots: roots,
+      context: "Fix the hydration warning in this repo's own app directory.",
+    },
+    () => 0.1,
+  )
+  assert.equal(first.decision, "deny-unneeded")
+  assert.equal(first.escalatable, true)
+  const second = escalateOnRepeat(first, 1)
+  assert.equal(second.decision, "allow")
 })

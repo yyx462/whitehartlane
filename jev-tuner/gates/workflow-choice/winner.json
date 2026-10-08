@@ -1,0 +1,12 @@
+{
+  "name": "v1-baseline",
+  "accuracy": 0.9811320754716981,
+  "threshold": 0.5,
+  "cases": 54,
+  "landed_at": "2026-10-08T06:16:49.769Z",
+  "prompt": "Is this task a bag of independent units, such as separate web searches, where no unit needs another's result?",
+  "options": {
+    "fan-out": "The task is independent units. No unit needs another unit's result.",
+    "direct": "The task is one piece of work, like a coding change in one chat."
+  }
+}

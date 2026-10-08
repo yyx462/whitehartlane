@@ -38,11 +38,20 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - **Permission decisions (JEV's other half).** A blocked pane is a
   question; `src/permission.ts` answers it — typed, not an agent:
   allow (inside the member's roots), deny (secrets, outside home),
-  deny-unneeded (wandering) — and a repeat ask for the same non-dangerous path escalates to a durable allow: persistence is the asserted need. The rail
-  applies the verdict (dialog cleared, message injected, root made
-  durable on allow), books a `permission` event, and caps the asks —
-  over 6 the member is dead. With this, worker permissions are
-  restrictive by default: no dialog ever waits for a person.
+  and the gray zone (inside home, outside roots) is a jev question,
+  not a flat no: a tuned typed judgment (`tunedPermissionJudge`)
+  reads the ask plus the member's brief and allows what is plausibly
+  needed for the task (a vista job reads its session shots) — a dead
+  jev fails restrictive. The prompt and threshold it asks with are
+  the jev-tuner's landed winner (`src/jev-prompts/`, read live,
+  compiled fallback), so tuning lands without a deploy. And a repeat
+  ask for the same non-dangerous path escalates to a durable allow:
+  persistence is the asserted need, covering the judge's misses;
+  hard-deny never escalates. The rail applies the verdict (dialog
+  cleared, message injected, root made durable on allow), books a
+  `permission` event, and caps the asks — over 6 the member is dead.
+  With this, worker permissions are restrictive by default: no
+  dialog ever waits for a person.
 - **Fail recovery, both halves.** Detect: `audit` (unadmitted panes),
   `sweep` (running Job, dead orchestrator pid). Recover, ask-first: a
   dead orchestrator parks the Job `orphaned` in a derived queue —

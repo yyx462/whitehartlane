@@ -1,0 +1,52 @@
+{
+  "gate": "workflow-choice",
+  "at": "2026-10-08T06:16:49.767Z",
+  "cases": 54,
+  "candidates": [
+    {
+      "name": "v1-baseline",
+      "accuracy": 0.9811320754716981,
+      "confusion": {
+        "hit": 52,
+        "miss": 1
+      },
+      "misses": [
+        "wc-053"
+      ],
+      "errors": [
+        "wc-009: Command failed: jev choice Is this task a bag of independent units, such as separate web searches, where no unit needs a"
+      ]
+    },
+    {
+      "name": "v2-shape",
+      "accuracy": 0.9629629629629629,
+      "confusion": {
+        "hit": 52,
+        "miss": 2
+      },
+      "misses": [
+        "wc-025",
+        "wc-053"
+      ],
+      "errors": []
+    },
+    {
+      "name": "v3-dataflow",
+      "accuracy": 0.9629629629629629,
+      "confusion": {
+        "hit": 52,
+        "miss": 2
+      },
+      "misses": [
+        "wc-025",
+        "wc-053"
+      ],
+      "errors": []
+    }
+  ],
+  "winner": {
+    "name": "v1-baseline",
+    "accuracy": 0.9811320754716981
+  },
+  "landed": true
+}

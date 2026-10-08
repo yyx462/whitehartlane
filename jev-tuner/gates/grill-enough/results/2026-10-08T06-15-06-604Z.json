@@ -1,0 +1,67 @@
+{
+  "gate": "grill-enough",
+  "at": "2026-10-08T06:15:06.604Z",
+  "cases": 54,
+  "candidates": [
+    {
+      "name": "v2-criteria",
+      "accuracy": 1,
+      "threshold": 0.3,
+      "confusion": {
+        "hit": 54,
+        "miss": 0
+      },
+      "misses": [],
+      "errors": []
+    },
+    {
+      "name": "v1-baseline",
+      "accuracy": 0.8867924528301887,
+      "threshold": 0.3,
+      "confusion": {
+        "hit": 47,
+        "miss": 6
+      },
+      "misses": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "errors": [
+        "ge-005: Command failed: jev noul Is this task specified enough to write worker hooks and run without more questions? -s Fix the "
+      ]
+    },
+    {
+      "name": "v3-engineer",
+      "accuracy": 0.7962962962962963,
+      "threshold": 0.3,
+      "confusion": {
+        "hit": 43,
+        "miss": 11
+      },
+      "misses": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "errors": []
+    }
+  ],
+  "winner": {
+    "name": "v2-criteria",
+    "accuracy": 1,
+    "threshold": 0.3
+  },
+  "landed": true
+}

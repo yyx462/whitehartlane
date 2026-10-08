@@ -1,0 +1,13 @@
+{
+  "id": "workflow-choice",
+  "kind": "choice",
+  "min_cases": 50,
+  "margin": 0.02,
+  "positive": "fan-out",
+  "negative": "direct",
+  "state": "task",
+  "describes": "whether a task is a bag of independent units (fan-out) or one piece of work (direct)",
+  "input_fields": {
+    "task": "the task text exactly as the user typed it at the front door"
+  }
+}

@@ -3,6 +3,36 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-08 — The jev tuner, and a gray zone that asks. The permission
+decider's flat "deny-unneeded" turned away work the job actually
+needed (a vista job blocked off its own session shots) — the gray zone
+(in home, outside roots, not dangerous) was a judgment wearing a
+rule's clothes. Now that branch asks a real typed judgment:
+`tunedPermissionJudge` sends the ask plus the member's brief through
+the jev CLI with a landed prompt; below the landed threshold it stays
+deny-with-guidance — and, merged with master's escalation, a repeat
+ask for the same non-dangerous path still escalates to a durable
+allow: the judge answers the first ask, escalateOnRepeat covers its
+misses; a dead jev fails restrictive; secrets and credential-shaped
+paths (added: `~/.config/jev/`, `~/.secrets/`, gpg) are denied before
+the judge ever sees them. The prompt a gate asks
+with is now data, not code: every JEV-involved gate (permission-
+needed, grill-enough, workflow-choice) has a folder in
+`jev-tuner/gates/` holding >= 50 LLM-seeded test cases, prompt
+candidates, accuracy reports, and a winner record; `bin/jev-tuner
+run` scores candidates through the same adapter and state builder the
+rails use, sweeps noul thresholds offline, and the accuracy winner
+lands in production (`src/jev-prompts/<gate>.*`) automatically when
+it beats the incumbent by the gate's margin — tuning is never
+hand-copying. Hand-tuned prompts and judged-by-vibes rewrites
+rejected: the winner is measured or it does not land. Serves 2, 3.
+Trail: src/permission.ts, src/jev.ts, src/jev-prompts.ts,
+src/jev-tuner.ts, bin/jev-tuner, bin/pick-workflow, src/grill.ts,
+bin/lab-orchestrator, jev-tuner/, test/jev-tuner.test.ts,
+docs/RAILS.md, jev-tuner/README.md. Current winners: permission-
+needed v4-named-and-safe 98.3% (t=0.6), grill-enough v2-criteria
+100% (t=0.3), workflow-choice v1-baseline 98.1%.
+
 2026-10-07 — Dag identity: the Project pid, the dag_id, the version
 hash. Runs group like Airflow's DAG runs, so a group key was needed
 that no path and no git provides. A Project is a pid minted once into

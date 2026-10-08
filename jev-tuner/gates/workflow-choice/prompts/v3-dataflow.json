@@ -1,0 +1,7 @@
+{
+  "question": "Does doing this task well require passing results between units, or is it genuinely parallel units that never meet?",
+  "options": {
+    "fan-out": "Genuinely parallel: every unit can be done and graded on its own; nothing it produces is input to another unit of this same task.",
+    "direct": "Connected: at least one unit's output feeds another unit of the same task, or the work is one evolving thread best held in one place."
+  }
+}

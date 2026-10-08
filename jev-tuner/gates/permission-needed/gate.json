@@ -1,0 +1,15 @@
+{
+  "id": "permission-needed",
+  "kind": "noul",
+  "min_cases": 50,
+  "margin": 0.02,
+  "positive": "allow",
+  "negative": "deny-unneeded",
+  "state": "permission-ask",
+  "describes": "whether a path a worker's permission dialog asks for is plausibly needed to complete the worker's task (the gray zone: inside home, outside the job's roots, not dangerous)",
+  "input_fields": {
+    "path": "the absolute path the permission dialog asks about",
+    "ask": "the permission dialog text (first ~300 chars), often 'Permission required / Access external directory <path>'",
+    "context": "the worker's task or brief; may name tools, dirs, and files the job must touch"
+  }
+}

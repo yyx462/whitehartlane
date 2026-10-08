@@ -1,0 +1,1 @@
+A worker agent asks, mid-task, for a path outside its assigned roots. Default no: the roots already contain what the job was planned around. Answer yes only when the path is clearly required by the task as stated — a tool's own state directory that the task explicitly exercises, or a file the brief names — never because it is nearby, related by topic, or convenient.

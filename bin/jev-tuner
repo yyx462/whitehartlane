@@ -1,0 +1,96 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// jev-tuner list | init <gate> | run <gate> | report <gate> | promote <gate> <candidate>
+// The tuning loop for every JEV-involved decision gate. Gates live in
+// jev-tuner/gates/<gate>/ (cases.jsonl, prompts/, results/,
+// winner.json). run scores every candidate through the real jev CLI
+// and the accuracy winner lands in production (src/jev-prompts/)
+// automatically when it beats the incumbent by the gate's margin;
+// --no-land only reports. init seeds cases with an LLM through the
+// same key jev uses. promote lands a named candidate by hand.
+// Plain JS on purpose: this file has no extension, so Node will not
+// type-strip it. The modules it imports are .ts and strip fine.
+import { appendCases, listGates, loadCases, loadCandidates, loadGateConfig, readWinner, runGate } from "../src/jev-tuner.ts"
+import { initCases } from "../src/jev-tuner-init.ts"
+import { landGate, loadThreshold } from "../src/jev-prompts.ts"
+
+const cmd = process.argv[2] ?? "list"
+const arg = process.argv[3]
+
+function usage() {
+  console.log(`usage: jev-tuner list
+       jev-tuner init <gate> [--n=50] [--model=M]
+       jev-tuner run <gate> [--jobs=4] [--no-land]
+       jev-tuner report <gate>
+       jev-tuner promote <gate> <candidate> [--threshold=0.55]`)
+  process.exit(2)
+}
+
+function pct(x) {
+  return `${(x * 100).toFixed(1)}%`
+}
+
+if (cmd === "list") {
+  for (const g of listGates()) {
+    const n = loadCases(g.id).length
+    const w = readWinner(g.id)
+    const flag = n < g.min_cases ? `  (under ${g.min_cases} cases — will not land)` : ""
+    const won = w ? `winner ${w.name} ${pct(w.accuracy)} t=${w.threshold}` : "no winner yet"
+    console.log(`${g.id.padEnd(20)} ${g.kind.padEnd(7)} ${String(n).padStart(3)} cases  ${won}${flag}`)
+  }
+  process.exit(0)
+}
+
+if (!arg) usage()
+if (cmd === "init") {
+  const n = Number(process.argv.find((a) => a.startsWith("--n="))?.slice(4) ?? 50)
+  const model = process.argv.find((a) => a.startsWith("--model="))?.slice(8)
+  const cfg = loadGateConfig(arg)
+  const existing = loadCases(arg)
+  const fresh = await initCases(cfg, existing, { n, model })
+  const added = appendCases(arg, fresh)
+  console.log(`init ${arg}: +${added} cases (of ${fresh.length} generated, ${existing.length} existed) -> ${existing.length + added} total`)
+  process.exit(added > 0 ? 0 : 1)
+}
+if (cmd === "run") {
+  const jobs = Number(process.argv.find((a) => a.startsWith("--jobs="))?.slice(7) ?? 4)
+  const land = !process.argv.includes("--no-land")
+  const report = await runGate(arg, { jobs, land })
+  for (const c of report.candidates) {
+    const t = c.threshold !== undefined ? ` t=${c.threshold}` : ""
+    const err = c.errors.length > 0 ? ` errors=${c.errors.length}` : ""
+    console.log(`  ${c.name.padEnd(28)} ${pct(c.accuracy)}${t}${err}`)
+  }
+  const w = report.winner
+  console.log(
+    report.landed
+      ? `landed: ${w?.name} ${pct(w?.accuracy ?? 0)} -> src/jev-prompts/${arg}.*`
+      : `not landed: ${report.why_not ?? "no candidate beat the incumbent"}`,
+  )
+  process.exit(0)
+}
+if (cmd === "report") {
+  const w = readWinner(arg)
+  if (!w) {
+    console.log(`no winner recorded for ${arg} — run it first`)
+    process.exit(1)
+  }
+  console.log(`${arg}: winner ${w.name} ${pct(w.accuracy)} threshold ${w.threshold} on ${w.cases} cases (landed ${w.landed_at})`)
+  console.log(`prompt: ${w.prompt}`)
+  process.exit(0)
+}
+if (cmd === "promote") {
+  const candidateName = process.argv[4]
+  if (!candidateName) usage()
+  const cfg = loadGateConfig(arg)
+  const candidates = loadCandidates(arg, cfg.kind)
+  const hit = candidates.find((c) => c.name === candidateName)
+  if (!hit) {
+    console.log(`no candidate ${candidateName} in jev-tuner/gates/${arg}/prompts/`)
+    process.exit(1)
+  }
+  const threshold = Number(process.argv.find((a) => a.startsWith("--threshold="))?.slice(12) ?? loadThreshold(cfg.id))
+  landGate(cfg.id, hit.prompt, threshold, hit.options)
+  console.log(`landed ${candidateName} (threshold ${threshold}) -> src/jev-prompts/${arg}.*`)
+  process.exit(0)
+}
+usage()
