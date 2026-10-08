@@ -113,6 +113,49 @@ function jobFileOf(sid, jid) {
   return path.join(SESSIONS_DIR, sid, "jobs", jid, "job.json");
 }
 
+// ---- v4: status vocabulary (one mapping, server-side, used everywhere) --
+//   retired + report.status done               -> "success"
+//   retired + report failed / any failed rows  -> "failed"
+//   aborted                                    -> "failed"
+//   running                                    -> "running"
+//   orphaned                                   -> "orphaned"
+// The raw state always travels alongside (detail views show reasons).
+
+function reportOf(job) {
+  if (!job?.dir) return null;
+  return readJson(path.join(job.dir, "report.json"));
+}
+
+function reportHasFailures(report) {
+  if (!report) return false;
+  if (report.status === "failed") return true;
+  const c = report.counts || {};
+  if (Number(c.failed) > 0) return true;
+  const table = Array.isArray(report.table) ? report.table : [];
+  return table.some(
+    (r) => r && typeof r.result === "string" && /fail/i.test(r.result),
+  );
+}
+
+function statusOf(job, report) {
+  const st = job?.state || "";
+  if (st === "running") return "running";
+  if (job?.orphan || st === "orphaned") return "orphaned";
+  if (st === "aborted" || job?.abort) return "failed";
+  if (st === "retired") {
+    if (report) {
+      return reportHasFailures(report) || report.status !== "done"
+        ? "failed"
+        : "success";
+    }
+    return job?.receipt?.status === "done" ? "success" : "failed";
+  }
+  return "running"; // unknown / inflight reads as running
+}
+
+// semantic order for ?sort=status (running -> orphaned -> failed -> success)
+const STATUS_RANK = { running: 0, orphaned: 1, failed: 2, success: 3 };
+
 // the staged program dir: job.dir when it is a dir, else the canonical
 // sessions/<sid>/jobs/<jid>/run
 function runDirOf(job, sid, jid) {
@@ -129,12 +172,16 @@ function runDirOf(job, sid, jid) {
 function flattenJob(job) {
   const panes = Array.isArray(job.panes) ? job.panes : [];
   const reportPath = path.join(job.dir || "", "report.json");
+  const report = reportOf(job);
   return {
     id: job.id,
     sid: job.sid,
     workflow: job.workflow || null,
     stoodUpBy: job.stoodUpBy || null,
-    state: job.state || "unknown",
+    state: job.state || "unknown", // raw state, kept alongside the mapping
+    status: statusOf(job, report), // v4 vocabulary: success|failed|running|orphaned
+    reportStatus: report?.status ?? null,
+    legacy: !job.dag, // v4: no dag block -> legacy, never shown as a dag
     task: job.task || null,
     dir: job.dir || null,
     pid: job.pid ?? null,
@@ -213,14 +260,17 @@ function buildDags() {
     if (dag && dag.content_hash && !g.versions.includes(dag.content_hash)) {
       g.versions.push(dag.content_hash);
     }
+    const report = reportOf(job);
     g.runs.push({
       sid: job.sid,
       jid: job.id,
-      state: job.state || "unknown",
+      state: job.state || "unknown", // raw
+      status: statusOf(job, report), // v4 vocabulary
       workflow: job.workflow || null,
       created: job.created || null,
       finished: finishedOf(job),
       durationMs: durationMsOf(job),
+      version: dag?.content_hash || null,
       labels: dag?.labels || {},
     });
   }
@@ -234,6 +284,20 @@ function buildDags() {
       null,
     );
     const last = g.runs[0] || null;
+    // v4: the workflow of the latest run names the dag's kind
+    g.kind = last?.workflow || null; // fan-out | lab | coworker
+    g.labels = last?.labels || {};
+    // v4: latest run with the mapped status (start/end/durationMs/status)
+    g.latestRun = last
+      ? {
+          jid: last.jid,
+          sid: last.sid,
+          start: last.created,
+          end: last.finished,
+          durationMs: last.durationMs,
+          status: last.status,
+        }
+      : null;
     g.lastRun = last
       ? {
           jid: last.jid,
@@ -258,7 +322,51 @@ function buildDags() {
 
 // ---- v2: dag shape (flow diagram data) --------------------------------
 
-const shapeCache = new Map(); // dag.mjs path -> {mtimeMs, payload}
+// import() a dag.mjs (staged or LIVE source — same shape) into
+// {dagName, nodes:[{id,does}], edges:[{from,to,messages:0}]} or
+// {…, error}. Cached by mtime so config edits show up immediately.
+const labGraphCache = new Map(); // dag.mjs path -> {mtimeMs, graph}
+
+async function labGraph(dagFile) {
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(dagFile).mtimeMs;
+  } catch {
+    return null; // no dag.mjs there
+  }
+  const hit = labGraphCache.get(dagFile);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.graph;
+  let graph;
+  try {
+    const mod = await import(pathToFileURL(dagFile).href + "?v=" + mtimeMs);
+    const dag = mod.dag || mod.default?.dag || null;
+    const steps = Array.isArray(dag?.steps) ? dag.steps : [];
+    const nodes = [];
+    const edges = [];
+    for (const s of steps) {
+      if (!s || typeof s.id !== "string") continue;
+      nodes.push({ id: s.id, does: s.does ?? null });
+      const after = Array.isArray(s.after) ? s.after : s.after ? [s.after] : [];
+      for (const a of after) {
+        if (typeof a === "string") edges.push({ from: a, to: s.id, messages: 0 });
+      }
+    }
+    graph = {
+      dagName: typeof dag?.name === "string" ? dag.name : null,
+      nodes,
+      edges,
+    };
+  } catch (e) {
+    graph = {
+      dagName: null,
+      nodes: [],
+      edges: [],
+      error: "dag.mjs import failed: " + (e && e.message ? e.message : String(e)),
+    };
+  }
+  labGraphCache.set(dagFile, { mtimeMs, graph });
+  return graph;
+}
 
 // v3: tally relay message files per from->to pair in a staged run dir
 function messageTallies(messagesDir) {
@@ -298,52 +406,18 @@ function memberDoes(file) {
 
 async function dagShape(job, sid, jid) {
   const runDir = runDirOf(job, sid, jid);
-  const dagFile = path.join(runDir, "dag.mjs");
 
-  // lab job: the staged dag.mjs IS data — import() it
-  let mtimeMs = 0;
-  try {
-    mtimeMs = fs.statSync(dagFile).mtimeMs;
-  } catch {
-    mtimeMs = -1;
-  }
-  if (mtimeMs >= 0) {
-    const hit = shapeCache.get(dagFile);
-    if (hit && hit.mtimeMs === mtimeMs) return hit.payload;
-    let payload;
-    try {
-      const mod = await import(pathToFileURL(dagFile).href + "?v=" + mtimeMs);
-      const dag = mod.dag || mod.default?.dag || null;
-      const steps = Array.isArray(dag?.steps) ? dag.steps : [];
-      const nodes = [];
-      const edges = [];
-      for (const s of steps) {
-        if (!s || typeof s.id !== "string") continue;
-        nodes.push({ id: s.id, does: s.does ?? null });
-        const after = Array.isArray(s.after) ? s.after : s.after ? [s.after] : [];
-        for (const a of after) {
-          if (typeof a === "string") edges.push({ from: a, to: s.id, messages: 0 });
-        }
-      }
-      payload = {
-        kind: "lab",
-        dagName: typeof dag?.name === "string" ? dag.name : null,
-        nodes,
-        edges,
-        hooks: stagedHooks(runDir),
-      };
-    } catch (e) {
-      payload = {
-        kind: "lab",
-        dagName: null,
-        nodes: [],
-        edges: [],
-        hooks: stagedHooks(runDir),
-        error: "dag.mjs import failed: " + (e && e.message ? e.message : String(e)),
-      };
-    }
-    shapeCache.set(dagFile, { mtimeMs, payload });
-    return payload;
+  // lab job: the staged dag.mjs IS data — import() it (cached by mtime)
+  const lab = await labGraph(path.join(runDir, "dag.mjs"));
+  if (lab) {
+    return {
+      kind: "lab",
+      dagName: lab.dagName,
+      nodes: lab.nodes,
+      edges: lab.edges,
+      hooks: stagedHooks(runDir),
+      ...(lab.error ? { error: lab.error } : {}),
+    };
   }
 
   // coworker job: members as nodes, relay edges between consecutive members
@@ -463,6 +537,44 @@ function cappedRead(file, cap = 4000) {
   } catch {
     return null;
   }
+}
+
+// v4: recursive listing for the run-dir browser. Symlinks are listed but
+// never followed; depth-capped; dirs first, then files, then links.
+function treeOf(dir, depth) {
+  const out = [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (e.isSymbolicLink()) {
+      out.push({ name: e.name, type: "link" });
+      continue;
+    }
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      out.push({
+        name: e.name,
+        type: "dir",
+        children: depth < 8 ? treeOf(p, depth + 1) : [],
+      });
+    } else if (e.isFile()) {
+      try {
+        const st = fs.statSync(p);
+        out.push({
+          name: e.name,
+          type: "file",
+          bytes: st.size,
+          mtime: st.mtime.toISOString(),
+        });
+      } catch {}
+    }
+  }
+  const rank = { dir: 0, file: 1, link: 2 };
+  return out.sort((a, b) => rank[a.type] - rank[b.type] || a.name.localeCompare(b.name));
 }
 
 function sourceOf(job, sid, jid) {
@@ -666,6 +778,105 @@ function readEvents(sid) {
   return events;
 }
 
+// ---- v4: home (the Home page in one call) ------------------------------
+
+function dayKeyOf(iso) {
+  const t = Date.parse(iso || "");
+  if (!isFinite(t)) return null;
+  return new Date(t).toISOString().slice(0, 10); // UTC day
+}
+
+// {allow, deny, denyUnneeded} from trace `permission` events — the trace
+// IS the session's events.jsonl
+function permissionMixAll() {
+  const mix = { allow: 0, deny: 0, denyUnneeded: 0 };
+  for (const s of readSessions()) {
+    const events = readEvents(s.id);
+    if (!events) continue;
+    for (const e of events) {
+      if (e.kind !== "permission") continue;
+      if (e.decision === "allow") mix.allow++;
+      else if (e.decision === "deny") mix.deny++;
+      else if (e.decision === "deny-unneeded") mix.denyUnneeded++;
+    }
+  }
+  return mix;
+}
+
+function buildHome() {
+  const now = Date.now();
+  const rows = listAllJobs().map((job) => ({
+    created: job.created || null,
+    durationMs: durationMsOf(job),
+    status: statusOf(job, reportOf(job)),
+  }));
+  const in24 = rows.filter((r) => {
+    const t = Date.parse(r.created || "");
+    return isFinite(t) && t >= now - 24 * 3600 * 1000;
+  });
+  const terminal24 = in24.filter(
+    (r) => r.status === "success" || r.status === "failed",
+  );
+  const ok24 = terminal24.filter((r) => r.status === "success");
+  const dur24 = terminal24.map((r) => r.durationMs).filter((d) => d != null);
+
+  const kpis = {
+    jobs24h: in24.length,
+    // % of terminal (success|failed) jobs started in the last 24h that
+    // succeeded; null when nothing terminal ran in the window
+    successRate24h: terminal24.length
+      ? Math.round((ok24.length / terminal24.length) * 1000) / 10
+      : null,
+    avgDuration24h: dur24.length
+      ? Math.round(dur24.reduce((a, b) => a + b, 0) / dur24.length)
+      : null,
+    runningNow: rows.filter((r) => r.status === "running").length,
+    orphanedNow: rows.filter((r) => r.status === "orphaned").length,
+  };
+
+  // 14 day buckets (UTC day of created), oldest -> newest, zero-filled
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    days.push(new Date(now - i * 24 * 3600 * 1000).toISOString().slice(0, 10));
+  }
+  const runsPerDay = days.map((day) => ({
+    day,
+    success: 0,
+    failed: 0,
+    running: 0,
+    orphaned: 0,
+  }));
+  const byDay = new Map(runsPerDay.map((d) => [d.day, d]));
+  for (const r of rows) {
+    const day = dayKeyOf(r.created);
+    const b = day ? byDay.get(day) : null;
+    if (b && r.status in b) b[r.status]++;
+  }
+
+  const durationTrend = buildDags()
+    .filter((g) => g.dag_id !== UNGROUPED)
+    .map((g) => ({
+      dag_id: g.dag_id,
+      project: g.project,
+      points: [...g.runs]
+        .sort((a, b) => (a.created || "").localeCompare(b.created || ""))
+        .map((r) => ({
+          jid: r.jid,
+          durationMs: r.durationMs,
+          version: r.version ?? null,
+          status: r.status,
+        })),
+    }));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    kpis,
+    runsPerDay,
+    durationTrend,
+    permissionMix: permissionMixAll(),
+  };
+}
+
 function sendJson(res, status, body) {
   const buf = Buffer.from(JSON.stringify(body));
   res.writeHead(status, {
@@ -823,8 +1034,11 @@ async function handleApi(req, res, url) {
         state: (j) => j.state || "",
         created: (j) => j.created || "",
         duration: (j) => j.durationMs,
+        status: (j) => STATUS_RANK[j.status] ?? 9,
       }[sort];
-      if (!keyFn) return sendError(res, 400, "bad sort, want state|created|duration");
+      if (!keyFn) {
+        return sendError(res, 400, "bad sort, want state|created|duration|status");
+      }
       const dir = sortDirOf(q.get("order"));
       if (dir === null) return sendError(res, 400, "bad order, want asc|desc");
       applySort(jobs, keyFn, dir);
@@ -832,32 +1046,156 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { count: jobs.length, jobs });
   }
 
+  if (req.method === "GET" && pathname === "/api/home") {
+    return sendJson(res, 200, buildHome());
+  }
+
   if (req.method === "GET" && pathname === "/api/dags") {
+    // v4: sort by the latest run (start/end/duration/status) or dag name;
+    // v3 keys runs|last|created keep working. The (ungrouped) group is
+    // EXCLUDED — legacy runs are reached via /api/jobs only.
     const sort = q.get("sort") || "last";
-    if (!["runs", "last", "created"].includes(sort)) {
-      return sendError(res, 400, "bad sort, want runs|last|created");
-    }
-    const dir = sortDirOf(q.get("order"));
-    if (dir === null) return sendError(res, 400, "bad order, want asc|desc");
     const keyFn = {
+      start: (g) => g.latestRun?.start ?? null,
+      end: (g) => g.latestRun?.end ?? null,
+      duration: (g) => g.latestRun?.durationMs ?? null,
+      status: (g) => (g.latestRun?.status != null ? STATUS_RANK[g.latestRun.status] ?? 9 : null),
+      dag: (g) => g.dag_id,
       runs: (g) => g.runCount,
       last: (g) => g.lastRun?.created ?? null,
       created: (g) => g.created ?? null,
     }[sort];
-    const dags = buildDags();
-    const real = dags.filter((g) => g.dag_id !== UNGROUPED);
-    applySort(real, keyFn, dir);
-    const rest = dags.filter((g) => g.dag_id === UNGROUPED);
+    if (!keyFn) {
+      return sendError(
+        res,
+        400,
+        "bad sort, want start|end|duration|status|dag|runs|last|created",
+      );
+    }
+    const dir = sortDirOf(q.get("order"));
+    if (dir === null) return sendError(res, 400, "bad order, want asc|desc");
+    const dags = buildDags().filter((g) => g.dag_id !== UNGROUPED);
+    applySort(dags, keyFn, dir);
     return sendJson(res, 200, {
       generatedAt: new Date().toISOString(),
       sort,
       order: dir === 1 ? "asc" : "desc",
       count: dags.length,
-      dags: [...real, ...rest],
+      dags,
     });
   }
 
-  let m = pathname.match(/^\/api\/dag-shape\/([^/]+)\/([^/]+)$/);
+  // v4: the dag's definition, parsed LIVE from its SOURCE folder (not a
+  // run's staged copy) — config edits show up immediately. Lab programs:
+  // import() the source dag.mjs; coworker programs: members/*.md as nodes
+  // with relay chain edges. PLUS hooks from the source workflow.toml.
+  let m = pathname.match(/^\/api\/dag-definition\/([^/]+)\/([^/]+)$/);
+  if (req.method === "GET" && m) {
+    const pid = safeDecode(res, m[1]);
+    const dagId = safeDecode(res, m[2]);
+    if (pid === null || dagId === null) return;
+    const g = findDagGroup(pid + "/" + dagId);
+    if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
+    if (!g.source) return sendError(res, 400, "dag has no source folder");
+    const srcErr = sourceFolderError(g.source);
+    if (srcErr) return sendError(res, 400, srcErr);
+    const base = {
+      project: g.project,
+      dag_id: g.dag_id,
+      source: g.source,
+    };
+    const hooks = stagedHooks(g.source);
+
+    const lab = await labGraph(path.join(g.source, "dag.mjs"));
+    if (lab) {
+      return sendJson(res, 200, {
+        ...base,
+        kind: "lab",
+        dagName: lab.dagName,
+        nodes: lab.nodes,
+        edges: lab.edges.map(({ from, to }) => ({ from, to })),
+        hooks,
+        ...(lab.error ? { error: lab.error } : {}),
+      });
+    }
+
+    const membersDir = path.join(g.source, "members");
+    let memberFiles = [];
+    try {
+      memberFiles = fs
+        .readdirSync(membersDir)
+        .filter((f) => f.endsWith(".md"))
+        .sort();
+    } catch {}
+    if (memberFiles.length) {
+      const nodes = memberFiles.map((f) => ({
+        id: f.replace(/\.md$/, ""),
+        does: memberDoes(path.join(membersDir, f)) || "member",
+      }));
+      const edges = [];
+      for (let i = 1; i < nodes.length; i++) {
+        edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
+      }
+      return sendJson(res, 200, { ...base, kind: "coworker", nodes, edges, hooks });
+    }
+
+    return sendJson(res, 200, {
+      ...base,
+      kind: g.kind || "none",
+      nodes: [],
+      edges: [],
+      hooks,
+    });
+  }
+
+  // v4: the read-only run-dir browser — the run dir's file tree, and
+  // ?path=<rel> for one file's text (capped at 8000 chars). report.json is
+  // fetched by name and rendered by the frontend. No secrets by design.
+  m = pathname.match(/^\/api\/run-dir\/([^/]+)\/([^/]+)$/);
+  if (req.method === "GET" && m) {
+    const [, sid, jid] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
+    const runDir = runDirOf(job, sid, jid);
+    let root = null;
+    try {
+      root = fs.realpathSync(runDir);
+    } catch {
+      return sendError(res, 404, "run dir not found: " + runDir);
+    }
+    const rel = q.get("path");
+    if (rel === null || rel === "") {
+      return sendJson(res, 200, { sid, jid, runDir, tree: treeOf(root, 0) });
+    }
+    if (rel.includes("\u0000")) return sendError(res, 400, "bad path");
+    const target = path.resolve(root, "." + path.sep + rel);
+    if (target !== root && !target.startsWith(root + path.sep)) {
+      return sendError(res, 403, "path escapes run dir");
+    }
+    let st = null;
+    try {
+      st = fs.statSync(target);
+    } catch {
+      return sendError(res, 404, "no such file: " + rel);
+    }
+    if (st.isDirectory()) return sendError(res, 400, "path is a directory: " + rel);
+    const r = cappedRead(target, 8000);
+    if (!r) return sendError(res, 404, "no such file: " + rel);
+    const binary = r.text.includes("\u0000");
+    return sendJson(res, 200, {
+      sid,
+      jid,
+      runDir,
+      path: rel,
+      bytes: st.size,
+      truncated: r.truncated,
+      binary,
+      text: binary ? null : r.text,
+    });
+  }
+
+  m = pathname.match(/^\/api\/dag-shape\/([^/]+)\/([^/]+)$/);
   if (req.method === "GET" && m) {
     const [, sid, jid] = m;
     if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
