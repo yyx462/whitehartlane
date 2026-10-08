@@ -250,6 +250,7 @@ function onRoute() {
     }
     return;
   }
+  closeEventsStream();
   state.split = null;
   if (r.view === "home") { mountHome(seq); return; }
   if (r.view === "dags") { mountDags(seq); return; }
@@ -594,6 +595,7 @@ function mountSplit(r, seq) {
     report: null, reportNote: null,
     filePath: null, fileData: null, fileLoading: false, fileCache: {},
     events: null, eventsError: null, eventsLoadedKey: null,
+    es: null, esKey: null,
     resizeCount: Number(sessionStorage.getItem(RESIZE_KEY) || 0),
   };
   initSplitLayout();
@@ -686,12 +688,15 @@ async function updateSplit(seq) {
     sp.report = null; sp.reportNote = null;
     sp.filePath = null; sp.fileData = null; sp.fileLoading = false; sp.fileCache = {};
     sp.events = null; sp.eventsError = null; sp.eventsLoadedKey = null;
+    closeEventsStream();
   }
   const lk = `${r.legacy ? "legacy" : r.dag}|${r.legacy ? "" : r.tab}`;
   if (lk !== sp.leftKey) {
     sp.leftKey = lk;
     renderLeft();
   }
+  // the stream lives only while the events tab shows its run
+  if (r.rtab !== "events" || !r.run) closeEventsStream();
   renderRight();
 }
 
@@ -1292,8 +1297,21 @@ function renderRightBody() {
     return;
   }
   if (r.rtab === "events") {
-    const sid = splitKey(r.run)[0];
-    if (sp.eventsLoadedKey !== sid) {
+    const runKey = r.run;
+    const st = splitRunState(runKey);
+    const streaming = !!sp.es && sp.esKey === runKey;
+    if (st === "running" || streaming) {
+      // live run: EventSource owns updates — no polling, appends only
+      openEventsStream(runKey);
+      const nearBottom = body.scrollHeight === 0 ||
+        body.scrollTop + body.clientHeight >= body.scrollHeight - 60;
+      const have = Array.isArray(sp.events);
+      body.innerHTML = eventsShellHtml(have);
+      if (nearBottom && have) body.scrollTop = body.scrollHeight;
+      return;
+    }
+    // finished (or not yet known) run: one-shot immutable history, as v4
+    if (sp.eventsLoadedKey !== runKey) {
       body.innerHTML = paneEmpty("loading events…");
       loadEvents(state.seq);
       return;
@@ -1580,6 +1598,130 @@ function eventsBodyHtml() {
     `</div>`;
 }
 
+function eventsShellHtml(have) {
+  const sp = state.split;
+  const empty = `<span class="muted" data-ev-empty>${sp.es ? "connecting to live events…" : "loading events…"}</span>`;
+  const lines = have ? (sp.events.map(evLine).join("") || empty) : empty;
+  return `<div class="ev-live" id="ev-live"><span class="ev-dot"></span>live` +
+    `<span id="ev-reconnecting" class="hidden"> — reconnecting…</span></div>` +
+    `<div class="events tall" id="ev-box">${lines}</div>`;
+}
+
+// ----- live events stream (running runs) -----
+
+function setEventsReconnecting(on) {
+  const el = $("#ev-reconnecting");
+  if (el) el.classList.toggle("hidden", !on);
+}
+
+function closeEventsStream() {
+  const sp = state.split;
+  if (!sp || !sp.es) return;
+  try { sp.es.close(); } catch { /* already closed */ }
+  sp.es = null;
+  sp.esKey = null;
+  setEventsReconnecting(false);
+}
+
+function openEventsStream(runKey) {
+  const sp = state.split;
+  if (!sp || (sp.es && sp.esKey === runKey)) return;
+  closeEventsStream();
+  const [sid, jid] = splitKey(runKey);
+  sp.esKey = runKey;
+  sp.events = null;
+  sp.eventsError = null;
+  const es = new EventSource(`/api/events/stream?sid=${enc(sid)}&jid=${enc(jid)}`);
+  sp.es = es;
+  es.addEventListener("open", () => {
+    if (sp.es === es) setEventsReconnecting(false);
+  });
+  es.addEventListener("snapshot", (e) => {
+    if (sp.es !== es || sp.esKey !== runKey) return;
+    let data = {};
+    try { data = JSON.parse(e.data); } catch { /* bad frame */ }
+    if (!current(sp, state.seq) || sp.route.run !== runKey || sp.route.rtab !== "events") return;
+    sp.events = Array.isArray(data.events) ? data.events : [];
+    paintEventsFromState();
+  });
+  es.addEventListener("append", (e) => {
+    if (sp.es !== es || sp.esKey !== runKey) return;
+    let ev = null;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    if (!sp.events) sp.events = [];
+    sp.events.push(ev);
+    appendEventLine(ev);
+  });
+  es.addEventListener("error", () => {
+    if (sp.es === es) setEventsReconnecting(true);
+  });
+}
+
+// full repaint from sp.events — first snapshot paint and reconnect
+// replaces (server sends a fresh snapshot on reconnect, which dedupes
+// anything missed while the wire was down). Scroll law: stick to the
+// tail only if the reader was at the tail, else hold their position.
+function paintEventsFromState() {
+  const sp = state.split;
+  const el = $("#right-body");
+  const box = $("#ev-box");
+  if (!box) return;
+  const nearBottom = !el || el.scrollHeight === 0 ||
+    el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+  const wasTop = el ? el.scrollTop : 0;
+  box.innerHTML = (sp.events || []).map(evLine).join("") ||
+    '<span class="muted" data-ev-empty>no events</span>';
+  if (el) el.scrollTop = nearBottom ? el.scrollHeight : wasTop;
+}
+
+// append-only growth: touch nothing above, snap to the new tail only
+// if the reader was already at the tail — never move a reading position
+function appendEventLine(ev) {
+  const el = $("#right-body");
+  const box = $("#ev-box");
+  if (!box) return;
+  const atTail = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const ghost = box.querySelector("[data-ev-empty]");
+  if (ghost) ghost.remove();
+  box.insertAdjacentHTML("beforeend", evLine(ev));
+  if (el && atTail) el.scrollTop = el.scrollHeight;
+}
+
+// the run finished while we watched: close the stream, pin the final
+// history with one immutable snapshot fetch (snapshot-equivalent)
+async function finalizeEventsStream(seq) {
+  const sp = state.split;
+  const runKey = sp.route.run;
+  if (!runKey) return;
+  closeEventsStream();
+  const [sid, jid] = splitKey(runKey);
+  try {
+    const res = await fetchJSON(`/api/events?sid=${enc(sid)}&jid=${enc(jid)}`);
+    if (!current(sp, seq) || sp.route.run !== runKey || sp.route.rtab !== "events") return;
+    sp.events = res.events || [];
+    sp.eventsError = null;
+    sp.eventsLoadedKey = runKey;
+  } catch (err) {
+    if (!current(sp, seq) || sp.route.run !== runKey) return;
+    sp.eventsError = err.message;
+    sp.eventsLoadedKey = runKey;
+  }
+  if (sp.route.rtab === "events") paintEventsFromState();
+}
+
+// called from the 5s tick while the events tab is open — upgrades a
+// not-yet-known run to live once it's seen running, and closes the
+// stream the moment the run is terminal
+function maintainEventsStream(seq) {
+  const sp = state.split;
+  if (!sp || !sp.route.run) return;
+  const runKey = sp.route.run;
+  const st = splitRunState(runKey);
+  const streaming = !!sp.es && sp.esKey === runKey;
+  if (streaming && st && st !== "running") finalizeEventsStream(seq);
+  else if (!streaming && st === "running") openEventsStream(runKey);
+}
+
 function refreshSplit() {
   const sp = state.split;
   if (!sp) return;
@@ -1594,8 +1736,9 @@ function refreshSplit() {
   if (!r.run) return;
   if (r.rtab === "receipt") loadJob(state.seq, true);
   else if (r.rtab === "events") {
-    // only a running run's events can change — finished history never refetches
-    if (splitRunState(r.run) === "running") loadEvents(state.seq, true);
+    // the stream owns a running run's growth — the tick only tends the
+    // lifecycle (open once it's known running, finalize once terminal)
+    maintainEventsStream(state.seq);
   }
 }
 
