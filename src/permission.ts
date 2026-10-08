@@ -6,9 +6,12 @@
 // no: a tuned typed judgment reads the ask plus the worker's task and
 // decides plausibly-needed (a vista job may read its session shots)
 // against wandering. The prompt and threshold it asks with are the
-// jev-tuner's landed winner — a dead jev fails restrictive and the
-// say-why escape hatch still works. Every verdict carries a message
-// the rail injects into the pane. Prompts never queue for a human.
+// jev-tuner's landed winner — a dead jev fails restrictive. And a
+// repeated ask for the same non-dangerous path IS the assertion of
+// need: escalateOnRepeat grants it on the second ask, so the deny
+// message's promise is true even when the judge misses. Hard-deny
+// never escalates. Every verdict carries a message the rail injects
+// into the pane. Prompts never queue for a human.
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
 
@@ -16,6 +19,8 @@ export type PermissionDecision = {
   decision: "allow" | "deny" | "deny-unneeded"
   message: string
   path?: string
+  // true when a repeat ask for the same path may escalate to allow
+  escalatable?: boolean
 }
 
 // The gray-zone judge: p(this path is plausibly needed for this task).
@@ -66,6 +71,7 @@ export function decidePermission(
   if (path === undefined) {
     return {
       decision: "deny-unneeded",
+      escalatable: false,
       message:
         "denied: no recognizable path in that permission ask. Stay in the target tree and the job dir; if you truly need something else, say why in your next message.",
     }
@@ -74,6 +80,7 @@ export function decidePermission(
     return {
       decision: "deny",
       path,
+      escalatable: false,
       message: `denied: ${path} looks like secrets or credentials. Never touch it in this Job. Continue your own task.`,
     }
   }
@@ -88,11 +95,13 @@ export function decidePermission(
     return {
       decision: "deny",
       path,
-      message: `denied: ${path} is outside the home tree this Job runs in. Continue your own task.`,
+      escalatable: true,
+      message: `denied: ${path} is outside the home tree this Job runs in. If you truly need it, ask again — a repeated ask for the same path is granted.`,
     }
   }
   // the gray zone: inside home, outside roots. A judge reads the ask
-  // in context; no judge (or a dead one) stays restrictive.
+  // in context; no judge (or a dead one) stays restrictive. Whatever
+  // the judge says, a repeat ask still escalates below.
   if (judge) {
     let p: number
     try {
@@ -111,8 +120,23 @@ export function decidePermission(
   return {
     decision: "deny-unneeded",
     path,
-    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, say why in your next message and the decision may change.`,
+    escalatable: true,
+    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, ask again — a repeated ask for the same path is granted.`,
   }
+}
+
+// A repeat ask for the same path is the assertion of need the first
+// denial asked for. The rail counts asks per member+path; the second
+// escalates to a durable allow. Hard-deny verdicts never escalate.
+export function escalateOnRepeat(v: PermissionDecision, priorAsksForPath: number): PermissionDecision {
+  if (priorAsksForPath >= 1 && v.escalatable && v.path) {
+    return {
+      decision: "allow",
+      path: v.path,
+      message: `granted on repeat: you asked for ${v.path} again — treated as asserted need, and made durable for this Job.`,
+    }
+  }
+  return v
 }
 
 // The state string the tuned judge asks over — one builder shared by

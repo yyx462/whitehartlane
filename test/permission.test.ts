@@ -3,7 +3,7 @@ import test from "node:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { decidePermission } from "../src/permission.ts"
+import { decidePermission, escalateOnRepeat } from "../src/permission.ts"
 
 // the judge branch reads the landed threshold; point at an empty tmp
 // dir so the compiled default (0.5) applies, whatever has been landed
@@ -59,7 +59,7 @@ test("home-but-unrooted wandering is denied as unneeded, with guidance", () => {
   })
   assert.equal(v.decision, "deny-unneeded")
   assert.match(v.message, /I don't think you need/)
-  assert.match(v.message, /say why/)
+  assert.match(v.message, /ask again/)
 })
 
 test("a question with no path is denied as unneeded", () => {
@@ -90,7 +90,7 @@ test("the gray zone: a low judge score stays deny-unneeded", () => {
     () => 0.3,
   )
   assert.equal(v.decision, "deny-unneeded")
-  assert.match(v.message, /say why/)
+  assert.match(v.message, /ask again/)
 })
 
 test("a dead judge fails restrictive, never blocks the rail", () => {
@@ -114,4 +114,47 @@ test("no judge keeps the legacy flat deny-unneeded", () => {
     context: "Use yyx-vista to screenshot the built page.",
   })
   assert.equal(v.decision, "deny-unneeded")
+})
+
+test("a repeat ask escalates to allow — persistence is the asserted need", () => {
+  const first = decidePermission({
+    question: "Access external directory /Users/me/.config/opencode/skills/yyx-vista/",
+    allowedRoots: roots,
+  })
+  assert.equal(first.decision, "deny-unneeded")
+  assert.equal(first.escalatable, true)
+  assert.match(first.message, /ask again/)
+  const second = escalateOnRepeat(first, 1)
+  assert.equal(second.decision, "allow")
+  assert.match(second.message, /granted on repeat/)
+  // outside-home denies escalate too; hard-deny never does
+  const tmp = decidePermission({ question: "Access /tmp/build-cache", allowedRoots: roots })
+  assert.equal(escalateOnRepeat(tmp, 1).decision, "allow")
+  const secret = decidePermission({
+    question: "Access /Users/me/proj/ui-window/web/.env",
+    allowedRoots: roots,
+  })
+  assert.equal(secret.decision, "deny")
+  assert.equal(escalateOnRepeat(secret, 5).decision, "deny")
+  // first asks and no-path verdicts stay as they are
+  assert.equal(escalateOnRepeat(first, 0).decision, "deny-unneeded")
+  assert.equal(
+    escalateOnRepeat(decidePermission({ question: "no path here", allowedRoots: roots }), 3).decision,
+    "deny-unneeded",
+  )
+})
+
+test("a judge miss is still covered: the judge's deny-unneeded escalates on repeat", () => {
+  const first = decidePermission(
+    {
+      question: "Access external directory /Users/me/projects/inventory-app/src/app/page.tsx",
+      allowedRoots: roots,
+      context: "Fix the hydration warning in this repo's own app directory.",
+    },
+    () => 0.1,
+  )
+  assert.equal(first.decision, "deny-unneeded")
+  assert.equal(first.escalatable, true)
+  const second = escalateOnRepeat(first, 1)
+  assert.equal(second.decision, "allow")
 })
