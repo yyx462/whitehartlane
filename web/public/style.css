@@ -926,6 +926,38 @@ td.empty, .empty {
 .ev-kind.k-job\.orphaned { color: var(--orphaned); }
 .ev-extra { color: var(--muted); }
 
+/* live events stream */
+.ev-live {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  margin: -4px 0 8px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+}
+.ev-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 70%, transparent);
+  animation: ev-pulse 2s ease-in-out infinite;
+}
+@keyframes ev-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+#ev-reconnecting { color: var(--orphaned); }
+
 /* ---------- trigger button ---------- */
 .trig {
   width: 26px;
