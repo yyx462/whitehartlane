@@ -10,9 +10,12 @@ needed (a vista job blocked off its own session shots) — the gray zone
 rule's clothes. Now that branch asks a real typed judgment:
 `tunedPermissionJudge` sends the ask plus the member's brief through
 the jev CLI with a landed prompt; below the landed threshold it stays
-the old deny-with-guidance; a dead jev fails restrictive; secrets and
-credential-shaped paths (added: `~/.config/jev/`, `~/.secrets/`, gpg)
-are denied before the judge ever sees them. The prompt a gate asks
+deny-with-guidance — and, merged with master's escalation, a repeat
+ask for the same non-dangerous path still escalates to a durable
+allow: the judge answers the first ask, escalateOnRepeat covers its
+misses; a dead jev fails restrictive; secrets and credential-shaped
+paths (added: `~/.config/jev/`, `~/.secrets/`, gpg) are denied before
+the judge ever sees them. The prompt a gate asks
 with is now data, not code: every JEV-involved gate (permission-
 needed, grill-enough, workflow-choice) has a folder in
 `jev-tuner/gates/` holding >= 50 LLM-seeded test cases, prompt

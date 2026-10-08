@@ -3,19 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>agentic-os · dag explorer</title>
+    <title>agentic-os · dags</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header class="topnav">
-      <a class="brand" href="#/runs">
+      <a class="brand" href="#/home">
         <span class="brand-dot"></span>
         <span class="wordmark">agentic-os</span>
-        <span class="brand-sub">dag explorer</span>
+        <span class="brand-sub">dags</span>
       </a>
       <nav class="mainnav">
-        <a href="#/runs" data-nav="runs">All Runs</a>
-        <a href="#/dags" data-nav="dags">DAGs</a>
+        <a href="#/home" data-nav="home">Home</a>
+        <a href="#/dags" data-nav="dags">Dags</a>
+      </nav>
+      <nav class="subnav" id="subnav" aria-label="Dags section">
+        <a href="#/dags" data-subnav="dags">Dags</a>
+        <span class="subnav-sep">·</span>
+        <a href="#/dag-runs" data-subnav="dag-runs">Dag Runs</a>
       </nav>
       <div class="nav-right">
         <span id="refresh-note" class="muted" title="auto-refresh interval">5s</span>
