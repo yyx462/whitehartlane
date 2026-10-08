@@ -11,7 +11,7 @@ const clockEl = $("#clock");
 
 const LEFT_TABS = ["diagram", "runs", "config"];
 const RIGHT_TABS = ["receipt", "report", "events"];
-const STATUSES = ["success", "failed", "running", "paused", "orphaned"];
+const STATUSES = ["success", "failed", "aborted", "running", "paused", "orphaned"];
 const SPLIT_KEY = "ui4-split-pct";
 const RESIZE_KEY = "ui4-split-resized";
 
@@ -361,7 +361,7 @@ function svgRunsPerDay(days) {
   if (!days.length) return paneEmpty("no data");
   const W = 880, H = 224, padL = 40, padR = 12, padT = 12, padB = 28;
   const iw = W - padL - padR, ih = H - padT - padB;
-  const totals = days.map((d) => (d.success || 0) + (d.failed || 0) + (d.running || 0) + (d.paused || 0) + (d.orphaned || 0));
+  const totals = days.map((d) => (d.success || 0) + (d.failed || 0) + (d.aborted || 0) + (d.running || 0) + (d.paused || 0) + (d.orphaned || 0));
   const max = Math.max(...totals, 1);
   const step = niceStep(max);
   const top = Math.max(Math.ceil(max / step) * step, step);
@@ -373,7 +373,7 @@ function svgRunsPerDay(days) {
     g += `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="c-grid"></line>` +
       `<text x="${padL - 6}" y="${y(v) + 3}" class="c-yaxis" text-anchor="end">${v}</text>`;
   }
-  const segKeys = ["success", "failed", "running", "paused", "orphaned"];
+  const segKeys = ["success", "failed", "aborted", "running", "paused", "orphaned"];
   let bars = "";
   days.forEach((d, i) => {
     const cx = padL + i * bw + bw / 2;
@@ -808,7 +808,10 @@ async function updateSplit(seq) {
     sp.report = null; sp.reportNote = null;
     sp.filePath = null; sp.fileData = null; sp.fileLoading = false; sp.fileCache = {};
     sp.events = null; sp.eventsError = null; sp.eventsLoadedKey = null;
+    sp.shape = null; sp.shapeKey = null;
+    sp.evSel = null; sp.evSideHtml = null; sp.evSideMember = null; sp.msgCache = {};
     closeEventsStream();
+    closeNodePopup();
   }
   const lk = `${r.legacy ? "legacy" : r.dag}|${r.legacy ? "" : r.tab}`;
   if (lk !== sp.leftKey) {
@@ -1007,6 +1010,13 @@ function hookStripHtml(hooks) {
   return `<div class="hookstrip">${chips}</div>`;
 }
 
+// hooks LIVE in the diagram now: a labeled rail across the top of the
+// canvas, so "where is the hook" answers itself at a glance
+function hooksRailHtml(hooks) {
+  if (!hooks || !hooks.length) return "";
+  return `<div class="g-hooks"><span class="g-hooks-label">hooks · detectors · gates</span>${hookStripHtml(hooks)}</div>`;
+}
+
 function renderDiagramBody() {
   const sp = state.split;
   const body = $("#left-body");
@@ -1052,8 +1062,9 @@ function drawDiagram(body, defn, dk) {
   const W = Math.max(...nodes.map((n) => pos[n.id].x + 190), 300) + 24;
   const H = Math.max(...nodes.map((n) => pos[n.id].y + 100), 200) + 24;
   body.innerHTML = `
-    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · live from the dag source — drag nodes to arrange (saved per dag)</div>
+    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · live from the dag source — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}</div>
     <div class="diagram-view">
+      ${hooksRailHtml(defn.hooks)}
       <div class="g-canvas" style="width:${W}px;height:${H}px" id="d-canvas">
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
           <defs>
@@ -1063,15 +1074,59 @@ function drawDiagram(body, defn, dk) {
           </defs>
         </svg>
         ${nodes.map((n) =>
-          `<div class="g-node" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.does || n.id)}">` +
+          `<div class="g-node" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief">` +
           `<div class="g-id">${esc(n.id)}</div>` +
           (n.does ? `<div class="g-does">${esc(n.does)}</div>` : "") +
+          (n.brief || n.does ? `<div class="g-open">brief ⌄</div>` : "") +
           `</div>`).join("")}
       </div>
     </div>
-    ${hookStripHtml(defn.hooks)}`;
+    <div id="node-pop-slot"></div>`;
   redrawEdges();
   bindNodeDrag(dk);
+  // the selected run's live shape (×N relayed messages), on the 5s loop
+  loadShape(state.seq);
+}
+
+// ----- live shape overlay (the diagram is a loop, not a one-shot) -----
+
+// message tallies of the selected run, keyed "from->to"; a run that
+// hasn't relayed yet (or a lab dag) yields an empty map harmlessly
+function shapeTally() {
+  const sp = state.split;
+  const t = new Map();
+  if (!sp || !sp.shape) return t;
+  for (const e of sp.shape.edges || []) {
+    if (e.messages > 0) t.set(`${e.from}->${e.to}`, e.messages);
+  }
+  return t;
+}
+
+function memberMailTotals(id) {
+  const sp = state.split;
+  let sent = 0, recv = 0;
+  for (const e of (sp && sp.shape ? sp.shape.edges : []) || []) {
+    if (e.from === id) sent += e.messages || 0;
+    if (e.to === id) recv += e.messages || 0;
+  }
+  return { sent, recv };
+}
+
+async function loadShape(seq) {
+  const sp = state.split;
+  if (!sp) return;
+  const runKey = sp.route.run;
+  if (!runKey || sp.route.legacy) return;
+  const [sid, jid] = splitKey(runKey);
+  try {
+    const res = await fetchJSON(`/api/dag-shape/${enc(sid)}/${enc(jid)}`);
+    if (!current(sp, seq) || sp.route.run !== runKey) return;
+    sp.shape = res;
+    sp.shapeKey = runKey;
+  } catch {
+    sp.shape = null;
+  }
+  if (sp.route.tab === "diagram" && $("#d-canvas")) redrawEdges();
 }
 
 function nodeBox(canvas, id) {
@@ -1097,23 +1152,47 @@ function redrawEdges() {
   const sp = state.split;
   if (!svg || !canvas || !sp || !sp.defn) return;
   svg.querySelectorAll("line.d-edge").forEach((el) => el.remove());
-  for (const e of sp.defn.edges || []) {
+  canvas.querySelectorAll(".g-badge").forEach((el) => el.remove());
+  // the drawn set = definition edges + the run's relay LOOP edges (a
+  // from->to pair with traffic but no chain edge — e.g. frontend
+  // answering back) so the exchange shows ×N in BOTH directions
+  const all = [...(sp.defn.edges || [])];
+  const seen = new Set(all.map((e) => `${e.from}->${e.to}`));
+  for (const e of (sp.shape && sp.shape.edges) || []) {
+    const k = `${e.from}->${e.to}`;
+    if (!seen.has(k)) { seen.add(k); all.push({ from: e.from, to: e.to, loop: true }); }
+  }
+  const tally = shapeTally();
+  for (const e of all) {
     const a = nodeBox(canvas, e.from), b = nodeBox(canvas, e.to);
     if (!a || !b) continue;
     const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
     const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     const p1 = borderPoint(a, bc), p2 = borderPoint(b, ac);
+    const n = tally.get(`${e.from}->${e.to}`) || 0;
     const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
     ln.setAttribute("x1", p1.x.toFixed(1));
     ln.setAttribute("y1", p1.y.toFixed(1));
     ln.setAttribute("x2", p2.x.toFixed(1));
     ln.setAttribute("y2", p2.y.toFixed(1));
-    ln.setAttribute("class", "d-edge");
+    ln.setAttribute("class", "d-edge" + (n > 0 ? " has-msg" : "") + (e.loop ? " loop" : ""));
     ln.setAttribute("marker-end", "url(#d-arrow)");
     const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    t.textContent = `${e.from} → ${e.to}`;
+    t.textContent = `${e.from} → ${e.to}` + (n > 0 ? ` · ${n} message${n === 1 ? "" : "s"} relayed` : "");
     ln.appendChild(t);
     svg.appendChild(ln);
+    if (n > 0) {
+      const badge = document.createElement("div");
+      badge.className = "g-badge";
+      badge.textContent = `×${n}`;
+      badge.title = `${e.from} → ${e.to}: ${n} message${n === 1 ? "" : "s"} relayed by the selected run`;
+      // a pair with traffic both ways shares one midpoint — split the
+      // badges apart so both stay readable (chain above, reply below)
+      const yOff = e.loop ? 16 : -10;
+      badge.style.left = ((p1.x + p2.x) / 2).toFixed(1) + "px";
+      badge.style.top = ((p1.y + p2.y) / 2 + yOff).toFixed(1) + "px";
+      canvas.appendChild(badge);
+    }
   }
 }
 
@@ -1128,7 +1207,9 @@ function bindNodeDrag(dk) {
       node.classList.add("dragging");
       const startX = e.clientX, startY = e.clientY;
       const ox = node.offsetLeft, oy = node.offsetTop;
+      let moved = false;
       const move = (ev) => {
+        if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true;
         node.style.left = Math.max(0, ox + ev.clientX - startX) + "px";
         node.style.top = Math.max(0, oy + ev.clientY - startY) + "px";
         redrawEdges();
@@ -1137,14 +1218,56 @@ function bindNodeDrag(dk) {
         node.removeEventListener("pointermove", move);
         node.removeEventListener("pointerup", up);
         node.classList.remove("dragging");
-        const all = {};
-        $$(".g-node", canvas).forEach((n) => { all[n.dataset.node] = [n.offsetLeft, n.offsetTop]; });
-        savePositions(dk, all);
+        if (moved) {
+          const all = {};
+          $$(".g-node", canvas).forEach((n) => { all[n.dataset.node] = [n.offsetLeft, n.offsetTop]; });
+          savePositions(dk, all);
+        } else {
+          // a press without movement is a click — open the node's brief
+          openNodePopup(node.dataset.node);
+        }
       };
       node.addEventListener("pointermove", move);
       node.addEventListener("pointerup", up);
     });
   });
+}
+
+// ----- node detail popup: the box stays a box, the prompt gets a stage -----
+
+function closeNodePopup() {
+  const slot = $("#node-pop-slot");
+  if (slot) slot.innerHTML = "";
+}
+
+function openNodePopup(id) {
+  const sp = state.split;
+  const slot = $("#node-pop-slot");
+  if (!slot || !sp || !sp.defn) return;
+  const n = (sp.defn.nodes || []).find((x) => x.id === id);
+  if (!n) return;
+  const mail = memberMailTotals(id);
+  const runKey = sp.route.run;
+  const brief = n.brief || n.does || null;
+  slot.innerHTML = `
+    <div class="node-pop" id="node-pop">
+      <div class="node-pop-head">
+        <span class="node-pop-id mono">${esc(id)}</span>
+        <span class="chip kind">${esc(sp.defn.kind || "node")}</span>
+        <span class="grow"></span>
+        <button class="btn ghost" id="node-pop-close" title="close (Esc)">✕</button>
+      </div>
+      ${n.does ? `<div class="node-pop-does">${esc(n.does)}</div>` : ""}
+      ${runKey ? `<div class="node-pop-mail">${mail.sent || mail.recv
+        ? `<span class="ok">↗ ${mail.sent} sent</span> · <span class="ok">↘ ${mail.recv} received</span> <span class="muted small">— relayed messages in the selected run</span>`
+        : `<span class="muted small">no relayed messages in the selected run${sp.shape ? "" : " (shape not loaded)"}</span>`}</div>` : ""}
+      ${brief
+        ? `<div class="node-pop-body"><div class="node-pop-label">full brief</div><pre>${esc(brief)}</pre></div>`
+        : `<div class="node-pop-body"><span class="muted small">no brief recorded for this node</span></div>`}
+    </div>`;
+  $("#node-pop-close").addEventListener("click", closeNodePopup);
+  const pop = $("#node-pop");
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
 }
 
 function programNameOk(name) {
@@ -1426,11 +1549,13 @@ function renderRightBody() {
     if (st === "running" || streaming) {
       // live run: EventSource owns updates — no polling, appends only
       openEventsStream(runKey);
-      const nearBottom = body.scrollHeight === 0 ||
-        body.scrollTop + body.clientHeight >= body.scrollHeight - 60;
+      const box0 = evScrollEl();
+      const nearBottom = !box0 || box0.scrollHeight === 0 ||
+        box0.scrollTop + box0.clientHeight >= box0.scrollHeight - 60;
       const have = Array.isArray(sp.events);
       body.innerHTML = eventsShellHtml(have);
-      if (nearBottom && have) body.scrollTop = body.scrollHeight;
+      const box = evScrollEl();
+      if (box && nearBottom && have) box.scrollTop = box.scrollHeight;
       return;
     }
     // finished (or not yet known) run: one-shot immutable history, as v4
@@ -1439,10 +1564,13 @@ function renderRightBody() {
       loadEvents(state.seq);
       return;
     }
-    const nearBottom = body.scrollHeight === 0 ||
-      body.scrollTop + body.clientHeight >= body.scrollHeight - 60;
+    const box0 = evScrollEl();
+    const nearBottom = !box0 || box0.scrollHeight === 0 ||
+      box0.scrollTop + box0.clientHeight >= box0.scrollHeight - 60;
+    const wasTop = box0 ? box0.scrollTop : 0;
     body.innerHTML = eventsBodyHtml();
-    if (nearBottom) body.scrollTop = body.scrollHeight;
+    const box = evScrollEl();
+    if (box) box.scrollTop = nearBottom ? box.scrollHeight : wasTop;
   }
 }
 
@@ -1465,6 +1593,9 @@ async function loadJob(seq) {
   if (sp.route.rtab === "receipt") {
     renderRightHead();
     renderRightBody();
+  } else if (sp.route.rtab === "events" && sp.evSideMember) {
+    // pane facts just landed — refresh the member card holding them
+    renderMemberCard(sp.evSideMember);
   }
 }
 
@@ -1488,6 +1619,7 @@ function receiptBodyHtml() {
   } else if (job.abort) {
     outcome = `
       <dt>abort</dt><dd class="bad">${esc(job.abort.reason || "–")}</dd>
+      ${job.abort.actor ? `<dt>aborted by</dt><dd>${esc(job.abort.actor)} <span class="muted small">— the actor on the trace's job.aborted event (who called it)</span></dd>` : `<dt>aborted by</dt><dd class="muted">not booked on the trace</dd>`}
       <dt>panes remaining</dt><dd>${esc(job.abort.panesRemaining ?? "–")}</dd>
       <dt>finished</dt><dd>${esc(fmtTs(job.abort.finished))}</dd>`;
   } else if (job.orphan) {
@@ -1497,6 +1629,7 @@ function receiptBodyHtml() {
   } else if (job.pause) {
     outcome = `
       <dt>paused</dt><dd class="warn">${esc(job.pause.reason || "–")}</dd>
+      ${job.pause.actor ? `<dt>paused by</dt><dd>${esc(job.pause.actor)}</dd>` : ""}
       <dt>panes remaining</dt><dd>${esc(job.pause.panesRemaining ?? "–")}</dd>
       <dt>paused at</dt><dd>${esc(fmtTs(job.pause.at))}</dd>`;
   } else {
@@ -1691,7 +1824,7 @@ async function loadEvents(seq) {
   if (sp.route.rtab === "events") {
     // stream-like: remember where the reader was; stick to the tail
     // only if they were at the tail, never yank them to the top
-    const el = $("#right-body");
+    const el = evScrollEl();
     const was = el ? { top: el.scrollTop, atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 } : null;
     renderRightBody();
     if (el && was) el.scrollTop = was.atBottom ? el.scrollHeight : was.top;
@@ -1709,33 +1842,282 @@ function splitRunState(key) {
   return j ? stOf(j.status || j.state) : null;
 }
 
-function evLine(ev) {
-  const extraBits = [];
-  if (ev.jid) extraBits.push(ev.jid);
-  if (ev.label) extraBits.push(ev.label);
-  else if (ev.pane) extraBits.push(ev.pane);
-  if (ev.workflow) extraBits.push(ev.workflow);
-  return `<div class="ev-line"><span class="ev-ts">${esc(fmtShortTs(ev.ts))}</span>  ` +
-    `<span class="ev-kind k-${esc(ev.kind)}">${esc(ev.kind)}</span>  ` +
-    `<span class="ev-extra">${esc(ev.actor || "")}${extraBits.length ? " · " + esc(extraBits.join(" · ")) : ""}</span></div>`;
+// ----- events: a labeled table (columns + per-kind color), split with a
+// detail side — click a row for the full event, a chip (member, pane,
+// message file) to trace WHO said WHAT
+
+const EV_KIND_PALETTE = {
+  "job.born": "#a78bfa",
+  admit: "#38bdf8",
+  "pane.born": "#34d399",
+  "pane.died": "#f87171",
+  relay: "#93c5fd",
+  permission: "#fbbf24",
+  reprompt: "#c4b5fd",
+  "job.retired": "#34d399",
+  "job.aborted": "#f472b6",
+  "job.paused": "#a5b4fc",
+  "job.continued": "#38bdf8",
+  "job.orphaned": "#fbbf24",
+};
+
+// every event kind gets a color — named kinds by hand, unknown kinds a
+// stable hash so a new kind is still readable at a glance
+function kindColor(kind) {
+  const key = String(kind || "?");
+  if (EV_KIND_PALETTE[key]) return EV_KIND_PALETTE[key];
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 70% 68%)`;
 }
+
+function entChip(type, name, title) {
+  return `<button class="ev-ent" data-ev-ent="${esc(type)}:${esc(name)}" title="${esc(title || name)}">${esc(name)}</button>`;
+}
+
+function evDetailHtml(ev) {
+  const bits = [];
+  if (ev.from && ev.to) bits.push(`${entChip("member", ev.from, `member ${ev.from} — click to trace its mail`)} → ${entChip("member", ev.to, `member ${ev.to} — click to trace its mail`)}`);
+  if (ev.file) bits.push(entChip("msg", ev.file, `relay message ${ev.file} — click to read it`));
+  if (ev.member) bits.push(entChip("member", ev.member, `member ${ev.member} — click to trace its mail`));
+  if (ev.label) bits.push(entChip("pane", ev.label, `pane ${ev.label} — click for the pane card`));
+  else if (ev.pane) bits.push(`<span class="ev-txt mono">${esc(ev.pane)}</span>`);
+  if (ev.decision) {
+    bits.push(`<span class="ev-dec d-${esc(ev.decision)}" title="permission decision">${esc(ev.decision)}</span>`);
+    if (ev.path) bits.push(`<span class="ev-txt mono" title="${esc(ev.path)}">${esc(shortenCmd(ev.path, 56))}</span>`);
+    if (ev.ask != null) bits.push(`<span class="ev-txt muted">ask ${esc(ev.ask)}</span>`);
+  }
+  if (ev.nudge != null) bits.push(`<span class="ev-txt muted">nudge ${esc(ev.nudge)}</span>`);
+  if (ev.reason) bits.push(`<span class="ev-txt ev-reason" title="reason">${esc(ev.reason)}</span>`);
+  if (ev.workflow) bits.push(`<span class="ev-txt muted">${esc(ev.workflow)}</span>`);
+  if (ev.parent) bits.push(`<span class="ev-txt muted">parent ${esc(ev.parent)}</span>`);
+  if (ev.unit) bits.push(`<span class="ev-txt muted">${esc(ev.unit)}</span>`);
+  if (ev.task) bits.push(`<span class="ev-txt ev-task" title="${esc(ev.task)}">${esc(shortenCmd(ev.task, 64))}</span>`);
+  return bits.join(" ");
+}
+
+function evLine(ev, i) {
+  const sel = state.split && state.split.evSel === i ? " sel" : "";
+  return `<div class="ev-line${sel}" data-evi="${i}">` +
+    `<span class="ev-ts">${esc(fmtShortTs(ev.ts))}</span>` +
+    `<span class="ev-kind" style="color:${kindColor(ev.kind)}">${esc(ev.kind || "?")}</span>` +
+    `<span class="ev-actor">${esc(ev.actor || "")}</span>` +
+    `<span class="ev-run mono">${ev.jid ? esc(ev.jid) : ""}</span>` +
+    `<span class="ev-detail">${evDetailHtml(ev)}</span>` +
+    `</div>`;
+}
+
+function evHeadHtml() {
+  return `<div class="ev-head">` +
+    `<span>time</span><span>event</span><span>actor</span><span>run</span>` +
+    `<span>detail — click a row for the full record, a chip to trace it</span></div>`;
+}
+
+function evSplitShell(linesHtml, sideHtml) {
+  return `<div class="ev-wrap">
+    <div class="ev-split">
+      <div class="ev-log">
+        ${evHeadHtml()}
+        <div class="events tall" id="ev-box">${linesHtml}</div>
+      </div>
+      <aside class="ev-side" id="ev-side">${sideHtml}</aside>
+    </div>
+  </div>`;
+}
+
+const EV_SIDE_EMPTY = `<div class="ev-side-hint">
+  <b>trace pane</b>
+  <div>Click an event row for its full record — every field, transcript pointers included.</div>
+  <div>Click a <span class="ev-ent">member</span> chip to see its mail (what it sent and received).</div>
+  <div>Click a <span class="ev-ent">1-backend.json</span> chip to read the relayed message itself.</div>
+</div>`;
 
 function eventsBodyHtml() {
   const sp = state.split;
   if (sp.eventsError && !sp.events) return paneEmpty(`events failed: ${esc(sp.eventsError)}`);
   if (!sp.events) return paneEmpty("loading events…");
-  return `<div class="events" style="min-height:100%">` +
-    (sp.events.map(evLine).join("") || '<span class="muted">no events</span>') +
-    `</div>`;
+  return evSplitShell(sp.events.map((ev, i) => evLine(ev, i)).join("") ||
+    '<span class="muted" data-ev-empty>no events</span>', sp.evSideHtml || EV_SIDE_EMPTY);
 }
 
 function eventsShellHtml(have) {
   const sp = state.split;
   const empty = `<span class="muted" data-ev-empty>${sp.es ? "connecting to live events…" : "loading events…"}</span>`;
-  const lines = have ? (sp.events.map(evLine).join("") || empty) : empty;
-  return `<div class="ev-live" id="ev-live"><span class="ev-dot"></span>live` +
+  const lines = have ? (sp.events.map((ev, i) => evLine(ev, i)).join("") || empty) : empty;
+  return `<div class="ev-live"><span class="ev-dot"></span>live` +
     `<span id="ev-reconnecting" class="hidden"> — reconnecting…</span></div>` +
-    `<div class="events tall" id="ev-box">${lines}</div>`;
+    evSplitShell(lines, sp.evSideHtml || EV_SIDE_EMPTY);
+}
+
+// the log column's scroll element — the stick-to-tail law lives here now
+function evScrollEl() { return $("#ev-box"); }
+
+// ----- the trace side pane: full records, member mail, message bodies -----
+
+function setEvSide(html) {
+  const sp = state.split;
+  if (!sp) return;
+  sp.evSideHtml = html;
+  const el = $("#ev-side");
+  if (el) { el.innerHTML = html; el.scrollTop = 0; }
+}
+
+function fmtJson(v) {
+  try {
+    const s = JSON.stringify(v, null, 2);
+    return s && s.length > 4000 ? s.slice(0, 4000) + "\n…" : (s ?? "–");
+  } catch { return "–"; }
+}
+
+function objRows(v) {
+  return `<pre class="ev-json">${esc(fmtJson(v))}</pre>`;
+}
+
+function selectEvent(i) {
+  const sp = state.split;
+  if (!sp || !Array.isArray(sp.events)) return;
+  sp.evSel = i;
+  $$("#ev-box .ev-line").forEach((el) => el.classList.toggle("sel", Number(el.dataset.evi) === i));
+  const ev = sp.events[i];
+  if (!ev) return;
+  const skip = new Set(["ts", "kind", "sid"]);
+  const rows = [];
+  for (const [k, v] of Object.entries(ev)) {
+    if (skip.has(k)) continue;
+    const val = v != null && typeof v === "object" ? objRows(v) : esc(v ?? "–");
+    rows.push(`<dt>${esc(k)}</dt><dd>${val}</dd>`);
+  }
+  let extra = "";
+  if (ev.file) {
+    extra = `<div id="ev-msg" class="ev-msg"><div class="muted small">loading ${esc(ev.file)}…</div></div>`;
+  } else if (ev.member) {
+    extra = `<button class="btn" id="ev-side-member" data-ev-ent="member:${esc(ev.member)}" style="margin-top:10px">trace ${esc(ev.member)}'s mail</button>`;
+  }
+  setEvSide(`
+    <div class="ev-side-head">
+      <span class="ev-side-kind" style="color:${kindColor(ev.kind)}">${esc(ev.kind || "?")}</span>
+      <span class="muted small">${esc(fmtTs(ev.ts))}</span>
+    </div>
+    <dl class="kv ev-side-kv">${rows.join("")}</dl>
+    ${extra}`);
+  // only now does #ev-msg exist for the renderer to fill
+  if (ev.file) loadMessage(ev.file);
+}
+
+// every relay message this member sent or received, straight from the
+// run's own events (no extra fetch — the trace IS the source)
+function memberMail(name) {
+  const sp = state.split;
+  const out = [];
+  (sp.events || []).forEach((ev, i) => {
+    if (ev.kind !== "relay") return;
+    if (ev.from === name || ev.to === name) out.push({ i, ev });
+  });
+  return out;
+}
+
+function renderMemberCard(name) {
+  const sp = state.split;
+  if (!sp) return;
+  sp.evSideMember = name;
+  const mail = memberMail(name);
+  // panes of this member: labels look like "<member>-<suffix>"
+  const panes = [];
+  if (sp.job && Array.isArray(sp.job.panes && sp.job.panes.rows)) {
+    for (const p of sp.job.panes.rows) {
+      if ((p.label || "").split("-")[0] === name || p.label === name) panes.push(p);
+    }
+  }
+  const mailHtml = mail.length ? mail.map(({ i, ev }) =>
+    `<button class="ev-mailrow" data-ev-ent="msg:${esc(ev.file)}" data-evi="${i}" title="${esc(fmtTs(ev.ts))} — click to read the message">` +
+    `<span class="mono muted small">${esc(fmtShortTs(ev.ts))}</span>` +
+    `<span class="ev-maildir">${esc(ev.from)} → ${esc(ev.to)}</span>` +
+    `<span class="mono">${esc(ev.file)}</span></button>`).join("")
+    : `<div class="muted small" style="padding:6px 0">no relayed messages ${esc(name)} was part of</div>`;
+  const panesHtml = panes.length ? panes.map((p) => `
+    <div class="ev-paneinfo">
+      <div><span class="mono">${esc(p.label || "–")}</span>${p.pane ? ` <span class="muted small mono">pane ${esc(p.pane)}</span>` : ""}</div>
+      <div class="muted small">${esc(fmtTs(p.born))} → ${p.died ? esc(fmtTs(p.died)) : '<span class="ok">alive</span>'}</div>
+      ${p.tool ? `<div class="muted small mono">${esc(p.tool)} · ${esc(p.cwd || "")}</div>` : ""}
+    </div>`).join("") : "";
+  setEvSide(`
+    <div class="ev-side-head">
+      <span class="ev-side-kind">member</span>
+      <b class="mono" style="font-size:14px">${esc(name)}</b>
+    </div>
+    <div class="node-pop-label">mail — relayed messages (${mail.length})</div>
+    ${mailHtml}
+    ${panesHtml ? `<div class="node-pop-label" style="margin-top:12px">panes of this member</div>${panesHtml}` : ""}
+    ${!panesHtml && sp.route.run ? `<div class="muted small" style="margin-top:10px">pane records load with the run — open the receipt tab once if this stays empty</div>` : ""}`);
+  // pane rows come from /api/job — load it quietly if we don't have it yet
+  if (!sp.job && sp.route.run && sp.jobLoadedKey !== sp.route.run) loadJob(state.seq);
+}
+
+function renderPaneCard(label) {
+  const sp = state.split;
+  if (!sp) return;
+  const member = String(label).split("-")[0];
+  setEvSide(`
+    <div class="ev-side-head">
+      <span class="ev-side-kind">pane</span>
+      <b class="mono" style="font-size:14px">${esc(label)}</b>
+    </div>
+    <div class="muted small" style="margin:6px 0 10px">a pane of member <button class="ev-ent" data-ev-ent="member:${esc(member)}">${esc(member)}</button> — click it for the mail</div>
+    <div class="muted small">full pane facts (born/died, transcript pointer) live on the pane's birth event — click the matching <span class="mono">pane.born</span> row in the log.</div>`);
+}
+
+async function loadMessage(file) {
+  const sp = state.split;
+  if (!sp || !sp.route.run) return;
+  const runKey = sp.route.run;
+  const [sid, jid] = splitKey(runKey);
+  const box = $("#ev-msg");
+  if (!box) return;
+  if (!sp.msgCache) sp.msgCache = {};
+  const render = (d) => {
+    const el = $("#ev-msg");
+    if (!el || sp.route.run !== runKey) return;
+    if (d.__error) { el.innerHTML = `<div class="bad small">${esc(d.__error)}</div>`; return; }
+    let head = "";
+    try {
+      const j = JSON.parse(d.text);
+      head = `<div class="ev-msg-head"><span class="ok">${esc(j.from)}</span> → <span class="ok">${esc(j.to)}</span>${j.type ? ` · <span class="muted">${esc(j.type)}</span>` : ""}</div>`;
+    } catch { /* not json — the raw text shows */ }
+    el.innerHTML = `${head}<pre class="ev-msg-body">${esc(d.text ?? "")}</pre>`;
+  };
+  const hit = sp.msgCache[file];
+  if (hit) { render(hit); return; }
+  box.innerHTML = `<div class="muted small">loading messages/${esc(file)}…</div>`;
+  try {
+    const res = await fetchJSON(`/api/run-dir/${enc(sid)}/${enc(jid)}?path=${enc("messages/" + file)}`);
+    if (sp.route.run !== runKey) return;
+    sp.msgCache[file] = res;
+    render(res);
+  } catch (err) {
+    if (sp.route.run !== runKey) return;
+    const d = { __error: `could not load ${file}: ${err.message}` };
+    sp.msgCache[file] = d;
+    render(d);
+  }
+}
+
+// entity chips and rows funnel through here (delegated from bodyClick)
+function handleEvEnt(ref) {
+  const i = ref.indexOf(":");
+  if (i === -1) return;
+  const type = ref.slice(0, i);
+  const name = ref.slice(i + 1);
+  if (type === "member") renderMemberCard(name);
+  else if (type === "pane") renderPaneCard(name);
+  else if (type === "msg") {
+    const ev = state.split && state.split.events || [];
+    const rel = ev.find((e) => e.kind === "relay" && e.file === name);
+    const head = rel
+      ? `<div class="ev-side-head"><span class="ev-side-kind" style="color:${kindColor("relay")}">relay</span><span class="muted small">${esc(fmtTs(rel.ts))}</span></div>`
+      : `<div class="ev-side-head"><span class="ev-side-kind" style="color:${kindColor("relay")}">relay message</span></div>`;
+    setEvSide(`${head}<div id="ev-msg" class="ev-msg"><div class="muted small">loading ${esc(name)}…</div></div>`);
+    loadMessage(name);
+  }
 }
 
 // ----- live events stream (running runs) -----
@@ -1794,28 +2176,26 @@ function openEventsStream(runKey) {
 // tail only if the reader was at the tail, else hold their position.
 function paintEventsFromState() {
   const sp = state.split;
-  const el = $("#right-body");
-  const box = $("#ev-box");
+  const box = evScrollEl();
   if (!box) return;
-  const nearBottom = !el || el.scrollHeight === 0 ||
-    el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
-  const wasTop = el ? el.scrollTop : 0;
-  box.innerHTML = (sp.events || []).map(evLine).join("") ||
+  const nearBottom = box.scrollHeight === 0 ||
+    box.scrollTop + box.clientHeight >= box.scrollHeight - 60;
+  const wasTop = box.scrollTop;
+  box.innerHTML = (sp.events || []).map((ev, i) => evLine(ev, i)).join("") ||
     '<span class="muted" data-ev-empty>no events</span>';
-  if (el) el.scrollTop = nearBottom ? el.scrollHeight : wasTop;
+  box.scrollTop = nearBottom ? box.scrollHeight : wasTop;
 }
 
 // append-only growth: touch nothing above, snap to the new tail only
 // if the reader was already at the tail — never move a reading position
 function appendEventLine(ev) {
-  const el = $("#right-body");
-  const box = $("#ev-box");
+  const box = evScrollEl();
   if (!box) return;
-  const atTail = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const atTail = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const ghost = box.querySelector("[data-ev-empty]");
   if (ghost) ghost.remove();
-  box.insertAdjacentHTML("beforeend", evLine(ev));
-  if (el && atTail) el.scrollTop = el.scrollHeight;
+  box.insertAdjacentHTML("beforeend", evLine(ev, (state.split.events || []).length - 1));
+  if (atTail) box.scrollTop = box.scrollHeight;
 }
 
 // the run finished while we watched: close the stream, pin the final
@@ -1863,6 +2243,10 @@ function refreshSplit() {
     renderRunsList();
   } else if (r.tab === "config") {
     if (!(sp.program && sp.program.unlocked)) renderConfigBody();
+  } else if (r.tab === "diagram" && r.run && sp.defn && $("#d-canvas")) {
+    // the diagram is on the loop: the selected run's ×N relay badges
+    // refresh every tick — no full re-render, drag positions survive
+    loadShape(state.seq);
   }
   if (!r.run) return;
   if (r.rtab === "receipt") loadJob(state.seq, true);
@@ -1890,7 +2274,8 @@ async function triggerDag(pid, dagId, btns) {
 // ----- run ops: pause / abort / continue -----
 
 // the two op buttons for one run, driven by its mapped status:
-// running -> Pause+Abort · paused -> Resume+Abort · orphaned -> Continue+Abort
+// running -> Pause+Abort · paused -> Resume+Abort · aborted|orphaned ->
+// Continue+Abort (both parks rebirth the same way)
 // retired (success/failed) -> both present, disabled and greyed (parked, not broken)
 function opsButtonsHtml(st, sid, jid) {
   const key = `${sid}/${jid}`;
@@ -1898,8 +2283,7 @@ function opsButtonsHtml(st, sid, jid) {
   const retired = st === "success" || st === "failed";
   const slot = st === "running" ? ["pause", "Pause"]
     : st === "paused" ? ["continue", "Resume"]
-    : st === "orphaned" ? ["continue", "Continue"]
-    : ["pause", "Pause"];
+    : ["continue", "Continue"];
   const dis = retired || busy ? " disabled" : "";
   const titles = {
     pause: "drains to a unit boundary, then parks",
@@ -1955,6 +2339,19 @@ async function runOps(verb, sid, jid) {
 }
 
 function bodyClick(e) {
+  const evEnt = e.target.closest("[data-ev-ent]");
+  if (evEnt) {
+    e.preventDefault();
+    e.stopPropagation();
+    handleEvEnt(evEnt.dataset.evEnt);
+    return;
+  }
+  const evRow = e.target.closest("[data-evi]");
+  if (evRow && !e.target.closest("button")) {
+    e.preventDefault();
+    selectEvent(Number(evRow.dataset.evi));
+    return;
+  }
   const trig = e.target.closest("[data-trig]");
   if (trig) {
     e.preventDefault();
@@ -2042,6 +2439,9 @@ async function tick() {
 window.addEventListener("hashchange", onRoute);
 document.body.addEventListener("click", bodyClick);
 document.addEventListener("change", onDocChange);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeNodePopup();
+});
 
 function updateClock() {
   clockEl.textContent = new Date().toLocaleTimeString();
