@@ -1238,14 +1238,20 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && pathname === "/api/events") {
-    // all sessions merged, oldest first
+    // events, oldest first; scope with ?sid= and ?jid= — a run's events
+    // are its own history, never every run's noise
+    const u = new URL(req.url, "http://localhost");
+    const sid = u.searchParams.get("sid");
+    const jid = u.searchParams.get("jid");
     const all = [];
     for (const s of readSessions()) {
+      if (sid && s.id !== sid) continue;
       const ev = readEvents(s.id);
       if (ev) all.push(...ev);
     }
-    all.sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
-    return sendJson(res, 200, { count: all.length, events: all });
+    const scoped = jid ? all.filter((e) => e.jid === jid) : all;
+    scoped.sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
+    return sendJson(res, 200, { count: scoped.length, events: scoped });
   }
 
   if (req.method === "GET" && pathname === "/api/health") {

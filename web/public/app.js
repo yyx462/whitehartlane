@@ -656,6 +656,8 @@ async function updateSplit(seq) {
   const sp = state.split;
   if (!sp) return;
   const r = sp.route;
+  // the selection highlight never waits on a fetch
+  $$(".runsel").forEach((b) => b.classList.toggle("active", b.dataset.run === (r.run || "")));
   if (r.run && !r.dag && !r.legacy) {
     const [sid, jid] = splitKey(r.run);
     const dk = await resolveRunDag(seq, sid, jid);
@@ -1523,19 +1525,39 @@ async function loadEvents(seq) {
   const sp = state.split;
   const runKey = sp.route.run;
   if (!runKey) return;
-  const sid = splitKey(runKey)[0];
+  const [sid, jid] = splitKey(runKey);
+  // a finished run's events are immutable history — fetch once, never churn
+  if (sp.eventsLoadedKey === runKey && splitRunState(runKey) !== "running") return;
   try {
-    const res = await fetchJSON(`/api/events/${enc(sid)}`);
+    const res = await fetchJSON(`/api/events?sid=${enc(sid)}&jid=${enc(jid)}`);
     if (!current(sp, seq)) return;
     sp.events = res.events || [];
     sp.eventsError = null;
-    sp.eventsLoadedKey = sid;
+    sp.eventsLoadedKey = runKey;
   } catch (err) {
     if (!current(sp, seq)) return;
     sp.eventsError = err.message;
-    sp.eventsLoadedKey = sid;
+    sp.eventsLoadedKey = runKey;
   }
-  if (sp.route.rtab === "events") renderRightBody();
+  if (sp.route.rtab === "events") {
+    // stream-like: remember where the reader was; stick to the tail
+    // only if they were at the tail, never yank them to the top
+    const el = $("#right-body");
+    const was = el ? { top: el.scrollTop, atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 } : null;
+    renderRightBody();
+    if (el && was) el.scrollTop = was.atBottom ? el.scrollHeight : was.top;
+  }
+}
+
+// the selected run's status vocabulary, from whichever list holds it
+function splitRunState(key) {
+  const sp = state.split;
+  if (!sp) return null;
+  const g = findGroupKey(sp.route.dag);
+  const run = g && (g.runs || []).find((x) => `${x.sid}/${x.jid || x.id}` === key);
+  if (run) return stOf(run.status || run.state);
+  const j = (legacyJobs() || []).find((x) => `${x.sid}/${x.id}` === key);
+  return j ? stOf(j.status || j.state) : null;
 }
 
 function evLine(ev) {
@@ -1571,7 +1593,10 @@ function refreshSplit() {
   }
   if (!r.run) return;
   if (r.rtab === "receipt") loadJob(state.seq, true);
-  else if (r.rtab === "events") loadEvents(state.seq, true);
+  else if (r.rtab === "events") {
+    // only a running run's events can change — finished history never refetches
+    if (splitRunState(r.run) === "running") loadEvents(state.seq, true);
+  }
 }
 
 async function triggerDag(pid, dagId, btns) {
@@ -1610,6 +1635,9 @@ function bodyClick(e) {
   if (rbtn) {
     e.preventDefault();
     const key = rbtn.dataset.run;
+    // instant highlight: the selection is a fact the moment it is
+    // clicked — data loads may land whenever they like
+    $$(".runsel").forEach((b) => b.classList.toggle("active", b.dataset.run === key));
     if (state.split && state.split.route.run !== key) setHash(splitHref({ run: key }));
     return;
   }
