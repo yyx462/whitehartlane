@@ -1,33 +1,43 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// agentic-os run <folder> | jobs | events | audit | sweep | relaunch | abort — the
-// start door is run. It reads workflow.toml and starts that workflow's engine.
-// The rest read and settle the OS disk (~/.local/share/agentic-os). jobs lists every
-// Job record with its state and receipt; audit diffs live shep panes
-// against booked panes (every pane is born booked — a live pane no Job
-// admits is a violation); sweep parks running Jobs whose orchestrator
-// died without a graceful stop in the ask-first relaunch queue —
-// orphaned, not aborted, never auto-resurrected; relaunch re-runs one
-// from its run dir (user-decided, capped at 2 tries per Job); abort
-// declines (or SIGTERMs a live orchestrator, which aborts itself).
+// agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
+// continue | promote — the start door is run. It reads workflow.toml and
+// starts that workflow's engine. The rest read and settle the OS disk
+// (~/.local/share/agentic-os). jobs lists every Job record with its state
+// and receipt; audit diffs live shep panes against booked panes (every
+// pane is born booked — a live pane no Job admits is a violation); sweep
+// parks running Jobs whose orchestrator died without a graceful stop in
+// the ask-first queue — orphaned, not aborted, never auto-resurrected;
+// pause SIGTERMs a live orchestrator, which drains to its boundary and
+// books paused (ADR 5); abort kills immediately (SIGKILL — sessions stay
+// booked for a later continue); continue rebirths a paused/aborted/
+// orphaned Job from its booked session pointers (the old relaunch,
+// absorbed — M3: no cap, a soft continued ×N counter).
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, openSync, readFileSync } from "node:fs"
+import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun } from "../src/run.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import {
   abortJob,
+  continueJob,
   killPane,
   listJobs,
   orphanJob,
   readAllEvents,
   readEvents,
-  relaunchJob,
   saveJob,
 } from "../src/store.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
 
-const RELAUNCH_CAP = 2
+// "90s", "2m", "1h", "5000" (ms) — the pause --wait one-shot ceiling.
+function parseDuration(raw) {
+  const m = /^(\d+)(ms|s|m|h)?$/.exec(String(raw ?? ""))
+  if (!m) return null
+  const scale = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, "": 1 }[m[2] ?? ""] ?? 1
+  const ms = Number(m[1]) * scale
+  return Number.isFinite(ms) && ms > 0 ? ms : null
+}
 
 /** @typedef {{ label: string, pane: string }} LivePane */
 
@@ -79,17 +89,19 @@ function fmtJobs(jobs) {
     const outcome = job.receipt
       ? `receipt ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
       : job.abort
-        ? `aborted: ${job.abort.reason} (${job.abort.panesRemaining} left)`
+        ? `aborted: ${job.abort.reason} — continue?`
         : job.orphan
-          ? `orphaned: ${job.orphan.reason} — relaunch?`
-          : "in flight"
+          ? `orphaned: ${job.orphan.reason} — continue?`
+          : job.pause
+            ? `paused: ${job.pause.reason} — continue?`
+            : "in flight"
     return [
       job.id.padEnd(9),
       job.state.padEnd(8),
       `${job.workflow} by ${job.stoodUpBy}`.padEnd(22),
       units ? `u ${units.done}d/${units.failed}f` : "u -",
       `p ${dead}/${born}`,
-      outcome,
+      `${job.continues ? `×${job.continues} ` : ""}${outcome}`,
       job.dir,
     ].join("  ")
   })
@@ -208,12 +220,12 @@ async function main() {
       orphanJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
       swept += 1
       console.log(`${job.id} orphaned (parked, ask-first) — ${job.dir}`)
-      console.log(`  relaunch: agentic-os relaunch ${job.id} | decline: agentic-os abort ${job.id}`)
+      console.log(`  continue: agentic-os continue ${job.id} | decline: agentic-os abort ${job.id}`)
       if (orphans.length > 0) {
-        console.log(`  straggler panes still live (relaunch retires them): ${orphans.map((p) => p.label).join(", ")}`)
+        console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
     }
-    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for relaunch decision`)
+    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for a continue decision`)
     return
   }
 
@@ -255,28 +267,62 @@ async function main() {
     return
   }
 
-  if (cmd === "relaunch") {
+  // pause (ADR 5): SIGTERM is the drain — the orchestrator stops
+  // claiming, lets in-flight units settle, retires its panes, and
+  // books paused. --wait is a one-shot drain-ceiling override (2m, 90s).
+  if (cmd === "pause") {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
     if (!jid || !job) {
-      console.error(`relaunch: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`pause: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
       process.exitCode = 2
       return
     }
-    if (job.state !== "orphaned") {
-      console.error(`relaunch: ${job.id} is ${job.state}, not orphaned — run: agentic-os sweep`)
+    if (job.state !== "running" || !pidAlive(job.pid)) {
+      console.error(`pause: ${job.id} is ${job.state}${job.pid ? " (orchestrator not live)" : ""} — only a running Job can pause`)
       process.exitCode = 2
       return
     }
-    const tries = job.relaunches ?? 0
-    if (tries >= RELAUNCH_CAP) {
-      console.error(`relaunch: ${job.id} already relaunched ${tries}x (cap ${RELAUNCH_CAP}) — decline: agentic-os abort ${job.id}`)
+    const waitIdx = process.argv.indexOf("--wait")
+    if (waitIdx !== -1) {
+      const ms = parseDuration(process.argv[waitIdx + 1])
+      if (ms === null) {
+        console.error("pause: --wait wants a duration like 2m or 90s")
+        process.exitCode = 2
+        return
+      }
+      writeFileSync(join(job.dir, "drain.deadline"), new Date(Date.now() + ms).toISOString())
+    }
+    try {
+      process.kill(job.pid, "SIGTERM")
+      console.log(`pause: signalled orchestrator pid ${job.pid} — ${job.id} drains to a boundary, then books paused`)
+    } catch (err) {
+      console.error(`pause: could not signal pid ${job.pid} (${err.message})`)
+      process.exitCode = 1
+    }
+    return
+  }
+
+  // continue (ADR 5): the reborn verb — paused, aborted, and orphaned
+  // all continue the same way. Stragglers retire first (a live pane
+  // from the parked generation would double-write a unit dir), then
+  // the orchestrator resumes unfinished units from booked session
+  // pointers. Deliberate and typed; the counter warns, never blocks.
+  // (Absorbs the old relaunch: same straggler-retire + respawn path,
+  // no cap — M3.)
+  if (cmd === "continue") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`continue: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
       process.exitCode = 2
       return
     }
-    // Stragglers first (2026-10-01 stress-test): a live pane from the
-    // dead generation would double-write a unit dir and poison the
-    // receipt. Retire every pane of the old generation, then relaunch.
+    if (job.state !== "paused" && job.state !== "aborted" && job.state !== "orphaned") {
+      console.error(`continue: ${job.id} is ${job.state}, not paused/aborted/orphaned`)
+      process.exitCode = 2
+      return
+    }
     for (const pane of job.panes.filter((p) => p.died === undefined)) {
       try {
         execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
@@ -291,8 +337,8 @@ async function main() {
       env: { ...process.env, AGENTIC_OS_SID: job.sid, AGENTIC_OS_JID: job.id },
     })
     child.unref()
-    relaunchJob(job, child.pid)
-    console.log(`relaunched ${job.id} (pid ${child.pid}, try ${tries + 1}/${RELAUNCH_CAP}) — log: ${join(job.dir, "orchestrator.log")}`)
+    continueJob(job, child.pid)
+    console.log(`continued ${job.id} (pid ${child.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)
     return
   }
 
@@ -310,14 +356,25 @@ async function main() {
       return
     }
     if (job.state === "running" && pidAlive(job.pid)) {
-      // graceful stop: the orchestrator's signal handler books the abort
+      // kill semantics (ADR 5): SIGKILL — the orchestrator cannot book,
+      // so the CLI books the abort and retires the panes itself.
+      // Unsettled units stay open; their booked sessions survive for
+      // a later continue. (SIGTERM is pause, not abort.)
       try {
-        process.kill(job.pid, "SIGTERM")
-        console.log(`abort: signalled orchestrator pid ${job.pid} — ${job.id} aborts itself`)
-        return
+        process.kill(job.pid, "SIGKILL")
       } catch (err) {
-        console.error(`abort: could not signal pid ${job.pid} (${err.message}) — declining on record`)
+        console.error(`abort: could not kill pid ${job.pid} (${err.message}) — declining on record`)
       }
+      const live = shepStatus()
+      for (const pane of job.panes.filter((p) => p.died === undefined)) {
+        try {
+          execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
+        } catch {}
+        killPane(job, pane.label)
+      }
+      abortJob(job, `killed pid ${job.pid}`, 0, "first_mate")
+      console.log(`aborted ${job.id} (killed orchestrator; sessions kept — continue resumes) — ${job.dir}`)
+      return
     }
     const live = shepStatus()
     abortJob(job, "declined by user", livePanesOf(job, live).length, "first_mate")
@@ -325,7 +382,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | relaunch <jid> | abort <jid> | promote <jid>")
+  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | promote <jid>")
   process.exitCode = 2
 }
 

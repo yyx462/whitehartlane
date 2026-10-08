@@ -26,13 +26,16 @@ import {
   killPane,
   loadJob,
   openSession,
+  pauseJob as pauseJobRec,
   readEvents,
   saveJob,
+  setPaneSession,
   modelIn,
   splitModel,
   writePiSettings,
   writeWorkerPermissions,
 } from "../src/store.ts"
+import { readState } from "../src/state.ts"
 
 const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`)
@@ -102,6 +105,17 @@ const ledger = (() => {
           log(`job ${job.id} aborted (${reason}) — panes remaining ${panesRemaining}`)
         } catch {}
       },
+      pause(reason, panesRemaining) {
+        try {
+          pauseJobRec(job, reason, panesRemaining)
+          log(`job ${job.id} paused (${reason}) — panes remaining ${panesRemaining}`)
+        } catch {}
+      },
+      setSession(label, sessionId) {
+        try {
+          setPaneSession(job, label, sessionId)
+        } catch {}
+      },
     }
   } catch (err) {
     log(`ledger unavailable (${err.message}) — running without a Job record`)
@@ -114,7 +128,10 @@ const scoped = paneLabeler(runIdFor(taskDir))
 const workerModel = modelIn(taskDir)
 writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
 
-for (const sig of ["SIGTERM", "SIGINT"]) {
+// SIGINT stays an immediate stop (books the abort itself). SIGTERM is
+// the drain — runOrchestrator traps it, drains to a unit boundary, and
+// parks paused (ADR 5). SIGKILL is uncatchable: the abort verb's own.
+for (const sig of ["SIGINT"]) {
   process.on(sig, () => {
     ledger?.abort(`signal ${sig}`, mine.size)
     process.exit(0)
@@ -215,10 +232,21 @@ function openFleetTab(dir) {
   log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
 
+// The host session id, when the tool reports one: booked write-ahead
+// (ADR 5) so a later continue can resume this pane's conversation.
+function probeSession(name) {
+  const got = herdr("agent", "get", name)
+  return jsonAt(got.stdout, (d) =>
+    d?.result?.session_id ?? d?.result?.session ?? d?.result?.agent?.session_id ?? null,
+  )
+}
+
 // start an agent in an existing pane, record it, submit the brief.
 // since is stamped BEFORE the agent starts, so the host tool's session
 // (created during start) always falls inside the pointer's window.
-function inhabitPane(rawName, kind, pane, briefPath, cwd) {
+// resumeSession (ADR 5) continues a booked host session instead of
+// starting a fresh one (--session passes through to the agent CLI).
+function inhabitPane(rawName, kind, pane, briefPath, cwd, resumeSession = undefined) {
   const since = new Date().toISOString()
   const name = scoped(rawName)
   const rec = shep("record", pane, name)
@@ -229,14 +257,16 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
-  const startArgs = []
+  const tail = []
   if (workerModel && kind === "pi") {
     writePiSettings(cwd, workerModel)
     const { provider, id } = splitModel(workerModel)
-    startArgs.push("--", "--approve", "--provider", provider, "--model", id)
+    tail.push("--approve", "--provider", provider, "--model", id)
   } else if (workerModel && kind === "opencode") {
-    startArgs.push("--", "--model", workerModel)
+    tail.push("--model", workerModel)
   }
+  if (resumeSession) tail.push("--session", resumeSession)
+  const startArgs = tail.length ? ["--", ...tail] : []
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
   if (start.status !== 0) {
     shep("retire", name)
@@ -250,13 +280,43 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`brief submission failed for ${name} — the grace reprompt will retry`)
   }
   mine.add(name)
+  const sessionId = resumeSession ?? probeSession(name)
   ledger?.attach(
     name,
     pane,
     name.startsWith("orch-lane") ? undefined : name,
-    { tool: kind, cwd, since },
+    { tool: kind, cwd, since, ...(sessionId ? { session_id: sessionId } : {}) },
   )
+  // pi mints its session on the first prompt — probe once more so the
+  // booked pointer carries the id even when start reported nothing
+  if (!sessionId && !name.startsWith("orch-lane")) {
+    const late = probeSession(name)
+    if (late) ledger?.setSession(name, late)
+  }
   return true
+}
+
+// Split a pane for the next worker in the fleet tab's column: the
+// column head first, then below the newest live worker, then a fresh
+// column beside the lane pane. Split from a LIVE pane only — retired
+// workers close their panes, so a stale anchor pane_not_found's
+// (2026-09-29 09:41 run).
+function splitForWorker(cwd) {
+  if (!colUsed) {
+    // Split the column head for the first worker too — a split sets
+    // the unit cwd deterministically (no cd race); the empty head
+    // closes and the worker takes the column.
+    const pane = splitPane(colPane, "down", cwd, 0.5)
+    if (pane) herdr("pane", "close", colPane)
+    colUsed = true
+    return pane
+  }
+  for (const anchor of [...liveWorkerPanes].reverse()) {
+    const pane = splitPane(anchor, "down", cwd, 0.5)
+    if (pane) return pane
+  }
+  if (viewerPane) return splitPane(viewerPane, "right", cwd, 0.7)
+  return null
 }
 
 const port = {
@@ -268,27 +328,7 @@ const port = {
   spawnWorker: (name, kind, briefPath, cwd) => {
     const label = scoped(name)
     if (layout.tab === "new" && colPane) {
-      // Split from a LIVE pane only: retired workers close their panes, so
-      // a stale anchor pane_not_found's (2026-09-29 09:41 run). Try the
-      // newest live worker downward, any older live worker, then a fresh
-      // column beside the lane pane.
-      let pane = null
-      if (!colUsed) {
-        // Split the column head for the first worker too — a split sets
-        // the unit cwd deterministically (no cd race); the empty head
-        // closes and the worker takes the column.
-        pane = splitPane(colPane, "down", cwd, 0.5)
-        if (pane) herdr("pane", "close", colPane)
-        colUsed = true
-      } else {
-        for (const anchor of [...liveWorkerPanes].reverse()) {
-          pane = splitPane(anchor, "down", cwd, 0.5)
-          if (pane) break
-        }
-        if (!pane && viewerPane) {
-          pane = splitPane(viewerPane, "right", cwd, 0.7)
-        }
-      }
+      const pane = splitForWorker(cwd)
       if (!pane) {
         log(`pane split failed for ${label} — no live anchor`)
         return false
@@ -311,6 +351,44 @@ const port = {
     mine.add(label)
     ledger?.attach(label, undefined, name, { tool: kind, cwd, since: new Date().toISOString() })
     log(`spawned ${label} (${kind})`)
+    return true
+  },
+
+  // ADR 5: a parked unit's pane is reborn with its host session resumed
+  // (--session passes through herdr to the agent CLI) and the continue
+  // brief. The shep path has no arg pass-through — a fresh pane with the
+  // continue brief covers it (the unit dir is the outliving memory).
+  resumeWorker: (name, session, briefPath, cwd) => {
+    const label = scoped(name)
+    if (layout.tab === "new" && colPane) {
+      const pane = splitForWorker(cwd)
+      if (!pane) {
+        log(`pane split failed for ${label} — no live anchor`)
+        return false
+      }
+      const ok = inhabitPane(name, session.tool, pane, briefPath, cwd, session.session_id)
+      if (ok) {
+        liveWorkerPanes.push(pane)
+        paneOf.set(label, pane)
+        log(`resumed ${label} (${session.tool}, session ${session.session_id ?? "unbooked — briefed takeover"}) in fleet tab pane ${pane}`)
+      }
+      return ok
+    }
+    const r = shep("spawn", label, "--kind", session.tool, "--cwd", cwd, "--brief", `@${briefPath}`)
+    if (r.status !== 0) {
+      shep("retire", label)
+      ledger?.emit("reject", { label, why: "resume spawn failed" })
+      log(`resume spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
+      return false
+    }
+    mine.add(label)
+    ledger?.attach(label, undefined, name, {
+      tool: session.tool,
+      cwd,
+      since: new Date().toISOString(),
+      ...(session.session_id ? { session_id: session.session_id } : {}),
+    })
+    log(`resumed ${label} (fresh pane, continue brief — session ${session.session_id ?? "unbooked"})`)
     return true
   },
 
@@ -558,6 +636,7 @@ function ensureRole(board, role, dir) {
 try {
   const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
   const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
+  const drainMs = Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined
   const existingRows = ledger
     ? readEvents(ledger.job.sid)
         .filter((e) => e.jid === ledger.job.id && e.kind === "unit.settled")
@@ -567,16 +646,50 @@ try {
     log("refusing: kind lab is bin/lab-orchestrator, not fan-out")
     process.exit(2)
   }
+  // ADR 5: unfinished units of an earlier generation resume from the
+  // pane ledger — the latest pane record per unsettled unit carries the
+  // booked session pointer (write-ahead at spawn, session id at birth).
+  const resumes = new Map()
+  if (ledger) {
+    const settled = readState(taskDir)
+    const closed = new Set([...settled.done, ...settled.failed])
+    const latest = new Map()
+    for (const p of ledger.job.panes) {
+      if (!p.unit || !p.transcript) continue
+      const prev = latest.get(p.unit)
+      if (!prev || p.born > prev.born) latest.set(p.unit, p)
+    }
+    for (const [unitId, p] of latest) {
+      if (closed.has(unitId)) continue
+      resumes.set(unitId, {
+        tool: p.transcript.tool,
+        ...(p.transcript.session_id ? { session_id: p.transcript.session_id } : {}),
+        cwd: p.transcript.cwd || ledger.job.worktree || taskDir,
+      })
+    }
+    if (resumes.size > 0) {
+      log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
+    }
+  }
   const report = await runOrchestrator({
     taskDir,
     shep: port,
     checkMs,
     slots,
+    drainMs,
+    resumes,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows,
     worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
     canary: process.env.AGENTIC_OS_CANARY !== "0",
   })
+  if (!report) {
+    // parked (ADR 5): the rail drained to a boundary and retired its
+    // panes — book the pause; a typed continue brings the Job back.
+    ledger?.pause("drained", ledger.job.panes.filter((p) => p.died === undefined).length)
+    log(`parked: paused — continue with: agentic-os continue ${ledger?.job.id ?? "<jid>"}`)
+    process.exit(0)
+  }
   log(`done: ${report.status}`)
   const reap = port.verify()
   // zen 5: the receipt counts THIS Job's panes, not the scope's

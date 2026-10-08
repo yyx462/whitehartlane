@@ -10,14 +10,14 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { basename, join, resolve } from "node:path"
 import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../src/hooks.ts"
 import { loadDagFile, tick } from "../src/dag.ts"
-import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt } from "../src/coworker.ts"
+import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "../src/coworker.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
 import { decidePermission, escalateOnRepeat, tunedPermissionJudge } from "../src/permission.ts"
 import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
-import { paneLabeler, runIdFor, runOrchestrator } from "../src/orchestrator.ts"
+import { paneLabeler, runIdFor, runOrchestrator, drainDeadline } from "../src/orchestrator.ts"
 import { writeReport } from "../src/report.ts"
 import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
 import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
@@ -32,8 +32,10 @@ import {
   killPane,
   loadJob,
   openSession,
+  pauseJob as pauseJobRec,
   readEvents,
   saveJob,
+  setPaneSession,
   modelIn,
   splitModel,
   writePiSettings,
@@ -108,6 +110,17 @@ const ledger = (() => {
           log(`job ${job.id} aborted (${reason}) — panes remaining ${panesRemaining}`)
         } catch {}
       },
+      pause(reason, panesRemaining) {
+        try {
+          pauseJobRec(job, reason, panesRemaining)
+          log(`job ${job.id} paused (${reason}) — panes remaining ${panesRemaining}`)
+        } catch {}
+      },
+      setSession(label, sessionId) {
+        try {
+          setPaneSession(job, label, sessionId)
+        } catch {}
+      },
     }
   } catch (err) {
     log(`ledger unavailable (${err.message}) — running without a Job record`)
@@ -134,8 +147,14 @@ const programRoots = (() => {
 })()
 writeWorkerPermissions(taskDir) // per-run opencode.json: no external-dir prompts inside this run
 
+// SIGINT stays an immediate stop (books the abort itself). SIGTERM is
+// the drain when the running engine takes one (ADR 5: runCoworker
+// installs the hook — it drains to quiescence and parks paused);
+// without a hook (the lab/dag engine), SIGTERM aborts as ever.
+let drainHook = null
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
+    if (sig === "SIGTERM" && drainHook) return drainHook()
     ledger?.abort(`signal ${sig}`, mine.size)
     process.exit(0)
   })
@@ -234,10 +253,21 @@ function openFleetTab(dir) {
   log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
 
+// The host session id, when the tool reports one: booked write-ahead
+// (ADR 5) so a later continue can resume this pane's conversation.
+function probeSession(name) {
+  const got = herdr("agent", "get", name)
+  return jsonAt(got.stdout, (d) =>
+    d?.result?.session_id ?? d?.result?.session ?? d?.result?.agent?.session_id ?? null,
+  )
+}
+
 // start an agent in an existing pane, record it, submit the brief.
 // since is stamped BEFORE the agent starts, so the host tool's session
 // (created during start) always falls inside the pointer's window.
-function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, seed = undefined, hold = false) {
+// resumeSession (ADR 5) continues a booked host session instead of
+// starting a fresh one (--session passes through to the agent CLI).
+function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, seed = undefined, hold = false, resumeSession = undefined) {
   const since = new Date().toISOString()
   const name = scoped(rawName)
   const rec = shep("record", pane, name)
@@ -248,14 +278,16 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, s
     log(`record failed for ${name} on pane ${pane} — pane closed`)
     return false
   }
-  const startArgs = []
+  const tail = []
   if (model && kind === "pi") {
     writePiSettings(cwd, model)
     const { provider, id } = splitModel(model)
-    startArgs.push("--", "--approve", "--provider", provider, "--model", id)
+    tail.push("--approve", "--provider", provider, "--model", id)
   } else if (model && kind === "opencode") {
-    startArgs.push("--", "--model", model)
+    tail.push("--model", model)
   }
+  if (resumeSession) tail.push("--session", resumeSession)
+  const startArgs = tail.length ? ["--", ...tail] : []
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
   if (start.status !== 0) {
     shep("retire", name)
@@ -274,13 +306,20 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, s
     }
   }
   mine.add(name)
+  const sessionId = resumeSession ?? probeSession(name)
   ledger?.attach(
     name,
     pane,
     name.startsWith("orch-lane") ? undefined : name,
-    { tool: kind, cwd, since },
+    { tool: kind, cwd, since, ...(sessionId ? { session_id: sessionId } : {}) },
     seed,
   )
+  // pi mints its session on the first prompt — probe once more so the
+  // booked pointer carries the id even when start reported nothing
+  if (!sessionId && !name.startsWith("orch-lane")) {
+    const late = probeSession(name)
+    if (late) ledger?.setSession(name, late)
+  }
   return true
 }
 
@@ -897,6 +936,30 @@ async function runCoworker() {
     log("coworker needs one member with initiates = true — otherwise everyone idles and the exchange never starts")
     process.exit(1)
   }
+  // ADR 5 / M2: the relay ledger is outliving memory — deliveries and
+  // refusals survive the orchestrator; pending mail redelivers by it.
+  const relayLedger = readRelayLedger(taskDir)
+  const delivered = [...relayLedger.delivered]
+  const refused = [...relayLedger.refused]
+  const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused })
+  // A parked member continues its own booked session (write-ahead at
+  // birth); a member without one is born fresh, held idle until mail.
+  const resumeOf = new Map()
+  if (ledger) {
+    for (const m of members) {
+      const latest = ledger.job.panes
+        .filter((p) => p.unit === m.name && p.transcript)
+        .sort((a, b) => a.born.localeCompare(b.born))
+        .pop()
+      if (latest?.transcript?.session_id) resumeOf.set(m.name, latest.transcript.session_id)
+    }
+  }
+  const { messages: priorMessages } = readMessages(join(taskDir, "messages"), names)
+  const initiator = members.find((m) => m.initiates)?.name
+  const midTurn = interruptedMember(priorMessages, delivered, initiator)
+  if (resumeOf.size > 0) {
+    log(`continue: ${resumeOf.size} member(s) resume booked sessions${midTurn ? `; ${midTurn} was mid-turn at park` : ""}`)
+  }
   let board = emptyBoard()
   if (wantVerbose(taskDir)) openVerbose(taskDir)
   mkdirSync(join(taskDir, "messages"), { recursive: true })
@@ -923,20 +986,32 @@ async function runCoworker() {
     const slot = ensureRole(board, m.name, dir)
     board = slot.board
     // the initiator wakes on its brief alone; everyone else is held
-    // idle until the rail delivers brief + first message together
+    // idle until the rail delivers brief + first message together —
+    // except a resumed member (ADR 5): its session already carries the
+    // brief, so it is never re-briefed; a mid-turn park gets one
+    // rail-generated nudge instead ("continue where you left off")
+    const resumeId = resumeOf.get(m.name)
     const ok = slot.pane
-      ? inhabitPane(m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir, m.model, m.seed, !m.initiates)
+      ? inhabitPane(
+          m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
+          m.model, m.seed, !m.initiates || Boolean(resumeId), resumeId,
+        )
       : false
     if (slot.pane) herdr("pane", "rename", slot.pane, m.name)
-    if (ok && m.initiates) prompted.add(m.name)
+    if (ok && (m.initiates || resumeId)) prompted.add(m.name)
+    if (ok && resumeId && m.name === midTurn) {
+      herdr(
+        "agent", "prompt", scoped(m.name),
+        "[rail] The run was parked and has been continued. You were interrupted mid-thought — pick up exactly where you left off.",
+      )
+      log(`continue: nudged ${m.name} (interrupted mid-turn at park)`)
+    }
     bornAt.set(m.name, Date.now())
     log(ok ? `name ${m.name} pane ${slot.pane}${m.initiates ? " (initiates)" : " (held idle)"}` : `member ${m.name} failed to spawn`)
     if (ok) say("rail", `birth ${m.name}`)
   }
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
   const deadline = Date.now() + 2 * 60 * 60_000
-  const delivered = []
-  const refused = []
   const dead = []
   const askedCount = new Map()
   const pathAsks = new Map()
@@ -948,12 +1023,40 @@ async function runCoworker() {
   // must never stall the exchange forever.
   const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
   const nudged = new Map()
-  let ended = null // "stop" | "cap" | "deadline" | "dead"
+  let ended = null // "stop" | "cap" | "deadline" | "dead" | "paused"
+  // SIGTERM is the drain (ADR 5): stop delivering, let a member
+  // mid-turn end its turn, then park. Pending mail is NOT drained — it
+  // waits in messages/ for the next run's relay.
+  let draining = false
+  let drainUntil = null
+  drainHook = () => {
+    if (ended !== null || draining) return
+    draining = true
+    const ceiling =
+      Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || manifest.workflow.drain_timeout_ms || 10 * 60_000
+    drainUntil = drainDeadline(taskDir, Date.now(), ceiling)
+    log(`coworker: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
+  }
   while (!ended && Date.now() < deadline) {
+    if (draining) {
+      // ADR 5: no new deliveries; a member mid-turn ends its turn.
+      // Permission asks, nudges, and dead checks stand down — the
+      // park is taking over, bounded by the drain ceiling.
+      const anyWorking = members.some((m) =>
+        herdr("agent", "get", scoped(m.name)).stdout.includes('"agent_status":"working"'),
+      )
+      if (!anyWorking || Date.now() > drainUntil) {
+        ended = "paused"
+        break
+      }
+      await waitChange(join(taskDir, "messages"), 5_000)
+      continue
+    }
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
     for (const b of bad) {
       if (refused.includes(b.file)) continue
       refused.push(b.file)
+      commitRelay()
       ledger?.emit("reject", { why: `message ${b.file}: ${b.why}` })
       log(`refused message ${b.file}: ${b.why}`)
       say("watcher", `refuse ${b.file}`)
@@ -984,6 +1087,7 @@ async function runCoworker() {
         continue
       }
       delivered.push(r.file)
+      commitRelay()
       ballOn.name = r.to
       ballOn.since = Date.now()
       ledger?.emit("relay", { from: r.from, to: r.to, file: r.file })
@@ -1087,6 +1191,15 @@ async function runCoworker() {
     await waitChange(join(taskDir, "messages"), 30_000)
   }
   if (!ended) ended = "deadline"
+  // ADR 5: parked — not a finish. No report; the delivery ledger and
+  // messages/ carry the exchange; a typed continue resumes it.
+  if (ended === "paused") {
+    drainHook = null
+    port.retireAll()
+    if (verbosePane) herdr("pane", "close", verbosePane)
+    log(`coworker: parked — paused (${delivered.length} relayed; pending mail waits in messages/)`)
+    return null
+  }
   const { messages } = readMessages(join(taskDir, "messages"), names)
   const rows = members.map((m) => ({
     unit: m.name,
@@ -1116,6 +1229,13 @@ try {
         .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
     : undefined
   const report = await (workflowKindOf(taskDir) === "coworker" ? runCoworker() : runLive())
+  if (!report) {
+    // parked (ADR 5): the rail drained to quiescence and retired its
+    // panes — book the pause; a typed continue brings the Job back.
+    ledger?.pause("drained", ledger.job.panes.filter((p) => p.died === undefined).length)
+    log(`parked: paused — continue with: agentic-os continue ${ledger?.job.id ?? "<jid>"}`)
+    process.exit(0)
+  }
   log(`done: ${report.status}`)
   const reap = port.verify()
   // zen 5: the receipt counts THIS Job's panes, not the scope's
