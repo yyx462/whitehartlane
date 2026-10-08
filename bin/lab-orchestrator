@@ -10,6 +10,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { basename, join, resolve } from "node:path"
 import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../src/hooks.ts"
 import { loadDagFile, tick } from "../src/dag.ts"
+import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt } from "../src/coworker.ts"
+import { workflowKind } from "../src/workflow-kind.ts"
+import { decidePermission } from "../src/permission.ts"
 import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
@@ -20,6 +23,7 @@ import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
 import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
 import {
   abortJob as abortJobRec,
+  addWorkerRoot,
   appendEvent,
   attachPane,
   createJob,
@@ -80,9 +84,9 @@ const ledger = (() => {
           appendEvent(job.sid, { actor: "orchestrator", jid: job.id, kind, ...payload })
         } catch {}
       },
-      attach(label, pane, unit, transcript) {
+      attach(label, pane, unit, transcript, seed) {
         try {
-          attachPane(job, { label, pane, unit, parent: "orchestrator", transcript })
+          attachPane(job, { label, pane, unit, parent: "orchestrator", transcript, seed })
         } catch {}
       },
       kill(label) {
@@ -233,7 +237,7 @@ function openFleetTab(dir) {
 // start an agent in an existing pane, record it, submit the brief.
 // since is stamped BEFORE the agent starts, so the host tool's session
 // (created during start) always falls inside the pointer's window.
-function inhabitPane(rawName, kind, pane, briefPath, cwd) {
+function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, seed = undefined, hold = false) {
   const since = new Date().toISOString()
   const name = scoped(rawName)
   const rec = shep("record", pane, name)
@@ -245,12 +249,12 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     return false
   }
   const startArgs = []
-  if (workerModel && kind === "pi") {
-    writePiSettings(cwd, workerModel)
-    const { provider, id } = splitModel(workerModel)
+  if (model && kind === "pi") {
+    writePiSettings(cwd, model)
+    const { provider, id } = splitModel(model)
     startArgs.push("--", "--approve", "--provider", provider, "--model", id)
-  } else if (workerModel && kind === "opencode") {
-    startArgs.push("--", "--model", workerModel)
+  } else if (model && kind === "opencode") {
+    startArgs.push("--", "--model", model)
   }
   const start = herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
   if (start.status !== 0) {
@@ -259,10 +263,15 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
     return false
   }
-  const brief = readFileSync(briefPath, "utf8")
-  const prompt = herdr("agent", "prompt", name, brief)
-  if (prompt.status !== 0) {
-    log(`brief submission failed for ${name} — the grace reprompt will retry`)
+  // hold: a coworker member that does not initiate is born idle — its
+  // brief rides WITH the first relayed message (zen 6: the rail is the
+  // watcher; the member never polls, never sleeps, never waits)
+  if (!hold) {
+    const brief = readFileSync(briefPath, "utf8")
+    const prompt = herdr("agent", "prompt", name, brief)
+    if (prompt.status !== 0) {
+      log(`brief submission failed for ${name} — the grace reprompt will retry`)
+    }
   }
   mine.add(name)
   ledger?.attach(
@@ -270,6 +279,7 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd) {
     pane,
     name.startsWith("orch-lane") ? undefined : name,
     { tool: kind, cwd, since },
+    seed,
   )
   return true
 }
@@ -862,6 +872,224 @@ async function runLive() {
   return report
 }
 
+function workflowKindOf(dir) {
+  try {
+    return workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
+  } catch {
+    return "fan-out"
+  }
+}
+
+// Coworker (zen 6): members talk through the rail. Birth each named
+// member with its own brief and model, relay message files as prompts
+// to the named pane, end on stop or the cap, then report.
+async function runCoworker() {
+  const toml = readFileSync(join(taskDir, "workflow.toml"), "utf8")
+  const members = parseMembers(toml)
+  if (members.length < 2) {
+    log("coworker needs at least two [members.*]")
+    process.exit(1)
+  }
+  const manifest = loadManifest(taskDir)
+  const memberKind = manifest.workflow.worker_kind
+  const names = members.map((m) => m.name)
+  if (!members.some((m) => m.initiates)) {
+    log("coworker needs one member with initiates = true — otherwise everyone idles and the exchange never starts")
+    process.exit(1)
+  }
+  let board = emptyBoard()
+  if (wantVerbose(taskDir)) openVerbose(taskDir)
+  mkdirSync(join(taskDir, "messages"), { recursive: true })
+  mkdirSync(join(taskDir, "briefs"), { recursive: true })
+  const bornAt = new Map()
+  const prompted = new Set()
+  const sandboxOf = new Map()
+  for (const m of members) {
+    const dir = join(taskDir, "sandboxes", m.name)
+    sandboxOf.set(m.name, dir)
+    mkdirSync(dir, { recursive: true })
+    writeWorkerPermissions(dir, [taskDir, ...programRoots])
+    let brief = ""
+    try {
+      brief = readFileSync(join(taskDir, "members", `${m.name}.md`), "utf8")
+    } catch {
+      log(`no brief for ${m.name} — members/${m.name}.md is missing`)
+      process.exit(1)
+    }
+    writeFileSync(
+      join(taskDir, "briefs", `${m.name}.md`),
+      brief + memberProtocol(m.name, names.filter((n) => n !== m.name), taskDir),
+    )
+    const slot = ensureRole(board, m.name, dir)
+    board = slot.board
+    // the initiator wakes on its brief alone; everyone else is held
+    // idle until the rail delivers brief + first message together
+    const ok = slot.pane
+      ? inhabitPane(m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir, m.model, m.seed, !m.initiates)
+      : false
+    if (slot.pane) herdr("pane", "rename", slot.pane, m.name)
+    if (ok && m.initiates) prompted.add(m.name)
+    bornAt.set(m.name, Date.now())
+    log(ok ? `name ${m.name} pane ${slot.pane}${m.initiates ? " (initiates)" : " (held idle)"}` : `member ${m.name} failed to spawn`)
+    if (ok) say("rail", `birth ${m.name}`)
+  }
+  const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
+  const deadline = Date.now() + 2 * 60 * 60_000
+  const delivered = []
+  const refused = []
+  const dead = []
+  const askedCount = new Map()
+  // verdicts that arrived while the member was blocked — herdr refuses
+  // to prompt a blocked pane, so the note waits for the next beat
+  const pendingNote = new Map()
+  // the ball: whose turn the exchange waits on. Idle too long → one
+  // nudge, then a second, then the member is dead. A silent member
+  // must never stall the exchange forever.
+  const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
+  const nudged = new Map()
+  let ended = null // "stop" | "cap" | "deadline" | "dead"
+  while (!ended && Date.now() < deadline) {
+    const { messages, bad } = readMessages(join(taskDir, "messages"), names)
+    for (const b of bad) {
+      if (refused.includes(b.file)) continue
+      refused.push(b.file)
+      ledger?.emit("reject", { why: `message ${b.file}: ${b.why}` })
+      log(`refused message ${b.file}: ${b.why}`)
+      say("watcher", `refuse ${b.file}`)
+    }
+    // flush queued permission notes into panes that can take them
+    for (const [held, note] of pendingNote) {
+      const st = herdr("agent", "get", scoped(held)).stdout
+      if (st.includes('"agent_status":"blocked"') || st.includes('"agent_status":"working"')) continue
+      if (herdr("agent", "prompt", scoped(held), note).status === 0) {
+        pendingNote.delete(held)
+        log(`injected queued note into ${held}`)
+      }
+    }
+    const plan = relayPlan(messages, delivered, CAP)
+    for (const r of plan.relays) {
+      const target = scoped(r.to)
+      // a working member takes mail on a later beat — never mid-turn
+      const state = herdr("agent", "get", target).stdout
+      if (state.includes('"agent_status":"working"')) continue
+      let text = `[relay] from ${r.from}:\n\n${r.body}`
+      if (!prompted.has(r.to)) {
+        text = combineFirstPrompt(readFileSync(join(taskDir, "briefs", `${r.to}.md`), "utf8"), r.from, r.body)
+        prompted.add(r.to)
+      }
+      const rc = herdr("agent", "prompt", target, text)
+      if (rc.status !== 0) {
+        log(`relay ${r.file} could not reach ${r.to} (rc=${rc.status}) — retrying next beat`)
+        continue
+      }
+      delivered.push(r.file)
+      ballOn.name = r.to
+      ballOn.since = Date.now()
+      ledger?.emit("relay", { from: r.from, to: r.to, file: r.file })
+      log(`relay ${r.file}: ${r.from} -> ${r.to}`)
+      say("rail", `relay ${r.from} -> ${r.to}`)
+    }
+    if (plan.stop) {
+      ended = plan.why ?? "stop"
+      break
+    }
+    // the permission half of JEV: a blocked member is a question, and
+    // the typed decider answers it — allow (roots), deny (dangerous),
+    // deny-unneeded (wandering) — with a message injected back. No
+    // dialog ever waits for a person. Capped like every retry surface.
+    for (const m of members) {
+      if (dead.includes(m.name)) continue
+      const out = herdr("agent", "get", scoped(m.name)).stdout
+      if (!out.includes('"agent_status":"blocked"')) continue
+      const term = herdr("agent", "read", scoped(m.name)).stdout
+      const at = term.lastIndexOf("Permission required")
+      const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
+      const verdict = decidePermission({
+        question,
+        allowedRoots: [taskDir, sandboxOf.get(m.name) ?? "", ...programRoots],
+      })
+      const asked = (askedCount.get(m.name) ?? 0) + 1
+      askedCount.set(m.name, asked)
+      if (verdict.decision === "allow" && verdict.path) {
+        addWorkerRoot(sandboxOf.get(m.name) ?? taskDir, verdict.path.replace(/\/[^/]*$/, ""))
+        herdr("agent", "send-keys", scoped(m.name), "enter")
+      } else {
+        herdr("agent", "send-keys", scoped(m.name), "esc")
+        const note = `[permission] ${verdict.message}`
+        const rc = herdr("agent", "prompt", scoped(m.name), note)
+        if (rc.status !== 0) pendingNote.set(m.name, note)
+      }
+      ledger?.emit("permission", { member: m.name, decision: verdict.decision, path: verdict.path, ask: asked })
+      log(`permission ${m.name} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"}`)
+      say("watcher", `permission ${m.name} ${verdict.decision}`)
+      if (asked >= 6) {
+        dead.push(m.name)
+        ledger?.emit("wake", { why: `member ${m.name} blocked past the permission cap` })
+        log(`member ${m.name} hit the permission cap (6) — ending`)
+      }
+    }
+    // the stall guard: whoever holds the ball and idles too long gets
+    // nudged — twice, then the exchange ends. Working resets the clock.
+    if (ballOn.name && !dead.includes(ballOn.name)) {
+      const st = herdr("agent", "get", scoped(ballOn.name)).stdout
+      if (st.includes('"agent_status":"working"')) {
+        ballOn.since = Date.now()
+      } else if (Date.now() - ballOn.since > 120_000) {
+        const used = nudged.get(ballOn.name) ?? 0
+        if (used < 2) {
+          nudged.set(ballOn.name, used + 1)
+          herdr(
+            "agent", "prompt", scoped(ballOn.name),
+            used === 0
+              ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
+              : `Second and final nudge, ${ballOn.name}: the exchange waits on you. Act now or the job ends unresolved.`,
+          )
+          ballOn.since = Date.now()
+          log(`nudge ${ballOn.name} (${used + 1}/2)`)
+          ledger?.emit("reprompt", { member: ballOn.name, nudge: used + 1 })
+        } else {
+          dead.push(ballOn.name)
+          ledger?.emit("wake", { why: `member ${ballOn.name} stalled past the nudge cap` })
+          log(`member ${ballOn.name} stalled past the nudge cap — ending`)
+        }
+      }
+    }
+    for (const m of members) {
+      if (dead.includes(m.name)) continue
+      if (!port.paneAlive(m.name) && Date.now() - (bornAt.get(m.name) ?? 0) > 15_000) {
+        dead.push(m.name)
+        ledger?.emit("wake", { why: `member ${m.name} is dead` })
+        log(`member ${m.name} is dead — ending the exchange`)
+        say("watcher", `${m.name} dead`)
+      }
+    }
+    if (dead.length > 0) {
+      ended = "dead"
+      break
+    }
+    await waitChange(join(taskDir, "messages"), 30_000)
+  }
+  if (!ended) ended = "deadline"
+  const { messages } = readMessages(join(taskDir, "messages"), names)
+  const rows = members.map((m) => ({
+    unit: m.name,
+    result: `${messages.filter((x) => x.from === m.name).length} messages`,
+    pass: !dead.includes(m.name),
+  }))
+  if (ended !== "stop") rows.push({ unit: "exchange", result: `ended by ${ended}`, pass: false })
+  log(`exchange ended (${ended}) — ${messages.length} messages, ${delivered.length} relayed`)
+  const report = writeReport(
+    taskDir,
+    taskDir,
+    rows,
+    (table) => runCounts(taskDir, loadManifest(taskDir), table),
+    ended === "stop" && dead.length === 0 ? "done" : undefined,
+  )
+  port.retireAll()
+  if (verbosePane) herdr("pane", "close", verbosePane)
+  return report
+}
+
 try {
   const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
   const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
@@ -870,7 +1098,7 @@ try {
         .filter((e) => e.jid === ledger.job.id && e.kind === "unit.settled")
         .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
     : undefined
-  const report = await runLive()
+  const report = await (workflowKindOf(taskDir) === "coworker" ? runCoworker() : runLive())
   log(`done: ${report.status}`)
   const reap = port.verify()
   // zen 5: the receipt counts THIS Job's panes, not the scope's

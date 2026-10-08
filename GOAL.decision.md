@@ -3,6 +3,67 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-07 — Dag identity: the Project pid, the dag_id, the version
+hash. Runs group like Airflow's DAG runs, so a group key was needed
+that no path and no git provides. A Project is a pid minted once into
+`project.json` inside the program folder (indexed on the OS disk):
+worktrees and clones copy the file — runs combine silently, no
+warning; a moved folder keeps its identity (paths are never identity);
+git is never required (repo+branch rejected: not every project uses
+git; absolute path rejected: it breaks on move and double-counts
+worktrees). dag_id is explicit in workflow.toml, else the workflow
+name, else a hashed id with a loud warning — it always exists and
+grouping never silently falls apart. Duplicate protection is light
+and never a refusal: the same (project, dag_id) with different
+content from a different path warns. Every Job books the dag identity
+— project, dag_id, source content hash (the version), source path,
+and branch/worktree as labels that display but never identify. The
+run door prints `dag: <pid>/<dag_id> version <hash>` and the
+warnings. Programs may now live in any repo, not only
+agentic-program; the OS disk is the one storage. Serves 5, 6. Trail:
+src/project.ts, test/project.test.ts, CONTEXT.md (Project, Dag id).
+
+2026-10-07 — The permission half of JEV, and members held idle. A
+blocked worker's dialog used to wait for a person (the ui-window run
+stuck on one for the job's own OS-disk paths). Now a dialog is a
+question to a typed decider (`src/permission.ts` — a script, not an
+agent): allow inside the member's roots (the root is also made durable
+in the sandbox permissions), deny dangerous patterns (secrets,
+outside-home) and deny unneeded wandering, each verdict injected as a
+message and booked as a `permission` event; asks are capped (6, then
+the member is dead). Worker permissions go back to restrictive by
+default — the decider, not a human, is the throughput. Same run
+taught the relay's wake discipline: exactly one member `initiates`
+(wakes on its brief); every other member is born idle and held, and
+its first prompt is brief + first message together, split by a -----
+line — no context-read turn, no polling, no sleep loop; the rail is
+the watcher. And mail is never delivered mid-turn: a working member
+takes its message on a later beat, delivered only when the prompt
+lands. Serves 2, 3, 4. Trail: docs/prd/coworker.md,
+src/permission.ts, test/permission.test.ts.
+
+2026-10-07 — Born booked; fork; coworker. JEV's gate half is retired:
+nothing in the rail needs a model's yes to birth a pane — the lab path
+already births from the professor's protocol and `src/policy.ts`
+admits deterministically (slots, retry cap, one Job). What stands is
+the stamp: every pane is born booked, `pane.born` carries the decider
+(`parent`, zen 4's wake budgets), and a fork adds `seed ->
+{tool, session_id, since}` — a pointer into an existing host session;
+bytes never copied, the original never written, fresh record and
+binding; a fork passes the same admission plus the seed must resolve.
+Adoption of a live pane of another session stays rejected: its record,
+scope, and binding answer to another master, and the receipt (panes of
+this Job = 0) goes ambiguous. Ownership reworded: the trace owns pane
+records — shep and herdr are mechanisms, not owners. And panes may now
+depend on each other, in a third workflow kind: Coworker — named
+members exchange typed message files on the Job dir, the Rail is the
+relay (a worker never writes another worker), the orchestrator pane
+stays optional and failure-only, and the Job still produces a report
+(`kind = "coworker"`). The chat's product half is becoming a DAG
+creator; the shell stays. Supersedes: zen 1's "JEV is the only birth
+canal" (the stamp survives), Ownership's shep line. Serves 1, 2, 4, 5.
+Trail: docs/zen/2026-10-07-zen-6.md, docs/prd/coworker.md.
+
 2026-10-07 — No first-tenant favors. The rail read SKILL_RSI_TARGET and
 SKILL_RSI_PROTOTYPE_ROOT — the first program's shell plumbing baked
 into the OS, four lines of special case. Gone: a program names the

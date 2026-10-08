@@ -25,13 +25,24 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `route, admit, reject, job.born, job.orphaned, job.relaunched,
   pane.born, pane.died, reprompt, backpressure, unit.settled,
   job.retired, job.aborted, wake.consumed, fatal`.
-- **JEV admission.** Model proposes, `src/policy.ts` admits; every pane
-  is booked `pane.born` with a JEV `parent` stamp (`first_mate` |
-  `orchestrator` — zen 4's two wake budgets never mix). No JEV, no
-  pane; unadmitted live panes are audit findings, not workers.
+- **Booked birth (JEV).** `src/policy.ts` admits — deterministic checks
+  (slots, retry cap, one Job; a fork's seed must resolve); every pane
+  is booked `pane.born` with a `parent` stamp (`first_mate` |
+  `orchestrator` — zen 4's two wake budgets never mix) and, when
+  forked, a `seed` pointer into the seeded host session (zen 6). No
+  booked birth, no pane; unbooked live panes are audit findings, not
+  workers. A model proposal is an input to booking, never the booking.
 - **The pane ledger and the receipt.** Panes of a Job are booked
   born/died; retire = this Job's panes remaining 0 (`job.retired`).
   Records are never deleted — `retired` is a state.
+- **Permission decisions (JEV's other half).** A blocked pane is a
+  question; `src/permission.ts` answers it — typed, not an agent:
+  allow (inside the member's roots), deny (secrets, outside home),
+  deny-unneeded (wandering, with guidance to say why). The rail
+  applies the verdict (dialog cleared, message injected, root made
+  durable on allow), books a `permission` event, and caps the asks —
+  over 6 the member is dead. With this, worker permissions are
+  restrictive by default: no dialog ever waits for a person.
 - **Fail recovery, both halves.** Detect: `audit` (unadmitted panes),
   `sweep` (running Job, dead orchestrator pid). Recover, ask-first: a
   dead orchestrator parks the Job `orphaned` in a derived queue —

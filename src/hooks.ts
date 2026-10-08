@@ -25,7 +25,7 @@ export type Layout = {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; dag_id?: string }
   hooks: { units: string; grade: string; counts: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
@@ -99,6 +99,13 @@ export function loadManifest(taskDir: string): Manifest {
       throw new HookError(`workflow.model must be provider/model: ${model}`)
     }
   }
+  let dagId: string | undefined
+  if (workflow.dag_id !== undefined) {
+    dagId = str(workflow.dag_id, "workflow.dag_id")
+    if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/.test(dagId)) {
+      throw new HookError(`workflow.dag_id must be url-safe lowercase: ${dagId}`)
+    }
+  }
   const detectors: { signal?: string; end?: string } = {}
   const optCmd = (value: unknown, field: string): string | undefined => {
     if (value === undefined) return undefined
@@ -117,7 +124,7 @@ export function loadManifest(taskDir: string): Manifest {
     if (cmd !== undefined) gates[id] = cmd
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(dagId ? { dag_id: dagId } : {}) },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),

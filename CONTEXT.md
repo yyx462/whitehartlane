@@ -1,6 +1,6 @@
 # Agentic OS
 
-A shell and supervisor for subagent work. The user talks in the First Mate; panes are born only through JEV.
+A shell and supervisor for subagent work. The user talks in the First Mate; every pane is born booked.
 
 ## Language
 
@@ -35,8 +35,16 @@ Code outside this repo. It stands a Job up. The rails make that Job manageable. 
 Example: skill-rsi.
 _Avoid_: workflow, Job, scheduler, pipeline, project
 
+**Project**:
+The namespace a dag_id is unique in. A pid minted once, kept in `project.json` inside the program folder and indexed on the OS disk. Worktrees and clones copy the file, so runs combine under one group wherever the folder lives — no warning, by design. Paths are never identity; move the folder, the trace continues. Git is never required.
+_Avoid_: repo, worktree, folder path, git origin
+
+**Dag id**:
+The group runs gather under, unique inside its Project. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the dag identity: project, dag_id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify.
+_Avoid_: workflow name collision, run id, Job id, tag
+
 **Workflow**:
-A component that receives an input and has an orchestrator. The index is `workflow.toml`: it names the hook commands. It is not the loop. Fan-out must produce a report. Direct must not finish. A project fills hooks. A project does not skip fan-out's report, and it does not draw a graph.
+A component that receives an input and has an orchestrator. The index is `workflow.toml`: it names the hook commands. It is not the loop. Fan-out and Coworker must produce a report. Direct must not finish. A project fills hooks. A project does not skip the report, and it does not draw a graph.
 _Avoid_: hierarchy, fleet, driver, custom script, DAG file, program
 
 **Scheduler**:
@@ -44,8 +52,13 @@ The part that picks a workflow for a task. It does not run the task and it does 
 _Avoid_: orchestrator, driver, jev, program
 
 **Jev**:
-The birth canal. The model proposes a pane; policy admits it. That pair is JEV. Cheap typed judgment, not an agent and not a pane.
-_Avoid_: router model, LLM scheduler, subagent
+The birth check and the stamp. Policy admits — deterministic checks: slots, the retry cap, one Job, and, for a fork, a seed that resolves. `pane.born` books the decider as `parent`. A model may propose; its proposal is an input to booking, never the booking. Cheap typed judgment, not an agent and not a pane.
+_Avoid_: birth canal, gate, router model, LLM scheduler, subagent
+
+**Fork**:
+A birth mode. The new pane's host session starts seeded from a pointer into an existing host session: `seed = {tool, session_id, since}`. The bytes are never copied and the original session is never written. A fork passes the same admission as any birth — plus the seed must resolve — and it is booked on `pane.born`.
+Example: the lender pane in a Coworker Job, forked from three hours of the old project's session.
+_Avoid_: adopt, enlist, takeover, session copy, polluting the original
 
 **Trace**:
 The append-only `events.jsonl` on a session disk: every route, admission, pane birth and death, settle, retire, abort, wake. The single source; all records are projections of it.
@@ -95,6 +108,10 @@ _Avoid_: stuck, status, error
 The workflow for independent units. Workers do not depend on each other. The orchestrator starts them and settles results.
 _Avoid_: fleet, hierarchy, swarm
 
+**Coworker**:
+The workflow for panes that depend on each other. Named members exchange typed message files on the Job dir; the Rail is the relay — it moves a message to the named pane's prompt. A worker never writes another worker. `kind = "coworker"` in `workflow.toml`. It must produce a report.
+_Avoid_: social group, chat room, swarm, orchestrator-with-friends
+
 **Direct**:
 The workflow for one worker. That worker is the chat the user already has open. No pane is opened. No retry: the open chat is the supervisor — a blocked turn is visible and the user resends; unattended work belongs to a Job, not Direct. There is no finish and no report.
 _Avoid_: single agent, dummy workflow, fallback, hidden retry script
@@ -118,9 +135,9 @@ State that remains after the worker that wrote it is gone, so another worker can
 _Avoid_: snapshot, context, chat history
 
 **Ownership**:
-A recorded fact that one object is the parent of a worker or of an artifact. Three owners, and they do not overlap. The `shep` ledger owns panes. The Job's dir owns progress and output. The worktree owns project bytes. A worker owns none of these.
-Example: `w-france` dies on the shep ledger. `report.json` lives in the Job dir. The repo the worker edits is the worktree.
-_Avoid_: leader, lease, "I spawned it", task directory
+A recorded fact that one object is the parent of a worker or of an artifact. Three owners, and they do not overlap. The trace owns pane records. The Job's dir owns progress and output. The worktree owns project bytes. shep and herdr are mechanisms, not owners. A worker owns none of these.
+Example: `w-france` dies on the trace's pane record. `report.json` lives in the Job dir. The repo the worker edits is the worktree.
+_Avoid_: leader, lease, "I spawned it", task directory, the shep ledger owns panes
 
 **Backpressure**:
 The workflow stopping new provider calls when the provider refuses or slows, then opening them again when the provider can take more. A hand-set cap is not this.
