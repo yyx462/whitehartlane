@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agentic-os · dag explorer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topnav">
+      <a class="brand" href="#/runs">
+        <span class="brand-dot"></span>
+        <span class="wordmark">agentic-os</span>
+        <span class="brand-sub">dag explorer</span>
+      </a>
+      <nav class="mainnav">
+        <a href="#/runs" data-nav="runs">All Runs</a>
+        <a href="#/dags" data-nav="dags">DAGs</a>
+      </nav>
+      <div class="nav-right">
+        <span id="refresh-note" class="muted" title="auto-refresh interval">5s</span>
+        <span id="clock" class="muted mono"></span>
+      </div>
+    </header>
+
+    <main id="view" class="view"></main>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
