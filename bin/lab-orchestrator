@@ -1096,6 +1096,14 @@ async function runCoworker() {
       }
       delivered.push(r.file)
       commitRelay()
+      // a held member mints its session on this first prompt — book it
+      // shortly (ADR 5), so continue resumes its conversation
+      const heldCwd = sandboxOf.get(r.to)
+      const heldSince = new Date(bornAt.get(r.to) ?? Date.now()).toISOString()
+      setTimeout(() => {
+        const sid = resolveLiveSession(memberKind, heldCwd, heldSince)
+        if (sid) ledger?.setSession(target, sid)
+      }, 5_000).unref()
       ballOn.name = r.to
       ballOn.since = Date.now()
       ledger?.emit("relay", { from: r.from, to: r.to, file: r.file })
