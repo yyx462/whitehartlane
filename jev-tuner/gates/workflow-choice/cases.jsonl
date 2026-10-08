@@ -1,0 +1,54 @@
+{"id":"wc-001","input":{"task":"Search the web for the top 5 competitor pricing pages and note each one's entry price."},"expected":"fan-out"}
+{"id":"wc-002","input":{"task":"Fix the failing test in src/wave.ts and make the suite green."},"expected":"direct"}
+{"id":"wc-003","input":{"task":"Translate these 12 product titles in data/titles.csv into Korean."},"expected":"fan-out"}
+{"id":"wc-004","input":{"task":"Refactor the storage layer in src/store.ts to remove the global lock."},"expected":"direct"}
+{"id":"wc-005","input":{"task":"Check these 8 npm packages in audit/deps.txt for deprecation or license problems, one line each."},"expected":"fan-out"}
+{"id":"wc-006","input":{"task":"Debug why the rail loop drops events when two panes finish together."},"expected":"direct"}
+{"id":"wc-007","input":{"task":"Compare the CI configs of these 4 repos in a table: build time, cache, matrix."},"expected":"fan-out"}
+{"id":"wc-008","input":{"task":"Write the launch announcement post covering the release notes in CHANGELOG.md."},"expected":"direct"}
+{"id":"wc-009","input":{"task":"Find three sources that explain the new import tariff rules for electronics and summarize each in 5 bullets."},"expected":"fan-out"}
+{"id":"wc-010","input":{"task":"Implement the token-bucket rate limiter behind feature flag api-v2-throttle."},"expected":"direct"}
+{"id":"wc-011","input":{"task":"Look up the current prices of the 6 gpus listed in hardware/gpus.txt from any two retailers each."},"expected":"fan-out"}
+{"id":"wc-012","input":{"task":"Figure out why the deploy hook double-charges shipping on the second retry."},"expected":"direct"}
+{"id":"wc-013","input":{"task":"Proofread the six draft posts in posts/drafts/ and list typos per post."},"expected":"fan-out"}
+{"id":"wc-014","input":{"task":"Redesign the settings page to match the new design system."},"expected":"direct"}
+{"id":"wc-015","input":{"task":"Check whether each of these 10 docs links in docs/links.txt still resolves, and note the http status."},"expected":"fan-out"}
+{"id":"wc-016","input":{"task":"Add the healthz endpoint and wire it into the load balancer config."},"expected":"direct"}
+{"id":"wc-017","input":{"task":"For each of the 5 competitors in competitors.txt, find their changelog and note the last three feature entries."},"expected":"fan-out"}
+{"id":"wc-018","input":{"task":"Write a failing test that reproduces the csv bom bug, then fix the writer."},"expected":"direct","note":"the test informs the fix — connected work"}
+{"id":"wc-019","input":{"task":"Screenshot the 7 pages listed in e2e/pages.txt at mobile and desktop widths."},"expected":"fan-out"}
+{"id":"wc-020","input":{"task":"Audit our own checkout flow for accessibility problems and write the findings report."},"expected":"direct"}
+{"id":"wc-021","input":{"task":"Translate the onboarding emails in copy/emails/ from English to Japanese."},"expected":"fan-out"}
+{"id":"wc-022","input":{"task":"Set up the jenmskins pipeline for the tuner repo: job, webhook, deploy script."},"expected":"direct"}
+{"id":"wc-023","input":{"task":"For each of the 12 skus in sites.toml, fetch the product page and record title, price, stock."},"expected":"fan-out"}
+{"id":"wc-024","input":{"task":"Reduce the docker image to under 700mb with a multi-stage build."},"expected":"direct"}
+{"id":"wc-025","input":{"task":"Research three options for the webhook relay (papertrail, hookdeck, self-host) and recommend one."},"expected":"fan-out","note":"gathering is independent; the recommendation reads the results, it is not another unit"}
+{"id":"wc-026","input":{"task":"Migrate the build from webpack to vite keeping the output hashes stable."},"expected":"direct"}
+{"id":"wc-027","input":{"task":"Get the github stars, last release, and open issue count for each repo in deps/repos.txt."},"expected":"fan-out"}
+{"id":"wc-028","input":{"task":"Track down the flaky scheduler test and make 50 consecutive runs pass."},"expected":"direct"}
+{"id":"wc-029","input":{"task":"Answer these 9 support questions in queue.md, each with a short doc cite."},"expected":"fan-out"}
+{"id":"wc-030","input":{"task":"Instrument the checkout steps with the analytics client's step_viewed event."},"expected":"direct"}
+{"id":"wc-031","input":{"task":"Check the five competitor docs sites for webhook signature docs; one row each: documented, algorithm, rotation."},"expected":"fan-out"}
+{"id":"wc-032","input":{"task":"Draft the incident postmortem from the timeline in incidents/2026-09-30.md."},"expected":"direct"}
+{"id":"wc-033","input":{"task":"Classify each of the 40 tickets in triage/inbox.jsonl as bug, feature, or question."},"expected":"fan-out"}
+{"id":"wc-034","input":{"task":"Make the dashboard orders panel live over the existing websocket server."},"expected":"direct"}
+{"id":"wc-035","input":{"task":"For each of the 6 cities in data/cities.csv, find today's pm2.5 reading from the public api and write one row."},"expected":"fan-out"}
+{"id":"wc-036","input":{"task":"Extract the retry logic from the three services into src/retry.ts and migrate them."},"expected":"direct"}
+{"id":"wc-037","input":{"task":"Verify each of the 14 translations in locales/ja.json against the glossary in locales/glossary.md."},"expected":"fan-out"}
+{"id":"wc-038","input":{"task":"Swap the mailer's sender domain and update the spf docs."},"expected":"direct"}
+{"id":"wc-039","input":{"task":"Take the 5 fonts in design/fonts.txt, find their licenses and whether they allow app embedding."},"expected":"fan-out"}
+{"id":"wc-040","input":{"task":"Build the admin orders table pagination with server-side cursors."},"expected":"direct"}
+{"id":"wc-041","input":{"task":"List the top 3 third-party libraries each of these 6 repos imports, from their package.json files at the pinned urls."},"expected":"fan-out"}
+{"id":"wc-042","input":{"task":"Write the pytest fixtures the tuner tests need, then the tuner tests that use them."},"expected":"direct","note":"later work consumes earlier fixtures"}
+{"id":"wc-043","input":{"task":"For each vendor in vendors.txt, download this quarter's invoice pdf and record its total."},"expected":"fan-out"}
+{"id":"wc-044","input":{"task":"Fix the safari double-submit bug in the login form."},"expected":"direct"}
+{"id":"wc-045","input":{"task":"Summarize each of the 10 papers in reading/list.txt in exactly 3 bullets."},"expected":"fan-out"}
+{"id":"wc-046","input":{"task":"Move the nightlies from cron to launchd, keeping the same schedule and log paths."},"expected":"direct"}
+{"id":"wc-047","input":{"task":"Check each of the 8 brand names in brands.txt against the korean trademark registry; note conflicts."},"expected":"fan-out"}
+{"id":"wc-048","input":{"task":"Add the debounced search box to the docs page header with keyboard navigation."},"expected":"direct"}
+{"id":"wc-049","input":{"task":"For each of the 5 apis in integrations/, hit the health endpoint and record latency and status."},"expected":"fan-out"}
+{"id":"wc-050","input":{"task":"Investigate the memory leak in the relay process and patch it."},"expected":"direct"}
+{"id":"wc-051","input":{"task":"Convert each of the 15 markdown posts in posts/src/ to the new mdx frontmatter format."},"expected":"fan-out"}
+{"id":"wc-052","input":{"task":"Make the login page pass the axe audit."},"expected":"direct"}
+{"id":"wc-053","input":{"task":"Read these 3 competitor changelogs and tell me which features we lack (list only, no plan)."},"expected":"fan-out","note":"the comparison is a read over gathered rows, not a unit consuming another unit's result"}
+{"id":"wc-054","input":{"task":"Plan the sprint: read the backlog, group the tickets, estimate each group."},"expected":"direct"}

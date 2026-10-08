@@ -1,0 +1,8 @@
+{
+  "threshold": 0.5,
+  "gate": "workflow-choice",
+  "options": {
+    "fan-out": "The task is independent units. No unit needs another unit's result.",
+    "direct": "The task is one piece of work, like a coding change in one chat."
+  }
+}

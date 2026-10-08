@@ -1,0 +1,54 @@
+{"id":"ge-001","input":{"task":"Add a dark mode toggle to the settings page: a `theme` button that persists to localStorage. Done when the test suite passes and a reload keeps the chosen theme. Don't touch routing."},"expected":"enough"}
+{"id":"ge-002","input":{"task":"Make the app faster."},"expected":"not-enough"}
+{"id":"ge-003","input":{"task":"Improve error handling in the API."},"expected":"not-enough"}
+{"id":"ge-004","input":{"task":"In src/wave.ts the closeWave() function drops the last unit when two finish in the same tick. Fix the off-by-one, add a regression test with two simultaneous finishes. Done when the new test fails on main and passes on the branch."},"expected":"enough"}
+{"id":"ge-005","input":{"task":"Fix the bug the user reported yesterday."},"expected":"not-enough"}
+{"id":"ge-006","input":{"task":"Add tests."},"expected":"not-enough"}
+{"id":"ge-007","input":{"task":"Translate the 12 product titles listed in data/titles.csv from English to Korean; write translations to data/titles.ko.csv keeping the same ids. Preserve brand names untranslated. Done when the output csv has 12 rows that pass the linter's korean-charset check."},"expected":"enough"}
+{"id":"ge-008","input":{"task":"Why is the search endpoint slow?"},"expected":"not-enough","note":"a question to investigate together, not a runnable unit"}
+{"id":"ge-009","input":{"task":"Migrate the build from webpack to vite, keep the same output hashes for the five entry points, and update the three CI scripts that hardcode dist/js. Done when the CI pipeline is green on the PR."},"expected":"enough"}
+{"id":"ge-010","input":{"task":"Make the landing page look nicer."},"expected":"not-enough"}
+{"id":"ge-011","input":{"task":"Add a rate limiter to the public API endpoints: token bucket, 60 req/min per api key, configured via the existing settings service. Done when a 120-request burst test shows exactly 60 passes and a 429 for the rest. Don't change auth."},"expected":"enough"}
+{"id":"ge-012","input":{"task":"Refactor the codebase."},"expected":"not-enough"}
+{"id":"ge-013","input":{"task":"Extract the retry logic duplicated in three services into src/retry.ts, keep behavior identical, migrate all three call sites. Done when the full test suite passes and no service imports its own copy."},"expected":"enough"}
+{"id":"ge-014","input":{"task":"Look into the CI failures."},"expected":"not-enough"}
+{"id":"ge-015","input":{"task":"Set up logging."},"expected":"not-enough"}
+{"id":"ge-016","input":{"task":"Change the invoice pdf template so the vat id prints under the address block, not in the footer. The template is invoice/template.html; regenerate the two sample pdfs in invoice/samples. Done when both samples show the moved line in a text extract."},"expected":"enough"}
+{"id":"ge-017","input":{"task":"Handle the edge cases in the importer."},"expected":"not-enough"}
+{"id":"ge-018","input":{"task":"Write a blog post about the release."},"expected":"not-enough","note":"no audience, no length, no angle"}
+{"id":"ge-019","input":{"task":"Write a 600-word changelog post for the 2.4 release covering the new tuner and the permission gate, tone matching posts/2026-09-tuner.md, publish draft to posts/drafts/. Done when the draft renders without the broken-link warnings."},"expected":"enough"}
+{"id":"ge-020","input":{"task":"Add pagination to the orders table on the admin page: page size 50, server-side via the existing list endpoint's cursor param. Done when navigating 120 seeded orders shows 3 pages and the browser back button works. Don't touch the auth guard."},"expected":"enough"}
+{"id":"ge-021","input":{"task":"Make the mobile experience better."},"expected":"not-enough"}
+{"id":"ge-022","input":{"task":"Upgrade all the dependencies."},"expected":"not-enough"}
+{"id":"ge-023","input":{"task":"Upgrade @playwright/test from 1.40 to 1.44 in this repo, fix the two deprecated locator calls the release notes flag, keep the trace fixtures working. Done when the e2e suite passes locally on chromium."},"expected":"enough"}
+{"id":"ge-024","input":{"task":"Investigate the memory leak."},"expected":"not-enough"}
+{"id":"ge-025","input":{"task":"The nightly export writes exports/orders.csv with a bom that breaks the downstream loader. Strip the bom from csv.ts's writer, add a test asserting the first three bytes. Done when the test passes and the loader's dry-run accepts the file."},"expected":"enough"}
+{"id":"ge-026","input":{"task":"Add a search box."},"expected":"not-enough"}
+{"id":"ge-027","input":{"task":"Add a debounced search box to the docs page header: 300ms debounce, calls the existing /api/search, shows up to 8 suggestions with keyboard navigation. Done when typing 'tuner' shows the three tuner docs and arrow keys move the highlight."},"expected":"enough"}
+{"id":"ge-028","input":{"task":"Clean up the css."},"expected":"not-enough"}
+{"id":"ge-029","input":{"task":"Delete the four unused tailwind plugins from tailwind.config.js that the audit script in scripts/audit-css.sh lists, and shrink the built css. Done when the built css is at least 10kb smaller and the visual diff harness reports no changes."},"expected":"enough"}
+{"id":"ge-030","input":{"task":"Make it more accessible."},"expected":"not-enough"}
+{"id":"ge-031","input":{"task":"Add aria-labels to every icon-only button in the checkout flow (cart, wishlist, remove), listed in the audit table of issue #431. Done when axe reports zero icon-button violations on the three checkout pages."},"expected":"enough"}
+{"id":"ge-032","input":{"task":"Fix the flaky tests."},"expected":"not-enough"}
+{"id":"ge-033","input":{"task":"The wave scheduler test fails on CI about once per ten runs because it sleeps on wall clock. Replace the sleep with the fake timer pattern already used in test/backpressure.test.ts. Done when 50 consecutive local runs pass."},"expected":"enough"}
+{"id":"ge-034","input":{"task":"Set up monitoring for the service."},"expected":"not-enough"}
+{"id":"ge-035","input":{"task":"Add the /healthz endpoint returning {status, uptime, queue_depth} as json, no auth, wired into the existing router. Done when a curl shows the three fields and the load balancer config's health check turns green."},"expected":"enough"}
+{"id":"ge-036","input":{"task":"Improve the onboarding flow."},"expected":"not-enough"}
+{"id":"ge-037","input":{"task":"Reduce the docker image size."},"expected":"not-enough"}
+{"id":"ge-038","input":{"task":"Cut the docker image from 1.2gb to under 700mb by switching to the multi-stage pattern in build/Dockerfile and dropping the build tools from the runtime layer. Done when docker images reports the final image under 700mb and the smoke test passes."},"expected":"enough"}
+{"id":"ge-039","input":{"task":"Add dark mode."},"expected":"not-enough","note":"no toggle shape, no persistence, no scope"}
+{"id":"ge-040","input":{"task":"Write the migration that adds the `deleted_at` column to the orders table, backfills nulls from the archive table's matching rows, and updates the two queries the dashboard uses so soft-deleted orders stop counting. Done when the dashboard fixture test shows 41 not 43 orders."},"expected":"enough"}
+{"id":"ge-041","input":{"task":"Make the emails work."},"expected":"not-enough"}
+{"id":"ge-042","input":{"task":"The password reset email lands in spam; switch the transactional sender domain to mail.example2.com in the mailer config, update the spf record text in docs/dns.md to match. Done when mail-tester scores 10/10 for the reset template."},"expected":"enough"}
+{"id":"ge-043","input":{"task":"Fix the login bug."},"expected":"not-enough"}
+{"id":"ge-044","input":{"task":"The login form on safari submits twice because the submit handler is bound in both module scripts. Remove the duplicate binding in auth/login.js, add a counter assertion to the existing login test. Done when the test asserts exactly one submit event."},"expected":"enough"}
+{"id":"ge-045","input":{"task":"Add some telemetry so we know what users do."},"expected":"not-enough"}
+{"id":"ge-046","input":{"task":"Instrument the three checkout steps with the existing analytics client's `step_viewed` event, property `step_name` from the data-step attribute. Done when the debug panel shows the three events in order on a fixture run. No new dependencies."},"expected":"enough"}
+{"id":"ge-047","input":{"task":"Reduce the bundle size."},"expected":"not-enough"}
+{"id":"ge-048","input":{"task":"Replace the lodash dependency with native array methods across src/, only for the map/filter/forEach call sites the codemod covers (list in scripts/lodash-audit.txt). Done when the bundle no longer contains lodash and the unit tests pass."},"expected":"enough"}
+{"id":"ge-049","input":{"task":"Make the dashboard real-time."},"expected":"not-enough"}
+{"id":"ge-050","input":{"task":"Stream the dashboard's orders panel live over the existing websocket server: subscribe to the orders channel, patch rows by id, reconnect with backoff on drop. Done when a fixture order insert appears in an open panel within a second without a refresh."},"expected":"enough"}
+{"id":"ge-051","input":{"task":"Update the dependencies that need updating."},"expected":"not-enough"}
+{"id":"ge-052","input":{"task":"Scrape these five product urls in sites.toml, one row per sku: title, price, stock, fetched_at. Write to data/prices.csv, headers as in data/prices.example.csv. Done when the csv validates against the linter and has every sku from the toml."},"expected":"enough"}
+{"id":"ge-053","input":{"task":"Document the api."},"expected":"not-enough"}
+{"id":"ge-054","input":{"task":"Document the four endpoints in src/routes/payouts.ts in docs/api.md using the existing endpoint template (see the auth section): params, response shape, one curl each. Done when the md linter passes and each curl returns the documented shape against the fixture server."},"expected":"enough"}
