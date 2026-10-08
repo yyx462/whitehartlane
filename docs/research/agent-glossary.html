@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Dev JD Glossary — study companion for agentic-os</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --card: #161b22; --border: #2d333b;
+    --text: #e6edf3; --muted: #9198a1; --accent: #58a6ff; --accent2: #f778ba;
+    --amber: #e3b341; --teal: #39c5cf; --green: #3fb950; --tag-bg: #21262d;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  [data-theme="light"] {
+    --bg: #fafbfc; --bg2: #f0f2f5; --card: #ffffff; --border: #d8dee4;
+    --text: #1f2328; --muted: #59636e; --accent: #0969da; --accent2: #bf3989;
+    --amber: #9a6700; --teal: #1b7c83; --green: #1a7f37; --tag-bg: #eaeef2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+  header { padding: 48px 0 8px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); max-width: 72ch; }
+  .sub b { color: var(--text); }
+  .toolbar {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 14px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+  }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--border); background: var(--bg2); color: var(--muted);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer;
+    user-select: none;
+  }
+  .chip.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  .search {
+    margin-left: auto; display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--bg2); border-radius: 8px;
+    padding: 5px 10px; color: var(--muted);
+  }
+  .search input {
+    background: transparent; border: 0; outline: 0; color: var(--text);
+    font: inherit; width: 200px;
+  }
+  .search kbd {
+    font: 11px var(--mono); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 5px; color: var(--muted);
+  }
+  .theme { cursor: pointer; border: 1px solid var(--border); background: var(--bg2);
+    color: var(--muted); border-radius: 8px; padding: 5px 10px; font-size: 14px; }
+  h2 { font-size: 20px; margin: 48px 0 4px; letter-spacing: -0.01em; }
+  h2 .n { color: var(--muted); font-weight: 400; }
+  .lede { color: var(--muted); margin: 0 0 16px; max-width: 78ch; }
+  section { scroll-margin-top: 80px; }
+
+  /* flow */
+  .flow { display: flex; flex-wrap: wrap; gap: 0; align-items: stretch; margin: 20px 0 4px; }
+  .fstep {
+    flex: 1 1 150px; border: 1px solid var(--border); background: var(--card);
+    border-radius: 10px; padding: 12px 14px; min-width: 150px; position: relative;
+  }
+  .fstep + .fstep { margin-left: 26px; }
+  .fstep + .fstep::before {
+    content: "→"; position: absolute; left: -22px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font-size: 16px;
+  }
+  .fstep .t { font-weight: 600; font-size: 14px; }
+  .fstep .d { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .fstep .d code { font-size: 11.5px; }
+  .phases { display: flex; margin-top: 10px; }
+  .phase { font: 12px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 10px; border-radius: 6px; }
+  .phase.agent { color: var(--accent2); background: color-mix(in srgb, var(--accent2) 12%, transparent); flex: 1.9; }
+  .phase.wf { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); flex: 3; text-align: right; }
+  .punch {
+    border-left: 3px solid var(--accent); background: var(--bg2); padding: 12px 16px;
+    border-radius: 0 8px 8px 0; margin: 18px 0; max-width: 78ch;
+  }
+  .punch .q { font-style: italic; }
+
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--tag-bg);
+    border-radius: 4px; padding: 1px 5px; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+
+  /* cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .card .head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .card .term { font-weight: 650; font-size: 15.5px; }
+  .card .def { font-size: 14px; margin: 6px 0 0; }
+  .tag { font: 11px var(--mono); letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--muted); background: var(--tag-bg); border-radius: 4px; padding: 2px 7px; }
+  .tag.think { color: var(--accent2); } .tag.shape { color: var(--teal); }
+  .tag.prod { color: var(--amber); } .tag.eco { color: var(--green); }
+  .osline { font-size: 12.5px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .osline .k { font: 11px var(--mono); color: var(--teal); letter-spacing: 0.05em; }
+  .ask { font-size: 12.5px; margin-top: 8px; color: var(--muted); }
+  .ask .k { font: 11px var(--mono); color: var(--amber); letter-spacing: 0.05em; }
+  .count { color: var(--muted); font-size: 13px; margin-left: 4px; }
+
+  /* tables */
+  .tblwrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--bg2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { white-space: nowrap; font-weight: 600; }
+  .good { color: var(--green); } .bad { color: var(--accent2); } .mid { color: var(--amber); }
+
+  .rule { margin: 14px 0; padding: 10px 14px; background: var(--bg2);
+    border-radius: 8px; font-size: 14px; }
+  .rule .k { font: 11px var(--mono); color: var(--teal); letter-spacing: 0.05em; }
+
+  footer { margin-top: 64px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .hidden { display: none; }
+  @media (max-width: 720px) { .search input { width: 120px; } .fstep + .fstep { margin-left: 18px; } .fstep + .fstep::before { left: -16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Agent Dev JD Glossary</h1>
+  <p class="sub">The vocabulary 2026 Agent Dev job descriptions test — each concept grounded in <b>agentic-os</b>, where it already runs. Full prose in <code>docs/research/agent-jd-glossary.md</code>; feature decision in <code>docs/adr/0004</code>. Press <b>/</b> to search.</p>
+</header>
+
+<div class="toolbar">
+  <div class="chips" id="chips">
+    <button class="chip on" data-c="all">All</button>
+    <button class="chip" data-c="think">How it thinks</button>
+    <button class="chip" data-c="shape">System shape</button>
+    <button class="chip" data-c="prod">Production</button>
+    <button class="chip" data-c="eco">Ecosystem</button>
+  </div>
+  <div class="search">🔎 <input id="q" placeholder="search terms…"><kbd>/</kbd></div>
+  <button class="theme" id="theme">☾</button>
+</div>
+
+<section id="bigidea">
+  <h2><span class="n">0 —</span> The big idea this OS banks on</h2>
+  <p class="lede">The field's unresolved tension: agents are flexible but expensive and hard to trust; workflows are trustworthy but handwritten. This repo's answer — use the agent <i>once, at compile time</i>; use the workflow <i>many times, at run time</i>.</p>
+  <div class="flow">
+    <div class="fstep"><div class="t">a task</div><div class="d">cold text, or a project task with <code>roots.txt</code> scope</div></div>
+    <div class="fstep"><div class="t">Composer Actor</div><div class="d">an agent, once — plans the task into a program folder</div></div>
+    <div class="fstep"><div class="t">agentic-program/</div><div class="d"><code>dag.mjs</code> · <code>workflow.toml</code> · <code>hooks/</code> — reviewable, versioned, diff-able</div></div>
+    <div class="fstep"><div class="t">gate</div><div class="d">human approves the plan before anything runs</div></div>
+    <div class="fstep"><div class="t">run door → Rail</div><div class="d">deterministic DAG runs, report + trace every time</div></div>
+  </div>
+  <div class="phases"><div class="phase agent">agent time — flexible, once</div><div class="phase wf">workflow time — predictable, many</div></div>
+  <div class="punch">Airflow DAGs are handwritten by humans. Here <span class="q">the DAG is the agent's output artifact</span> — plan-and-execute taken literally. That's the elevator pitch no competitor has.</div>
+</section>
+
+<section id="glossary">
+  <h2><span class="n">1 —</span> Glossary <span class="count" id="count"></span></h2>
+  <p class="lede">Cards with a teal <span style="font-family:var(--mono);font-size:11px;color:var(--teal)">IN THIS OS</span> line map the concept to code in this repo — that line is your interview answer.</p>
+  <div class="grid" id="grid"></div>
+</section>
+
+<section id="tradeoffs">
+  <h2><span class="n">2 —</span> Tradeoffs — the interview spine</h2>
+  <p class="lede">Interviewers probe the choice, not the definition. Drill these until the decision rules are reflexes.</p>
+
+  <div class="tblwrap"><table>
+    <tr><th></th><th>ReAct</th><th>Plan-and-Execute</th><th>ReWOO</th></tr>
+    <tr><td>LLM calls</td><td class="bad">many (1/step)</td><td class="mid">planner + executor</td><td class="good">one plan + workers</td></tr>
+    <tr><td>Plan reviewability</td><td class="bad">none — it emerges</td><td class="good">plan artifact</td><td class="good">plan w/ placeholders</td></tr>
+    <tr><td>Adaptivity</td><td class="good">reacts every observation</td><td class="mid">replanner handles drift</td><td class="bad">plan is frozen</td></tr>
+    <tr><td>Failure mode</td><td>loops, drift, cost blowout</td><td>stale plan</td><td>wrong placeholder cascade</td></tr>
+    <tr><td>Use when</td><td>environment shifts mid-task</td><td>plan knowable + should be approved</td><td>plan knowable + tools reliable</td></tr>
+  </table></div>
+
+  <div class="rule"><span class="k">SAY IT LIKE THIS</span> — "If the next action usually depends on what the last tool returned: ReAct. If the plan is knowable up front and a human should approve it: plan-and-execute. If it's knowable and nobody needs to look: ReWOO, for cost."</div>
+
+  <div class="tblwrap"><table>
+    <tr><th>Pattern</th><th>Gain</th><th>Pain</th><th>Reach for it when</th></tr>
+    <tr><td>Reflexion</td><td class="good">cheap accuracy on retries</td><td class="bad">only if failures are diagnosable; memory grows</td><td>retryable tasks — always paired with a retry cap</td></tr>
+    <tr><td>CodeAct</td><td class="good">composition: loops, conditions over tool results</td><td class="bad">needs a real sandbox</td><td>every worker pane in this OS is exactly this</td></tr>
+    <tr><td>LATS / ToT</td><td class="good">escapes greedy first-path failures</td><td class="bad">cost × branch factor</td><td>wrong path is expensive + reward is checkable (tests, verifiers)</td></tr>
+    <tr><td>Multi-agent</td><td class="good">specialization, parallelism, isolated contexts</td><td class="bad">error compounding, cost, distributed debugging</td><td>when context windows or tool specialization force it — not by default</td></tr>
+    <tr><td>Workflow vs agent</td><td class="good">predictability vs flexibility</td><td class="bad">the field picks one and eats the other's pain</td><td>this OS: agent once at compile time, workflow forever at run time</td></tr>
+  </table></div>
+
+  <div class="rule"><span class="k">META-RULE (ANTHROPIC)</span> — start with single LLM calls; add agentic complexity <i>only when it demonstrably improves outcomes</i>. Saying this in an interview is table stakes; pointing at <code>src/policy.ts</code> while saying it is differentiation.</div>
+</section>
+
+<section id="map">
+  <h2><span class="n">3 —</span> Concept → agentic-os map</h2>
+  <p class="lede">Every row: "concept, definition, and here's my implementation of it."</p>
+  <div class="tblwrap"><table>
+    <tr><th>JD concept</th><th>agentic-os embodiment</th><th>Where</th></tr>
+    <tr><td>Workflow</td><td><code>dag.mjs</code> parsed, never executed — "a program names steps; it does not call"; <code>tick()</code> is the only scheduler</td><td><code>src/dag.ts</code></td></tr>
+    <tr><td>Agent</td><td>the Actor: reads <code>actor.md</code>, writes <code>protocol.json</code> waves, decides stop</td><td><code>src/protocol.ts</code> · <code>src/roles.ts</code></td></tr>
+    <tr><td>Orchestrator-workers</td><td>Fan-out: <code>units</code> hook decomposes, wave panes execute, report settles</td><td><code>src/wave.ts</code> · <code>global/hooks/units.sh</code></td></tr>
+    <tr><td>Parallelization</td><td>a Wave — N panes, rail waits for every End</td><td><code>src/dag.ts</code></td></tr>
+    <tr><td>Evaluator-optimizer</td><td>the <code>grade</code> hook; failure re-prompts with backoff</td><td><code>src/hooks.ts</code> · <code>src/live-grade.ts</code></td></tr>
+    <tr><td>Routing</td><td>the Scheduler: <code>pick-workflow</code> routes fan-out vs direct via jev</td><td><code>bin/pick-workflow</code></td></tr>
+    <tr><td>Human-in-the-loop</td><td><code>gate</code> steps + <code>[gates]</code> commands</td><td><code>docs/adr/0003</code></td></tr>
+    <tr><td>Guardrails / policy</td><td>admission: slots, retry cap, one Job — a model proposes, policy books</td><td><code>src/policy.ts</code></td></tr>
+    <tr><td>Backpressure</td><td>provider refusal (exit 75) → stop calls, reopen on recovery</td><td><code>src/backpressure.ts</code></td></tr>
+    <tr><td>Multi-agent messaging</td><td>Coworker: typed message files, the Rail is the relay</td><td><code>src/coworker.ts</code></td></tr>
+    <tr><td>Context seeding</td><td>Fork: a pane born seeded from a host-session pointer</td><td><code>seed_session</code></td></tr>
+    <tr><td>Sandboxing</td><td>per-worker allow-list from <code>roots.txt</code></td><td><code>src/permission.ts</code></td></tr>
+    <tr><td>Observability</td><td>append-only <code>events.jsonl</code>; all records are projections</td><td><code>src/store.ts</code></td></tr>
+    <tr><td>Memory</td><td>outliving memory: <code>protocol.json</code>, <code>units/&lt;id&gt;/log.txt</code>, the trace</td><td>CONTEXT.md</td></tr>
+    <tr><td>Context engineering</td><td><code>task.txt</code> one-liner, <code>actor.md</code> brief, <code>roots.txt</code> scope, grill before admission</td><td><code>src/grill.ts</code></td></tr>
+    <tr><td>Evaluation</td><td>grade/counts are hooks — LLM-as-judge is swappable, not a rail</td><td><code>global/hooks/</code></td></tr>
+    <tr><td>Versioning / identity</td><td>Project pid + <code>dag_id</code> + content hash</td><td><code>src/project.ts</code></td></tr>
+    <tr><td>Agent-planned workflows</td><td>the Composer (proposed): a program whose Actor writes programs</td><td><code>docs/adr/0004</code></td></tr>
+  </table></div>
+</section>
+
+<footer>
+  Study companion for <code>docs/research/agent-jd-glossary.md</code> · sources there · Anthropic <i>Building Effective Agents</i> (workflows vs agents, five patterns) · papers: ReAct 2210.03629 · ReWOO 2305.18309 · Reflexion 2303.11366 · ToT 2305.10601 · LATS 2310.04406 · market: agentic-engineering-jobs.com (1,135 listings).
+</footer>
+
+</div>
+<script>
+const TERMS = [
+  {t:"ReAct", c:"think", d:"Interleave Thought → Action → Observation in one loop; the model reasons about what it just saw before the next tool call. The default 'agent loop' everyone pictures.", os:"the Actor's round loop: look at results, write the next protocol wave or stop", ask:"When is ReAct the wrong choice? (stable plans, cost-sensitive runs)"},
+  {t:"Chain-of-Thought", c:"think", d:"Intermediate reasoning steps before the answer. Not an architecture — a property every pattern below assumes."},
+  {t:"Tree of Thoughts", c:"think", d:"Explore a tree of reasoning branches with backtracking instead of one chain. Expensive; for search-like problems with a reward signal."},
+  {t:"Plan-and-Execute", c:"think", d:"A planner LLM emits the full plan up front; an executor (often smaller/cheaper) walks it; a replanner handles drift. Descends from classical planning (LLM+P used PDDL).", os:"taken literally by the Composer (ADR 0004): the plan is a program folder", ask:"Compare to ReAct on cost and reviewability."},
+  {t:"ReWOO", c:"think", d:"Reason Without Observation: one planner pass produces a plan with placeholders for tool results; workers fill them; a solver combines. Fewest LLM calls, least adaptive."},
+  {t:"Reflexion", c:"think", d:"After a failed episode the agent writes a verbal self-critique into memory; the next attempt starts with it in context. RL with words instead of weights.", os:"grade failure → rail re-prompts the worker with the grade feedback, under the retry cap"},
+  {t:"CodeAct", c:"think", d:"Act by writing and executing code instead of emitting JSON tool calls — one program composes many tools. Needs a real sandbox.", os:"every worker pane: opencode/pi writing code in a scoped worktree"},
+  {t:"LATS", c:"think", d:"Language Agent Tree Search: MCTS over agent trajectories with self-reflection as value signal. The heavy end — wrong first paths must be expensive to justify it."},
+  {t:"Skill library / long memory", c:"think", d:"Voyager lineage: durable skills an agent accumulates across tasks, not a bigger context window.", os:"outliving memory: protocol.json, log.txt done-lines, the trace"},
+  {t:"Workflow vs agent", c:"shape", d:"Anthropic's canonical split: workflows orchestrate LLMs through predefined code paths; agents let the LLM direct its own process. Workflows = predictable; agents = flexible.", os:"dag.mjs + tick() is the workflow; the Actor is the agent", ask:"Walk me through when you'd use each. (Then show §0 of this page.)"},
+  {t:"Prompt chaining", c:"shape", d:"Fixed sequence of LLM steps with programmatic checks between them. Cheapest workflow pattern."},
+  {t:"Routing", c:"shape", d:"Classify the input, dispatch to a specialized subpath — also cheap-model vs strong-model dispatch.", os:"the Scheduler: pick-workflow routes fan-out vs direct via jev typed judgment"},
+  {t:"Parallelization", c:"shape", d:"Sectioning (independent subtasks in parallel) or voting (same task, several attempts, aggregate).", os:"a Wave: N mock panes, rail waits for every End"},
+  {t:"Orchestrator-workers", c:"shape", d:"A central LLM decomposes dynamically, workers execute, results synthesize. Subtasks are NOT predefined — the canonical coding-agent shape.", os:"Fan-out: units hook decomposes, panes execute, report settles"},
+  {t:"Evaluator-optimizer", c:"shape", d:"Generator + critic in a loop (a.k.a. generator-verifier). Works when evaluation criteria are clear and refinement is measurable.", os:"the grade hook + re-prompt with backoff"},
+  {t:"Autonomous agent", c:"shape", d:"LLM with tools in a loop, environment ground truth each step, stopping conditions, human checkpoints at blockers. 'Just an LLM calling tools in a loop' — the loop discipline is the product."},
+  {t:"Multi-agent topologies", c:"shape", d:"Hierarchical (manager/crew), sequential (role pipeline), parallel (debate), handoffs (one agent transfers control). Gains: specialization, isolated contexts. Pains: cost, error compounding.", os:"Coworker kind: named members, typed message files, the Rail is the relay"},
+  {t:"Handoffs", c:"shape", d:"OpenAI Swarm vocabulary: one agent transfers control of the conversation to another. Contrast with message-passing between peers.", os:"Coworker messages are relayed by the Rail — a worker never writes another worker"},
+  {t:"Human-in-the-loop", c:"shape", d:"Approval gates, checkpoints, escalation. In 2026 JDs a requirement, not a nicety.", os:"gate steps: [gates] commands that print done", ask:"Where does your system force a human decision?"},
+  {t:"Tool / function calling", c:"prod", d:"Model emits structured calls against declared schemas; the host executes and returns results. Tool design is prompt engineering — Anthropic's ACI appendix."},
+  {t:"Structured outputs", c:"prod", d:"Schema-constrained generation (JSON mode → strict schema). Pairs with tool calls; 'clear tool schemas, structured outputs' is a literal JD bullet."},
+  {t:"MCP", c:"prod", d:"Model Context Protocol — open standard connecting models to tools and data sources. 'USB-C for agent tools.' The integrations vocabulary of 2026."},
+  {t:"A2A", c:"prod", d:"Agent-to-agent protocol (Google origin) for cross-vendor agent interop. Know the name and the one-liner."},
+  {t:"RAG", c:"prod", d:"Retrieval-augmented generation: chunking, embeddings, reranking. Interview twist: know when RAG alone beats an agent."},
+  {t:"Agent memory", c:"prod", d:"Short-term (context management), long-term (persistent store), episodic (past trajectories), procedural (skills). Survey framing: profile / memory / planning / action modules.", os:"outliving memory in CONTEXT.md — state that survives its writer"},
+  {t:"Context engineering", c:"prod", d:"The 2026 successor buzzword to prompt engineering at agent scale: what enters the window, what gets compacted, what gets dropped.", os:"task.txt one-liner, actor.md brief, roots.txt scope, grill before admission"},
+  {t:"Guardrails", c:"prod", d:"Input/output validation, side-effect safety, permission scoping. The boring bullets that separate demos from production.", os:"admission policy: slots, retry cap, one Job per session — a model proposes, policy books"},
+  {t:"Sandboxing", c:"prod", d:"Where untrusted actions (CodeAct, file writes) run.", os:"per-worker opencode.json allow-list from roots.txt (src/permission.ts)"},
+  {t:"Step limits / timeouts", c:"prod", d:"Bounding the loop: max iterations, per-call timeouts, retry caps.", os:"the retry cap and 2h deadline are rails, not suggestions"},
+  {t:"Agent evaluation", c:"prod", d:"Trajectory evals (judge the path, not just the answer), LLM-as-judge, golden tasks, online metrics.", os:"grade/counts are hook commands — the judge is swappable, the report is not", ask:"How do you eval an agent?"},
+  {t:"Observability / tracing", c:"prod", d:"Every route, tool call, retry recorded; LangSmith-class tooling.", os:"append-only events.jsonl — 'the single source; all records are projections of it'"},
+  {t:"Backpressure", c:"prod", d:"Stop issuing provider calls when the provider refuses or slows; reopen on recovery. Distinct from a static concurrency cap.", os:"exit 75 (provider refusal) → rail pauses new calls, reopens with backoff"},
+  {t:"LangGraph", c:"eco", d:"Graph/state-machine agent runtime: explicit edges, checkpointing, HITL primitives. The safest framework bet on 2026 JDs.", os:"positioning contrast: LangGraph gives you the graph runtime; this OS gives you the rails + panes + trace around whatever runtime you run"},
+  {t:"CrewAI", c:"eco", d:"Role-based crews (agent-as-teammate metaphor). Fast prototyping, less control."},
+  {t:"AutoGen / AG2", c:"eco", d:"Microsoft's conversational multi-agent runtime; Azure-shop favorite."},
+  {t:"OpenAI Agents SDK", c:"eco", d:"Minimal agents + handoffs + guardrails (Swarm lineage). Vendor-native minimalism."},
+  {t:"Claude Agent SDK", c:"eco", d:"Anthropic's managed agent loop — the 'managed agents' direction of travel."},
+  {t:"smolagents", c:"eco", d:"HF's minimal CodeAct-first library — the 'code is the action' bet."},
+  {t:"Airflow", c:"eco", d:"The DAG scheduler everyone knows — and the contrast case: deterministic scheduler, human-authored DAGs. The gap this OS fills: agent-planned DAGs.", os:"agentic-os is 'Airflow on agents' where the DAG can be written by an agent (ADR 0004)"},
+];
+
+const CL = {think:"how it thinks", shape:"system shape", prod:"production", eco:"ecosystem"};
+const grid = document.getElementById("grid"), count = document.getElementById("count");
+let filter = "all", query = "";
+
+function render() {
+  grid.innerHTML = "";
+  const shown = TERMS.filter(x =>
+    (filter === "all" || x.c === filter) &&
+    (!query || (x.t + " " + x.d + " " + (x.os || "") + " " + (x.ask || "")).toLowerCase().includes(query))
+  );
+  for (const x of shown) {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML =
+      `<div class="head"><span class="term">${x.t}</span><span class="tag ${x.c}">${CL[x.c]}</span></div>` +
+      `<p class="def">${x.d}</p>` +
+      (x.os ? `<div class="osline"><span class="k">IN THIS OS&nbsp;</span>${x.os}</div>` : "") +
+      (x.ask ? `<div class="ask"><span class="k">ASKED AS&nbsp;</span>${x.ask}</div>` : "");
+    grid.appendChild(el);
+  }
+  count.textContent = `— ${shown.length}/${TERMS.length} shown`;
+}
+document.getElementById("chips").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+  b.classList.add("on"); filter = b.dataset.c; render();
+});
+const q = document.getElementById("q");
+q.addEventListener("input", () => { query = q.value.trim().toLowerCase(); render(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && document.activeElement !== q) { e.preventDefault(); q.focus(); }
+});
+const themeBtn = document.getElementById("theme");
+themeBtn.addEventListener("click", () => {
+  const el = document.documentElement;
+  const dark = el.dataset.theme === "dark";
+  el.dataset.theme = dark ? "light" : "dark";
+  themeBtn.textContent = dark ? "☀" : "☾";
+});
+render();
+</script>
+</body>
+</html>
