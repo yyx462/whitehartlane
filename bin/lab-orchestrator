@@ -19,6 +19,7 @@ import { gradeCall } from "../src/live-grade.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
 import { paneLabeler, runIdFor, runOrchestrator, drainDeadline } from "../src/orchestrator.ts"
 import { writeReport } from "../src/report.ts"
+import { resolveOpencode, resolvePi } from "../src/transcripts.ts"
 import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
 import { beat, closes, note as sayOnce, verboseOn } from "../src/verbose.ts"
 import {
@@ -253,13 +254,17 @@ function openFleetTab(dir) {
   log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
 }
 
-// The host session id, when the tool reports one: booked write-ahead
-// (ADR 5) so a later continue can resume this pane's conversation.
-function probeSession(name) {
-  const got = herdr("agent", "get", name)
-  return jsonAt(got.stdout, (d) =>
-    d?.result?.session_id ?? d?.result?.session ?? d?.result?.agent?.session_id ?? null,
-  )
+// The host session id, booked write-ahead (ADR 5) so a later continue
+// can resume this pane's conversation. herdr itself reports no session
+// id (verified live 2026-10-08) — the tools' own stores do: pi's jsonl
+// headers, the opencode db / CLI. (cwd, since) → newest in window.
+function resolveLiveSession(kind, cwd, since) {
+  try {
+    const hit = kind === "pi" ? resolvePi({ tool: kind, cwd, since }) : resolveOpencode({ tool: kind, cwd, since })
+    return hit?.id ?? null
+  } catch {
+    return null
+  }
 }
 
 // start an agent in an existing pane, record it, submit the brief.
@@ -306,7 +311,7 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, s
     }
   }
   mine.add(name)
-  const sessionId = resumeSession ?? probeSession(name)
+  const sessionId = resumeSession ?? resolveLiveSession(kind, cwd, since)
   ledger?.attach(
     name,
     pane,
@@ -314,11 +319,14 @@ function inhabitPane(rawName, kind, pane, briefPath, cwd, model = workerModel, s
     { tool: kind, cwd, since, ...(sessionId ? { session_id: sessionId } : {}) },
     seed,
   )
-  // pi mints its session on the first prompt — probe once more so the
-  // booked pointer carries the id even when start reported nothing
+  // The session mints on the first message and may land in the tool's
+  // store a beat later — probe again shortly so the booked pointer
+  // carries the id a Continue resumes
   if (!sessionId && !name.startsWith("orch-lane")) {
-    const late = probeSession(name)
-    if (late) ledger?.setSession(name, late)
+    setTimeout(() => {
+      const late = resolveLiveSession(kind, cwd, since)
+      if (late) ledger?.setSession(name, late)
+    }, 5_000).unref()
   }
   return true
 }

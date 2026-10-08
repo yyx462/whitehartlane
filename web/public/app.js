@@ -11,7 +11,7 @@ const clockEl = $("#clock");
 
 const LEFT_TABS = ["diagram", "runs", "config"];
 const RIGHT_TABS = ["receipt", "report", "events"];
-const STATUSES = ["success", "failed", "running", "orphaned"];
+const STATUSES = ["success", "failed", "running", "paused", "orphaned"];
 const SPLIT_KEY = "ui4-split-pct";
 const RESIZE_KEY = "ui4-split-resized";
 
@@ -23,15 +23,24 @@ const SORT_NAMES = {
   status: "status",
 };
 
+const RUN_SORT_NAMES = {
+  state: "state",
+  created: "created",
+  duration: "duration",
+  status: "status",
+};
+
 const state = {
   route: null,
   seq: 0,
   dags: [],
   dagsSort: null,
   jobs: [],
+  jobsSort: null,
   jobsLoaded: false,
   home: null,
   split: null,
+  opsBusy: {},
   toastTimer: null,
 };
 
@@ -151,9 +160,9 @@ function parseHash() {
 function parseRoute() {
   const { parts, q } = parseHash();
   if (parts[0] === "home") return { view: "home" };
-  if (parts[0] === "dag-runs") {
+  if (parts[0] === "dag-status") {
     return {
-      view: "dag-runs",
+      view: "dag-status",
       dag: q.get("dag") || null,
       run: q.get("run") || null,
       tab: LEFT_TABS.includes(q.get("tab")) ? q.get("tab") : "diagram",
@@ -161,6 +170,7 @@ function parseRoute() {
       legacy: q.get("legacy") === "1",
     };
   }
+  if (parts[0] === "dag-runs") return { view: "dag-runs" };
   if (parts[0] === "dags") return { view: "dags" };
   return { view: "home" };
 }
@@ -171,14 +181,20 @@ function canonicalize() {
     return;
   }
   const { parts } = parseHash();
+  const raw = location.hash.replace(/^#\/?/, "");
+  // v4 flat-list hash with a query -> the v5 detail view kept the query
+  if (parts[0] === "dag-runs" && raw.includes("?")) {
+    history.replaceState(null, "", `#/dag-status${raw.slice("dag-runs".length)}`);
+    return;
+  }
   if (parts[0] === "runs") {
     if (parts[1] && parts[2]) {
       const tabMap = { overview: "receipt", shape: "report", source: "report" };
       const rtab = tabMap[parts[3]] || null;
       history.replaceState(null, "",
-        `#/dag-runs?run=${enc(parts[1])}/${enc(parts[2])}${rtab ? `&rtab=${rtab}` : ""}`);
+        `#/dag-status?run=${enc(parts[1])}/${enc(parts[2])}${rtab ? `&rtab=${rtab}` : ""}`);
     } else {
-      history.replaceState(null, "", "#/dag-runs");
+      history.replaceState(null, "", "#/dag-status");
     }
     return;
   }
@@ -186,7 +202,7 @@ function canonicalize() {
     const tabMap = { shape: "diagram", source: "diagram", config: "config" };
     const tab = tabMap[parts[3]] || null;
     history.replaceState(null, "",
-      `#/dag-runs?dag=${enc(parts[1])}/${enc(parts[2])}${tab ? `&tab=${tab}` : ""}`);
+      `#/dag-status?dag=${enc(parts[1])}/${enc(parts[2])}${tab ? `&tab=${tab}` : ""}`);
   }
 }
 
@@ -195,8 +211,8 @@ function splitHref(over) {
   const merged = {
     dag: r.dag || null,
     run: r.run || null,
-    tab: r.view === "dag-runs" ? r.tab : null,
-    rtab: r.view === "dag-runs" ? r.rtab : null,
+    tab: r.view === "dag-status" ? r.tab : null,
+    rtab: r.view === "dag-status" ? r.rtab : null,
     legacy: r.legacy ? "1" : null,
     ...over,
   };
@@ -206,12 +222,12 @@ function splitHref(over) {
     params.set(k, v === true ? "1" : String(v));
   }
   const qs = params.toString();
-  return "#/dag-runs" + (qs ? `?${qs}` : "");
+  return "#/dag-status" + (qs ? `?${qs}` : "");
 }
 
 function applyRouteOver(over) {
   const r = state.route;
-  if (!r || r.view !== "dag-runs") return;
+  if (!r || r.view !== "dag-status") return;
   if ("dag" in over) r.dag = over.dag || null;
   if ("run" in over) r.run = over.run || null;
   if ("legacy" in over) r.legacy = over.legacy === true || over.legacy === "1";
@@ -229,8 +245,9 @@ function renderNav(r) {
   const subnav = $("#subnav");
   if (subnav) {
     subnav.classList.toggle("idle", r.view === "home");
+    const sub = r.view === "dag-status" ? "dag-status" : r.view === "dag-runs" ? "dag-runs" : "dags";
     $$("#subnav a").forEach((a) =>
-      a.classList.toggle("active", a.dataset.subnav === (r.view === "dag-runs" ? "dag-runs" : "dags")));
+      a.classList.toggle("active", a.dataset.subnav === sub));
   }
 }
 
@@ -241,8 +258,8 @@ function onRoute() {
   const prev = state.route;
   state.route = r;
   renderNav(r);
-  if (r.view === "dag-runs") {
-    if (prev && prev.view === "dag-runs" && state.split) {
+  if (r.view === "dag-status") {
+    if (prev && prev.view === "dag-status" && state.split) {
       state.split.route = r;
       updateSplit(seq);
     } else {
@@ -254,6 +271,7 @@ function onRoute() {
   state.split = null;
   if (r.view === "home") { mountHome(seq); return; }
   if (r.view === "dags") { mountDags(seq); return; }
+  if (r.view === "dag-runs") { mountDagRunsList(seq); return; }
 }
 
 function dagsUrl() {
@@ -272,9 +290,15 @@ async function fetchDags(seq) {
   }
 }
 
+function jobsUrl() {
+  return state.jobsSort
+    ? `/api/jobs?sort=${state.jobsSort.sort}&order=${state.jobsSort.order}`
+    : "/api/jobs";
+}
+
 async function fetchJobs(seq) {
   try {
-    const res = await fetchJSON("/api/jobs");
+    const res = await fetchJSON(jobsUrl());
     if (seq !== state.seq) return;
     state.jobs = res.jobs || [];
     state.jobsLoaded = true;
@@ -287,6 +311,10 @@ function legacyJobs() {
   return state.jobs
     .filter((j) => j.legacy)
     .sort((a, b) => new Date(b.created) - new Date(a.created));
+}
+
+function dagJobs() {
+  return state.jobs.filter((j) => j.dag && !j.legacy);
 }
 
 function findGroupKey(dk) {
@@ -333,7 +361,7 @@ function svgRunsPerDay(days) {
   if (!days.length) return paneEmpty("no data");
   const W = 880, H = 224, padL = 40, padR = 12, padT = 12, padB = 28;
   const iw = W - padL - padR, ih = H - padT - padB;
-  const totals = days.map((d) => (d.success || 0) + (d.failed || 0) + (d.running || 0) + (d.orphaned || 0));
+  const totals = days.map((d) => (d.success || 0) + (d.failed || 0) + (d.running || 0) + (d.paused || 0) + (d.orphaned || 0));
   const max = Math.max(...totals, 1);
   const step = niceStep(max);
   const top = Math.max(Math.ceil(max / step) * step, step);
@@ -345,7 +373,7 @@ function svgRunsPerDay(days) {
     g += `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="c-grid"></line>` +
       `<text x="${padL - 6}" y="${y(v) + 3}" class="c-yaxis" text-anchor="end">${v}</text>`;
   }
-  const segKeys = ["success", "failed", "running", "orphaned"];
+  const segKeys = ["success", "failed", "running", "paused", "orphaned"];
   let bars = "";
   days.forEach((d, i) => {
     const cx = padL + i * bw + bw / 2;
@@ -545,7 +573,7 @@ function renderDags() {
     const dk = `${g.project}/${g.dag_id}`;
     const lr = g.latestRun;
     const params = new URLSearchParams({ dag: dk });
-    return `<tr class="row" data-href="#/dag-runs?${params.toString()}">
+    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(g.project_name || g.dag_id)}</span>
         <span class="cell-sub">${esc(g.dag_id)}</span>
@@ -565,15 +593,107 @@ function renderDagsLegacyNote() {
   if (!el) return;
   const n = state.jobs.filter((j) => j.legacy).length;
   el.innerHTML = n
-    ? `<span>${n} legacy run${n === 1 ? "" : "s"} before dag identity —</span><a href="#/dag-runs?legacy=1">open them in Dag Runs →</a>`
+    ? `<span>${n} legacy run${n === 1 ? "" : "s"} before dag identity —</span><a href="#/dag-status?legacy=1">open them in Dag Status →</a>`
     : `<span>no legacy runs</span>`;
+}
+
+// ----- Dag Runs: the flat, sortable list of every dag run -----
+
+function mountDagRunsList(seq) {
+  viewEl.className = "view wide";
+  viewEl.innerHTML = `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Dag Runs</h2>
+        <span id="jrl-note" class="muted small"></span>
+        <span class="grow"></span>
+        <span id="jrl-sort" class="muted small"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <colgroup>
+            <col style="width:24%" /><col style="width:12%" /><col style="width:9%" />
+            <col style="width:10%" /><col style="width:13%" /><col style="width:11%" /><col style="width:12%" />
+          </colgroup>
+          <thead><tr>
+            <th>dag</th>
+            <th>run</th>
+            <th class="sortable" data-jsort="status">status</th>
+            <th>kind</th>
+            <th class="sortable" data-jsort="created">created</th>
+            <th class="sortable num" data-jsort="duration">duration</th>
+            <th class="ctr">ops</th>
+          </tr></thead>
+          <tbody id="jrl-body">${emptyRow(7, "loading…")}</tbody>
+        </table>
+      </div>
+      <div class="legacy-note">every run of every dag, flat — click a row for its Dag Status · ops act on the run (see Dags for a per-dag view)</div>
+    </section>`;
+  $$("#view th[data-jsort]").forEach((th) => {
+    th.addEventListener("click", () => cycleJobsSort(th.dataset.jsort));
+  });
+  renderDagRunsList();
+  fetchJobs(seq).then(() => { if (seq === state.seq) renderDagRunsList(); });
+}
+
+function cycleJobsSort(key) {
+  const cur = state.jobsSort;
+  if (!cur || cur.sort !== key) state.jobsSort = { sort: key, order: "asc" };
+  else if (cur.order === "asc") state.jobsSort = { sort: key, order: "desc" };
+  else state.jobsSort = null;
+  const seq = state.seq;
+  fetchJobs(seq).then(() => { if (seq === state.seq) renderDagRunsList(); });
+}
+
+function renderDagRunsList() {
+  const body = $("#jrl-body");
+  if (!body) return;
+  const sort = state.jobsSort;
+  $$("#view th[data-jsort]").forEach((th) => {
+    const isActive = sort ? sort.sort === th.dataset.jsort : th.dataset.jsort === "created";
+    const order = sort ? sort.order : "desc";
+    const arrow = !isActive ? "" : order === "asc"
+      ? `<span class="arrow">↑</span>`
+      : `<span class="arrow">↓</span>`;
+    th.innerHTML = esc(RUN_SORT_NAMES[th.dataset.jsort] || th.dataset.jsort) + arrow;
+  });
+  const sortNote = $("#jrl-sort");
+  if (sortNote) {
+    sortNote.textContent = sort
+      ? `sort: ${RUN_SORT_NAMES[sort.sort]} ${sort.order === "asc" ? "↑ asc" : "↓ desc"}`
+      : "sort: created ↓ (default)";
+  }
+  const runs = dagJobs();
+  const note = $("#jrl-note");
+  if (note) note.textContent = `${runs.length} dag run${runs.length === 1 ? "" : "s"}`;
+  if (!runs.length) {
+    body.innerHTML = emptyRow(7, "no dag runs yet — trigger one from Dags");
+    return;
+  }
+  body.innerHTML = runs.map((j) => {
+    const jid = j.jid || j.id;
+    const dk = `${j.dag.project}/${j.dag.dag_id}`;
+    const params = new URLSearchParams({ dag: dk, run: `${j.sid}/${jid}` });
+    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
+      <td><div class="clamp">
+        <span class="cell-name">${esc(j.dag.project_name || j.dag.dag_id)}</span>
+        <span class="cell-sub">${esc(j.dag.dag_id)}</span>
+      </div></td>
+      <td class="mono small">${esc(jid)}<span class="cell-sub" title="${esc(j.sid)}">${esc(j.sid)}</span></td>
+      <td>${stChip(j.status || j.state)}</td>
+      <td>${kindChip(j.workflow)}</td>
+      <td>${dtHtml(j.created)}</td>
+      <td class="num"><span class="dur-cell">${esc(runDurText(j))}</span></td>
+      <td class="ctr ops">${opsButtonsHtml(stOf(j.status || j.state), j.sid, jid)}</td>
+    </tr>`;
+  }).join("");
 }
 
 function mountSplit(r, seq) {
   viewEl.className = "view wide";
   viewEl.innerHTML = `
     <div class="split-bar">
-      <span class="small" style="font-weight:700">Dag Runs</span>
+      <span class="small" style="font-weight:700">Dag Status</span>
       <span class="grow"></span>
       <span id="split-note" class="muted"></span>
       <button class="btn ghost" id="split-reset" title="reset divider to 45% / 55%">Reset</button>
@@ -788,7 +908,8 @@ function renderLeftBody() {
 
 function runDurText(x) {
   if (x.durationMs != null) return humanAge(x.durationMs);
-  if (stOf(x.status || x.state) === "running" && x.created) {
+  const st = stOf(x.status || x.state);
+  if ((st === "running" || st === "paused") && x.created) {
     return `${humanAge(createdElapsed(x.created))} so far`;
   }
   return "–";
@@ -1265,6 +1386,8 @@ function renderRightHead() {
       <h2 class="mono" style="font-size:15px">${esc(jid)}</h2>
       ${status ? stChip(status) : `<span class="muted small">…</span>`}
       ${legacy ? `<span class="chip kind" title="before dag identity">legacy</span>` : ""}
+      <span class="grow"></span>
+      ${status ? opsButtonsHtml(stOf(status), sid, jid) : ""}
     </div>
     <div class="sp-sub-row mono">sid <b>${esc(sid)}</b>${job && job.created ? ` · ${esc(fmtShortTs(job.created))} → ${job.finished ? esc(fmtShortTs(job.finished)) : "…"}` : ""}${job && job.durationMs != null ? ` · ${esc(humanAge(job.durationMs))}` : ""}</div>`;
 }
@@ -1371,8 +1494,16 @@ function receiptBodyHtml() {
     outcome = `
       <dt>orphaned</dt><dd class="warn">${esc(job.orphan.reason || "–")}</dd>
       <dt>at</dt><dd>${esc(fmtTs(job.orphan.at))}</dd>`;
+  } else if (job.pause) {
+    outcome = `
+      <dt>paused</dt><dd class="warn">${esc(job.pause.reason || "–")}</dd>
+      <dt>panes remaining</dt><dd>${esc(job.pause.panesRemaining ?? "–")}</dd>
+      <dt>paused at</dt><dd>${esc(fmtTs(job.pause.at))}</dd>`;
   } else {
     outcome = `<dt>receipt</dt><dd class="warn">none yet — job in flight</dd>`;
+  }
+  if (job.continues) {
+    outcome += `<dt>continued</dt><dd><span class="cont-badge" title="times this run was continued back">x${esc(job.continues)}</span></dd>`;
   }
   const dagRow = job.dag && job.dag.project_name !== "-"
     ? `<dt>dag</dt><dd>${esc(job.dag.project_name)} / ${esc(job.dag.dag_id)}</dd>
@@ -1756,6 +1887,73 @@ async function triggerDag(pid, dagId, btns) {
   tick();
 }
 
+// ----- run ops: pause / abort / continue -----
+
+// the two op buttons for one run, driven by its mapped status:
+// running -> Pause+Abort · paused -> Resume+Abort · orphaned -> Continue+Abort
+// retired (success/failed) -> both present, disabled and greyed (parked, not broken)
+function opsButtonsHtml(st, sid, jid) {
+  const key = `${sid}/${jid}`;
+  const busy = state.opsBusy[key];
+  const retired = st === "success" || st === "failed";
+  const slot = st === "running" ? ["pause", "Pause"]
+    : st === "paused" ? ["continue", "Resume"]
+    : st === "orphaned" ? ["continue", "Continue"]
+    : ["pause", "Pause"];
+  const dis = retired || busy ? " disabled" : "";
+  const titles = {
+    pause: "drains to a unit boundary, then parks",
+    abort: "kills now — booked sessions survive; a Continue can bring it back",
+    continue: "resumes from booked sessions",
+  };
+  const pTitle = retired ? "retired — parked" : titles[slot[0]];
+  const aTitle = retired ? "retired — parked" : titles.abort;
+  const pLabel = busy && slot[0] === "pause" ? "Pausing…"
+    : busy && slot[0] === "continue" ? "Continuing…" : slot[1];
+  const aLabel = busy ? "Aborting…" : "Abort";
+  return `<span class="ops-pair">` +
+    `<button class="btn ops${retired ? " retired" : ""}" data-ops="${slot[0]}" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(pTitle)}">${pLabel}</button>` +
+    `<button class="btn ops danger${retired ? " retired" : ""}" data-ops="abort" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(aTitle)}">${aLabel}</button>` +
+    `</span>`;
+}
+
+// repaint whatever surface is currently showing op buttons so a busy
+// run keeps its pending state across the 5s tick
+function repaintOps() {
+  if (state.route && state.route.view === "dag-runs") renderDagRunsList();
+  if (state.split) renderRightHead();
+}
+
+const OPS_CONFIRMS = {
+  pause: (jid) => `Pause run ${jid}? It drains to a unit boundary, then parks.`,
+  abort: (jid) => `Abort run ${jid}? Kills now — booked sessions survive; a Continue can bring it back.`,
+  continue: (jid) => `Continue run ${jid}? It resumes from booked sessions.`,
+};
+
+async function runOps(verb, sid, jid) {
+  if (!OPS_CONFIRMS[verb]) return;
+  if (!confirm(OPS_CONFIRMS[verb](jid))) return;
+  const key = `${sid}/${jid}`;
+  state.opsBusy[key] = verb;
+  repaintOps();
+  try {
+    const res = await fetchJSON(`/api/job/${enc(sid)}/${enc(jid)}/${verb}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const head = verb === "pause" ? "pause signalled — it drains to a boundary, then the row flips to paused"
+      : verb === "abort" ? "abort signalled"
+      : "continue signalled";
+    showToast([head, ...(res.lines || [])].filter(Boolean).join("\n"), "ok");
+  } catch (err) {
+    showToast(`${verb} failed:\n${err.message}`, "err");
+  }
+  delete state.opsBusy[key];
+  repaintOps();
+  tick();
+}
+
 function bodyClick(e) {
   const trig = e.target.closest("[data-trig]");
   if (trig) {
@@ -1765,6 +1963,13 @@ function bodyClick(e) {
     const dagId = trig.dataset.dag;
     const btns = $$(`[data-trig][data-pid="${CSS.escape(pid)}"][data-dag="${CSS.escape(dagId)}"]`);
     triggerDag(pid, dagId, btns);
+    return;
+  }
+  const ops = e.target.closest("[data-ops]");
+  if (ops && !ops.disabled) {
+    e.preventDefault();
+    e.stopPropagation();
+    runOps(ops.dataset.ops, ops.dataset.sid, ops.dataset.jid);
     return;
   }
   const fbtn = e.target.closest("[data-file]");
@@ -1814,7 +2019,11 @@ async function tick() {
       if (seq !== state.seq || state.route.view !== "dags") return;
       renderDags();
       renderDagsLegacyNote();
-    } else if (r.view === "dag-runs" && state.split) {
+    } else if (r.view === "dag-runs") {
+      await fetchJobs(seq);
+      if (seq !== state.seq || state.route.view !== "dag-runs") return;
+      renderDagRunsList();
+    } else if (r.view === "dag-status" && state.split) {
       await fetchDags(seq);
       if (!current(state.split, seq)) return;
       if (state.split.route.legacy) {
