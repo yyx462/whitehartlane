@@ -3,12 +3,15 @@
 // an agent, never a person waiting. Allow what is inside the member's
 // roots; deny the dangerous patterns outright; deny the rest as
 // unneeded wandering. Every verdict carries a message the rail injects
-// into the pane. With this decider the default posture can be
-// restrictive again: prompts never queue for a human.
+// into the pane. And a repeated ask for the same non-dangerous path IS
+// the assertion of need: escalateOnRepeat grants it on the second ask,
+// so the deny message's promise is true. Hard-deny never escalates.
 export type PermissionDecision = {
   decision: "allow" | "deny" | "deny-unneeded"
   message: string
   path?: string
+  // true when a repeat ask for the same path may escalate to allow
+  escalatable?: boolean
 }
 
 // hardcoded: secrets and credentials are denied even inside roots
@@ -43,6 +46,7 @@ export function decidePermission(input: {
   if (path === undefined) {
     return {
       decision: "deny-unneeded",
+      escalatable: false,
       message:
         "denied: no recognizable path in that permission ask. Stay in the target tree and the job dir; if you truly need something else, say why in your next message.",
     }
@@ -51,6 +55,7 @@ export function decidePermission(input: {
     return {
       decision: "deny",
       path,
+      escalatable: false,
       message: `denied: ${path} looks like secrets or credentials. Never touch it in this Job. Continue your own task.`,
     }
   }
@@ -65,12 +70,28 @@ export function decidePermission(input: {
     return {
       decision: "deny",
       path,
-      message: `denied: ${path} is outside the home tree this Job runs in. Continue your own task.`,
+      escalatable: true,
+      message: `denied: ${path} is outside the home tree this Job runs in. If you truly need it, ask again — a repeated ask for the same path is granted.`,
     }
   }
   return {
     decision: "deny-unneeded",
     path,
-    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, say why in your next message and the decision may change.`,
+    escalatable: true,
+    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, ask again — a repeated ask for the same path is granted.`,
   }
+}
+
+// A repeat ask for the same path is the assertion of need the first
+// denial asked for. The rail counts asks per member+path; the second
+// escalates to a durable allow. Hard-deny verdicts never escalate.
+export function escalateOnRepeat(v: PermissionDecision, priorAsksForPath: number): PermissionDecision {
+  if (priorAsksForPath >= 1 && v.escalatable && v.path) {
+    return {
+      decision: "allow",
+      path: v.path,
+      message: `granted on repeat: you asked for ${v.path} again — treated as asserted need, and made durable for this Job.`,
+    }
+  }
+  return v
 }

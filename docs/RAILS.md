@@ -38,7 +38,7 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - **Permission decisions (JEV's other half).** A blocked pane is a
   question; `src/permission.ts` answers it — typed, not an agent:
   allow (inside the member's roots), deny (secrets, outside home),
-  deny-unneeded (wandering, with guidance to say why). The rail
+  deny-unneeded (wandering) — and a repeat ask for the same non-dangerous path escalates to a durable allow: persistence is the asserted need. The rail
   applies the verdict (dialog cleared, message injected, root made
   durable on allow), books a `permission` event, and caps the asks —
   over 6 the member is dead. With this, worker permissions are
