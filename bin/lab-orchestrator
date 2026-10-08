@@ -12,7 +12,7 @@ import { loadManifest, runCounts, runEndDetector, runGateDetector, runGrade, run
 import { loadDagFile, tick } from "../src/dag.ts"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt } from "../src/coworker.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
-import { decidePermission } from "../src/permission.ts"
+import { decidePermission, escalateOnRepeat } from "../src/permission.ts"
 import { withBackpressure } from "../src/backpressure.ts"
 import { drop, emptyBoard, note, place } from "../src/lanes.ts"
 import { gradeCall } from "../src/live-grade.ts"
@@ -939,6 +939,7 @@ async function runCoworker() {
   const refused = []
   const dead = []
   const askedCount = new Map()
+  const pathAsks = new Map()
   // verdicts that arrived while the member was blocked — herdr refuses
   // to prompt a blocked pane, so the note waits for the next beat
   const pendingNote = new Map()
@@ -995,8 +996,10 @@ async function runCoworker() {
     }
     // the permission half of JEV: a blocked member is a question, and
     // the typed decider answers it — allow (roots), deny (dangerous),
-    // deny-unneeded (wandering) — with a message injected back. No
-    // dialog ever waits for a person. Capped like every retry surface.
+    // deny-unneeded (wandering) — with a message injected back. A
+    // repeated ask for the same non-dangerous path escalates to a
+    // durable allow: persistence is the asserted need. No dialog ever
+    // waits for a person. Capped like every retry surface.
     for (const m of members) {
       if (dead.includes(m.name)) continue
       const out = herdr("agent", "get", scoped(m.name)).stdout
@@ -1004,10 +1007,14 @@ async function runCoworker() {
       const term = herdr("agent", "read", scoped(m.name)).stdout
       const at = term.lastIndexOf("Permission required")
       const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
-      const verdict = decidePermission({
+      const raw = decidePermission({
         question,
         allowedRoots: [taskDir, sandboxOf.get(m.name) ?? "", ...programRoots],
       })
+      const key = `${m.name}|${raw.path ?? "?"}`
+      const prior = pathAsks.get(key) ?? 0
+      pathAsks.set(key, prior + 1)
+      const verdict = escalateOnRepeat(raw, prior)
       const asked = (askedCount.get(m.name) ?? 0) + 1
       askedCount.set(m.name, asked)
       if (verdict.decision === "allow" && verdict.path) {
