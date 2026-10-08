@@ -24,36 +24,51 @@ The interview story for this repo: *Airflow for agents where the DAGs themselves
 
 ## 2. Glossary
 
-### 2.1 Reasoning patterns — "how does it think"
+### 2.1 How it thinks — five orthogonal axes, not a menu
 
-**ReAct** (Yao et al., 2022, arXiv:2210.03629)
-Interleave Thought → Action → Observation in one loop; the model reasons about what it just saw before choosing the next tool call. The default "agent loop" most people picture.
-*Interview line*: "ReAct is the right pick when observations frequently change the next action; you pay for that adaptivity in LLM calls and loop-drift risk."
+The JD trap: listing these as alternative "agent types." They are **axes** — one agent can be ReAct (control flow) + Reflexion (learning) + CodeAct (action format) simultaneously. Classify a system along all five; never "ReAct *or* Reflexion."
+
+**Axis 1 — Inside one call: reasoning style**
 
 **Chain-of-Thought (CoT)**
-The model outputs intermediate reasoning steps before the answer. Not an architecture — a prompting/decoding property every pattern below assumes.
+The model outputs intermediate reasoning steps before the answer. Not an architecture — a property of a single model call; the atom every outer pattern composes.
 
-**Tree of Thoughts (ToT)** (arXiv:2305.10601)
-Explore a tree of reasoning branches with backtracking, not a single chain. Expensive; for hard search-like problems with a usable reward signal.
+**Reasoning models / test-time compute** (o1/R1 lineage)
+RL-trained models that emit long internal CoT by default — ToT-style search and backtracking *inside one call*. The trade: that deliberation lives server-side. OpenAI/Gemini return only summaries; Claude returns plaintext thinking with encrypted redactions; open-weight models return everything (and the encrypted blobs turned out to be replayable — Panfilov et al., arXiv:2608.09867).
+
+**Axis 2 — Control flow: when the plan is made**
+
+**ReAct** (Yao et al., 2022, arXiv:2210.03629)
+Interleave Thought → Action → Observation in one loop; the model reasons about what it just saw before choosing the next tool call. *Just-in-time planning* — the default "agent loop" most people picture.
+*Interview line*: "ReAct is the right pick when observations frequently change the next action; you pay for that adaptivity in LLM calls and loop-drift risk."
 
 **Plan-and-Execute** (LangChain lineage; LLM+P, arXiv:2304.11477)
-A planner LLM emits a full plan up front; an executor (often a smaller model) walks the steps; a replanner handles drift. descendant of classical planning (PDDL as the plan language in LLM+P).
+A planner LLM emits a full plan *up front*; an executor (often a smaller model) walks the steps; a replanner handles drift. Descendant of classical planning (PDDL as the plan language in LLM+P).
 *Interview line*: "Plan-and-execute trades adaptivity for cost and reviewability — the plan is an artifact a human can inspect before any expensive step runs."
 
 **ReWOO** (Xu, 2023, arXiv:2305.18309)
-"Reason Without Observation": one planner pass produces a plan with **placeholders** for tool results; workers fill them; a solver combines. Fewest LLM calls of the family — and the least adaptive.
+"Reason Without Observation": one planner pass produces a plan with **placeholders** for tool results; workers fill them; a solver combines. The frozen-plan extreme of this axis — fewest LLM calls, least adaptive.
 
-**Reflexion** (Shinn et al., 2023, arXiv:2303.11366)
-After a failed episode, the agent writes a *verbal self-critique* into memory; the next attempt starts with that critique in context. "Reinforcement learning with words instead of weights." Works when failures are diagnosable and the task is retryable.
+**Axis 3 — Deliberation: how many paths**
 
-**CodeAct**
-Act by writing and executing code instead of emitting JSON tool calls. One program can compose many tools (loops, conditionals, variables). Requires a real sandbox; error surfaces are compiler/runtime rather than parse failures.
+**Tree of Thoughts (ToT)** (arXiv:2305.10601)
+Explore a tree of reasoning branches with backtracking, not a single chain — a *harness-level* search pattern: the framework generates k candidates, scores states, prunes. Expensive; for hard search-like problems with a usable reward signal. Depth-1 ToT = best-of-N / self-consistency.
 
 **LATS** (Zhou et al., 2023, arXiv:2310.04406)
-Language Agent Tree Search: MCTS over agent trajectories with self-reflection as the value signal. The heavy end of the spectrum — for tasks where a wrong first path is expensive and reward is checkable.
+Language Agent Tree Search: MCTS over *full agent trajectories* with self-reflection as the value signal. ToT where the nodes are tool-using episodes — the heavy end of the spectrum.
+
+**Axis 4 — Learning: what persists across attempts**
+
+**Reflexion** (Shinn et al., 2023, arXiv:2303.11366)
+After a failed episode, the agent writes a *verbal self-critique* into memory; the next attempt starts with that critique in context. "Reinforcement learning with words instead of weights." Composable with any control-flow pattern — ReAct+Reflexion is the canonical pairing. Works when failures are diagnosable and the task is retryable.
 
 **Memory & skill accumulation** (the Voyager lineage, arXiv:2305.16291)
 Long-term memory as a *skill library* / episodic store the agent grows across tasks, not just a bigger context window.
+
+**Axis 5 — Action format: what an action looks like**
+
+**CodeAct**
+Act by writing and executing code instead of emitting JSON tool calls. One program can compose many tools (loops, conditionals, variables). Requires a real sandbox; error surfaces are compiler/runtime rather than parse failures. JSON tool calling (§2.3's first term) is the other format on this axis.
 
 ### 2.2 Architecture taxonomy — "how is the system shaped"
 
