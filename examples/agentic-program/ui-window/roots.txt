@@ -1,3 +1,4 @@
 /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window
 /Users/sagebot/.local/share/agentic-os
 /Users/sagebot/projects/Agentic-Workspace/agent-gadgets
+/Users/sagebot/.config/opencode/skills
