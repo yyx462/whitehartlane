@@ -95,8 +95,9 @@
   .card .def { font-size: 14px; margin: 6px 0 0; }
   .tag { font: 11px var(--mono); letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--muted); background: var(--tag-bg); border-radius: 4px; padding: 2px 7px; }
-  .tag.think { color: var(--accent2); } .tag.shape { color: var(--teal); }
-  .tag.prod { color: var(--amber); } .tag.eco { color: var(--green); }
+  .tag.call { color: #a371f7; } .tag.plan { color: var(--accent2); } .tag.search { color: var(--teal); }
+  .tag.learn { color: #ff7b72; } .tag.act { color: var(--amber); } .tag.shape { color: var(--accent); }
+  .tag.prod { color: #ffa657; } .tag.eco { color: var(--green); }
   .osline { font-size: 12.5px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
   .osline .k { font: 11px var(--mono); color: var(--teal); letter-spacing: 0.05em; }
   .ask { font-size: 12.5px; margin-top: 8px; color: var(--muted); }
@@ -132,7 +133,11 @@
 <div class="toolbar">
   <div class="chips" id="chips">
     <button class="chip on" data-c="all">All</button>
-    <button class="chip" data-c="think">How it thinks</button>
+    <button class="chip" data-c="call">One call</button>
+    <button class="chip" data-c="plan">Control flow</button>
+    <button class="chip" data-c="search">Search</button>
+    <button class="chip" data-c="learn">Learning</button>
+    <button class="chip" data-c="act">Actions</button>
     <button class="chip" data-c="shape">System shape</button>
     <button class="chip" data-c="prod">Production</button>
     <button class="chip" data-c="eco">Ecosystem</button>
@@ -157,7 +162,7 @@
 
 <section id="glossary">
   <h2><span class="n">1 —</span> Glossary <span class="count" id="count"></span></h2>
-  <p class="lede">Cards with a teal <span style="font-family:var(--mono);font-size:11px;color:var(--teal)">IN THIS OS</span> line map the concept to code in this repo — that line is your interview answer.</p>
+  <p class="lede">Cards with a teal <span style="font-family:var(--mono);font-size:11px;color:var(--teal)">IN THIS OS</span> line map the concept to code in this repo — that line is your interview answer. Note: the five <b>think-side tags are orthogonal axes, not alternatives</b> — one agent can be ReAct (control flow) + Reflexion (learning) + CodeAct (action format) at once. Compose, don't choose.</p>
   <div class="grid" id="grid"></div>
 </section>
 
@@ -221,15 +226,23 @@
 </div>
 <script>
 const TERMS = [
-  {t:"ReAct", c:"think", d:"Interleave Thought → Action → Observation in one loop; the model reasons about what it just saw before the next tool call. The default 'agent loop' everyone pictures.", os:"the Actor's round loop: look at results, write the next protocol wave or stop", ask:"When is ReAct the wrong choice? (stable plans, cost-sensitive runs)"},
-  {t:"Chain-of-Thought", c:"think", d:"Intermediate reasoning steps before the answer. Not an architecture — a property every pattern below assumes."},
-  {t:"Tree of Thoughts", c:"think", d:"Explore a tree of reasoning branches with backtracking instead of one chain. Expensive; for search-like problems with a reward signal."},
-  {t:"Plan-and-Execute", c:"think", d:"A planner LLM emits the full plan up front; an executor (often smaller/cheaper) walks it; a replanner handles drift. Descends from classical planning (LLM+P used PDDL).", os:"taken literally by the Composer (ADR 0004): the plan is a program folder", ask:"Compare to ReAct on cost and reviewability."},
-  {t:"ReWOO", c:"think", d:"Reason Without Observation: one planner pass produces a plan with placeholders for tool results; workers fill them; a solver combines. Fewest LLM calls, least adaptive."},
-  {t:"Reflexion", c:"think", d:"After a failed episode the agent writes a verbal self-critique into memory; the next attempt starts with it in context. RL with words instead of weights.", os:"grade failure → rail re-prompts the worker with the grade feedback, under the retry cap"},
-  {t:"CodeAct", c:"think", d:"Act by writing and executing code instead of emitting JSON tool calls — one program composes many tools. Needs a real sandbox.", os:"every worker pane: opencode/pi writing code in a scoped worktree"},
-  {t:"LATS", c:"think", d:"Language Agent Tree Search: MCTS over agent trajectories with self-reflection as value signal. The heavy end — wrong first paths must be expensive to justify it."},
-  {t:"Skill library / long memory", c:"think", d:"Voyager lineage: durable skills an agent accumulates across tasks, not a bigger context window.", os:"outliving memory: protocol.json, log.txt done-lines, the trace"},
+  // axis 1 — inside one call
+  {t:"Chain-of-Thought", c:"call", d:"Intermediate reasoning steps before the answer. Not an architecture — a property of a single model call; the atom every outer pattern composes."},
+  {t:"Reasoning models / test-time compute", c:"call", d:"o1/R1 lineage: RL-trained models that emit long internal CoT by default — ToT-style search and backtracking inside one call. The trade: that deliberation lives server-side — OpenAI/Gemini return summaries, Claude returns plaintext thinking with encrypted redactions, open-weight models return everything.", ask:"Where does the CoT live in each provider's API? (Encrypted reasoning blobs were shown replayable — arXiv:2608.09867)"},
+  // axis 2 — control flow: when the plan is made
+  {t:"ReAct", c:"plan", d:"Interleave Thought → Action → Observation in one loop; the model reasons about what it just saw before the next tool call. Just-in-time planning — the default 'agent loop' everyone pictures.", os:"the Actor's round loop: look at results, write the next protocol wave or stop", ask:"When is ReAct the wrong choice? (stable plans, cost-sensitive runs)"},
+  {t:"Plan-and-Execute", c:"plan", d:"A planner LLM emits the full plan up front; an executor (often smaller/cheaper) walks it; a replanner handles drift. Descends from classical planning (LLM+P used PDDL).", os:"taken literally by the Composer (ADR 0004): the plan is a program folder", ask:"Compare to ReAct on cost and reviewability."},
+  {t:"ReWOO", c:"plan", d:"Reason Without Observation: one planner pass produces a plan with placeholders for tool results; workers fill them; a solver combines. The frozen-plan extreme of this axis — fewest LLM calls, least adaptive."},
+  // axis 3 — deliberation: how many paths
+  {t:"Tree of Thoughts", c:"search", d:"Explore a tree of reasoning branches with backtracking instead of one chain — a harness-level search pattern: the framework generates k candidates, scores states, prunes. Expensive; for search-like problems with a reward signal. Depth-1 ToT = best-of-N / self-consistency.", os:"a lab program: Wave = breadth, grade = value function, the Actor = search policy — the tree lives in protocol rounds, never in dag.mjs"},
+  {t:"LATS", c:"search", d:"Language Agent Tree Search: MCTS over full agent trajectories with self-reflection as value signal. ToT where the nodes are tool-using episodes — the heavy end; wrong first paths must be expensive to justify it."},
+  // axis 4 — learning: what persists across attempts
+  {t:"Reflexion", c:"learn", d:"After a failed episode the agent writes a verbal self-critique into memory; the next attempt starts with it in context. RL with words instead of weights. Composable with any control flow — ReAct+Reflexion is the canonical pairing.", os:"grade failure → rail re-prompts the worker with the grade feedback, under the retry cap"},
+  {t:"Skill library / long memory", c:"learn", d:"Voyager lineage: durable skills an agent accumulates across tasks, not a bigger context window.", os:"outliving memory: protocol.json, log.txt done-lines, the trace"},
+  // axis 5 — action format
+  {t:"Tool / function calling", c:"act", d:"Model emits structured JSON calls against declared schemas; the host executes and returns results. Tool design is prompt engineering — Anthropic's ACI appendix."},
+  {t:"CodeAct", c:"act", d:"The other action format: act by writing and executing code — one program composes many tools. Needs a real sandbox; errors surface as compiler/runtime failures, not parse failures.", os:"every worker pane: opencode/pi writing code in a scoped worktree"},
+  // system shape
   {t:"Workflow vs agent", c:"shape", d:"Anthropic's canonical split: workflows orchestrate LLMs through predefined code paths; agents let the LLM direct its own process. Workflows = predictable; agents = flexible.", os:"dag.mjs + tick() is the workflow; the Actor is the agent", ask:"Walk me through when you'd use each. (Then show §0 of this page.)"},
   {t:"Prompt chaining", c:"shape", d:"Fixed sequence of LLM steps with programmatic checks between them. Cheapest workflow pattern."},
   {t:"Routing", c:"shape", d:"Classify the input, dispatch to a specialized subpath — also cheap-model vs strong-model dispatch.", os:"the Scheduler: pick-workflow routes fan-out vs direct via jev typed judgment"},
@@ -240,7 +253,7 @@ const TERMS = [
   {t:"Multi-agent topologies", c:"shape", d:"Hierarchical (manager/crew), sequential (role pipeline), parallel (debate), handoffs (one agent transfers control). Gains: specialization, isolated contexts. Pains: cost, error compounding.", os:"Coworker kind: named members, typed message files, the Rail is the relay"},
   {t:"Handoffs", c:"shape", d:"OpenAI Swarm vocabulary: one agent transfers control of the conversation to another. Contrast with message-passing between peers.", os:"Coworker messages are relayed by the Rail — a worker never writes another worker"},
   {t:"Human-in-the-loop", c:"shape", d:"Approval gates, checkpoints, escalation. In 2026 JDs a requirement, not a nicety.", os:"gate steps: [gates] commands that print done", ask:"Where does your system force a human decision?"},
-  {t:"Tool / function calling", c:"prod", d:"Model emits structured calls against declared schemas; the host executes and returns results. Tool design is prompt engineering — Anthropic's ACI appendix."},
+  // production
   {t:"Structured outputs", c:"prod", d:"Schema-constrained generation (JSON mode → strict schema). Pairs with tool calls; 'clear tool schemas, structured outputs' is a literal JD bullet."},
   {t:"MCP", c:"prod", d:"Model Context Protocol — open standard connecting models to tools and data sources. 'USB-C for agent tools.' The integrations vocabulary of 2026."},
   {t:"A2A", c:"prod", d:"Agent-to-agent protocol (Google origin) for cross-vendor agent interop. Know the name and the one-liner."},
@@ -253,6 +266,7 @@ const TERMS = [
   {t:"Agent evaluation", c:"prod", d:"Trajectory evals (judge the path, not just the answer), LLM-as-judge, golden tasks, online metrics.", os:"grade/counts are hook commands — the judge is swappable, the report is not", ask:"How do you eval an agent?"},
   {t:"Observability / tracing", c:"prod", d:"Every route, tool call, retry recorded; LangSmith-class tooling.", os:"append-only events.jsonl — 'the single source; all records are projections of it'"},
   {t:"Backpressure", c:"prod", d:"Stop issuing provider calls when the provider refuses or slows; reopen on recovery. Distinct from a static concurrency cap.", os:"exit 75 (provider refusal) → rail pauses new calls, reopens with backoff"},
+  // ecosystem
   {t:"LangGraph", c:"eco", d:"Graph/state-machine agent runtime: explicit edges, checkpointing, HITL primitives. The safest framework bet on 2026 JDs.", os:"positioning contrast: LangGraph gives you the graph runtime; this OS gives you the rails + panes + trace around whatever runtime you run"},
   {t:"CrewAI", c:"eco", d:"Role-based crews (agent-as-teammate metaphor). Fast prototyping, less control."},
   {t:"AutoGen / AG2", c:"eco", d:"Microsoft's conversational multi-agent runtime; Azure-shop favorite."},
@@ -262,7 +276,7 @@ const TERMS = [
   {t:"Airflow", c:"eco", d:"The DAG scheduler everyone knows — and the contrast case: deterministic scheduler, human-authored DAGs. The gap this OS fills: agent-planned DAGs.", os:"agentic-os is 'Airflow on agents' where the DAG can be written by an agent (ADR 0004)"},
 ];
 
-const CL = {think:"how it thinks", shape:"system shape", prod:"production", eco:"ecosystem"};
+const CL = {call:"one call", plan:"control flow", search:"search", learn:"learning", act:"actions", shape:"system shape", prod:"production", eco:"ecosystem"};
 const grid = document.getElementById("grid"), count = document.getElementById("count");
 let filter = "all", query = "";
 
