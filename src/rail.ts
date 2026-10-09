@@ -7,17 +7,18 @@
 //
 // Migration seam: engines address workers by NAME (spawnWorker(name),
 // paneAlive(name)) — nothing pane-shaped leaks past this class. Every
-// shep/herdr invocation funnels through the injected runners below.
-// If panes become remote machines tomorrow, the swap happens here, in
-// one file; engines and bins do not change.
-import { execFileSync, spawn } from "node:child_process"
+// shep/herdr invocation funnels through the runner seam (src/runners.ts)
+// injected below. If panes become remote machines tomorrow, the swap
+// happens there, in one file; engines and bins do not change.
+import { spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import type { Layout } from "./hooks.ts"
+import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
 import { decidePermission, escalateOnRepeat, PERMISSION_CAP, tunedPermissionJudge, type PermissionJudge } from "./permission.ts"
 import { orchestratorBrief } from "./roles.ts"
+import type { Report } from "./report.ts"
 import {
   abortJob as abortJobRec,
   addWorkerRoot,
@@ -44,9 +45,10 @@ import {
 } from "./store.ts"
 import { readState } from "./state.ts"
 import { resolveOpencode, resolvePi } from "./transcripts.ts"
+import { defaultRunner, jsonAt, type RunnerResult } from "./runners.ts"
 import { beat, note as sayOnce, verboseOn } from "./verbose.ts"
 
-export type RunnerResult = { status: number; stdout: string }
+export type { RunnerResult } from "./runners.ts"
 
 // The Job ledger surface the Rail needs (zen 2/5). Bookkeeping must
 // never break the rail: every call is best-effort, and a run without
@@ -86,36 +88,12 @@ export type RailOpts = {
   judge?: PermissionJudge
 }
 
-function defaultRunner(cmd: string): (args: string[]) => RunnerResult {
-  return (args) => {
-    try {
-      const stdout = execFileSync(cmd, args, { encoding: "utf8", timeout: 90_000 })
-      return { status: 0, stdout }
-    } catch (err) {
-      return { status: typeof err.status === "number" ? err.status : 1, stdout: err.stdout ?? "" }
-    }
-  }
-}
-
 function taskLine(dir: string): string {
   try {
     return readFileSync(join(dir, "task.txt"), "utf8").split("\n")[0]?.slice(0, 120) || basename(dir)
   } catch {
     return basename(dir)
   }
-}
-
-function jsonAt<T>(out: string, pick: (data: never) => T): T | null {
-  for (const line of out.split("\n").reverse()) {
-    const t = line.trim()
-    if (!t.startsWith("{")) continue
-    try {
-      return pick(JSON.parse(t) as never)
-    } catch {
-      // keep looking
-    }
-  }
-  return null
 }
 
 export function waitChange(dir: string, ms: number): Promise<void> {
@@ -167,6 +145,9 @@ export class Rail implements ShepPort {
   private readonly seen = new Map<string, string>()
   private verbosePath: string | null = null
   private verbosePane: string | null = null
+  // the drain hook a SIGTERM-running engine installs (ADR 5): the
+  // coworker engine parks on it; a door without one aborts on TERM
+  drainHook: (() => void) | null = null
   // permission sweep state (zen 6): asks per pane, asks per pane+path,
   // and verdict notes queued for a pane that could not take them
   private readonly askedCount = new Map<string, number>()
@@ -310,6 +291,16 @@ export class Rail implements ShepPort {
     } catch {
       return false
     }
+  }
+
+  // The staged manifest, memoized — the run door stages workflow.toml
+  // once, so engines re-reading it mid-loop (per grade, per report)
+  // parse the same bytes every time. Throws like loadManifest until
+  // the first success.
+  private manifestCache: Manifest | undefined
+  manifest(): Manifest {
+    if (!this.manifestCache) this.manifestCache = loadManifest(this.taskDir)
+    return this.manifestCache
   }
 
   // -- private exec shims ------------------------------------------------------
@@ -901,6 +892,65 @@ export class Rail implements ShepPort {
 
   closeVerbose(): void {
     if (this.verbosePane) this.herdr("pane", "close", this.verbosePane)
+  }
+
+  // -- door protocol: signals and the engine epilogue ----------------------------
+  //
+  // One epilogue for every door (was copy-pasted per bin): run the
+  // engine, then park on null, finish on a report, abort+exit-code on
+  // a throw. Signals: SIGINT always aborts; SIGTERM drains when the
+  // engine installs a drainHook (coworker) or aborts when the door
+  // asks for termDrains — a door whose ENGINE owns SIGTERM (fan-out's
+  // runOrchestrator traps it internally) passes nothing.
+
+  trapSignals(opts: { termDrains?: boolean } = {}): void {
+    process.on("SIGINT", () => {
+      this.ledger?.abort("signal SIGINT", this.mine.size)
+      process.exit(0)
+    })
+    if (opts.termDrains) {
+      process.on("SIGTERM", () => {
+        if (this.drainHook) return this.drainHook()
+        this.ledger?.abort("signal SIGTERM", this.mine.size)
+        process.exit(0)
+      })
+    }
+  }
+
+  async run(engine: () => Promise<Report | null>): Promise<number> {
+    try {
+      const report = await engine()
+      if (!report) {
+        // parked (ADR 5): the rail drained to its boundary and retired
+        // its panes — book the pause; a typed continue brings the Job back.
+        this.ledger?.pause("drained", this.ledger.job.panes.filter((p) => p.died === undefined).length)
+        this.log(`parked: paused — continue with: agentic-os continue ${this.ledger?.job.id ?? "<jid>"}`)
+        return 0
+      }
+      this.log(`done: ${report.status}`)
+      const reap = this.verify()
+      // zen 5: the receipt counts THIS Job's panes, not the scope's
+      const panesLeft = this.ledger
+        ? this.ledger.job.panes.filter((p) => p.died === undefined).length
+        : NaN
+      this.log(`${reap} (scope); this job: ${panesLeft} of ${this.ledger?.job.panes.length ?? "?"} panes remain`)
+      this.ledger?.finish({
+        panesRemaining: panesLeft,
+        panesTotal: this.ledger.job.panes.length,
+        unitsDone: Number(report.counts?.units ?? NaN),
+        unitsFailed: Number(report.counts?.failed ?? NaN),
+        status: report.status,
+        report: join(this.taskDir, "report.json"),
+      })
+      return 0
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err)
+      this.log(`fatal: ${why}`)
+      this.ledger?.emit("fatal", { why: String(why) })
+      this.ledger?.abort(`fatal: ${why}`, this.mine.size)
+      this.wake("fan-out", "blocked", `orchestrator died: ${this.taskDir}/orchestrator.log`)
+      return 1
+    }
   }
 }
 
