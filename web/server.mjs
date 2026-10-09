@@ -2,8 +2,9 @@
 // agentic-os window — backend server. Node stdlib only, no npm.
 // Serves web/public/ statically and a JSON API over the OS disk
 // (~/.local/share/agentic-os): sessions, Jobs, panes, events, reports.
-// The only write action is POST /api/run, which spawns the run door
-// (agentic-os run <folder>) detached and returns its first stdout lines.
+// The write actions are POST /api/run (spawns the run door detached and
+// returns its first stdout lines), the rail verbs (pause|abort|continue
+// via the door), and POST delete (removes a job dir outright).
 import http from "node:http";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -1593,6 +1594,44 @@ async function handleApi(req, res, url) {
       jid,
       ...r,
     });
+  }
+
+  // v6: delete — pure spur file removing, the "I no longer need this"
+  // verb. No CLI door, no booking: the job dir (job.json + the staged
+  // run/) leaves the disk for good. Refused while the run is live
+  // (running, or a pause still draining — both read "running"); the
+  // parks (paused|aborted|orphaned) and retired (success|failed) are
+  // fair game. Not revertable — the UI confirms louder than the rail
+  // verbs for exactly this reason.
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/delete$/);
+  if (req.method === "POST" && m) {
+    const [, sid, jid] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job) return sendError(res, 404, "no such job: " + sid + "/" + jid);
+    if (statusOf(job, reportOf(job)) === "running") {
+      return sendError(res, 409, "refusing: run is live — abort or pause it first");
+    }
+    const jobDir = path.join(SESSIONS_DIR, sid, "jobs", jid);
+    // the staged run dir rides inside the job dir (jobs/<jid>/run); a
+    // job.dir pointing elsewhere under the sessions root is swept too,
+    // but nothing outside it is ever touched
+    const extraDir = typeof job.dir === "string" &&
+      job.dir.startsWith(SESSIONS_DIR + path.sep) &&
+      !job.dir.startsWith(jobDir + path.sep) ? job.dir : null;
+    const removed = [];
+    try {
+      fs.rmSync(jobDir, { recursive: true, force: true });
+      removed.push(jobDir);
+      if (extraDir && fs.existsSync(extraDir)) {
+        fs.rmSync(extraDir, { recursive: true, force: true });
+        removed.push(extraDir);
+      }
+    } catch (e) {
+      return sendError(res, 500, "delete failed: " + (e && e.message ? e.message : e));
+    }
+    log("job deleted:", sid, jid, "removed:", removed.join(" ,"));
+    return sendJson(res, 200, { ok: true, verb: "delete", sid, jid, removed });
   }
 
   // v4.1: the live events stream — one snapshot on connect, then one
