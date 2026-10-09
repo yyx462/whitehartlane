@@ -55,6 +55,8 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
       const fn = overrides.tailPane as ShepPort["tailPane"] | undefined
       return fn ? fn(logPath) : true
     },
+    paneBlocked: overrides.paneBlocked as ShepPort["paneBlocked"] | undefined,
+    answerPermission: overrides.answerPermission as ShepPort["answerPermission"] | undefined,
   }
   return { port, spawned, retired, wakes, calls, reprompts, seq }
 }
@@ -493,4 +495,44 @@ test("the orchestrator pane is born once and the second wave prompts that same p
   assert.equal(second.paneId, first.paneId)
   assert.deepEqual(spawned, ["orch"])
   assert.deepEqual(prompts, ["pane-7:wave 2"])
+})
+
+test("a permission dialog the rail answers does not stall the unit (zen 6)", async () => {
+  const dir = await copyExample("orch-permission-")
+  const answered: string[] = []
+  const shep = fakeShep({
+    paneBlocked: (name) => name === "w-france",
+    answerPermission: (name) => {
+      answered.push(name)
+      return "allow"
+    },
+  })
+
+  const d = deps(dir, shep.port, { stallMs: 10, now: () => 1_000_000 })
+  cycle(d) // spawns w-france
+  assert.deepEqual(answered, [])
+  cycle(d) // dialog seen, answered — the unit stays open, nothing settles
+
+  assert.deepEqual(answered, ["w-france"])
+  assert.deepEqual(shep.retired, [])
+  assert.deepEqual(shep.wakes, [])
+  assert.deepEqual(readState(dir), { done: [], failed: [] })
+  assert.equal(d.inFlight.has("france"), true)
+})
+
+test("a worker past the permission cap settles blocked with a wake that says so", async () => {
+  const dir = await copyExample("orch-perm-cap-")
+  const shep = fakeShep({
+    paneBlocked: () => true,
+    answerPermission: () => "capped",
+  })
+
+  const d = deps(dir, shep.port, { slots: 1 })
+  cycle(d) // spawn
+  cycle(d) // capped — settles like a block
+
+  assert.deepEqual(readState(dir).failed, ["france"])
+  assert.deepEqual(shep.retired, ["w-france"])
+  assert.equal(shep.wakes.length, 1)
+  assert.match(shep.wakes[0]!.detail, /permission ask cap/)
 })
