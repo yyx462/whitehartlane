@@ -8,12 +8,17 @@ import { join } from "node:path"
 
 export type SeedSpec = { tool: string; session_id: string; since?: string }
 
-export type Member = { name: string; model?: string; seed?: SeedSpec; initiates?: boolean }
+// roots: external paths (~ works) a member's work legitimately needs
+// OUTSIDE the job tree — declared up front so the dialogs never fire
+// (a granted root is only read at session start; answering mid-run
+// spends the sweep). A vista reviewer names ~/.vista here.
+export type Member = { name: string; model?: string; seed?: SeedSpec; initiates?: boolean; roots?: string[] }
 
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
-// [members.<name>] with optional model = "provider/model" and an
-// optional fork seed (seed_tool + seed_session [+ seed_since]).
+// [members.<name>] with optional model = "provider/model", an
+// optional fork seed (seed_tool + seed_session [+ seed_since]), and
+// optional pre-declared external roots (roots = ["~/.vista", …]).
 export function parseMembers(toml: string): Member[] {
   const members: Member[] = []
   const seen = new Set<string>()
@@ -42,6 +47,17 @@ export function parseMembers(toml: string): Member[] {
     const seedSession = body.match(/^\s*seed_session\s*=\s*"([^"]+)"/m)?.[1]
     const seedSince = body.match(/^\s*seed_since\s*=\s*"([^"]+)"/m)?.[1]
     const initiates = /^\s*initiates\s*=\s*true\s*$/m.test(body)
+    const rootsBody = body.match(/^\s*roots\s*=\s*\[([^\]]*)\]/m)?.[1]
+    let roots: string[] | undefined
+    if (rootsBody !== undefined) {
+      roots = [...rootsBody.matchAll(/"([^"]+)"/g)].map((m) => m[1])
+      if (roots.length === 0) throw new Error(`members.${name} roots list is empty`)
+      for (const root of roots) {
+        if (!root.startsWith("/") && !root.startsWith("~/") && root !== "~") {
+          throw new Error(`members.${name} root must be absolute or ~-relative: ${root}`)
+        }
+      }
+    }
     let seed: SeedSpec | undefined
     if (seedTool !== undefined || seedSession !== undefined) {
       if (seedTool === undefined || seedSession === undefined) {
@@ -49,7 +65,13 @@ export function parseMembers(toml: string): Member[] {
       }
       seed = { tool: seedTool, session_id: seedSession, ...(seedSince ? { since: seedSince } : {}) }
     }
-    members.push({ name, ...(model ? { model } : {}), ...(seed ? { seed } : {}), ...(initiates ? { initiates: true } : {}) })
+    members.push({
+      name,
+      ...(model ? { model } : {}),
+      ...(seed ? { seed } : {}),
+      ...(initiates ? { initiates: true } : {}),
+      ...(roots ? { roots } : {}),
+    })
   }
   return members
 }

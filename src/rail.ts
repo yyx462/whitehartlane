@@ -147,9 +147,12 @@ export class Rail implements ShepPort {
   // the drain hook a SIGTERM-running engine installs (ADR 5): the
   // coworker engine parks on it; a door without one aborts on TERM
   drainHook: (() => void) | null = null
-  // permission sweep state (zen 6): asks per pane, asks per pane+path,
-  // and verdict notes queued for a pane that could not take them
+  // permission sweep state (zen 6): asks per pane (display numbering),
+  // deny-family answers per pane (cap spend — allows are free), asks
+  // per pane+path, and verdict notes queued for a pane that could not
+  // take them
   private readonly askedCount = new Map<string, number>()
+  private readonly denyCount = new Map<string, number>()
   private readonly pathAsks = new Map<string, number>()
   private readonly pendingNote = new Map<string, string>()
 
@@ -309,7 +312,15 @@ export class Rail implements ShepPort {
   }
 
   private herdr(...args: string[]): RunnerResult {
-    return this.herdrRun(args)
+    const r = this.herdrRun(args)
+    // a failing ACTION call is a real finding — log it, so a silent
+    // CLI exit never hides behind a blocked sweep. Failing reads
+    // (agent get/read/wait) are how the rail probes pane state; they
+    // stay quiet or every beat would spam on each dead pane.
+    if (r.status !== 0 && !(args[0] === "agent" && ["get", "read", "wait"].includes(args[1] ?? ""))) {
+      this.log(`herdr ${args.slice(0, 3).join(" ")}${args.length > 3 ? " …" : ""} → rc=${r.status}`)
+    }
+    return r
   }
 
   private agentState(name: string): string {
@@ -683,8 +694,10 @@ export class Rail implements ShepPort {
   // Answer one worker's permission dialog, if it has one. Roots default
   // to the pane's booked cwd plus the task dir and program roots;
   // context defaults to the pane's booked brief. Returns the verdict:
-  // "none" (no dialog), "allow", "deny", or "capped" (ask cap hit —
-  // the caller settles or kills the worker).
+  // "none" (no dialog), "allow", "deny", or "capped" (deny cap hit —
+  // the caller settles or kills the worker. Allows are free: only a
+  // deny pattern — wandering asks, or a hard-deny re-ask loop —
+  // spends the cap).
   answerPermission(
     name: string,
     opts: { roots?: string[]; context?: string } = {},
@@ -713,6 +726,10 @@ export class Rail implements ShepPort {
     const asked = (this.askedCount.get(label) ?? 0) + 1
     this.askedCount.set(label, asked)
     if (verdict.decision === "allow" && verdict.path) {
+      // an allow spends nothing: the need was judged real (or asserted
+      // by repeat ask) — a working member touching legitimately-needed
+      // outside-roots paths (a vista job reading its shots) must not
+      // die at the cap
       addWorkerRoot(cwd, verdict.path.replace(/\/[^/]*$/, ""))
       this.herdr("agent", "send-keys", label, "enter")
     } else {
@@ -720,11 +737,12 @@ export class Rail implements ShepPort {
       const note = `[permission] ${verdict.message}`
       const rc = this.herdr("agent", "prompt", label, note)
       if (rc.status !== 0) this.pendingNote.set(label, note)
+      this.denyCount.set(label, (this.denyCount.get(label) ?? 0) + 1)
     }
     this.ledger?.emit("permission", { member: label, decision: verdict.decision, path: verdict.path, ask: asked })
     this.log(`permission ${label} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"}`)
     this.say("watcher", `permission ${label} ${verdict.decision}`)
-    return asked >= PERMISSION_CAP ? "capped" : verdict.decision === "allow" ? "allow" : "deny"
+    return (this.denyCount.get(label) ?? 0) >= PERMISSION_CAP ? "capped" : verdict.decision === "allow" ? "allow" : "deny"
   }
 
   // Flush queued permission notes into panes that can take them (a

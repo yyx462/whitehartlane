@@ -5,6 +5,7 @@
 // the cap, then reports. The privilege sweep, pane bookkeeping, and
 // layout all live on the Rail.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
 import { runCounts } from "./hooks.ts"
@@ -64,7 +65,12 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
     const dir = join(taskDir, "sandboxes", m.name)
     sandboxOf.set(m.name, dir)
     mkdirSync(dir, { recursive: true })
-    writeWorkerPermissions(dir, [taskDir, ...rail.programRoots])
+    // pre-declared external roots ride the session-start config — the
+    // dialogs for these paths never fire, so the sweep never spends
+    // on them (the j-5b245e lesson: a vista reviewer died at the cap
+    // for paths every verdict allowed)
+    const extraRoots = (m.roots ?? []).map((r) => r.replace(/^~(?=\/|$)/, homedir()))
+    writeWorkerPermissions(dir, [taskDir, ...rail.programRoots, ...extraRoots])
     let brief = ""
     try {
       brief = readFileSync(join(taskDir, "members", `${m.name}.md`), "utf8")
@@ -105,6 +111,10 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
   const deadline = Date.now() + 2 * 60 * 60_000
   const dead: string[] = []
+  // why each member died — the report's exchange row carries it, so a
+  // "failed" never arrives without its reason (j-5b245e read "ended by
+  // dead" with the cap hit only in the log)
+  const deadWhy = new Map<string, string>()
   // the ball: whose turn the exchange waits on. Idle too long → one
   // nudge, then a second, then the member is dead. A silent member
   // must never stall the exchange forever.
@@ -203,7 +213,7 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
     }
     // the permission half of JEV (zen 6): a blocked member is a
     // question, and the typed decider answers it — the Rail owns the
-    // sweep (roots, judge, escalation, ask cap); this loop only
+    // sweep (roots, judge, escalation, deny cap); this loop only
     // carries the consequence: a capped member is dead and ends the
     // exchange. No dialog ever waits for a person.
     for (const m of members) {
@@ -211,8 +221,9 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
       const verdict = rail.answerPermission(m.name)
       if (verdict === "capped") {
         dead.push(m.name)
-        ledger?.emit("wake", { why: `member ${m.name} blocked past the permission cap` })
-        log(`member ${m.name} hit the permission cap — ending`)
+        deadWhy.set(m.name, `${m.name} blocked past the deny cap`)
+        ledger?.emit("wake", { why: `member ${m.name} blocked past the deny cap` })
+        log(`member ${m.name} hit the deny cap — ending`)
       }
     }
     // the stall guard: whoever holds the ball and idles too long gets
@@ -244,6 +255,7 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
           ledger?.emit("reprompt", { member: ballOn.name, nudge: used + 1 })
         } else {
           dead.push(ballOn.name)
+          deadWhy.set(ballOn.name, `${ballOn.name} stalled past the nudge cap`)
           ledger?.emit("wake", { why: `member ${ballOn.name} stalled past the nudge cap` })
           log(`member ${ballOn.name} stalled past the nudge cap — ending`)
         }
@@ -253,6 +265,7 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
       if (dead.includes(m.name)) continue
       if (!rail.paneAlive(m.name) && Date.now() - (bornAt.get(m.name) ?? 0) > 15_000) {
         dead.push(m.name)
+        deadWhy.set(m.name, `${m.name} pane died`)
         ledger?.emit("wake", { why: `member ${m.name} is dead` })
         log(`member ${m.name} is dead — ending the exchange`)
         rail.say("watcher", `${m.name} dead`)
@@ -280,7 +293,10 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
     result: `${messages.filter((x) => x.from === m.name).length} messages`,
     pass: !dead.includes(m.name),
   }))
-  if (ended !== "stop") rows.push({ unit: "exchange", result: `ended by ${ended}`, pass: false })
+  if (ended !== "stop") {
+    const why = [...deadWhy.values()].join("; ")
+    rows.push({ unit: "exchange", result: `ended by ${ended}${why ? ` — ${why}` : ""}`, pass: false })
+  }
   log(`exchange ended (${ended}) — ${messages.length} messages, ${delivered.length} relayed`)
   const report = writeReport(
     taskDir,
