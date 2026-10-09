@@ -88,6 +88,9 @@ export type CycleDeps = {
   // Units parked mid-flight on an earlier generation, keyed by unit id:
   // respawn them with the booked session pointer instead of a fresh brief.
   resumes?: Map<string, ResumePointer>
+  // Booked wait (ADR 0006): true while a live child spur names this
+  // unit's pane session as its spawner — the stall clock stands down.
+  bookedWait?: (unitId: string) => boolean
 }
 
 const DEFAULT_SLOTS = 2
@@ -336,11 +339,17 @@ export function cycle(deps: CycleDeps): boolean {
           deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
         }
       } else if (!deps.draining && size === flight.lastSize && now() - flight.lastChange > stallMs) {
-        settle(id, false, { unit: id, result: "stalled", pass: false })
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", `no log output for ${stallMs}ms`)
+        if (deps.bookedWait?.(id)) {
+          // booked wait: a live child spur holds this pane (ADR 0006) —
+          // the silence is explained, so the stall clock restarts
+          flight.lastChange = now()
+        } else {
+          settle(id, false, { unit: id, result: "stalled", pass: false })
+          deps.shep.retire(`w-${id}`)
+          deps.inFlight.delete(id)
+          deps.attempts.delete(id)
+          deps.shep.wake(id, "blocked", `no log output for ${stallMs}ms`)
+        }
       } else if (size !== flight.lastSize) {
         flight.lastSize = size
         flight.lastChange = now()
@@ -427,6 +436,10 @@ export async function runOrchestrator(input: {
   drainMs?: number
   trapSignals?: boolean
   resumes?: Map<string, ResumePointer>
+  // Booked wait (ADR 0006): consult before settling a stall — while a
+  // live child spur names the pane's session as its spawner, the wait
+  // is booked and the stall stands down.
+  bookedWait?: (unitId: string) => boolean
 }): Promise<Report | null> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
@@ -507,6 +520,7 @@ export async function runOrchestrator(input: {
         canary,
         draining,
         resumes: input.resumes,
+        bookedWait: input.bookedWait,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.settled" && typeof payload.unit === "string") {

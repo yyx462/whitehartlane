@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
-// continue | promote — the start door is run. It reads workflow.toml and
+// continue | fork | promote — the start door is run. It reads workflow.toml and
 // starts that workflow's engine. The rest read and settle the OS disk
 // (~/.local/share/agentic-os). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
@@ -11,16 +11,24 @@
 // books paused (ADR 5); abort kills immediately (SIGKILL — sessions stay
 // booked for a later continue); continue rebirths a paused/aborted/
 // orphaned Job from its booked session pointers (the old relaunch,
-// absorbed — M3: no cap, a soft continued ×N counter).
+// absorbed — M3: no cap, a soft continued ×N counter); fork delivers a
+// booked wake into a reborn levy pane (ADR 0006 §3 — the spawner seed
+// resumed from the checkpoint, the wake as the first prompt).
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun } from "../src/run.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
+import { forkPrompt, forkSeedOf } from "../src/fork.ts"
+import { seedSessionFile } from "../src/transcripts.ts"
+import { admitFork } from "../src/policy.ts"
 import {
   abortJob,
+  appendEvent,
   continueJob,
+  eventsPath,
+  findOrOpenSession,
   killPane,
   listJobs,
   orphanJob,
@@ -57,6 +65,28 @@ function shepStatus() {
   } catch {
     return []
   }
+}
+
+function herdrAt(args) {
+  try {
+    const stdout = execFileSync("herdr", args, { encoding: "utf8", timeout: 60_000 })
+    return { status: 0, stdout }
+  } catch (err) {
+    return { status: typeof err.status === "number" ? err.status : 1, stdout: err.stdout ?? "" }
+  }
+}
+
+function jsonAt(out, pick) {
+  for (const line of out.split("\n").reverse()) {
+    const t = line.trim()
+    if (!t.startsWith("{")) continue
+    try {
+      return pick(JSON.parse(t))
+    } catch {
+      // keep looking
+    }
+  }
+  return null
 }
 
 /** @param {number | undefined} pid */
@@ -364,6 +394,110 @@ async function main() {
     return
   }
 
+  // fork (ADR 0006 §3): deliver a booked wake into a reborn levy pane.
+  // The seed is the spawner pointer — the levy's host session resumed
+  // from the spawn checkpoint — and the wake message is the pane's
+  // first prompt. Booked on the levy's session trace (the pane belongs
+  // to the levy, not to the spur's Job); the spur records consumption.
+  if (cmd === "fork") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`fork: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      process.exitCode = 2
+      return
+    }
+    if (!job.spawner) {
+      console.error(`fork: ${job.id} is unattended — no levy to fork`)
+      process.exitCode = 2
+      return
+    }
+    const wakePath = join(job.dir, "wake.json")
+    if (!existsSync(wakePath)) {
+      console.error(`fork: ${job.id} has no booked wake (state ${job.state}) — only a finished or parked spur wakes its levy`)
+      process.exitCode = 2
+      return
+    }
+    let wake
+    try {
+      wake = JSON.parse(readFileSync(wakePath, "utf8"))
+    } catch (err) {
+      console.error(`fork: wake.json unreadable (${err instanceof Error ? err.message : String(err)})`)
+      process.exitCode = 1
+      return
+    }
+    const seed = forkSeedOf(job)
+    const seedFile = seedSessionFile(job.spawner)
+    const admission = admitFork({
+      seed: { ...job.spawner, ...(seedFile ? { session_file: seedFile } : {}) },
+      fileExists: (p) => existsSync(p),
+    })
+    if (!admission.admit) {
+      console.error(`fork: the seed does not resolve — ${admission.why}`)
+      console.error(`fork: the durable wake stays at ${wakePath}`)
+      process.exitCode = 1
+      return
+    }
+    const { session, created } = findOrOpenSession({
+      cwd: job.dir,
+      host: { tool: job.spawner.tool, session_id: job.spawner.session_id },
+    })
+    const label = `fork-${job.id}`
+    const cwd = session.cwd || job.dir
+    // the pane: a fresh tab holding one shell for the reborn levy
+    const tabLabel = `whl-fork-${job.id}`.slice(0, 40)
+    const tab = herdrAt(["tab", "create", "--label", tabLabel, "--cwd", cwd, "--no-focus"])
+    const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+    if (!root) {
+      console.error(`fork: could not open a pane (herdr rc=${tab.status}) — the durable wake stays at ${wakePath}`)
+      process.exitCode = 1
+      return
+    }
+    const split = herdrAt(["pane", "split", "--pane", root, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
+    const shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
+    if (root) herdrAt(["pane", "close", root])
+    if (!shell) {
+      console.error(`fork: pane split failed — the durable wake stays at ${wakePath}`)
+      process.exitCode = 1
+      return
+    }
+    const start = herdrAt([
+      "agent", "start", label, "--kind", job.spawner.tool, "--pane", shell,
+      "--timeout", "60000", "--", "--session", job.spawner.session_id,
+    ])
+    if (start.status !== 0) {
+      herdrAt(["pane", "close", shell])
+      console.error(`fork: agent start failed (rc=${start.status}) — the durable wake stays at ${wakePath}`)
+      process.exitCode = 1
+      return
+    }
+    appendEvent(session.id, {
+      actor: "levy",
+      kind: "pane.born",
+      label,
+      pane: shell,
+      parent: "levy",
+      seed,
+      fork_of: job.id,
+    })
+    const text = forkPrompt({ wake, seed, jid: job.id })
+    const prompt = herdrAt(["agent", "prompt", label, text])
+    console.log(`fork: ${label} born in tab ${tabLabel}${created ? " (levy session opened)" : ""}`)
+    console.log(`session: ${job.spawner.tool}:${job.spawner.session_id} resumed from ${job.spawner.since}`)
+    console.log(`wake: ${wake.message}`)
+    if (prompt.status !== 0) {
+      console.error(`fork: the wake prompt did not land (rc=${prompt.status}) — re-prompt it:`)
+      console.error(`  herdr agent prompt ${label} '${wake.message}'`)
+      return
+    }
+    const at = new Date().toISOString()
+    job.consumed = { at, via: "fork", label, pane: shell }
+    saveJob(job)
+    appendEvent(job.sid, { actor: "levy", kind: "wake.consumed", jid: job.id, via: "fork", label })
+    console.log(`trace: ${eventsPath(session.id)}`)
+    return
+  }
+
   if (cmd === "abort") {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
@@ -404,7 +538,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | promote <jid>")
+  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | fork <jid> | promote <jid>")
   process.exitCode = 2
 }
 

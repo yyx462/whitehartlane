@@ -98,8 +98,11 @@ export type JobRecord = {
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
   spawner?: SpawnerPointer
-  woke?: { at: string; message: string }
+  woke?: { at: string; message: string; delivery?: WakeDelivery; to?: string }
   promoted?: { at: string; note: string }
+  // ADR 0006 §3 — a fork delivered the booked wake into a reborn levy
+  // pane; the wake is consumed, not re-delivered.
+  consumed?: { at: string; via: "fork"; label: string; pane?: string }
 }
 
 // ADR 0006: the levy — the main agent that stood the Job up, booked at spawn.
@@ -330,14 +333,30 @@ export function killPane(job: JobRecord, label: string): JobRecord {
   return job
 }
 
-// ADR 0006 — the end-of-job wake: exactly one message to the First
-// Mate that stood the Job up ("spur for task X done — report at …").
+// ADR 0006 — the end-of-job wake: exactly one message to the levy
+// that stood the Job up ("spur for task X done — report at …").
 // Layered delivery: wake.json on the job dir (durable), one job.woke
-// trace event, `woke` on the record as the once-guard, and a
-// best-effort doorbell through the machine's notify CLI. A failed or
-// absent doorbell never fails the booking. No spawner -> no wake (the
-// Job is unattended, nothing to tell).
-export function wakeFirstMate(job: JobRecord, outcome: string, report: string | null): JobRecord {
+// trace event, `woke` on the record as the once-guard, then — in
+// order — an in-band prompt to a live pane holding the spawner's host
+// session (a pane levy: the wake lands in its conversation), the
+// machine's notify CLI doorbell as fallback (best-effort; AGENTIC_OS_NOTIFY=0
+// or absence disables), and the durable record waiting for `whl fork`.
+// No spawner -> no wake (the Job is unattended, nothing to tell).
+export type WakeDelivery = "pane" | "doorbell" | "queued"
+
+export type WakePort = {
+  // prompt a live pane (herdr agent prompt <label>); false = not live
+  promptPane?: (label: string, message: string) => boolean
+  // the doorbell fallback (notify CLI)
+  notify?: (message: string) => void
+}
+
+export function wakeFirstMate(
+  job: JobRecord,
+  outcome: string,
+  report: string | null,
+  port: WakePort = {},
+): JobRecord {
   if (!job.spawner || job.woke) return job
   const at = new Date().toISOString()
   const where = report ?? join(job.dir, "report.json")
@@ -357,18 +376,89 @@ export function wakeFirstMate(job: JobRecord, outcome: string, report: string | 
   } catch {
     /* the trace event below still books the wake */
   }
-  job.woke = { at, message }
+  // delivery 1: in-band — a live pane of a running Job holds the
+  // spawner's host session (spurs may nest; the wake goes to the
+  // pointer regardless)
+  let delivery: WakeDelivery = "queued"
+  let to: string | undefined
+  const promptPane =
+    port.promptPane ??
+    ((label, text) => {
+      try {
+        return spawnSync("herdr", ["agent", "prompt", label, text], { timeout: 30_000 }).status === 0
+      } catch {
+        return false
+      }
+    })
+  const holder = findLivePaneForSpawner(job.spawner.session_id, job.id)
+  if (holder && promptPane(holder.label, `[wake] ${message}`)) {
+    delivery = "pane"
+    to = holder.label
+  }
+  // delivery 2 (fallback): the doorbell — the levy is a chat a person
+  // holds, or no live pane took the prompt
+  if (delivery !== "pane") {
+    const notify =
+      port.notify ??
+      ((text) => {
+        const cli = join(homedir(), ".local", "bin", "notify")
+        if (process.env.AGENTIC_OS_NOTIFY !== "0" && existsSync(cli)) {
+          try {
+            spawnSync(cli, [text], { timeout: 5000, stdio: "ignore" })
+          } catch {
+            /* doorbell is best effort */
+          }
+        }
+      })
+    notify(message)
+    delivery = "doorbell"
+    const rang =
+      port.notify !== undefined ||
+      (process.env.AGENTIC_OS_NOTIFY !== "0" && existsSync(join(homedir(), ".local", "bin", "notify")))
+    if (!rang) delivery = "queued"
+  }
+  job.woke = { at, message, delivery, ...(to ? { to } : {}) }
   saveJob(job)
-  appendEvent(job.sid, { actor: "rail", kind: "job.woke", jid: job.id, message, report: where })
-  const notify = join(homedir(), ".local", "bin", "notify")
-  if (process.env.AGENTIC_OS_NOTIFY !== "0" && existsSync(notify)) {
-    try {
-      spawnSync(notify, [message], { timeout: 5000, stdio: "ignore" })
-    } catch {
-      /* doorbell is best effort */
+  appendEvent(job.sid, {
+    actor: "rail",
+    kind: "job.woke",
+    jid: job.id,
+    message,
+    report: where,
+    delivery,
+    ...(to ? { to } : {}),
+  })
+  return job
+}
+
+// The panes that could hold a spawner's host session: live records of
+// running Jobs (a finished Job retires its panes; a died record is
+// not live). The waking Job itself never holds its own levy.
+export function findLivePaneForSpawner(
+  sessionId: string,
+  exceptJid?: string,
+): { label: string; jid: string } | null {
+  for (const other of listJobs()) {
+    if (other.id === exceptJid || other.state !== "running") continue
+    for (const pane of other.panes) {
+      if (pane.died === undefined && pane.transcript?.session_id === sessionId) {
+        return { label: pane.label, jid: other.id }
+      }
     }
   }
-  return job
+  return null
+}
+
+// Booked wait (ADR 0006): the host sessions that running Jobs name as
+// their spawner. A pane whose booked session is in this set is idle
+// for a reason — its child spur holds the ball — so the rails stand
+// down their stall and nudge clocks while the child runs.
+export function liveSpawnerSessionIds(): Set<string> {
+  const ids = new Set<string>()
+  for (const job of listJobs()) {
+    if (job.state === "running" && job.spawner) ids.add(job.spawner.session_id)
+  }
+  return ids
 }
 
 export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): JobRecord {
@@ -527,6 +617,8 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
         panesRemaining: Number(e.panesRemaining ?? 0),
         at: e.ts,
       }
+    } else if (e.kind === "wake.consumed") {
+      job.consumed = { at: e.ts, via: "fork", label: String(e.label ?? "") }
     } else if (e.kind === "job.relaunched") {
       // historical: relaunch was absorbed into continue (ADR 5, M3) —
       // old traces still replay
