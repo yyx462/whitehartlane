@@ -1,0 +1,17 @@
+[workflow]
+name = "ui-theme"
+dag_id = "ui-theme"
+kind = "coworker"
+worker_kind = "opencode"
+
+[members.styler]
+model = "zai-coding-plan/glm-5.3"
+initiates = true
+
+[members.reviewer]
+model = "zai-coding-plan/glm-5.3"
+
+[hooks]
+units = "true"
+grade = "true"
+counts = "node hooks/counts.mjs"
