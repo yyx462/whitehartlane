@@ -59,9 +59,14 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   persistence is the asserted need, covering the judge's misses;
   hard-deny never escalates. The Rail applies the verdict (dialog
   cleared, message injected, root made durable on allow), books a
-  `permission` event, and caps the asks — over `PERMISSION_CAP` (6)
-  the worker is done: fan-out settles the unit blocked, coworker ends
-  the member, lab answers before waking the orchestrator pane.
+  `permission` event, and caps the DENIES — over `PERMISSION_CAP` (6)
+  deny-family answers the worker is done (allows spend nothing: a
+  working member touching legitimately-needed outside-roots paths
+  must not die at the cap). Fan-out settles the unit blocked,
+  coworker ends the member, lab answers before waking the
+  orchestrator pane. Members may also pre-declare external roots in
+  `workflow.toml` (`roots = ["~/.vista"]` under `[members.<name>]`) —
+  granted at session start, those dialogs never fire at all.
   With this, worker permissions are restrictive by default: no
   dialog ever waits for a person — in every workflow, not just
   coworker.
