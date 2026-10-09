@@ -61,7 +61,12 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   cleared, message injected, root made durable on allow), books a
   `permission` event, and caps the asks — over `PERMISSION_CAP` (6)
   the worker is done: fan-out settles the unit blocked, coworker ends
-  the member, lab answers before waking the orchestrator pane.
+  the member, lab settles the mock blocked. No mind is woken anywhere:
+  a workflow earns an agent pane only when a runtime judgment is
+  needed that no typed gate can hold AND its output has a consumed
+  channel — no workflow passes (the actor's `protocol.json` is the
+  one consumed judgment channel). The lane pane in every workflow is
+  the engine's log viewer.
   With this, worker permissions are restrictive by default: no
   dialog ever waits for a person — in every workflow, not just
   coworker.

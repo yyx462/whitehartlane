@@ -17,7 +17,6 @@ import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
 import { decidePermission, escalateOnRepeat, PERMISSION_CAP, tunedPermissionJudge, type PermissionJudge } from "./permission.ts"
-import { orchestratorBrief } from "./roles.ts"
 import type { Report } from "./report.ts"
 import {
   abortJob as abortJobRec,
@@ -629,16 +628,9 @@ export class Rail implements ShepPort {
   }
 
   tailPane(logPath: string): boolean {
-    // a live lab births the orchestrator pane itself — it is a mind,
-    // not a log viewer (roles.ts)
-    if (this.layout.tab === "new" && this.viewerPane && this.liveWorkflow()) {
-      mkdirSync(join(this.taskDir, "briefs"), { recursive: true })
-      const briefPath = join(this.taskDir, "briefs", "orch-lane.md")
-      writeFileSync(briefPath, orchestratorBrief())
-      const ok = this.inhabitPane("orch-lane", "pi", this.viewerPane, briefPath, this.taskDir)
-      this.log(ok ? `orchestrator pane born (fleet tab pane ${this.viewerPane})` : "orchestrator pane failed")
-      return ok
-    }
+    // No mind rides the lane pane anymore: every workflow's lane pane
+    // is the engine's log viewer (the only consumed judgment channel
+    // in a lab is the actor's protocol.json)
     if (this.layout.tab === "new" && this.viewerPane) {
       const child = spawn("herdr", ["pane", "run", this.viewerPane, "tail", "-n", "+1", "-F", logPath], {
         detached: true,

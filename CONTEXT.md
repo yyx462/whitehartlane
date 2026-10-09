@@ -81,8 +81,8 @@ An opencode or pi agent running in a pane. It does a unit of work. It does not o
 _Avoid_: orchestrator, subagent, pane, front door
 
 **Orchestrator**:
-The live pane that watches the pane ledger. It knows its name. It wakes when a pane is blocked. It does not write a Protocol, and it does not call shep.
-_Avoid_: actor, babysitter, operator, front door, shepherd, worker
+The deterministic engine that runs a workflow's loop — the `Rail` plus the workflow's runner (fan-out, lab, coworker). A detached process, never a pane and never an agent: runtime judgment sits in typed gates (jev) or in consumed protocols (the actor's `Protocol`). A workflow earns a mind only when a runtime judgment is needed that no typed gate can hold AND its output has a consumed channel — no workflow passes today.
+_Avoid_: mind, agent, actor, babysitter, operator, front door, shepherd, worker
 
 **Actor**:
 The live pane that holds the Host session. It looks at the skill, writes prototypes, and writes the Protocol. It does not call shep.
