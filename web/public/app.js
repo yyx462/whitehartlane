@@ -2303,34 +2303,39 @@ async function triggerDag(pid, dagId, btns) {
   tick();
 }
 
-// ----- run ops: pause / abort / continue -----
+// ----- run ops: pause / abort / continue / delete -----
 
-// the two op buttons for one run, driven by its mapped status:
-// running -> Pause+Abort · paused -> Resume+Abort · aborted|orphaned ->
-// Continue+Abort (both parks rebirth the same way)
-// retired (success/failed) -> both present, disabled and greyed (parked, not broken)
+// the op buttons for one run, driven by its mapped status:
+// running -> Pause+Abort (the only state where both are live) · the
+// parks (paused|aborted|orphaned) -> Continue+Delete — Delete is the
+// "I no longer need this spur" exit, its files leave the disk ·
+// retired (success|failed) -> Delete alone (no dead buttons parked)
 function opsButtonsHtml(st, sid, jid) {
   const key = `${sid}/${jid}`;
   const busy = state.opsBusy[key];
+  const running = st === "running";
   const retired = st === "success" || st === "failed";
-  const slot = st === "running" ? ["pause", "Pause"]
+  const slot = running ? ["pause", "Pause"]
     : st === "paused" ? ["continue", "Resume"]
     : ["continue", "Continue"];
-  const dis = retired || busy ? " disabled" : "";
+  const dis = busy ? " disabled" : "";
   const titles = {
     pause: "drains to a unit boundary, then parks",
     abort: "kills now — booked sessions survive; a Continue can bring it back",
     continue: "resumes from booked sessions",
+    delete: "removes this spur's files from disk for good — not revertable",
   };
-  const pTitle = retired ? "retired — parked" : titles[slot[0]];
-  const aTitle = retired ? "retired — parked" : titles.abort;
+  const pTitle = titles[slot[0]];
   const pLabel = busy && slot[0] === "pause" ? "Pausing…"
     : busy && slot[0] === "continue" ? "Continuing…" : slot[1];
-  const aLabel = busy ? "Aborting…" : "Abort";
-  return `<span class="ops-pair">` +
-    `<button class="btn ops${retired ? " retired" : ""}" data-ops="${slot[0]}" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(pTitle)}">${pLabel}</button>` +
-    `<button class="btn ops danger${retired ? " retired" : ""}" data-ops="abort" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(aTitle)}">${aLabel}</button>` +
-    `</span>`;
+  const dLabel = busy === "delete" ? "Deleting…" : "Delete";
+  const pBtn = `<button class="btn ops" data-ops="${slot[0]}" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(pTitle)}">${pLabel}</button>`;
+  const aBtn = `<button class="btn ops danger" data-ops="abort" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.abort)}">${busy ? "Aborting…" : "Abort"}</button>`;
+  const dBtn = `<button class="btn ops danger" data-ops="delete" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.delete)}">${dLabel}</button>`;
+  const buttons = running ? pBtn + aBtn
+    : retired ? dBtn
+    : pBtn + dBtn;
+  return `<span class="ops-pair">${buttons}</span>`;
 }
 
 // repaint whatever surface is currently showing op buttons so a busy
@@ -2340,15 +2345,78 @@ function repaintOps() {
   if (state.split) renderRightHead();
 }
 
+// ----- confirm box: centered modal, not the browser's corner dialog -----
+
+// resolves true/false. danger=true gets the loud treatment (red title,
+// warning strip, Cancel focused — Enter must be a deliberate second
+// click, never a reflex), and the delete verb leans on exactly that.
+function confirmBox(opts) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = `cf-overlay${opts.danger ? " danger" : ""}`;
+    overlay.innerHTML = `
+      <div class="cf-box" role="dialog" aria-modal="true" aria-label="${esc(opts.title || "confirm")}">
+        <div class="cf-title">${esc(opts.title || "Confirm")}</div>
+        <div class="cf-body">${esc(opts.body || "")}</div>
+        ${opts.warn ? `<div class="cf-warn">${esc(opts.warn)}</div>` : ""}
+        <div class="cf-row">
+          <span class="grow"></span>
+          <button class="btn ghost" data-cf="no">Cancel</button>
+          <button class="btn${opts.danger ? " danger" : " primary"}" data-cf="yes">${esc(opts.confirmLabel || "Confirm")}</button>
+        </div>
+      </div>`;
+    const done = (v) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(false);
+    };
+    overlay.addEventListener("pointerdown", (e) => {
+      if (e.target === overlay) done(false); // click on the dim = cancel
+    });
+    overlay.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const b = e.target.closest("[data-cf]");
+      if (b) done(b.dataset.cf === "yes");
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    $(`.cf-box [data-cf="${opts.danger ? "no" : "yes"}"]`, overlay).focus();
+  });
+}
+
 const OPS_CONFIRMS = {
-  pause: (jid) => `Pause run ${jid}? It drains to a unit boundary, then parks.`,
-  abort: (jid) => `Abort run ${jid}? Kills now — booked sessions survive; a Continue can bring it back.`,
-  continue: (jid) => `Continue run ${jid}? It resumes from booked sessions.`,
+  pause: (jid) => ({
+    title: "Pause run",
+    body: `Pause run ${jid}? It drains to a unit boundary, then parks.`,
+    confirmLabel: "Pause",
+  }),
+  abort: (jid) => ({
+    title: "Abort run",
+    body: `Abort run ${jid}? Kills now — booked sessions survive; a Continue can bring it back.`,
+    confirmLabel: "Abort",
+    danger: true,
+  }),
+  continue: (jid) => ({
+    title: "Continue run",
+    body: `Continue run ${jid}? It resumes from booked sessions.`,
+    confirmLabel: "Continue",
+  }),
+  delete: (jid) => ({
+    title: "Delete spur",
+    body: `Delete spur ${jid}? Its files leave the disk — the job record, the staged program, the report, the booked sessions.`,
+    warn: "This changes the disk and cannot be undone.",
+    confirmLabel: "Delete",
+    danger: true,
+  }),
 };
 
 async function runOps(verb, sid, jid) {
-  if (!OPS_CONFIRMS[verb]) return;
-  if (!confirm(OPS_CONFIRMS[verb](jid))) return;
+  const cf = OPS_CONFIRMS[verb] && OPS_CONFIRMS[verb](jid);
+  if (!cf) return;
+  if (!await confirmBox(cf)) return;
   const key = `${sid}/${jid}`;
   state.opsBusy[key] = verb;
   repaintOps();
@@ -2360,8 +2428,14 @@ async function runOps(verb, sid, jid) {
     });
     const head = verb === "pause" ? "pause signalled — it drains to a boundary, then the row flips to paused"
       : verb === "abort" ? "abort signalled"
-      : "continue signalled";
-    showToast([head, ...(res.lines || [])].filter(Boolean).join("\n"), "ok");
+      : verb === "continue" ? "continue signalled"
+      : "deleted — the spur's files are gone";
+    const lines = res.lines || (verb === "delete" ? res.removed : []);
+    showToast([head, ...lines].filter(Boolean).join("\n"), "ok");
+    if (verb === "delete") {
+      // the open panes may be showing the run that just vanished
+      if (state.split && state.split.route.run === key) setHash(splitHref({ run: null }));
+    }
   } catch (err) {
     showToast(`${verb} failed:\n${err.message}`, "err");
   }
