@@ -97,7 +97,7 @@
     color: var(--muted); background: var(--tag-bg); border-radius: 4px; padding: 2px 7px; }
   .tag.call { color: #a371f7; } .tag.plan { color: var(--accent2); } .tag.search { color: var(--teal); }
   .tag.learn { color: #ff7b72; } .tag.act { color: var(--amber); } .tag.shape { color: var(--accent); }
-  .tag.prod { color: #ffa657; } .tag.eco { color: var(--green); }
+  .tag.prod { color: #ffa657; } .tag.eco { color: var(--green); } .tag.infra { color: #d2a8ff; }
   .osline { font-size: 12.5px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
   .osline .k { font: 11px var(--mono); color: var(--teal); letter-spacing: 0.05em; }
   .ask { font-size: 12.5px; margin-top: 8px; color: var(--muted); }
@@ -140,6 +140,7 @@
     <button class="chip" data-c="act">Actions</button>
     <button class="chip" data-c="shape">System shape</button>
     <button class="chip" data-c="prod">Production</button>
+    <button class="chip" data-c="infra">Infra words</button>
     <button class="chip" data-c="eco">Ecosystem</button>
   </div>
   <div class="search">🔎 <input id="q" placeholder="search terms…"><kbd>/</kbd></div>
@@ -266,6 +267,18 @@ const TERMS = [
   {t:"Agent evaluation", c:"prod", d:"Trajectory evals (judge the path, not just the answer), LLM-as-judge, golden tasks, online metrics.", os:"grade/counts are hook commands — the judge is swappable, the report is not", ask:"How do you eval an agent?"},
   {t:"Observability / tracing", c:"prod", d:"Every route, tool call, retry recorded; LangSmith-class tooling.", os:"append-only events.jsonl — 'the single source; all records are projections of it'"},
   {t:"Backpressure", c:"prod", d:"Stop issuing provider calls when the provider refuses or slows; reopen on recovery. Distinct from a static concurrency cap.", os:"exit 75 (provider refusal) → rail pauses new calls, reopens with backoff"},
+  // infra & ops words
+  {t:"Egress / ingress", c:"infra", d:"Data leaving / entering the sandbox over the network. Locking the filesystem while allowing free HTTP is an open door — a jailbroken agent exfiltrates secrets via POST. Egress control = an allow-list of destinations ('outbound may only reach pypi.org and api.openai.com').", ask:"Why is egress part of the sandbox, not just the filesystem?"},
+  {t:"fs / net / secrets contract", c:"infra", d:"The one-page allow-list of what the agent may touch: which folders (fs), which URLs (net), which tokens/env-vars it can even see (secrets). You write it; the sandbox enforces it.", os:"roots.txt + the generated per-worker opencode.json allow-list (src/permission.ts) is exactly this"},
+  {t:"Interface vs implementation level", c:"infra", d:"Knowing a component by what it promises — a Firecracker microVM boots in ~125ms and nothing escapes — vs knowing how it's built inside. App engineers need the former for every tier, the latter for none: drive the car, don't build the engine.", ask:"What level do you know Firecracker at?"},
+  {t:"Threat model", c:"infra", d:"One paragraph: what am I defending against, and from whom? Operator mistakes vs prompt-injected code vs a skilled adversary. That paragraph alone picks the isolation tier.", os:"the standing bet: the threat is mistakes, not adversaries — capability scoping, not VMs"},
+  {t:"Blast radius", c:"infra", d:"How much damage if it goes wrong: one file, the repo, the whole cloud account. Sandboxes exist to shrink this. Senior signal: sandboxes that arrive before the threat kills velocity; after, it kills trust.", os:"staged run dir + roots scoping + one Job per session shrink it"},
+  {t:"Host mount", c:"infra", d:"A container with a folder of the real machine wired into it (docker -v $HOME:/home). The classic red flag: bad code 'inside' reaches your actual files."},
+  {t:"Multi-tenant", c:"infra", d:"One shared system serving many customers who must never see each other's data; forces the strongest isolation tier."},
+  {t:"Retention (policy)", c:"infra", d:"How long logs, transcripts, artifacts are kept before deletion. Transcripts quietly accumulate secrets — the encrypted-reasoning leak was at heart a retention problem."},
+  {t:"Data residency", c:"infra", d:"The legal rule about which country data may live in ('EU data stays in EU regions'). Compliance bullet, not a technical choice."},
+  {t:"Managed service", c:"infra", d:"Someone else runs it; you call its API (E2B, Modal, Fly). 'Buy isolation, never build it' — rolling your own is a platform team's project."},
+  {t:"Isolation tier", c:"infra", d:"Which rung of the ladder you picked: allow-list → syscall filter → container → gVisor → microVM → VM. Tradeoff axes: strength, startup latency, cost, fidelity."},
   // ecosystem
   {t:"LangGraph", c:"eco", d:"Graph/state-machine agent runtime: explicit edges, checkpointing, HITL primitives. The safest framework bet on 2026 JDs.", os:"positioning contrast: LangGraph gives you the graph runtime; this OS gives you the rails + panes + trace around whatever runtime you run"},
   {t:"CrewAI", c:"eco", d:"Role-based crews (agent-as-teammate metaphor). Fast prototyping, less control."},
@@ -276,7 +289,7 @@ const TERMS = [
   {t:"Airflow", c:"eco", d:"The DAG scheduler everyone knows — and the contrast case: deterministic scheduler, human-authored DAGs. The gap this OS fills: agent-planned DAGs.", os:"agentic-os is 'Airflow on agents' where the DAG can be written by an agent (ADR 0004)"},
 ];
 
-const CL = {call:"one call", plan:"control flow", search:"search", learn:"learning", act:"actions", shape:"system shape", prod:"production", eco:"ecosystem"};
+const CL = {call:"one call", plan:"control flow", search:"search", learn:"learning", act:"actions", shape:"system shape", prod:"production", infra:"infra & ops", eco:"ecosystem"};
 const grid = document.getElementById("grid"), count = document.getElementById("count");
 let filter = "all", query = "";
 
