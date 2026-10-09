@@ -36,12 +36,12 @@ Example: skill-rsi.
 _Avoid_: workflow, Job, scheduler, pipeline, project
 
 **Project**:
-The namespace a dag_id is unique in. A pid minted once, kept in `project.json` inside the program folder and indexed on the OS disk. Worktrees and clones copy the file, so runs combine under one group wherever the folder lives — no warning, by design. Paths are never identity; move the folder, the trace continues. Git is never required.
+The namespace a spur id is unique in. A pid minted once, kept in `project.json` inside the program folder and indexed on the OS disk. Worktrees and clones copy the file, so runs combine under one group wherever the folder lives — no warning, by design. Paths are never identity; move the folder, the trace continues. Git is never required.
 _Avoid_: repo, worktree, folder path, git origin
 
-**Dag id**:
-The group runs gather under, unique inside its Project. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the dag identity: project, dag_id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify.
-_Avoid_: workflow name collision, run id, Job id, tag
+**Spur id**:
+The group runs gather under, unique inside its Project — a branch line off the main track: it stands up, runs to completion, and reports back while the main session carries on. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the spur identity: project, the id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify. The word is `spur` everywhere a human reads; `dag`/`dag_id` remain the historical key spelling on disk, in `workflow.toml`, and on the API — a format, never the word.
+_Avoid_: workflow name collision, run id, Job id, tag, dag, loop
 
 **Workflow**:
 A component that receives an input and has an orchestrator. The index is `workflow.toml`: it names the hook commands. It is not the loop. Fan-out and Coworker must produce a report. Direct must not finish. A project fills hooks. A project does not skip the report, and it does not draw a graph.
