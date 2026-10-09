@@ -117,7 +117,7 @@ The workflow for one worker. That worker is the chat the user already has open. 
 _Avoid_: single agent, dummy workflow, fallback, hidden retry script
 
 **Rail**:
-Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, backpressure, and the retry cap. Not the orchestrator's method. Not the layout.
+Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, backpressure, the retry cap, and privilege control (the permission sweep). One implementation: the `Rail` in `src/rail.ts` — the bins are thin entries. Not the orchestrator's method. Not the layout.
 _Avoid_: watcher, operator, script
 
 **Hook**:
