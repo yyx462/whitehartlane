@@ -34,9 +34,9 @@ export type ShepPort = {
   // permission dialog, the rail answers it before the stall timer
   // kills the unit. paneBlocked reports the dialog; answerPermission
   // resolves it — "allow"/"deny" (answered; the worker carries on),
-  // "none" (no dialog after all), or "capped" (ask cap hit — the
-  // caller settles the unit like a block). Both optional: absent
-  // ports keep the pre-permission behavior.
+  // "none" (no dialog after all), or "capped" (deny cap hit — the
+  // caller settles the unit like a block. Allows are free). Both
+  // optional: absent ports keep the pre-permission behavior.
   paneBlocked?: (name: string) => boolean
   answerPermission?: (name: string) => "allow" | "deny" | "capped" | "none"
 }
@@ -321,7 +321,7 @@ export function cycle(deps: CycleDeps): boolean {
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", `permission ask cap (${PERMISSION_CAP}) hit`)
+        deps.shep.wake(id, "blocked", `permission deny cap (${PERMISSION_CAP}) hit`)
       } else if (verdict !== "none") {
         // answered — an injected verdict is progress; the stall clock resets
         flight.lastChange = now()

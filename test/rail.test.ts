@@ -49,6 +49,8 @@ function makeRail(opts: {
   term?: string
   promptFails?: number
   judge?: (input: { path: string; ask: string; context?: string }) => number
+  logs?: string[]
+  failSub?: string
 }) {
   const calls: Call[] = []
   const blocked = new Set(opts.blocked ?? [])
@@ -69,6 +71,9 @@ function makeRail(opts: {
       }
       return { status: 0, stdout: "" }
     }
+    if (opts.failSub && args[0] === "agent" && args[1] === opts.failSub) {
+      return { status: 1, stdout: "" }
+    }
     return { status: 0, stdout: "" }
   }
   const shepRunner = (args: string[]): RunnerResult => {
@@ -79,7 +84,7 @@ function makeRail(opts: {
     argvDir: opts.taskDir,
     ledger: fakeLedger() as RailLedger,
     judge: opts.judge,
-    log: () => {},
+    log: opts.logs ? (msg) => opts.logs!.push(msg) : () => {},
     shepRunner,
     herdrRunner,
   })
@@ -155,14 +160,14 @@ test("a gray-zone path is denied, then a repeated ask escalates to allow", async
   assert.equal(enter.length, 1, "enter sent exactly once — on the escalation")
 })
 
-test(`the ask cap (${PERMISSION_CAP}) ends in "capped" and the caller settles`, async () => {
+test(`a deny pattern ends in "capped" at ${PERMISSION_CAP} denies and the caller settles`, async () => {
   const taskDir = await mkdtemp(join(tmpdir(), "rail-cap-"))
   const briefPath = join(taskDir, "brief.md")
   await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "wandering worker", "utf8"))
+  // a hard-deny re-ask loop: same secret every time, never escalates
   const one = makeRail({
     taskDir,
-    term: askFor(`/Users/tester/elsewhere/file.txt`),
-    judge: () => 0,
+    term: askFor(`/Users/tester/.ssh/id_rsa`),
   })
   assert.equal(one.rail.spawnWorker("w-egypt", "opencode", briefPath, taskDir), true)
   const label = one.rail.scopedName("w-egypt")
@@ -175,6 +180,49 @@ test(`the ask cap (${PERMISSION_CAP}) ends in "capped" and the caller settles`, 
   assert.equal(last, "capped")
   const ledger = one.rail.ledger as ReturnType<typeof fakeLedger>
   assert.equal(ledger.events.filter((e) => e.kind === "permission").length, PERMISSION_CAP)
+})
+
+test("allows never spend the cap — a needed outside-roots path is work, not wandering", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-allow-cap-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) =>
+    fs.writeFile(briefPath, "review the shots with vista", "utf8"))
+  // the j-5b245e shape: a vista reviewer asking for its session shots —
+  // every verdict is allow, past the old cap of 6, and it must live
+  const one = makeRail({
+    taskDir,
+    term: askFor(`/Users/tester/.vista/sessions/abc/views/shot.png`),
+    judge: () => 1, // the judge is certain the path is needed (thresholds are always < 1)
+  })
+  assert.equal(one.rail.spawnWorker("w-spurs", "opencode", briefPath, taskDir), true)
+  const label = one.rail.scopedName("w-spurs")
+  let last = "none"
+  for (let i = 0; i < PERMISSION_CAP + 4; i++) {
+    one.blocked.add(label)
+    last = one.rail.answerPermission("w-spurs")
+  }
+  assert.equal(last, "allow", "ten allows in — still not capped")
+})
+
+test("a failing action call logs its rc; a failing read stays quiet", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-rc-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "brief", "utf8"))
+  mkdirSync(join(taskDir, "sub"), { recursive: true })
+  const logs: string[] = []
+  const one = makeRail({
+    taskDir,
+    term: askFor(`${taskDir}/sub/file.txt`),
+    logs,
+    failSub: "send-keys",
+  })
+  assert.equal(one.rail.spawnWorker("w-ghana", "opencode", briefPath, taskDir), true)
+  const label = one.rail.scopedName("w-ghana")
+  one.blocked.add(label)
+  // send-keys fails (rc=1) — the enter that clears the dialog never
+  // lands; the log must say so instead of swallowing the exit code
+  assert.equal(one.rail.answerPermission("w-ghana"), "allow")
+  assert.ok(logs.some((m) => m.includes("herdr agent send-keys") && m.includes("rc=1")))
 })
 
 test("an unblocked pane answers \"none\" and reads no terminal", async () => {
