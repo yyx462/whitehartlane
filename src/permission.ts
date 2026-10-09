@@ -15,8 +15,11 @@
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
 
-// The ask cap every rail surface shares: a worker may be answered this
-// many times before its blocking is the worker's, not the dialog's.
+// The deny cap every rail surface shares: a worker may be DENIED this
+// many dialogs before its blocking is the worker's, not the dialog's.
+// Allows are free — a jev-blessed need (a vista job reading its
+// session shots) is work, not wandering; only a deny pattern (wandering
+// asks, or a hard-deny re-ask loop) spends the cap.
 export const PERMISSION_CAP = 6
 
 export type PermissionDecision = {
