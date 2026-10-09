@@ -1,9 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>agentic-os · spurs</title>
+    <script>
+      // theme before first paint — no flash of wrong theme
+      (function () {
+        try {
+          var t = localStorage.getItem("agentic-os-theme");
+          if (t !== "light" && t !== "dark") t = "dark";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) { /* stay dark */ }
+      })();
+    </script>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -25,6 +36,7 @@
         <a href="#/spur-runs" data-subnav="spur-runs">Spur Runs</a>
       </nav>
       <div class="nav-right">
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle color theme">Dark</button>
         <span id="refresh-note" class="muted" title="auto-refresh interval">5s</span>
         <span id="clock" class="muted mono"></span>
       </div>
