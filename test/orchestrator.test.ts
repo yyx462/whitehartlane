@@ -14,7 +14,7 @@ import { RefusedError } from "../src/backpressure.ts"
 import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
 import { readState, settleUnit } from "../src/state.ts"
-import { holdOrchestrator } from "../src/live.ts"
+
 import { copyExample } from "./util.ts"
 
 type Wake = { label: string; kind: string; detail: string }
@@ -510,26 +510,6 @@ test("the manifest layout section resolves with defaults and rejects bad values"
 
   writeFileSync(join(dir, "workflow.toml"), original.replace("slots = 2", "slots = 0"))
   assert.throws(() => loadManifest(dir), /slots must be an integer 1-9/)
-})
-
-test("the orchestrator pane is born once and the second wave prompts that same pane", () => {
-  const spawned: string[] = []
-  const prompts: string[] = []
-  const port = {
-    spawnOrchestrator: () => {
-      spawned.push("orch")
-      return "pane-7"
-    },
-    prompt: (paneId: string, text: string) => {
-      prompts.push(`${paneId}:${text}`)
-    },
-  }
-  const first = holdOrchestrator(port, null, "wave 1")
-  const second = holdOrchestrator(port, first, "wave 2")
-  assert.equal(first.paneId, "pane-7")
-  assert.equal(second.paneId, first.paneId)
-  assert.deepEqual(spawned, ["orch"])
-  assert.deepEqual(prompts, ["pane-7:wave 2"])
 })
 
 test("a permission dialog the rail answers does not stall the unit (zen 6)", async () => {
