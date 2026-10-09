@@ -1061,8 +1061,15 @@ function drawDiagram(body, defn, dk) {
   });
   const W = Math.max(...nodes.map((n) => pos[n.id].x + 190), 300) + 24;
   const H = Math.max(...nodes.map((n) => pos[n.id].y + 100), 200) + 24;
+  const staleBar = defn.stale ? `
+    <div class="stale-bar" title="${esc(defn.stale.reason)}">
+      <b>source folder gone</b> — showing the staged copy of run <span class="mono">${esc(defn.stale.fromRun)}</span>
+      <span class="muted small">(sid ${esc(defn.stale.fromSid)} · ${esc(defn.stale.runDir)})</span>.
+      This dag cannot be triggered or edited until a live source folder is back: <span class="mono small">${esc(defn.stale.reason)}</span>
+    </div>` : "";
   body.innerHTML = `
-    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · live from the dag source — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}</div>
+    ${staleBar}
+    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}</div>
     <div class="diagram-view">
       ${hooksRailHtml(defn.hooks)}
       <div class="g-canvas" style="width:${W}px;height:${H}px" id="d-canvas">

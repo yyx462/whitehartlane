@@ -574,6 +574,22 @@ td.empty, .empty {
 /* ---------- diagram ---------- */
 .shape-meta { font-size: 11px; color: var(--muted); padding: 2px 2px 8px; word-break: break-all; }
 
+/* the source worktree is gone — this diagram reads a run's staged
+   copy; loud, amber, honest about what still works and what refuses */
+.stale-bar {
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--orphaned);
+  background: color-mix(in srgb, var(--orphaned) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--orphaned) 40%, transparent);
+  border-radius: 7px;
+}
+
+.stale-bar b { color: var(--orphaned); }
+.stale-bar .mono { color: var(--text); }
+
 .diagram-view {
   position: relative;
   overflow: auto;

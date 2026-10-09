@@ -14,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PORT = Number(process.env.PORT || 8787);
 // bind the tailnet by default (Tailscale 100.x reach); set HOST=127.0.0.1 to go local-only
 const HOST = process.env.HOST || "0.0.0.0";
-const OS_ROOT = path.join(process.env.HOME, ".local/share/agentic-os");
+const OS_ROOT = process.env.AGENTIC_OS_ROOT ||
+  path.join(process.env.HOME, ".local/share/agentic-os");
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
@@ -692,6 +693,65 @@ function sourceOf(job, sid, jid) {
   return { sid, jid, runDir, files, hooks };
 }
 
+// v5.2: one definition shape from any program folder — the live SOURCE,
+// or (when the source dangles) a run's staged copy. Same shape either
+// way; the endpoint's `stale` marker is the only difference the caller
+// ever sees.
+async function definitionFromFolder(folder) {
+  const hooks = stagedHooks(folder);
+  const lab = await labGraph(path.join(folder, "dag.mjs"));
+  if (lab) {
+    return {
+      kind: "lab",
+      dagName: lab.dagName,
+      nodes: lab.nodes,
+      edges: lab.edges.map(({ from, to }) => ({ from, to })),
+      hooks,
+      ...(lab.error ? { error: lab.error } : {}),
+    };
+  }
+  const membersDir = path.join(folder, "members");
+  let memberFiles = [];
+  try {
+    memberFiles = fs
+      .readdirSync(membersDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort();
+  } catch {}
+  if (memberFiles.length) {
+    const nodes = memberFiles.map((f) => ({
+      id: f.replace(/\.md$/, ""),
+      does: memberDoes(path.join(membersDir, f)) || "member",
+      brief: memberBrief(path.join(membersDir, f)) || null,
+    }));
+    const edges = [];
+    for (let i = 1; i < nodes.length; i++) {
+      edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
+    }
+    return { kind: "coworker", nodes, edges, hooks };
+  }
+  return null;
+}
+
+// the staged definition of one dag, newest-run-first: sessions/<sid>/
+// jobs/<jid>/run keeps the program bytes the door copied at run time —
+// they outlive the source worktree, so the display never has to dangle
+async function stagedDefinition(g) {
+  for (const r of g.runs || []) {
+    const job = readJson(jobFileOf(r.sid, r.jid));
+    if (!job) continue;
+    const runDir = runDirOf(job, r.sid, r.jid);
+    try {
+      if (!fs.statSync(runDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const def = await definitionFromFolder(runDir);
+    if (def) return { ...def, runDir, sid: r.sid, jid: r.jid };
+  }
+  return null;
+}
+
 // ---- v3: sorting, trigger, program editing -----------------------------
 
 // compare two non-null keys — numbers numerically, strings lexically
@@ -1332,6 +1392,11 @@ async function handleApi(req, res, url) {
   // run's staged copy) — config edits show up immediately. Lab programs:
   // import() the source dag.mjs; coworker programs: members/*.md as nodes
   // with relay chain edges. PLUS hooks from the source workflow.toml.
+  // v5.2: if the source folder is GONE (merged-and-removed worktree, a
+  // moved folder — the dangling-pointer case), fall back READ-ONLY to
+  // the newest run's staged copy and mark it `stale`. Zero writes: the
+  // copies already exist per run. Trigger / run-with-edits / program
+  // edits keep refusing — they act on the source, which is not there.
   let m = pathname.match(/^\/api\/dag-definition\/([^/]+)\/([^/]+)$/);
   if (req.method === "GET" && m) {
     const pid = safeDecode(res, m[1]);
@@ -1340,56 +1405,45 @@ async function handleApi(req, res, url) {
     const g = findDagGroup(pid + "/" + dagId);
     if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
     if (!g.source) return sendError(res, 400, "dag has no source folder");
-    const srcErr = sourceFolderError(g.source);
-    if (srcErr) return sendError(res, 400, srcErr);
     const base = {
       project: g.project,
       dag_id: g.dag_id,
       source: g.source,
     };
-    const hooks = stagedHooks(g.source);
 
-    const lab = await labGraph(path.join(g.source, "dag.mjs"));
-    if (lab) {
+    const srcErr = sourceFolderError(g.source);
+    if (!srcErr) {
+      const def = await definitionFromFolder(g.source);
+      if (def) return sendJson(res, 200, { ...base, ...def });
       return sendJson(res, 200, {
         ...base,
-        kind: "lab",
-        dagName: lab.dagName,
-        nodes: lab.nodes,
-        edges: lab.edges.map(({ from, to }) => ({ from, to })),
-        hooks,
-        ...(lab.error ? { error: lab.error } : {}),
+        kind: g.kind || "none",
+        nodes: [],
+        edges: [],
+        hooks: stagedHooks(g.source),
       });
     }
 
-    const membersDir = path.join(g.source, "members");
-    let memberFiles = [];
-    try {
-      memberFiles = fs
-        .readdirSync(membersDir)
-        .filter((f) => f.endsWith(".md"))
-        .sort();
-    } catch {}
-    if (memberFiles.length) {
-      const nodes = memberFiles.map((f) => ({
-        id: f.replace(/\.md$/, ""),
-        does: memberDoes(path.join(membersDir, f)) || "member",
-        brief: memberBrief(path.join(membersDir, f)) || null,
-      }));
-      const edges = [];
-      for (let i = 1; i < nodes.length; i++) {
-        edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
-      }
-      return sendJson(res, 200, { ...base, kind: "coworker", nodes, edges, hooks });
+    // the source dangles — serve the newest staged copy, marked
+    const staged = await stagedDefinition(g);
+    if (staged) {
+      return sendJson(res, 200, {
+        ...base,
+        kind: staged.kind,
+        dagName: staged.dagName,
+        nodes: staged.nodes,
+        edges: staged.edges,
+        hooks: staged.hooks,
+        ...(staged.error ? { error: staged.error } : {}),
+        stale: {
+          reason: srcErr,
+          fromSid: staged.sid,
+          fromRun: staged.jid,
+          runDir: staged.runDir,
+        },
+      });
     }
-
-    return sendJson(res, 200, {
-      ...base,
-      kind: g.kind || "none",
-      nodes: [],
-      edges: [],
-      hooks,
-    });
+    return sendError(res, 400, srcErr + " — and no run of this dag kept a staged copy");
   }
 
   // v4: the read-only run-dir browser — the run dir's file tree, and

@@ -1,9 +1,11 @@
-# Dangling dag source pointers — a discussion (no implementation)
+# Dangling dag source pointers
 
-Status: OPEN DISCUSSION. Nothing below is implemented on purpose — the
-operator's call for this session was "discussion only, no
-implementation, because it is a dangerous one". This note exists so the
-next session starts from the full picture, not from scratch.
+Status: option 2 **implemented** (v5.2, operator-approved 2026-10-09 —
+"each job is just some text, having a copy is not a problem"; and no
+new copies were even needed). Option 4 (deleting runs/sessions) stays
+parked with its guardrails below. Nothing in this note was implemented
+blindly on the first night — the operator explicitly held it to
+discussion until the storage question was settled.
 
 ## The problem
 
@@ -57,15 +59,17 @@ trace.
 1. **Do nothing (today).** The definition view dies loudly with an
    honest `folder does not exist: …`. Acceptable; ugly.
 
-2. **Read-only fallback for display (the recommended next step, NOT
-   implemented).** When `sourceFolderError(g.source)` fires, fall back
-   to the newest run's staged copy for the definition view, marked
-   `stale: true` with the run's jid and content_hash. The UI shows an
-   amber "source folder gone — showing the staged copy of run j-…" chip;
-   Trigger and Run-with-edits stay disabled with that same sentence.
-   Zero writes, zero deletions, fully reversible. This solves the
-   "dangling display pointer" without storing anything new — the
-   snapshot already exists per run.
+2. **Read-only fallback for display (IMPLEMENTED in v5.2).** When
+   `sourceFolderError(g.source)` fires, `/api/dag-definition` serves the
+   NEWEST run's staged copy marked `stale: {reason, fromSid, fromRun,
+   runDir}`; the UI shows the amber "source folder gone" bar naming the
+   run it is reading. Trigger and Run-with-edits keep refusing with the
+   honest sentence; `/api/program` lists nothing editable and PUTs
+   refuse. Zero writes, zero deletions, fully reversible. Proved by
+   `test/web-definition-fallback.test.ts`: fixture OS disk, dangling
+   source, newest-staged-run-wins, trigger 400, program PUT 400, and a
+   full mtime/size snapshot of the disk identical before/after — the
+   fallback cannot write, and the test says so forever.
 
 3. **Snapshot every source into the OS disk on run** — rejected by the
    operator: too much storage, and it duplicates what the staged run
@@ -93,16 +97,19 @@ trace.
 
 ## The test question ("how can we test it without trying?")
 
-For option 2 (read-only fallback) testing is safe and cheap: a fixture
-OS_ROOT in a tmpdir, a fabricated dag group whose `source` points at a
-deleted folder, assert the fallback definition arrives with `stale: true`
-and that **no file anywhere under the OS_ROOT changed** (mtime/hash
-snapshot before and after the request). That test can run in CI with
-zero risk because the server only ever reads.
+Answered for option 2: `test/web-definition-fallback.test.ts` runs the
+whole server against a fixture `AGENTIC_OS_ROOT` in a tmpdir (env escape
+hatch added for exactly this), fabricates a dag group whose `source`
+points at a deleted folder plus two staged runs, and asserts the
+fallback definition arrives with `stale`, the NEWEST run wins, Trigger
+and program writes refuse, and **no file anywhere under the OS root
+changed** (mtime/size snapshot before and after every request). That
+test runs in the normal suite with zero risk because the server only
+ever reads.
 
-For option 4 there is no such thing as a safe try on the real disk; the
-fixture OS_ROOT is the only honest test bed, and the fixture must
-include the "session holds two jobs, one dangling one live" case.
+For option 4 there is still no such thing as a safe try on the real
+disk; the fixture OS_ROOT is the only honest test bed, and the fixture
+must include the "session holds two jobs, one dangling one live" case.
 
 ## Related facts on disk today
 
