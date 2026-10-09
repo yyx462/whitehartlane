@@ -19,6 +19,7 @@ import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun } from "../src/run.ts"
+import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkPrompt, forkSeedOf } from "../src/fork.ts"
 import { seedSessionFile } from "../src/transcripts.ts"
@@ -67,27 +68,9 @@ function shepStatus() {
   }
 }
 
-function herdrAt(args) {
-  try {
-    const stdout = execFileSync("herdr", args, { encoding: "utf8", timeout: 60_000 })
-    return { status: 0, stdout }
-  } catch (err) {
-    return { status: typeof err.status === "number" ? err.status : 1, stdout: err.stdout ?? "" }
-  }
-}
-
-function jsonAt(out, pick) {
-  for (const line of out.split("\n").reverse()) {
-    const t = line.trim()
-    if (!t.startsWith("{")) continue
-    try {
-      return pick(JSON.parse(t))
-    } catch {
-      // keep looking
-    }
-  }
-  return null
-}
+// the runner seam (src/runners.ts): one place the external CLIs are
+// dialed — shared with the Rail, swappable when the substrate changes
+const herdrAt = defaultRunner("herdr")
 
 /** @param {number | undefined} pid */
 function pidAlive(pid) {

@@ -9,9 +9,9 @@ rewrite rails.
 
 ## Start
 
-`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`.
+`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`. `whl` is the same door for any agent: a thin shim that calls `run` and walks away (ADR 0006).
 
-The chat still stands a Job up itself. That is a second door. It must call `run`. It does not, yet.
+The chat extension is passive now (the stand_up tool, /standup, and --route routing are retired): it binds the conversation's OS session, delivers wakes into the chat, announces orphans, lists Jobs, and caps error-turn retries. Standing up belongs to the doors — `agentic-os run` and `whl` — never to the chat itself.
 
 `run` reads the folder you pass and writes the Job under the session disk. The source is code and config. A run does not write it. Hook commands in the Job dir are absolute paths back to that source. The chat's materialize still copies a hooks folder.
 

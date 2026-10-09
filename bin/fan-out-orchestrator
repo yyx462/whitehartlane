@@ -1,74 +1,60 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// The fan-out rail. Runs detached; its log is the lane pane's content.
+// The fan-out rail door. Runs detached; its log is the lane pane's content.
 // Idle until a queue message: a log line, a pane wait, or the next
 // deadline. No poll. AGENTIC_OS_CHECK_MS is only the watch-failure backstop.
-// Thin entry: the machinery lives in src/rail.ts (Rail), the engine in
-// src/orchestrator.ts (runOrchestrator). Plain JS on purpose: this file
-// has no extension, so Node will not type-strip it. The modules it
-// imports are .ts and strip fine.
+// Thin door: the machinery lives in src/rail.ts (Rail), the engine in
+// src/orchestrator.ts (runOrchestrator), the epilogue in Rail.run.
+// Plain JS on purpose: this file has no extension, so Node will not
+// type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 import { runOrchestrator } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
 
 const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 const rail = new Rail({ argvDir, workflow: "fan-out" })
-const log = rail.log
-const taskDir = rail.taskDir
 const ledger = rail.ledger
 rail.writePermissions() // per-run opencode.json: no external-dir prompts inside this run
+// SIGINT aborts. SIGTERM is the engine's drain — runOrchestrator traps
+// it, drains to a unit boundary, and parks paused (ADR 5). SIGKILL is
+// uncatchable: the abort verb's own.
+rail.trapSignals()
 
-// SIGINT stays an immediate stop (books the abort itself). SIGTERM is
-// the drain — runOrchestrator traps it, drains to a unit boundary, and
-// parks paused (ADR 5). SIGKILL is uncatchable: the abort verb's own.
-for (const sig of ["SIGINT"]) {
-  process.on(sig, () => {
-    ledger?.abort(`signal ${sig}`, rail.mine.size)
-    process.exit(0)
-  })
+// Booked wait (ADR 0006): a unit's pane whose booked session a
+// running child spur names as its spawner is idle on purpose — the
+// stall clock stands down while the child runs. Disk-derived set,
+// memoized briefly so stall checks stay cheap.
+let spawnIdsAt = 0
+let spawnIds = new Set()
+const spawnerSessions = () => {
+  if (Date.now() - spawnIdsAt > 10_000) {
+    spawnIds = liveSpawnerSessionIds()
+    spawnIdsAt = Date.now()
+  }
+  return spawnIds
+}
+const bookedWait = (unitId) => {
+  if (!ledger) return false
+  const pane = ledger.job.panes.find((p) => p.label === rail.scopedName(`w-${unitId}`))
+  const sid = pane?.transcript?.session_id
+  return sid ? spawnerSessions().has(sid) : false
 }
 
-try {
-  const checkMs = Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined
-  const slots = Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined
-  const drainMs = Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined
-  if (rail.liveWorkflow()) {
-    log("refusing: kind lab is bin/lab-orchestrator, not fan-out")
-    process.exit(2)
-  }
+const engine = () => {
   // ADR 5: unfinished units of an earlier generation resume from the
   // pane ledger — the latest pane record per unsettled unit carries the
   // booked session pointer (write-ahead at spawn, session id at birth).
   const resumes = rail.resumesForUnsettled()
   if (resumes.size > 0) {
-    log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
+    rail.log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
   }
-  // Booked wait (ADR 0006): a unit's pane whose booked session a
-  // running child spur names as its spawner is idle on purpose — the
-  // stall clock stands down while the child runs. Disk-derived set,
-  // memoized briefly so stall checks stay cheap.
-  let spawnIdsAt = 0
-  let spawnIds = new Set()
-  const spawnerSessions = () => {
-    if (Date.now() - spawnIdsAt > 10_000) {
-      spawnIds = liveSpawnerSessionIds()
-      spawnIdsAt = Date.now()
-    }
-    return spawnIds
-  }
-  const bookedWait = (unitId) => {
-    if (!ledger) return false
-    const pane = ledger.job.panes.find((p) => p.label === rail.scopedName(`w-${unitId}`))
-    const sid = pane?.transcript?.session_id
-    return sid ? spawnerSessions().has(sid) : false
-  }
-  const report = await runOrchestrator({
-    taskDir,
+  return runOrchestrator({
+    taskDir: rail.taskDir,
     shep: rail,
-    checkMs,
-    slots,
-    drainMs,
+    checkMs: Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined,
+    slots: Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined,
+    drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
     resumes,
     bookedWait,
     emit: (kind, payload) => ledger?.emit(kind, payload),
@@ -76,30 +62,12 @@ try {
     worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
     canary: process.env.AGENTIC_OS_CANARY !== "0",
   })
-  if (!report) {
-    // parked (ADR 5): the rail drained to a boundary and retired its
-    // panes — book the pause; a typed continue brings the Job back.
-    ledger?.pause("drained", ledger.job.panes.filter((p) => p.died === undefined).length)
-    log(`parked: paused — continue with: agentic-os continue ${ledger?.job.id ?? "<jid>"}`)
-    process.exit(0)
-  }
-  log(`done: ${report.status}`)
-  const reap = rail.verify()
-  // zen 5: the receipt counts THIS Job's panes, not the scope's
-  const panesLeft = ledger ? ledger.job.panes.filter((p) => p.died === undefined).length : NaN
-  log(`${reap} (scope); this job: ${panesLeft} of ${ledger?.job.panes.length ?? "?"} panes remain`)
-  ledger?.finish({
-    panesRemaining: panesLeft,
-    panesTotal: ledger.job.panes.length,
-    unitsDone: Number(report.counts?.units ?? NaN),
-    unitsFailed: Number(report.counts?.failed ?? NaN),
-    status: report.status,
-    report: join(taskDir, "report.json"),
-  })
-} catch (err) {
-  log(`fatal: ${err instanceof Error ? err.message : String(err)}`)
-  ledger?.emit("fatal", { why: String(err instanceof Error ? err.message : err) })
-  ledger?.abort(`fatal: ${err instanceof Error ? err.message : String(err)}`, rail.mine.size)
-  rail.wake("fan-out", "blocked", `orchestrator died: ${taskDir}/orchestrator.log`)
-  process.exit(1)
 }
+// a lab-kind run belongs to bin/lab-orchestrator — refuse before any
+// booking (exit 2, no abort: nothing was run)
+if (rail.liveWorkflow()) {
+  rail.log("refusing: kind lab is bin/lab-orchestrator, not fan-out")
+  process.exit(2)
+}
+
+process.exit(await rail.run(engine))
