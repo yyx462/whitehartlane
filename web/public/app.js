@@ -408,9 +408,7 @@ function svgRunsPerDay(days) {
 }
 
 function verColor(v) {
-  let h = 0;
-  for (const c of String(v || "?")) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `hsl(${h} 70% 62%)`;
+  return brandHashColor("v:" + String(v || "?"));
 }
 
 function svgDurationTrend(t) {
@@ -433,7 +431,7 @@ function svgDurationTrend(t) {
   const dots = pts.map((p, i) => {
     const cx = x(i), cy = y(p.durationMs);
     const chipY = i % 2 === 0 ? Math.max(cy - 30, 2) : Math.min(cy + 12, H - 20);
-    return `<circle cx="${cx}" cy="${cy}" r="4.5" class="c-dot ${stOf(p.status)}" stroke="#0b0e14" stroke-width="1.5"><title>${esc(p.jid)} · ${esc(humanAge(p.durationMs))} · ${esc(p.status)} · version ${esc(p.version || "–")}</title></circle>` +
+    return `<circle cx="${cx}" cy="${cy}" r="4.5" class="c-dot ${stOf(p.status)}"><title>${esc(p.jid)} · ${esc(humanAge(p.durationMs))} · ${esc(p.status)} · version ${esc(p.version || "–")}</title></circle>` +
       `<rect x="${cx - 31}" y="${chipY}" width="62" height="15" rx="4" style="fill:${verColor(p.version)}" opacity="0.24"></rect>` +
       `<text x="${cx}" y="${chipY + 11}" text-anchor="middle" class="c-vchip">${esc(String(p.version || "?").slice(0, 7))}</text>` +
       `<text x="${cx}" y="${H - 8}" text-anchor="middle" class="c-xaxis">${esc(String(p.jid || "").replace(/^j-/, ""))}</text>`;
@@ -1091,7 +1089,7 @@ function drawDiagram(body, defn, dk) {
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
           <defs>
             <marker id="d-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f9cf9"></path>
+              <path d="M 0 0 L 10 5 L 0 10 z" class="d-arrow-head"></path>
             </marker>
           </defs>
         </svg>
@@ -1876,30 +1874,57 @@ function splitRunState(key) {
 // detail side — click a row for the full event, a chip (member, pane,
 // message file) to trace WHO said WHAT
 
-const EV_KIND_PALETTE = {
-  "job.born": "#a78bfa",
-  admit: "#38bdf8",
-  "pane.born": "#34d399",
-  "pane.died": "#f87171",
-  relay: "#93c5fd",
-  permission: "#fbbf24",
-  reprompt: "#c4b5fd",
-  "job.retired": "#34d399",
-  "job.aborted": "#f472b6",
-  "job.paused": "#a5b4fc",
-  "job.continued": "#38bdf8",
-  "job.orphaned": "#fbbf24",
-  "job.woke": "#34d399",
+// event kinds map onto the SHARED semantic roles of the active theme —
+// no hex literals, no AI purple; colors are read from the theme's CSS
+// custom properties and re-read whenever the theme switches
+const EV_KIND_ROLES = {
+  "job.born": "--kind",
+  admit: "--accent",
+  "pane.born": "--success",
+  "pane.died": "--danger",
+  relay: "--accent",
+  permission: "--gold",
+  reprompt: "--kind",
+  "job.retired": "--success",
+  "job.aborted": "--danger",
+  "job.paused": "--paused",
+  "job.continued": "--accent",
+  "job.orphaned": "--gold",
+  "job.woke": "--success",
 };
 
-// every event kind gets a color — named kinds by hand, unknown kinds a
-// stable hash so a new kind is still readable at a glance
+const EV_KIND_COLORS = {};
+
+// stable hash → one of a few brand tokens, never a raw rainbow hue:
+// a random hue can be neon purple; these four are on-brand in both
+// themes and re-read whenever the theme switches
+const HASH_ROLES = ["--accent", "--gold", "--kind", "--muted"];
+const HASH_COLORS = {};
+function brandHashColor(key) {
+  const k = String(key || "?");
+  if (HASH_COLORS[k]) return HASH_COLORS[k];
+  let h = 0;
+  for (const c of k) h = (h * 31 + c.charCodeAt(0)) % HASH_ROLES.length;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(HASH_ROLES[h]).trim();
+  HASH_COLORS[k] = v;
+  return v;
+}
+
+function refreshEventColors() {
+  for (const k in HASH_COLORS) delete HASH_COLORS[k];
+  const cs = getComputedStyle(document.documentElement);
+  for (const [kind, token] of Object.entries(EV_KIND_ROLES)) {
+    EV_KIND_COLORS[kind] = cs.getPropertyValue(token).trim();
+  }
+}
+
+// every event kind gets a color — named kinds from the theme tokens,
+// unknown kinds a stable brand hash so a new kind is still readable at a glance
 function kindColor(kind) {
   const key = String(kind || "?");
-  if (EV_KIND_PALETTE[key]) return EV_KIND_PALETTE[key];
-  let h = 0;
-  for (const c of key) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `hsl(${h} 70% 68%)`;
+  if (EV_KIND_COLORS[key]) return EV_KIND_COLORS[key];
+  return brandHashColor(key);
 }
 
 function entChip(type, name, title) {
@@ -2548,6 +2573,31 @@ document.addEventListener("change", onDocChange);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeNodePopup();
 });
+
+// ----- theme switch (Tottenham dark / light) -----
+const THEME_KEY = "agentic-os-theme";
+const themeToggleEl = $("#theme-toggle");
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch { /* private mode */ }
+  if (themeToggleEl) themeToggleEl.textContent = t === "light" ? "Light" : "Dark";
+  refreshEventColors();
+  // inline SVG/HTML colors were baked at render time — redraw the view
+  onRoute();
+}
+
+if (themeToggleEl) {
+  themeToggleEl.textContent = currentTheme() === "light" ? "Light" : "Dark";
+  themeToggleEl.addEventListener("click", () => {
+    applyTheme(currentTheme() === "light" ? "dark" : "light");
+  });
+}
+refreshEventColors();
 
 function updateClock() {
   clockEl.textContent = new Date().toLocaleTimeString();
