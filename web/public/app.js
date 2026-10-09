@@ -1659,7 +1659,7 @@ function receiptBodyHtml() {
   }
   if (job.woke) {
     outcome += `
-      <dt>woke First Mate</dt><dd class="ok" title="ADR 0006: exactly one end-of-job message">${esc(job.woke.message)} <span class="muted small">· ${esc(fmtTs(job.woke.at))}</span></dd>`;
+      <dt>woke the levy</dt><dd class="ok" title="ADR 0006: exactly one end-of-job message">${esc(job.woke.message)} <span class="muted small">· ${esc(fmtTs(job.woke.at))}</span></dd>`;
   }
   if (job.spawner) {
     outcome += `

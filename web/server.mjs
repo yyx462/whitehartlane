@@ -249,7 +249,7 @@ function flattenJob(job) {
       })),
     },
     receipt: job.receipt || null, // {panesRemaining,panesTotal,unitsDone,unitsFailed,status,report,finished}
-    spawner: job.spawner || null, // ADR 0006: {tool,session_id,since} — the First Mate checkpoint
+    spawner: job.spawner || null, // ADR 0006: {tool,session_id,since} — the levy checkpoint
     woke: job.woke || null, // ADR 0006: {at,message} — the end-of-job wake, booked once
     abort: job.abort
       ? { ...job.abort, actor: verbActorOf(job, "job.aborted") } // {reason,panesRemaining,finished,actor}
