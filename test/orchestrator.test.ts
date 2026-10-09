@@ -569,5 +569,5 @@ test("a worker past the permission cap settles blocked with a wake that says so"
   assert.deepEqual(readState(dir).failed, ["france"])
   assert.deepEqual(shep.retired, ["w-france"])
   assert.equal(shep.wakes.length, 1)
-  assert.match(shep.wakes[0]!.detail, /permission ask cap/)
+  assert.match(shep.wakes[0]!.detail, /permission deny cap/)
 })

@@ -118,3 +118,62 @@ test("the coworker engine refuses when nobody initiates", async () => {
   const rail = fakeRail(dir, fakeHerdr(), null)
   await assert.rejects(() => runCoworker(rail), /initiates/)
 })
+
+test("a pre-declared member root rides the session-start config — the dialogs never fire", async () => {
+  const dir = await coworkerDir("coworker-roots-")
+  const toml = readFileSync(join(dir, "workflow.toml"), "utf8").replace(
+    "[members.alpha]\ninitiates = true",
+    '[members.alpha]\ninitiates = true\nroots = ["~/.vista"]',
+  )
+  writeFileSync(join(dir, "workflow.toml"), toml)
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  // alpha goes straight to the stop — no dialog to answer
+  herdr.onPrompt = (name, _text, later) => {
+    if (!name.startsWith("alpha")) return
+    later(() => {
+      mkdirSync(join(dir, "messages"), { recursive: true })
+      writeFileSync(
+        join(dir, "messages", "2-alpha.json"),
+        JSON.stringify({ from: "alpha", to: "beta", type: "stop", body: "goal reached" }),
+      )
+    })
+  }
+  const report = await runCoworker(rail)
+  assert.equal(report?.status, "done")
+  // the expanded root landed in alpha's sandbox config at birth
+  const cfg = JSON.parse(readFileSync(join(dir, "sandboxes", "alpha", "opencode.json"), "utf8")) as {
+    permission: { external_directory: Record<string, string> }
+  }
+  const home = (await import("node:os")).homedir()
+  assert.equal(cfg.permission.external_directory[`${home}/.vista/**`], "allow")
+})
+
+test("a deny pattern ends the exchange with its reason in the report", async () => {
+  const dir = await coworkerDir("coworker-cap-")
+  const herdr = fakeHerdr()
+  const ledger = fakeLedger()
+  const rail = fakeRail(dir, herdr, ledger as never)
+  // alpha's brain: every prompt — brief, deny note, any nudge — puts it
+  // back on the same secrets dialog; a fresh tickle file per beat
+  // advances the watcher (directory watches only promise NEW entries)
+  let tickles = 0
+  herdr.onPrompt = (name, _text, later) => {
+    if (!name.startsWith("alpha")) return
+    herdr.phase[name] = "dialog"
+    herdr.readFor = () => "Permission required\n\nthe agent wants to read /Users/tester/.ssh/id_rsa"
+    later(() => {
+      tickles += 1
+      mkdirSync(join(dir, "messages"), { recursive: true })
+      writeFileSync(join(dir, "messages", `zz-tickle-${tickles}`), "wake the watcher")
+    })
+  }
+  const report = await runCoworker(rail)
+  assert.equal(report?.status, "failed")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.ok(exchange, "the exchange row exists")
+  assert.match(exchange!.result, /^ended by dead — alpha blocked past the deny cap$/)
+  const wake = ledger.events.find((e) => e.kind === "wake")
+  assert.ok(wake, "the death woke the ledger")
+  assert.match(String(wake!.payload.why), /deny cap/)
+})

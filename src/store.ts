@@ -467,7 +467,9 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   job.receipt = { ...receipt, finished: job.finished }
   saveJob(job)
   appendEvent(job.sid, { actor: "orchestrator", kind: "job.retired", jid: job.id, receipt: job.receipt })
-  wakeFirstMate(job, "done", job.receipt.report ?? null)
+  // the wake names the true outcome — a failed job must not arrive
+  // saying "done" (the spawner would read the all-clear and move on)
+  wakeFirstMate(job, receipt.status === "failed" ? "failed" : "done", job.receipt.report ?? null)
   return job
 }
 
