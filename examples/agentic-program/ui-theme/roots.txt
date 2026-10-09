@@ -1,0 +1,4 @@
+/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-theme
+/Users/sagebot/.local/share/agentic-os
+/Users/sagebot/.config/opencode/skills
+/Users/sagebot/.vista
