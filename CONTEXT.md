@@ -57,7 +57,7 @@ _Avoid_: birth canal, gate, router model, LLM scheduler, subagent
 
 **Fork**:
 A birth mode. The new pane's host session starts seeded from a pointer into an existing host session: `seed = {tool, session_id, since}`. The bytes are never copied and the original session is never written. A fork passes the same admission as any birth — plus the seed must resolve — and it is booked on `pane.born`.
-Example: the lender pane in a Coworker Job, forked from three hours of the old project's session.
+Example: the lender pane in a Coworker Job, forked from three hours of the old project's session; `whl fork <jid>`, the levy-side use — a booked wake delivered into a reborn levy pane.
 _Avoid_: adopt, enlist, takeover, session copy, polluting the original
 
 **Trace**:
@@ -175,8 +175,12 @@ _Avoid_: dashboard, one layout for every workflow
 Superseded by zen 2. One folder used to hold both OS state and project bytes. Those split: OS state lives at `sessions/<sid>/`; project bytes live in the bound worktree. The name stays so it is not revived.
 _Avoid_: use Session and Binding
 
+**Booked wait**:
+A pane's idle that a live child spur explains: the pane's booked session is the spawner of a running Job. Rails stand their stall and nudge clocks down while it holds; the run deadline still bounds. Clears when the child parks or retires — then the wake (or the stall) applies. Not a park, not a stall.
+_Avoid_: keepalive, heartbeat, blocked, sleeping
+
 **Wake**:
-A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end.
+A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end — in-band as a prompt into a live pane levy first, the doorbell only as fallback, `whl fork` for the pane already gone.
 _Avoid_: notification, ping
 
 **Receipt**:

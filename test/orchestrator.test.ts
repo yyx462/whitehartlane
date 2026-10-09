@@ -213,6 +213,41 @@ test("a worker whose log goes quiet past the stall window settles failed", async
   assert.equal(wakes.length, 3)
 })
 
+test("a booked wait stands the stall clock down; the stall returns when the child is gone", async () => {
+  const dir = await copyExample("orch-booked-")
+  let clock = 0
+  let booked = true
+  const { port, wakes } = fakeShep()
+  const base = deps(dir, port, {
+    stallMs: 1000,
+    now: () => clock,
+    bookedWait: (id) => booked && id === "france",
+  })
+  cycle(base)
+
+  // past the stall window: france is in a booked wait (a live child
+  // spur holds its session), japan and peru are not
+  clock = 5000
+  cycle(base)
+  assert.deepEqual(readState(dir).failed, ["japan", "peru"])
+  assert.ok(base.inFlight.has("france"), "the booked-wait pane stays in flight")
+  assert.equal(wakes.length, 2)
+
+  // the wait holds across many stall windows — the clock restarts
+  // each time the wait is seen
+  clock = 9000
+  cycle(base)
+  assert.ok(base.inFlight.has("france"))
+
+  // the child retires: the stall applies again, from a fresh window
+  booked = false
+  clock = 12000
+  const done = cycle(base)
+  assert.deepEqual(readState(dir).failed, ["japan", "peru", "france"])
+  assert.equal(done, true)
+  assert.equal(wakes.length, 3)
+})
+
 test("a worker whose log never appears gets exactly one reprompt after the grace window", async () => {
   const dir = await copyExample("orch-reprompt-")
   let clock = 0

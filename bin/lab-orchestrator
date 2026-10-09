@@ -21,7 +21,7 @@ import { endOf, readSignal, wakesFor, waveClosed } from "../src/live-run.ts"
 import { gradeCall } from "../src/live-grade.ts"
 import { actorBrief, orchestratorBrief, paneName } from "../src/roles.ts"
 import { writeReport } from "../src/report.ts"
-import { writeWorkerPermissions } from "../src/store.ts"
+import { liveSpawnerSessionIds, writeWorkerPermissions } from "../src/store.ts"
 import { closes } from "../src/verbose.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
 
@@ -464,6 +464,26 @@ async function runCoworker() {
   // must never stall the exchange forever.
   const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
   const nudged = new Map()
+  // Booked wait (ADR 0006): a member whose booked session a running
+  // child spur names as its spawner is idle on purpose — the nudge
+  // clock stands down (and resets) while the child runs. Disk-derived
+  // set, memoized briefly.
+  let spawnIdsAt = 0
+  let spawnIds = new Set()
+  const spawnerSessions = () => {
+    if (Date.now() - spawnIdsAt > 10_000) {
+      spawnIds = liveSpawnerSessionIds()
+      spawnIdsAt = Date.now()
+    }
+    return spawnIds
+  }
+  const memberBookedWait = (name) => {
+    if (!ledger) return false
+    const panes = ledger.job.panes.filter((p) => p.unit === name && p.transcript?.session_id)
+    const sid = panes[panes.length - 1]?.transcript?.session_id
+    return sid ? spawnerSessions().has(sid) : false
+  }
+  const stoodDown = new Set()
   let ended = null // "stop" | "cap" | "deadline" | "dead" | "paused"
   // SIGTERM is the drain (ADR 5): stop delivering, let a member
   // mid-turn end its turn, then park. Pending mail is NOT drained — it
@@ -553,6 +573,14 @@ async function runCoworker() {
     if (ballOn.name && !dead.includes(ballOn.name)) {
       const st = rail.agentStatus(ballOn.name)
       if (st.includes('"agent_status":"working"')) {
+        ballOn.since = Date.now()
+      } else if (Date.now() - ballOn.since > 120_000 && memberBookedWait(ballOn.name)) {
+        // booked wait: a live child spur holds this member — stand the
+        // nudge clock down without spending a nudge (ADR 0006)
+        if (!stoodDown.has(ballOn.name)) {
+          stoodDown.add(ballOn.name)
+          log(`booked wait ${ballOn.name}: a live child spur holds it — nudges stand down`)
+        }
         ballOn.since = Date.now()
       } else if (Date.now() - ballOn.since > 120_000) {
         const used = nudged.get(ballOn.name) ?? 0
