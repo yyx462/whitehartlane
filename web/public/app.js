@@ -1657,6 +1657,14 @@ function receiptBodyHtml() {
   } else {
     outcome = `<dt>receipt</dt><dd class="warn">none yet — job in flight</dd>`;
   }
+  if (job.woke) {
+    outcome += `
+      <dt>woke First Mate</dt><dd class="ok" title="ADR 0006: exactly one end-of-job message">${esc(job.woke.message)} <span class="muted small">· ${esc(fmtTs(job.woke.at))}</span></dd>`;
+  }
+  if (job.spawner) {
+    outcome += `
+      <dt>spawned by</dt><dd>${esc(job.spawner.tool)}:${esc(job.spawner.session_id)} <span class="muted small">· since ${esc(fmtTs(job.spawner.since))} (the fork checkpoint)</span></dd>`;
+  }
   if (job.continues) {
     outcome += `<dt>continued</dt><dd><span class="cont-badge" title="times this run was continued back">x${esc(job.continues)}</span></dd>`;
   }
@@ -1881,6 +1889,7 @@ const EV_KIND_PALETTE = {
   "job.paused": "#a5b4fc",
   "job.continued": "#38bdf8",
   "job.orphaned": "#fbbf24",
+  "job.woke": "#34d399",
 };
 
 // every event kind gets a color — named kinds by hand, unknown kinds a
@@ -1911,6 +1920,7 @@ function evDetailHtml(ev) {
   }
   if (ev.nudge != null) bits.push(`<span class="ev-txt muted">nudge ${esc(ev.nudge)}</span>`);
   if (ev.reason) bits.push(`<span class="ev-txt ev-reason" title="reason">${esc(ev.reason)}</span>`);
+  if (ev.message) bits.push(`<span class="ev-txt ev-task" title="${esc(ev.message)}">${esc(shortenCmd(ev.message, 72))}</span>`);
   if (ev.workflow) bits.push(`<span class="ev-txt muted">${esc(ev.workflow)}</span>`);
   if (ev.parent) bits.push(`<span class="ev-txt muted">parent ${esc(ev.parent)}</span>`);
   if (ev.unit) bits.push(`<span class="ev-txt muted">${esc(ev.unit)}</span>`);
