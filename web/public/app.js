@@ -16,7 +16,7 @@ const SPLIT_KEY = "ui4-split-pct";
 const RESIZE_KEY = "ui4-split-resized";
 
 const SORT_NAMES = {
-  dag: "dag name",
+  dag: "spur name",
   start: "latest run start",
   end: "latest run end",
   duration: "latest duration",
@@ -160,18 +160,18 @@ function parseHash() {
 function parseRoute() {
   const { parts, q } = parseHash();
   if (parts[0] === "home") return { view: "home" };
-  if (parts[0] === "dag-status") {
+  if (parts[0] === "spur-status") {
     return {
-      view: "dag-status",
-      dag: q.get("dag") || null,
+      view: "spur-status",
+      dag: q.get("dag") || q.get("spur") || null,
       run: q.get("run") || null,
       tab: LEFT_TABS.includes(q.get("tab")) ? q.get("tab") : "diagram",
       rtab: RIGHT_TABS.includes(q.get("rtab")) ? q.get("rtab") : "receipt",
       legacy: q.get("legacy") === "1",
     };
   }
-  if (parts[0] === "dag-runs") return { view: "dag-runs" };
-  if (parts[0] === "dags") return { view: "dags" };
+  if (parts[0] === "spur-runs") return { view: "spur-runs" };
+  if (parts[0] === "spurs") return { view: "spurs" };
   return { view: "home" };
 }
 
@@ -183,8 +183,23 @@ function canonicalize() {
   const { parts } = parseHash();
   const raw = location.hash.replace(/^#\/?/, "");
   // v4 flat-list hash with a query -> the v5 detail view kept the query
-  if (parts[0] === "dag-runs" && raw.includes("?")) {
-    history.replaceState(null, "", `#/dag-status${raw.slice("dag-runs".length)}`);
+  if (parts[0] === "spur-runs" && raw.includes("?")) {
+    history.replaceState(null, "", `#/spur-status${raw.slice("spur-runs".length)}`);
+    return;
+  }
+  // v6 "dag" words -> spurs (old bookmarks keep working, forever)
+  if (parts[0] === "dag-runs") {
+    // v4 flat-list hashes carried a query — they always meant the detail view
+    const base = raw.includes("?") ? "spur-status" : "spur-runs";
+    history.replaceState(null, "", `#/${base}${raw.slice("dag-runs".length)}`);
+    return;
+  }
+  if (parts[0] === "dag-status") {
+    history.replaceState(null, "", "#/spur-status" + raw.slice("dag-status".length));
+    return;
+  }
+  if (parts[0] === "dags") {
+    history.replaceState(null, "", "#/spurs" + raw.slice("dags".length));
     return;
   }
   if (parts[0] === "runs") {
@@ -192,17 +207,17 @@ function canonicalize() {
       const tabMap = { overview: "receipt", shape: "report", source: "report" };
       const rtab = tabMap[parts[3]] || null;
       history.replaceState(null, "",
-        `#/dag-status?run=${enc(parts[1])}/${enc(parts[2])}${rtab ? `&rtab=${rtab}` : ""}`);
+        `#/spur-status?run=${enc(parts[1])}/${enc(parts[2])}${rtab ? `&rtab=${rtab}` : ""}`);
     } else {
-      history.replaceState(null, "", "#/dag-status");
+      history.replaceState(null, "", "#/spur-status");
     }
     return;
   }
-  if (parts[0] === "dags" && parts[1] && parts[2]) {
+  if (parts[0] === "spurs" && parts[1] && parts[2]) {
     const tabMap = { shape: "diagram", source: "diagram", config: "config" };
     const tab = tabMap[parts[3]] || null;
     history.replaceState(null, "",
-      `#/dag-status?dag=${enc(parts[1])}/${enc(parts[2])}${tab ? `&tab=${tab}` : ""}`);
+      `#/spur-status?dag=${enc(parts[1])}/${enc(parts[2])}${tab ? `&tab=${tab}` : ""}`);
   }
 }
 
@@ -211,8 +226,8 @@ function splitHref(over) {
   const merged = {
     dag: r.dag || null,
     run: r.run || null,
-    tab: r.view === "dag-status" ? r.tab : null,
-    rtab: r.view === "dag-status" ? r.rtab : null,
+    tab: r.view === "spur-status" ? r.tab : null,
+    rtab: r.view === "spur-status" ? r.rtab : null,
     legacy: r.legacy ? "1" : null,
     ...over,
   };
@@ -222,12 +237,12 @@ function splitHref(over) {
     params.set(k, v === true ? "1" : String(v));
   }
   const qs = params.toString();
-  return "#/dag-status" + (qs ? `?${qs}` : "");
+  return "#/spur-status" + (qs ? `?${qs}` : "");
 }
 
 function applyRouteOver(over) {
   const r = state.route;
-  if (!r || r.view !== "dag-status") return;
+  if (!r || r.view !== "spur-status") return;
   if ("dag" in over) r.dag = over.dag || null;
   if ("run" in over) r.run = over.run || null;
   if ("legacy" in over) r.legacy = over.legacy === true || over.legacy === "1";
@@ -241,11 +256,11 @@ function setHash(h) {
 
 function renderNav(r) {
   $$(".mainnav a").forEach((a) =>
-    a.classList.toggle("active", a.dataset.nav === (r.view === "home" ? "home" : "dags")));
+    a.classList.toggle("active", a.dataset.nav === (r.view === "home" ? "home" : "spurs")));
   const subnav = $("#subnav");
   if (subnav) {
     subnav.classList.toggle("idle", r.view === "home");
-    const sub = r.view === "dag-status" ? "dag-status" : r.view === "dag-runs" ? "dag-runs" : "dags";
+    const sub = r.view === "spur-status" ? "spur-status" : r.view === "spur-runs" ? "spur-runs" : "spurs";
     $$("#subnav a").forEach((a) =>
       a.classList.toggle("active", a.dataset.subnav === sub));
   }
@@ -258,8 +273,8 @@ function onRoute() {
   const prev = state.route;
   state.route = r;
   renderNav(r);
-  if (r.view === "dag-status") {
-    if (prev && prev.view === "dag-status" && state.split) {
+  if (r.view === "spur-status") {
+    if (prev && prev.view === "spur-status" && state.split) {
       state.split.route = r;
       updateSplit(seq);
     } else {
@@ -270,8 +285,8 @@ function onRoute() {
   closeEventsStream();
   state.split = null;
   if (r.view === "home") { mountHome(seq); return; }
-  if (r.view === "dags") { mountDags(seq); return; }
-  if (r.view === "dag-runs") { mountDagRunsList(seq); return; }
+  if (r.view === "spurs") { mountDags(seq); return; }
+  if (r.view === "spur-runs") { mountDagRunsList(seq); return; }
 }
 
 function dagsUrl() {
@@ -286,7 +301,7 @@ async function fetchDags(seq) {
     if (seq !== state.seq) return;
     state.dags = res.dags || [];
   } catch (err) {
-    if (seq === state.seq) showToast(`dags failed: ${err.message}`, "err");
+    if (seq === state.seq) showToast(`spurs failed: ${err.message}`, "err");
   }
 }
 
@@ -492,7 +507,7 @@ function mountDags(seq) {
   viewEl.innerHTML = `
     <section class="panel">
       <div class="panel-head">
-        <h2>Dags</h2>
+        <h2>Spurs</h2>
         <span id="dl-note" class="muted small"></span>
         <span class="grow"></span>
         <span id="dl-sort" class="muted small"></span>
@@ -504,7 +519,7 @@ function mountDags(seq) {
             <col style="width:16%" /><col style="width:12%" /><col style="width:12%" /><col style="width:8%" />
           </colgroup>
           <thead><tr>
-            <th class="sortable" data-dsort="dag">dag</th>
+            <th class="sortable" data-dsort="dag">spur</th>
             <th>kind</th>
             <th class="sortable" data-dsort="start">latest run start</th>
             <th class="sortable" data-dsort="end">latest run end</th>
@@ -564,9 +579,9 @@ function renderDags() {
       : "sort: latest run start ↓ (default)";
   }
   const note = $("#dl-note");
-  if (note) note.textContent = `${state.dags.length} dag${state.dags.length === 1 ? "" : "s"}`;
+  if (note) note.textContent = `${state.dags.length} spur${state.dags.length === 1 ? "" : "s"}`;
   if (!state.dags.length) {
-    body.innerHTML = emptyRow(7, "no dags yet");
+    body.innerHTML = emptyRow(7, "no spurs yet");
     return;
   }
   body.innerHTML = state.dags.map((g) => {
@@ -593,18 +608,18 @@ function renderDagsLegacyNote() {
   if (!el) return;
   const n = state.jobs.filter((j) => j.legacy).length;
   el.innerHTML = n
-    ? `<span>${n} legacy run${n === 1 ? "" : "s"} before dag identity —</span><a href="#/dag-status?legacy=1">open them in Dag Status →</a>`
+    ? `<span>${n} legacy run${n === 1 ? "" : "s"} before spur identity —</span><a href="#/spur-status?legacy=1">open them in Spur Status →</a>`
     : `<span>no legacy runs</span>`;
 }
 
-// ----- Dag Runs: the flat, sortable list of every dag run -----
+// ----- Spur Runs: the flat, sortable list of every spur run -----
 
 function mountDagRunsList(seq) {
   viewEl.className = "view wide";
   viewEl.innerHTML = `
     <section class="panel">
       <div class="panel-head">
-        <h2>Dag Runs</h2>
+        <h2>Spur Runs</h2>
         <span id="jrl-note" class="muted small"></span>
         <span class="grow"></span>
         <span id="jrl-sort" class="muted small"></span>
@@ -616,7 +631,7 @@ function mountDagRunsList(seq) {
             <col style="width:10%" /><col style="width:13%" /><col style="width:11%" /><col style="width:12%" />
           </colgroup>
           <thead><tr>
-            <th>dag</th>
+            <th>spur</th>
             <th>run</th>
             <th class="sortable" data-jsort="status">status</th>
             <th>kind</th>
@@ -627,7 +642,7 @@ function mountDagRunsList(seq) {
           <tbody id="jrl-body">${emptyRow(7, "loading…")}</tbody>
         </table>
       </div>
-      <div class="legacy-note">every run of every dag, flat — click a row for its Dag Status · ops act on the run (see Dags for a per-dag view)</div>
+      <div class="legacy-note">every run of every spur, flat — click a row for its Spur Status · ops act on the run (see Spurs for a per-spur view)</div>
     </section>`;
   $$("#view th[data-jsort]").forEach((th) => {
     th.addEventListener("click", () => cycleJobsSort(th.dataset.jsort));
@@ -665,9 +680,9 @@ function renderDagRunsList() {
   }
   const runs = dagJobs();
   const note = $("#jrl-note");
-  if (note) note.textContent = `${runs.length} dag run${runs.length === 1 ? "" : "s"}`;
+  if (note) note.textContent = `${runs.length} spur run${runs.length === 1 ? "" : "s"}`;
   if (!runs.length) {
-    body.innerHTML = emptyRow(7, "no dag runs yet — trigger one from Dags");
+    body.innerHTML = emptyRow(7, "no spur runs yet — trigger one from Spurs");
     return;
   }
   body.innerHTML = runs.map((j) => {
@@ -693,7 +708,7 @@ function mountSplit(r, seq) {
   viewEl.className = "view wide";
   viewEl.innerHTML = `
     <div class="split-bar">
-      <span class="small" style="font-weight:700">Dag Status</span>
+      <span class="small" style="font-weight:700">Spur Status</span>
       <span class="grow"></span>
       <span id="split-note" class="muted"></span>
       <button class="btn ghost" id="split-reset" title="reset divider to 45% / 55%">Reset</button>
@@ -867,7 +882,7 @@ function renderLeft() {
     left.innerHTML = `
       <div class="sp-head">
         <div class="sp-title-row"><h2>Legacy runs</h2><span class="chip kind">no dag</span></div>
-        <div class="sp-sub-row">Jobs from before dag identity — they live in /api/jobs only and are never rendered as dags. Pick one to inspect on the right.</div>
+        <div class="sp-sub-row">Jobs from before spur identity — they live in /api/jobs only and are never rendered as spurs. Pick one to inspect on the right.</div>
       </div>
       <div class="sp-body"><div id="legacy-list" class="runsel-list">${paneEmpty("loading…")}</div></div>`;
     renderLegacyList();
@@ -885,9 +900,9 @@ function renderLeft() {
         ${g ? `<h2>${esc(g.project_name || g.dag_id)}</h2>` : `<h2 class="muted">…</h2>`}
         ${g ? kindChip(g.kind) : ""}
         ${g ? `<button class="trig" data-trig data-pid="${esc(pid)}" data-dag="${esc(dagId)}" title="Trigger run (runs the saved source)">▶</button>` : ""}
-        ${state.dags.length ? `<select class="dagpick" id="dag-select" title="switch dag">${opts}</select>` : ""}
+        ${state.dags.length ? `<select class="dagpick" id="dag-select" title="switch spur">${opts}</select>` : ""}
       </div>
-      <div class="sp-sub-row mono">dag_id <b>${esc(dagId)}</b>${g && g.source ? ` · <span title="${esc(g.source)}">${esc(shortenPath(g.source))}</span>` : ""}${g ? ` · ${g.runCount ?? (g.runs || []).length} runs` : ""}</div>
+      <div class="sp-sub-row mono">spur id <b>${esc(dagId)}</b>${g && g.source ? ` · <span title="${esc(g.source)}">${esc(shortenPath(g.source))}</span>` : ""}${g ? ` · ${g.runCount ?? (g.runs || []).length} runs` : ""}</div>
     </div>
     <nav class="sp-tabs">${LEFT_TABS.map((t) =>
       `<a class="sp-tab${t === r.tab ? " active" : ""}" href="${splitHref({ tab: t })}">${t}</a>`).join("")}</nav>
@@ -1022,7 +1037,7 @@ function renderDiagramBody() {
   const body = $("#left-body");
   if (!body) return;
   const dk = sp.route.dag;
-  if (!dk) { body.innerHTML = paneEmpty("no dag selected"); return; }
+  if (!dk) { body.innerHTML = paneEmpty("no spur selected"); return; }
   if (sp.defnKey !== dk) {
     sp.defnKey = dk;
     sp.defn = null;
@@ -1292,7 +1307,7 @@ function renderConfigBody() {
   const body = $("#left-body");
   if (!body) return;
   const dk = sp.route.dag;
-  if (!dk) { body.innerHTML = paneEmpty("no dag selected"); return; }
+  if (!dk) { body.innerHTML = paneEmpty("no spur selected"); return; }
   if (!sp.program || sp.program.dagKey !== dk) {
     sp.program = { dagKey: dk, files: null, picked: null, texts: {}, orig: {}, loadError: null, error: null, unlocked: false };
   }
@@ -1341,7 +1356,7 @@ function renderConfigBody() {
              <button class="btn ghost" id="cfg-lock">Done</button>`
           : `<button class="btn warn" id="cfg-edit">Edit</button>`}
         <span class="cfg-hint">${p.unlocked
-          ? `<b>Save</b> writes the file into the dag's source folder (persists) · <b>Run with edits</b> = one-time copy-run, nothing saved · <b>Done</b> locks again`
+          ? `<b>Save</b> writes the file into the spur's source folder (persists) · <b>Run with edits</b> = one-time copy-run, nothing saved · <b>Done</b> locks again`
           : `Program files are read-only — press <b>Edit</b> to unlock this textarea.`}</span>
       </div>`;
   }
@@ -1418,7 +1433,7 @@ async function cfgSave() {
   }
   const text = ta.value;
   p.texts[name] = text;
-  if (!confirm(`Save ${name} into the dag's source folder?\n\nThis is a real write to disk.`)) return;
+  if (!confirm(`Save ${name} into the spur's source folder?\n\nThis is a real write to disk.`)) return;
   const btn = $("#cfg-save");
   btn.disabled = true;
   btn.textContent = "Saving…";
@@ -1515,7 +1530,7 @@ function renderRightHead() {
     <div class="sp-title-row">
       <h2 class="mono" style="font-size:15px">${esc(jid)}</h2>
       ${status ? stChip(status) : `<span class="muted small">…</span>`}
-      ${legacy ? `<span class="chip kind" title="before dag identity">legacy</span>` : ""}
+      ${legacy ? `<span class="chip kind" title="before spur identity">legacy</span>` : ""}
       <span class="grow"></span>
       ${status ? opsButtonsHtml(stOf(status), sid, jid) : ""}
     </div>
@@ -1642,13 +1657,21 @@ function receiptBodyHtml() {
   } else {
     outcome = `<dt>receipt</dt><dd class="warn">none yet — job in flight</dd>`;
   }
+  if (job.woke) {
+    outcome += `
+      <dt>woke the levy</dt><dd class="ok" title="ADR 0006: exactly one end-of-job message">${esc(job.woke.message)} <span class="muted small">· ${esc(fmtTs(job.woke.at))}</span></dd>`;
+  }
+  if (job.spawner) {
+    outcome += `
+      <dt>spawned by</dt><dd>${esc(job.spawner.tool)}:${esc(job.spawner.session_id)} <span class="muted small">· since ${esc(fmtTs(job.spawner.since))} (the fork checkpoint)</span></dd>`;
+  }
   if (job.continues) {
     outcome += `<dt>continued</dt><dd><span class="cont-badge" title="times this run was continued back">x${esc(job.continues)}</span></dd>`;
   }
   const dagRow = job.dag && job.dag.project_name !== "-"
-    ? `<dt>dag</dt><dd>${esc(job.dag.project_name)} / ${esc(job.dag.dag_id)}</dd>
+    ? `<dt>spur</dt><dd>${esc(job.dag.project_name)} / ${esc(job.dag.dag_id)}</dd>
        <dt>version</dt><dd>${esc(job.dag.content_hash || "–")}</dd>`
-    : `<dt>dag</dt><dd class="muted">none — legacy run (before dag identity)</dd>`;
+    : `<dt>spur</dt><dd class="muted">none — legacy run (before spur identity)</dd>`;
   const labels = job.labels || {};
   return `
     <section class="d-section">
@@ -1866,6 +1889,7 @@ const EV_KIND_PALETTE = {
   "job.paused": "#a5b4fc",
   "job.continued": "#38bdf8",
   "job.orphaned": "#fbbf24",
+  "job.woke": "#34d399",
 };
 
 // every event kind gets a color — named kinds by hand, unknown kinds a
@@ -1896,6 +1920,7 @@ function evDetailHtml(ev) {
   }
   if (ev.nudge != null) bits.push(`<span class="ev-txt muted">nudge ${esc(ev.nudge)}</span>`);
   if (ev.reason) bits.push(`<span class="ev-txt ev-reason" title="reason">${esc(ev.reason)}</span>`);
+  if (ev.message) bits.push(`<span class="ev-txt ev-task" title="${esc(ev.message)}">${esc(shortenCmd(ev.message, 72))}</span>`);
   if (ev.workflow) bits.push(`<span class="ev-txt muted">${esc(ev.workflow)}</span>`);
   if (ev.parent) bits.push(`<span class="ev-txt muted">parent ${esc(ev.parent)}</span>`);
   if (ev.unit) bits.push(`<span class="ev-txt muted">${esc(ev.unit)}</span>`);
@@ -2311,7 +2336,7 @@ function opsButtonsHtml(st, sid, jid) {
 // repaint whatever surface is currently showing op buttons so a busy
 // run keeps its pending state across the 5s tick
 function repaintOps() {
-  if (state.route && state.route.view === "dag-runs") renderDagRunsList();
+  if (state.route && state.route.view === "spur-runs") renderDagRunsList();
   if (state.split) renderRightHead();
 }
 
@@ -2418,16 +2443,16 @@ async function tick() {
       if (seq !== state.seq || state.route.view !== "home") return;
       state.home = res;
       renderHome();
-    } else if (r.view === "dags") {
+    } else if (r.view === "spurs") {
       await Promise.all([fetchDags(seq), fetchJobs(seq)]);
-      if (seq !== state.seq || state.route.view !== "dags") return;
+      if (seq !== state.seq || state.route.view !== "spurs") return;
       renderDags();
       renderDagsLegacyNote();
-    } else if (r.view === "dag-runs") {
+    } else if (r.view === "spur-runs") {
       await fetchJobs(seq);
-      if (seq !== state.seq || state.route.view !== "dag-runs") return;
+      if (seq !== state.seq || state.route.view !== "spur-runs") return;
       renderDagRunsList();
-    } else if (r.view === "dag-status" && state.split) {
+    } else if (r.view === "spur-status" && state.split) {
       await fetchDags(seq);
       if (!current(state.split, seq)) return;
       if (state.split.route.legacy) {

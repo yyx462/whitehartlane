@@ -5,6 +5,7 @@
 // projection of events; records are never deleted (zen 5: retired is a
 // state, not rm).
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { loadManifest } from "./hooks.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -16,7 +17,7 @@ export type HostBinding = {
   session_file?: string
 }
 
-export type Parent = "first_mate" | "orchestrator"
+export type Parent = "levy" | "orchestrator" | "first_mate" // first_mate: legacy wire value from before the levy rename
 export type StoodUpBy = Parent | "standalone"
 // orphaned: the orchestrator died without a graceful stop — the Job is
 // parked in the ask-first continue queue, not finished (zen 5).
@@ -96,7 +97,18 @@ export type JobRecord = {
   pause?: { reason: string; panesRemaining: number; at: string }
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
+  spawner?: SpawnerPointer
+  woke?: { at: string; message: string }
   promoted?: { at: string; note: string }
+}
+
+// ADR 0006: the levy — the main agent that stood the Job up, booked at spawn.
+// `since` is the checkpoint — a point in the FM's own transcript, never
+// a copy. A whl fork reborn points back here and nowhere else.
+export type SpawnerPointer = {
+  tool: string
+  session_id: string
+  since: string
 }
 
 export type SessionRecord = {
@@ -245,6 +257,7 @@ export function createJob(input: {
   repo?: string
   worktree?: string
   dag?: DagIdentity
+  spawner?: SpawnerPointer
 }): JobRecord {
   const id = shortId("j")
   const job: JobRecord = {
@@ -258,6 +271,7 @@ export function createJob(input: {
     repo: input.repo,
     worktree: input.worktree,
     dag: input.dag,
+    spawner: input.spawner,
     state: "running",
     created: new Date().toISOString(),
     panes: [],
@@ -316,12 +330,54 @@ export function killPane(job: JobRecord, label: string): JobRecord {
   return job
 }
 
+// ADR 0006 — the end-of-job wake: exactly one message to the First
+// Mate that stood the Job up ("spur for task X done — report at …").
+// Layered delivery: wake.json on the job dir (durable), one job.woke
+// trace event, `woke` on the record as the once-guard, and a
+// best-effort doorbell through the machine's notify CLI. A failed or
+// absent doorbell never fails the booking. No spawner -> no wake (the
+// Job is unattended, nothing to tell).
+export function wakeFirstMate(job: JobRecord, outcome: string, report: string | null): JobRecord {
+  if (!job.spawner || job.woke) return job
+  const at = new Date().toISOString()
+  const where = report ?? join(job.dir, "report.json")
+  const message = `spur for task "${job.task}" ${outcome} — check ${where}`
+  const wake = {
+    to: job.spawner,
+    jid: job.id,
+    task: job.task,
+    outcome,
+    message,
+    report: where,
+    at,
+  }
+  try {
+    mkdirSync(job.dir, { recursive: true })
+    writeFileSync(join(job.dir, "wake.json"), JSON.stringify(wake, null, 2) + "\n")
+  } catch {
+    /* the trace event below still books the wake */
+  }
+  job.woke = { at, message }
+  saveJob(job)
+  appendEvent(job.sid, { actor: "rail", kind: "job.woke", jid: job.id, message, report: where })
+  const notify = join(homedir(), ".local", "bin", "notify")
+  if (process.env.AGENTIC_OS_NOTIFY !== "0" && existsSync(notify)) {
+    try {
+      spawnSync(notify, [message], { timeout: 5000, stdio: "ignore" })
+    } catch {
+      /* doorbell is best effort */
+    }
+  }
+  return job
+}
+
 export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): JobRecord {
   job.state = "retired"
   job.finished = new Date().toISOString()
   job.receipt = { ...receipt, finished: job.finished }
   saveJob(job)
   appendEvent(job.sid, { actor: "orchestrator", kind: "job.retired", jid: job.id, receipt: job.receipt })
+  wakeFirstMate(job, "done", job.receipt.report ?? null)
   return job
 }
 
@@ -336,6 +392,7 @@ export function abortJob(
   job.abort = { reason, panesRemaining, finished: job.finished }
   saveJob(job)
   appendEvent(job.sid, { actor, kind: "job.aborted", jid: job.id, reason, panesRemaining })
+  wakeFirstMate(job, `aborted (${reason})`, null)
   return job
 }
 
@@ -350,6 +407,7 @@ export function orphanJob(job: JobRecord, reason: string, panesRemaining: number
   job.orphan = { reason, panesRemaining, at }
   saveJob(job)
   appendEvent(job.sid, { actor: "sweep", kind: "job.orphaned", jid: job.id, reason, panesRemaining })
+  wakeFirstMate(job, `orphaned (${reason}) — continue or abort it`, null)
   return job
 }
 
@@ -378,7 +436,7 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
   job.pid = pid
   saveJob(job)
   appendEvent(job.sid, {
-    actor: "first_mate",
+    actor: "levy",
     kind: "job.continued",
     jid: job.id,
     pid,
