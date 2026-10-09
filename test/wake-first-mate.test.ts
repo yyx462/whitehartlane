@@ -51,6 +51,14 @@ test("retire wakes the spawning levy exactly once", () => {
   assert.equal((readEvents("s-wake01") ?? []).filter((e) => e.kind === "job.woke").length, 1)
 })
 
+test("a failed receipt wakes as failed — the levy must never read the all-clear", () => {
+  const job = jobWith({ tool: "opencode", session_id: "ses_02bad", since: "2026-10-09T00:00:00.000Z" })
+  finishJob(job, { panesRemaining: 0, panesTotal: 2, unitsDone: 0, unitsFailed: 2, status: "failed", report: join(job.dir, "report.json") })
+  const wake = JSON.parse(readFileSync(join(job.dir, "wake.json"), "utf8"))
+  assert.match(wake.message, /spur for task "prove the wake" failed/)
+  assert.doesNotMatch(wake.message, /done/)
+})
+
 test("abort and orphan wake too; no spawner means no wake", () => {
   const gone = jobWith({ tool: "opencode", session_id: "ses_gone", since: "2026-10-09T00:00:00.000Z" })
   abortJob(gone, "killed pid 1", 2, "levy")

@@ -110,3 +110,13 @@ test("the member protocol names the wire format and forbids peer-writing", () =>
   assert.match(text, /Never write a peer's message file/)
   assert.match(text, /messages/)
 })
+
+test("members may pre-declare external roots; bad ones fail the run", () => {
+  const members = parseMembers('[members.reviewer]\nroots = ["~/.vista", "/opt/data"]\n')
+  assert.deepEqual(members[0]!.roots, ["~/.vista", "/opt/data"])
+  // a relative root is a typo, not a grant — refuse before any spawn
+  assert.throws(() => parseMembers('[members.a]\nroots = ["relative/path"]\n'), /absolute or ~-relative/)
+  assert.throws(() => parseMembers('[members.a]\nroots = []\n'), /roots list is empty/)
+  // a member without the key stays bare
+  assert.equal(parseMembers("[members.b]\n")[0]!.roots, undefined)
+})
