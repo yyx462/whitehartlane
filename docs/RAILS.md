@@ -98,6 +98,11 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - `units` (decompose the task), `brief` (worker instructions),
   `grade` (settle a unit), `report.where` + `counts` (named counts),
   `slots` (per-task concurrency, default 2).
+- Hook commands run as `sh -c "<command> '<argument>'"` — positional
+  `$1` is only real inside a script FILE (`bash hooks/grade.sh` gets
+  `$1`); an inline command (`grade = "test -s units/$1/result.md"`)
+  sees `$1` empty. Inline needs a shell function:
+  `grade = "g() { test -s units/$1/result.md; }; g"`.
 - `detectors` (`signal`, `end`) — the program's say in what the
   photograph is made of: how a wave is recognized and how a unit's end
   is read. Same contract as every hook (strict output, exit 75 =
