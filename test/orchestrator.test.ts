@@ -57,6 +57,7 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
     },
     paneBlocked: overrides.paneBlocked as ShepPort["paneBlocked"] | undefined,
     answerPermission: overrides.answerPermission as ShepPort["answerPermission"] | undefined,
+    flushPendingNotes: (overrides.flushPendingNotes as ShepPort["flushPendingNotes"] | undefined) ?? (() => 0),
   }
   return { port, spawned, retired, wakes, calls, reprompts, seq }
 }
@@ -550,4 +551,19 @@ test("a worker past the permission cap settles blocked with a wake that says so"
   assert.deepEqual(shep.retired, ["w-france"])
   assert.equal(shep.wakes.length, 1)
   assert.match(shep.wakes[0]!.detail, /permission deny cap/)
+})
+
+test("every cycle flushes queued privilege notes (j-2b508e: the guidance never landed)", async () => {
+  const dir = await copyExample("orch-note-flush-")
+  let flushes = 0
+  const shep = fakeShep({
+    flushPendingNotes: () => {
+      flushes += 1
+      return 0
+    },
+  })
+  const d = deps(dir, shep.port, { slots: 1 })
+  cycle(d) // spawn
+  cycle(d) // a beat with a pane in flight
+  assert.ok(flushes >= 2, `the engine flushed on every cycle (got ${flushes})`)
 })

@@ -39,6 +39,11 @@ export type ShepPort = {
   // optional: absent ports keep the pre-permission behavior.
   paneBlocked?: (name: string) => boolean
   answerPermission?: (name: string) => "allow" | "deny" | "capped" | "none"
+  // Privilege notes queued for a pane that could not take them while
+  // blocked (the deny guidance): each cycle hands idle panes their
+  // mail — j-2b508e's worker never learned why it was denied, because
+  // only coworker ever flushed. Absent: the notes simply wait.
+  flushPendingNotes?: () => number
 }
 
 // The booked pointer a continued pane resumes from (ADR 5).
@@ -260,6 +265,9 @@ export function cycle(deps: CycleDeps): boolean {
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
   const briefGraceMs = deps.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const now = deps.now ?? Date.now
+  // queued privilege notes ride every cycle — a pane that unblocked
+  // since its deny gets the guidance on the next beat, not never
+  deps.shep.flushPendingNotes?.()
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
 
   // Every settle flows through here: state.json (resume projection) plus
