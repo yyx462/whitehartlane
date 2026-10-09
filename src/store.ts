@@ -17,7 +17,7 @@ export type HostBinding = {
   session_file?: string
 }
 
-export type Parent = "first_mate" | "orchestrator"
+export type Parent = "levy" | "orchestrator" | "first_mate" // first_mate: legacy wire value from before the levy rename
 export type StoodUpBy = Parent | "standalone"
 // orphaned: the orchestrator died without a graceful stop — the Job is
 // parked in the ask-first continue queue, not finished (zen 5).
@@ -102,7 +102,7 @@ export type JobRecord = {
   promoted?: { at: string; note: string }
 }
 
-// ADR 0006: the First Mate that stood the Job up, booked at spawn.
+// ADR 0006: the levy — the main agent that stood the Job up, booked at spawn.
 // `since` is the checkpoint — a point in the FM's own transcript, never
 // a copy. A whl fork reborn points back here and nowhere else.
 export type SpawnerPointer = {
@@ -436,7 +436,7 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
   job.pid = pid
   saveJob(job)
   appendEvent(job.sid, {
-    actor: "first_mate",
+    actor: "levy",
     kind: "job.continued",
     jid: job.id,
     pid,

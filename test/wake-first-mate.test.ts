@@ -1,5 +1,5 @@
 // ADR 0006 — the end-of-job wake, proved on a fixture OS disk:
-// a Job with a spawner wakes the First Mate exactly once (wake.json +
+// a Job with a spawner wakes the levy exactly once (wake.json +
 // job.woke on the trace + the once-guard); a Job without a spawner
 // never wakes; the doorbell is disabled here (AGENTIC_OS_NOTIFY=0).
 import assert from "node:assert/strict"
@@ -22,7 +22,7 @@ test.after(() => rmSync(process.env.AGENTIC_OS_HOME!, { recursive: true, force: 
 function jobWith(spawner?: { tool: string; session_id: string; since: string }) {
   return createJob({
     sid: "s-wake01",
-    stoodUpBy: spawner ? "first_mate" : "standalone",
+    stoodUpBy: spawner ? "levy" : "standalone",
     workflow: "fan-out",
     task: "prove the wake",
     runDir: true,
@@ -30,7 +30,7 @@ function jobWith(spawner?: { tool: string; session_id: string; since: string }) 
   })
 }
 
-test("retire wakes the spawning First Mate exactly once", () => {
+test("retire wakes the spawning levy exactly once", () => {
   const job = jobWith({ tool: "opencode", session_id: "ses_01abc", since: "2026-10-09T00:00:00.000Z" })
   finishJob(job, { panesRemaining: 0, panesTotal: 0, unitsDone: 1, unitsFailed: 0, status: "done", report: join(job.dir, "report.json") })
 
@@ -53,12 +53,12 @@ test("retire wakes the spawning First Mate exactly once", () => {
 
 test("abort and orphan wake too; no spawner means no wake", () => {
   const gone = jobWith({ tool: "opencode", session_id: "ses_gone", since: "2026-10-09T00:00:00.000Z" })
-  abortJob(gone, "killed pid 1", 2, "first_mate")
+  abortJob(gone, "killed pid 1", 2, "levy")
   assert.ok(existsSync(join(gone.dir, "wake.json")))
   assert.match(gone.woke!.message, /aborted \(killed pid 1\)/)
 
   const quiet = jobWith()
-  abortJob(quiet, "declined by user", 0, "first_mate")
+  abortJob(quiet, "declined by user", 0, "first_mate") // legacy wire value still accepted
   assert.ok(!quiet.woke, "unattended Jobs never wake")
   assert.ok(!existsSync(join(quiet.dir, "wake.json")))
 })

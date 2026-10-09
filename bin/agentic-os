@@ -121,8 +121,8 @@ async function main() {
   if (cmd === "run") {
     const args = process.argv.slice(3)
     const verbose = args.includes("--verbose")
-    // ADR 0006: --from <tool>:<session-id> books the spawning First
-    // Mate as the checkpoint — the Job will wake it once at the end.
+    // ADR 0006: --from <tool>:<session-id> books the spawning levy
+    // as the checkpoint — the Job will wake it once at the end.
     const fromIdx = args.indexOf("--from")
     const fromVal = fromIdx !== -1 ? args[fromIdx + 1] : undefined
     const spawner = (() => {
@@ -394,12 +394,12 @@ async function main() {
         } catch {}
         killPane(job, pane.label)
       }
-      abortJob(job, `killed pid ${job.pid}`, 0, "first_mate")
+      abortJob(job, `killed pid ${job.pid}`, 0, "levy")
       console.log(`aborted ${job.id} (killed orchestrator; sessions kept — continue resumes) — ${job.dir}`)
       return
     }
     const live = shepStatus()
-    abortJob(job, "declined by user", livePanesOf(job, live).length, "first_mate")
+    abortJob(job, "declined by user", livePanesOf(job, live).length, "levy")
     console.log(`aborted ${job.id} (declined) — ${job.dir}`)
     return
   }
