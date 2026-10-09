@@ -130,3 +130,44 @@ export function resolveTranscript(
   }
   return null
 }
+
+// A fork seed names a host session by id, not by a (cwd, since)
+// window: pi → the session file its header ids, opencode → the db row
+// (the CLI list is the fallback). This is the "seed must resolve"
+// half of fork admission (zen 6).
+export function seedSessionFile(seed: { tool: string; session_id: string }): string | null {
+  if (seed.tool === "pi") {
+    const root = piSessionsRoot()
+    if (!existsSync(root)) return null
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const dir = join(root, entry.name)
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith(".jsonl")) continue
+        const path = join(dir, name)
+        if (readPiHeader(path)?.id === seed.session_id) return path
+      }
+    }
+    return null
+  }
+  if (seed.tool === "opencode") {
+    return opencodeSessionExists(seed.session_id) ? opencodeDb() : null
+  }
+  return null
+}
+
+export function opencodeSessionExists(id: string): boolean {
+  if (existsSync(opencodeDb())) {
+    try {
+      const db = new DatabaseSync(opencodeDb(), { readOnly: true })
+      try {
+        return db.prepare("SELECT 1 FROM session WHERE id = ? LIMIT 1").get(id) !== undefined
+      } finally {
+        db.close()
+      }
+    } catch {
+      // fall through to the CLI
+    }
+  }
+  return listOpencodeSessions(1000).some((s) => s.id === id)
+}
