@@ -14,12 +14,21 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PORT = Number(process.env.PORT || 8787);
 // bind the tailnet by default (Tailscale 100.x reach); set HOST=127.0.0.1 to go local-only
 const HOST = process.env.HOST || "0.0.0.0";
-const OS_ROOT = path.join(process.env.HOME, ".local/share/agentic-os");
+const OS_ROOT = process.env.AGENTIC_OS_ROOT ||
+  path.join(process.env.HOME, ".local/share/agentic-os");
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
-const RUN_DOOR =
-  "/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
+// the run door — resolved, never hard-wired to one worktree: a merged and
+// removed worktree must not leave the door dangling (ui-pause did exactly
+// that). Env override first, then this checkout, then known fallbacks.
+const RUN_DOOR =
+  [
+    process.env.AGENTIC_OS_DOOR,
+    path.resolve(HERE, "..", "bin", "agentic-os"),
+    "/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/bin/agentic-os",
+    "/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os",
+  ].find((p) => p && fs.existsSync(p)) || null;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -114,10 +123,24 @@ function jobFileOf(sid, jid) {
   return path.join(SESSIONS_DIR, sid, "jobs", jid, "job.json");
 }
 
+// v5.1: WHO booked the verb — "an abort arrived, but from where?" The
+// trace's job.aborted / job.paused event carries the actor (orchestrator,
+// sweep, a human's CLI call). One lookup, oldest-match-wins, per job
+// that actually has the booked block.
+function verbActorOf(job, kind) {
+  if (!job || !job.sid || !job.id) return null;
+  const events = readEvents(job.sid);
+  if (!events) return null;
+  for (const e of events) {
+    if (e && e.kind === kind && e.jid === job.id) return e.actor || null;
+  }
+  return null;
+}
+
 // ---- v4: status vocabulary (one mapping, server-side, used everywhere) --
 //   retired + report.status done               -> "success"
 //   retired + report failed / any failed rows  -> "failed"
-//   aborted                                    -> "failed"
+//   aborted (v5.1: its own word, not "failed") -> "aborted"
 //   running                                    -> "running"
 //   paused (v5)                                -> "paused"
 //   orphaned                                   -> "orphaned"
@@ -125,6 +148,10 @@ function jobFileOf(sid, jid) {
 // v5: paused is an intentional park — never red, never "running". The
 // drain may take up to the ceiling, so the state flips a beat after
 // the POST /pause returns; until the booking lands it reads running.
+// v5.1: aborted is a park, not a failure — Continue accepts it like
+// paused/orphaned, so it gets its own color instead of borrowing
+// "failed". The raw state is authoritative; the booked blocks
+// (pause/orphan/abort) are only fallbacks for a missing state.
 
 function reportOf(job) {
   if (!job?.dir) return null;
@@ -145,9 +172,9 @@ function reportHasFailures(report) {
 function statusOf(job, report) {
   const st = job?.state || "";
   if (st === "running") return "running";
-  if (st === "paused" || job?.pause) return "paused";
-  if (job?.orphan || st === "orphaned") return "orphaned";
-  if (st === "aborted" || job?.abort) return "failed";
+  if (st === "paused") return "paused";
+  if (st === "orphaned") return "orphaned";
+  if (st === "aborted") return "aborted";
   if (st === "retired") {
     if (report) {
       return reportHasFailures(report) || report.status !== "done"
@@ -156,17 +183,21 @@ function statusOf(job, report) {
     }
     return job?.receipt?.status === "done" ? "success" : "failed";
   }
+  if (job?.pause) return "paused";
+  if (job?.orphan) return "orphaned";
+  if (job?.abort) return "aborted";
   return "unknown"; // unknown states never masquerade as running
 }
 
 // semantic order for ?sort=status
-// (running -> paused -> orphaned -> failed -> success; unknown last)
+// (running -> paused -> orphaned -> aborted -> failed -> success; unknown last)
 const STATUS_RANK = {
   running: 0,
   paused: 1,
   orphaned: 2,
-  failed: 3,
-  success: 4,
+  aborted: 3,
+  failed: 4,
+  success: 5,
 };
 
 // the staged program dir: job.dir when it is a dir, else the canonical
@@ -218,9 +249,13 @@ function flattenJob(job) {
       })),
     },
     receipt: job.receipt || null, // {panesRemaining,panesTotal,unitsDone,unitsFailed,status,report,finished}
-    abort: job.abort || null, // {reason,panesRemaining,finished}
+    abort: job.abort
+      ? { ...job.abort, actor: verbActorOf(job, "job.aborted") } // {reason,panesRemaining,finished,actor}
+      : null,
     orphan: job.orphan || null, // {reason,panesRemaining,at}
-    pause: job.pause || null, // v5: {reason,panesRemaining,at} — the park receipt
+    pause: job.pause
+      ? { ...job.pause, actor: verbActorOf(job, "job.paused") } // v5: {reason,panesRemaining,at,actor}
+      : null,
     continues: job.continues ?? null, // v5: soft continued ×N counter (no cap)
     hasReport: job.dir ? fs.existsSync(reportPath) : false,
   };
@@ -360,7 +395,7 @@ async function labGraph(dagFile) {
     const edges = [];
     for (const s of steps) {
       if (!s || typeof s.id !== "string") continue;
-      nodes.push({ id: s.id, does: s.does ?? null });
+      nodes.push({ id: s.id, does: s.does ?? null, brief: s.does ?? null });
       const after = Array.isArray(s.after) ? s.after : s.after ? [s.after] : [];
       for (const a of after) {
         if (typeof a === "string") edges.push({ from: a, to: s.id, messages: 0 });
@@ -402,21 +437,41 @@ function messageTallies(messagesDir) {
   return tallies;
 }
 
-// v3: one described line per member brief — the node says what it does,
-// not just that it exists
+// v3→v5.1: one described line per member brief — the node says what it
+// does, not just that it exists. The brief is hard-wrapped markdown, so
+// the old "first raw line" was a mid-sentence fragment nobody could
+// read ("…coworker job (v4.1). You"). Join the first paragraph, then
+// take its first sentence — a complete, readable thought.
 function memberDoes(file) {
-  let text = "";
+  const text = memberBrief(file);
+  if (!text) return null;
+  const para = text
+    .split(/\r?\n\s*\r?\n/)[0]
+    .replace(/^#{1,6}\s*/m, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!para) return null;
+  // first sentence — a terminator only counts when a space or the end
+  // follows it, so "v4.1" does not cut the sentence at its decimal
+  const m = para.match(/^.*?[.!?](?=\s|$)/);
+  let s = m ? m[0] : para;
+  if (s.length > 160) {
+    const cut = s.slice(0, 160);
+    s = cut.slice(0, cut.lastIndexOf(" ")) + "…";
+  }
+  return s || null;
+}
+
+// v5.1: the FULL member brief — the diagram box shows the sentence, the
+// click-popup shows the whole prompt (capped, never a copy, still the
+// source file's own bytes).
+function memberBrief(file, cap = 12000) {
   try {
-    text = fs.readFileSync(file, "utf8");
+    const t = fs.readFileSync(file, "utf8");
+    return t.length > cap ? t.slice(0, cap) + "\n… (truncated)" : t;
   } catch {
     return null;
   }
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#") || line.startsWith("<!--")) continue;
-    return line.length > 140 ? line.slice(0, 139) + "…" : line;
-  }
-  return null;
 }
 
 async function dagShape(job, sid, jid) {
@@ -448,6 +503,7 @@ async function dagShape(job, sid, jid) {
     const nodes = memberFiles.map((f) => ({
       id: f.replace(/\.md$/, ""),
       does: memberDoes(path.join(membersDir, f)) || "member",
+      brief: memberBrief(path.join(membersDir, f)) || null,
     }));
     const tallies = messageTallies(path.join(runDir, "messages"));
     const edgeCount = (from, to) => tallies.get(from + "\u0000" + to) || 0;
@@ -635,6 +691,65 @@ function sourceOf(job, sid, jid) {
   }
 
   return { sid, jid, runDir, files, hooks };
+}
+
+// v5.2: one definition shape from any program folder — the live SOURCE,
+// or (when the source dangles) a run's staged copy. Same shape either
+// way; the endpoint's `stale` marker is the only difference the caller
+// ever sees.
+async function definitionFromFolder(folder) {
+  const hooks = stagedHooks(folder);
+  const lab = await labGraph(path.join(folder, "dag.mjs"));
+  if (lab) {
+    return {
+      kind: "lab",
+      dagName: lab.dagName,
+      nodes: lab.nodes,
+      edges: lab.edges.map(({ from, to }) => ({ from, to })),
+      hooks,
+      ...(lab.error ? { error: lab.error } : {}),
+    };
+  }
+  const membersDir = path.join(folder, "members");
+  let memberFiles = [];
+  try {
+    memberFiles = fs
+      .readdirSync(membersDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort();
+  } catch {}
+  if (memberFiles.length) {
+    const nodes = memberFiles.map((f) => ({
+      id: f.replace(/\.md$/, ""),
+      does: memberDoes(path.join(membersDir, f)) || "member",
+      brief: memberBrief(path.join(membersDir, f)) || null,
+    }));
+    const edges = [];
+    for (let i = 1; i < nodes.length; i++) {
+      edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
+    }
+    return { kind: "coworker", nodes, edges, hooks };
+  }
+  return null;
+}
+
+// the staged definition of one dag, newest-run-first: sessions/<sid>/
+// jobs/<jid>/run keeps the program bytes the door copied at run time —
+// they outlive the source worktree, so the display never has to dangle
+async function stagedDefinition(g) {
+  for (const r of g.runs || []) {
+    const job = readJson(jobFileOf(r.sid, r.jid));
+    if (!job) continue;
+    const runDir = runDirOf(job, r.sid, r.jid);
+    try {
+      if (!fs.statSync(runDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const def = await definitionFromFolder(runDir);
+    if (def) return { ...def, runDir, sid: r.sid, jid: r.jid };
+  }
+  return null;
 }
 
 // ---- v3: sorting, trigger, program editing -----------------------------
@@ -953,7 +1068,7 @@ function buildHome() {
     return isFinite(t) && t >= now - 24 * 3600 * 1000;
   });
   const terminal24 = in24.filter(
-    (r) => r.status === "success" || r.status === "failed",
+    (r) => r.status === "success" || r.status === "failed" || r.status === "aborted",
   );
   const ok24 = terminal24.filter((r) => r.status === "success");
   const dur24 = terminal24.map((r) => r.durationMs).filter((d) => d != null);
@@ -981,7 +1096,9 @@ function buildHome() {
     day,
     success: 0,
     failed: 0,
+    aborted: 0,
     running: 0,
+    paused: 0,
     orphaned: 0,
   }));
   const byDay = new Map(runsPerDay.map((d) => [d.day, d]));
@@ -1275,6 +1392,11 @@ async function handleApi(req, res, url) {
   // run's staged copy) — config edits show up immediately. Lab programs:
   // import() the source dag.mjs; coworker programs: members/*.md as nodes
   // with relay chain edges. PLUS hooks from the source workflow.toml.
+  // v5.2: if the source folder is GONE (merged-and-removed worktree, a
+  // moved folder — the dangling-pointer case), fall back READ-ONLY to
+  // the newest run's staged copy and mark it `stale`. Zero writes: the
+  // copies already exist per run. Trigger / run-with-edits / program
+  // edits keep refusing — they act on the source, which is not there.
   let m = pathname.match(/^\/api\/dag-definition\/([^/]+)\/([^/]+)$/);
   if (req.method === "GET" && m) {
     const pid = safeDecode(res, m[1]);
@@ -1283,55 +1405,45 @@ async function handleApi(req, res, url) {
     const g = findDagGroup(pid + "/" + dagId);
     if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
     if (!g.source) return sendError(res, 400, "dag has no source folder");
-    const srcErr = sourceFolderError(g.source);
-    if (srcErr) return sendError(res, 400, srcErr);
     const base = {
       project: g.project,
       dag_id: g.dag_id,
       source: g.source,
     };
-    const hooks = stagedHooks(g.source);
 
-    const lab = await labGraph(path.join(g.source, "dag.mjs"));
-    if (lab) {
+    const srcErr = sourceFolderError(g.source);
+    if (!srcErr) {
+      const def = await definitionFromFolder(g.source);
+      if (def) return sendJson(res, 200, { ...base, ...def });
       return sendJson(res, 200, {
         ...base,
-        kind: "lab",
-        dagName: lab.dagName,
-        nodes: lab.nodes,
-        edges: lab.edges.map(({ from, to }) => ({ from, to })),
-        hooks,
-        ...(lab.error ? { error: lab.error } : {}),
+        kind: g.kind || "none",
+        nodes: [],
+        edges: [],
+        hooks: stagedHooks(g.source),
       });
     }
 
-    const membersDir = path.join(g.source, "members");
-    let memberFiles = [];
-    try {
-      memberFiles = fs
-        .readdirSync(membersDir)
-        .filter((f) => f.endsWith(".md"))
-        .sort();
-    } catch {}
-    if (memberFiles.length) {
-      const nodes = memberFiles.map((f) => ({
-        id: f.replace(/\.md$/, ""),
-        does: memberDoes(path.join(membersDir, f)) || "member",
-      }));
-      const edges = [];
-      for (let i = 1; i < nodes.length; i++) {
-        edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
-      }
-      return sendJson(res, 200, { ...base, kind: "coworker", nodes, edges, hooks });
+    // the source dangles — serve the newest staged copy, marked
+    const staged = await stagedDefinition(g);
+    if (staged) {
+      return sendJson(res, 200, {
+        ...base,
+        kind: staged.kind,
+        dagName: staged.dagName,
+        nodes: staged.nodes,
+        edges: staged.edges,
+        hooks: staged.hooks,
+        ...(staged.error ? { error: staged.error } : {}),
+        stale: {
+          reason: srcErr,
+          fromSid: staged.sid,
+          fromRun: staged.jid,
+          runDir: staged.runDir,
+        },
+      });
     }
-
-    return sendJson(res, 200, {
-      ...base,
-      kind: g.kind || "none",
-      nodes: [],
-      edges: [],
-      hooks,
-    });
+    return sendError(res, 400, srcErr + " — and no run of this dag kept a staged copy");
   }
 
   // v4: the read-only run-dir browser — the run dir's file tree, and
