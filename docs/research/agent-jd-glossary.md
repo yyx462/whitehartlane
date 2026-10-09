@@ -118,6 +118,46 @@ Named workflow patterns (same source):
 | **smolagents** | HF's minimal **CodeAct**-first library | The "code is the action" bet |
 | **Airflow** | The DAG scheduler everyone's heard of | This repo's contrast case: deterministic scheduler, **human-authored** DAGs — the gap agentic-os fills |
 
+### 2.5 Infra & ops words — the quiet bullets at the bottom of JDs
+
+Not agent concepts — the vocabulary that surrounds them in production bullets ("sandboxing, egress control, multi-tenant isolation"). The AI application engineer owns the *decision and the contract*; platform/security teams own the *mechanism*. Calibrate depth by team and cycle: solo → buy a managed sandbox and wire it; big co → spec requirements at interface level and catch wrong answers.
+
+**Egress / ingress**
+Data leaving / entering the sandbox over the network. Locking the filesystem while allowing free HTTP is an open door: a jailbroken agent exfiltrates secrets via POST. Egress control = an allow-list of destinations ("outbound may only reach `pypi.org`, `api.openai.com`").
+*Interview line*: "Egress is part of the sandbox — the threat isn't only what the agent touches, it's what it can tell."
+
+**fs / net / secrets contract**
+The one-page allow-list of what the agent may touch: which folders (fs), which URLs (net), which tokens/env-vars it can even see (secrets). You write it; the sandbox enforces it.
+*In this OS*: `roots.txt` + the generated per-worker `opencode.json` allow-list (`src/permission.ts`) is exactly this.
+
+**Interface level vs implementation level**
+Knowing a component by what it promises — a Firecracker microVM boots in ~125ms and nothing escapes — vs knowing how it's built inside. App engineers need the former for every tier, the latter for none. *Ask me*: "What level do you know Firecracker at?"
+
+**Threat model**
+One paragraph: what am I defending against, and from whom? Operator mistakes vs prompt-injected code vs a skilled adversary. That paragraph alone picks the tier.
+*In this OS*: the standing bet is "the threat is mistakes, not adversaries" — capability scoping, not VMs.
+
+**Blast radius**
+How much damage if it goes wrong: one file, the repo, the whole cloud account. Sandboxes exist to shrink this. Stage-gating is the senior signal: sandboxes that arrive before the threat kills velocity; after, it kills trust.
+
+**Host mount**
+A container with a folder of the real machine wired into it (`docker -v $HOME:/home`). The classic red flag: bad code "inside" reaches your actual files.
+
+**Multi-tenant**
+One shared system serving many customers who must never see each other's data; forces the strongest isolation tier.
+
+**Retention (policy)**
+How long logs, transcripts, artifacts are kept before deletion. Transcripts quietly accumulate secrets — the encrypted-reasoning leak (§2.1) was at heart a retention problem.
+
+**Data residency**
+The legal rule about which country data may live in ("EU data stays in EU regions"). Compliance bullet, not a technical choice.
+
+**Managed service**
+Someone else runs it; you call its API (E2B, Modal, Fly). "Buy isolation, never build it" — rolling your own is a platform team's project.
+
+**Isolation tier**
+Which rung of the ladder you picked: allow-list → syscall filter → container → gVisor → microVM → VM. Tradeoff axes: strength, startup latency, cost, fidelity.
+
 ---
 
 ## 3. Tradeoffs — the interview spine
