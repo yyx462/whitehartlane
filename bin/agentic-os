@@ -121,9 +121,27 @@ async function main() {
   if (cmd === "run") {
     const args = process.argv.slice(3)
     const verbose = args.includes("--verbose")
-    const folder = args.find((arg) => !arg.startsWith("-"))
+    // ADR 0006: --from <tool>:<session-id> books the spawning First
+    // Mate as the checkpoint — the Job will wake it once at the end.
+    const fromIdx = args.indexOf("--from")
+    const fromVal = fromIdx !== -1 ? args[fromIdx + 1] : undefined
+    const spawner = (() => {
+      if (!fromVal || !/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(fromVal)) return null
+      const i = fromVal.indexOf(":")
+      return {
+        tool: fromVal.slice(0, i),
+        session_id: fromVal.slice(i + 1),
+        since: new Date().toISOString(),
+      }
+    })()
+    if (fromIdx !== -1 && !spawner) {
+      console.error("run: --from wants <tool>:<session-id>, e.g. --from opencode:ses_01abc")
+      process.exitCode = 2
+      return
+    }
+    const folder = args.find((arg, i) => !arg.startsWith("-") && !(fromIdx !== -1 && i === fromIdx + 1))
     if (!folder) {
-      console.error("usage: agentic-os run <folder> [--verbose]")
+      console.error("usage: agentic-os run <folder> [--from <tool>:<session-id>] [--verbose]")
       process.exitCode = 2
       return
     }
@@ -132,6 +150,10 @@ async function main() {
       console.error(`run: ${ready.why}`)
       process.exitCode = ready.code
       return
+    }
+    if (spawner) {
+      ready.job.spawner = spawner
+      saveJob(ready.job)
     }
     const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, orchestratorBin(ready.kind))
     if (!existsSync(orchestrator)) {
