@@ -24,6 +24,7 @@ import {
   finishJob as finishJobRec,
   jobRunDir,
   killPane,
+  liveSpawnerSessionIds,
   loadJob,
   openSession,
   pauseJob as pauseJobRec,
@@ -680,6 +681,25 @@ try {
       log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
     }
   }
+  // Booked wait (ADR 0006): a unit's pane whose booked session a
+  // running child spur names as its spawner is idle on purpose — the
+  // stall clock stands down while the child runs. Disk-derived set,
+  // memoized briefly so stall checks stay cheap.
+  let spawnIdsAt = 0
+  let spawnIds = new Set()
+  const spawnerSessions = () => {
+    if (Date.now() - spawnIdsAt > 10_000) {
+      spawnIds = liveSpawnerSessionIds()
+      spawnIdsAt = Date.now()
+    }
+    return spawnIds
+  }
+  const bookedWait = (unitId) => {
+    if (!ledger) return false
+    const pane = ledger.job.panes.find((p) => p.label === scoped(`w-${unitId}`))
+    const sid = pane?.transcript?.session_id
+    return sid ? spawnerSessions().has(sid) : false
+  }
   const report = await runOrchestrator({
     taskDir,
     shep: port,
@@ -687,6 +707,7 @@ try {
     slots,
     drainMs,
     resumes,
+    bookedWait,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows,
     worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
