@@ -3,6 +3,36 @@
 Dated branches from GOAL.md. Each names the rule it serves and what it
 rejected. One entry per phase milestone.
 
+2026-10-09 — Spurs nest end-to-end: in-band wake, fork, booked wait.
+The glossary always said a levy may itself be a worker of another
+spur, but the mechanics broke it twice: the only wake delivery was a
+Telegram DM to the person (wrong recipient for a pane's business —
+stale design, demoted to fallback), and the waiting pane's own rail
+read its idle as failure — fan-out settled it "stalled" at ten silent
+minutes and retired it; coworker nudged twice and killed the exchange.
+Now the wake books first (wake.json + job.woke, the once-guard), then
+delivers in order: in-band — a live pane of a running Job holds the
+spawner's host session (the join is on disk: spawner.session_id ==
+pane transcript.session_id), the rail prompts that pane with the wake;
+doorbell — only when no pane took it; queued — the record waits.
+`whl fork <jid>` lands ADR 0006 §3: a booked wake delivered into a
+reborn levy pane — the spawner seed resumed from the checkpoint, the
+wake as the first prompt, born on the levy's session trace (never
+shep-recorded into the spur's Job), the spur books wake.consumed,
+admission by the fork law (pi header id, opencode db row). And a
+booked wait — a pane whose booked session a running child names as
+spawner — stands the fan-out stall and the coworker nudges down (the
+clock restarts each time the wait is seen; the run deadline still
+bounds; pause clears it by design — pausing a child your parent waits
+on is a deliberate, visible break). Telegram-first delivery and
+"idleness means done" both rejected: the wake goes to the pointer
+regardless, and a booked wait is explained silence, not a stall.
+Serves 2, 3, 4. Trail: src/store.ts, src/fork.ts, src/transcripts.ts,
+src/orchestrator.ts, bin/agentic-os, bin/fan-out-orchestrator,
+bin/lab-orchestrator, docs/adr/0006-whl-wake-and-fork.md, CONTEXT.md
+(Wake, Booked wait, Fork), test/wake-delivery.test.ts,
+test/fork-verb.test.ts, test/orchestrator.test.ts.
+
 2026-10-08 — The jev tuner, and a gray zone that asks. The permission
 decider's flat "deny-unneeded" turned away work the job actually
 needed (a vista job blocked off its own session shots) — the gray zone
