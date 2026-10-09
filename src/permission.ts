@@ -15,6 +15,10 @@
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
 
+// The ask cap every rail surface shares: a worker may be answered this
+// many times before its blocking is the worker's, not the dialog's.
+export const PERMISSION_CAP = 6
+
 export type PermissionDecision = {
   decision: "allow" | "deny" | "deny-unneeded"
   message: string

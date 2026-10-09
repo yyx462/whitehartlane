@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
+import { PERMISSION_CAP } from "./permission.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
 
@@ -29,6 +30,15 @@ export type ShepPort = {
   // Blocks until the pane is done, blocked, or the timeout hits.
   // Absent in tests: file growth and the deadline timer are enough.
   waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
+  // Privilege (zen 6): when the host tool blocks a worker on a
+  // permission dialog, the rail answers it before the stall timer
+  // kills the unit. paneBlocked reports the dialog; answerPermission
+  // resolves it — "allow"/"deny" (answered; the worker carries on),
+  // "none" (no dialog after all), or "capped" (ask cap hit — the
+  // caller settles the unit like a block). Both optional: absent
+  // ports keep the pre-permission behavior.
+  paneBlocked?: (name: string) => boolean
+  answerPermission?: (name: string) => "allow" | "deny" | "capped" | "none"
 }
 
 // The booked pointer a continued pane resumes from (ADR 5).
@@ -298,34 +308,52 @@ export function cycle(deps: CycleDeps): boolean {
         deps.attempts.delete(id)
         deps.shep.wake(id, "blocked", "pane not live in herdr")
       }
-    } else if (
-      !existsSync(flight.logPath) &&
-      !flight.reprompted &&
-      now() - flight.spawnedAt > briefGraceMs
-    ) {
-      // The agent started but the brief never landed (a startup race shep
-      // cannot see). Submit it once more; the stall timer is the backstop.
-      flight.reprompted = true
-      const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
-      if (ok) {
-        flight.lastChange = now()
-        deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
-      }
-    } else if (!deps.draining && size === flight.lastSize && now() - flight.lastChange > stallMs) {
-      if (deps.bookedWait?.(id)) {
-        // booked wait: a live child spur holds this pane (ADR 0006) —
-        // the silence is explained, so the stall clock restarts
-        flight.lastChange = now()
-      } else {
-        settle(id, false, { unit: id, result: "stalled", pass: false })
+    } else {
+      // Privilege (zen 6): a permission dialog is not a stall. Ask the
+      // port to answer it first; only an unanswered pane (verdict
+      // "none") falls through to the grace/stall/growth ladder. A
+      // capped pane settles like a block — the wake carries the story.
+      const verdict = deps.shep.paneBlocked?.(`w-${id}`)
+        ? deps.shep.answerPermission?.(`w-${id}`) ?? "none"
+        : "none"
+      if (verdict === "capped") {
+        settle(id, false, { unit: id, result: "blocked", pass: false })
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", `no log output for ${stallMs}ms`)
+        deps.shep.wake(id, "blocked", `permission ask cap (${PERMISSION_CAP}) hit`)
+      } else if (verdict !== "none") {
+        // answered — an injected verdict is progress; the stall clock resets
+        flight.lastChange = now()
+      } else if (
+        !existsSync(flight.logPath) &&
+        !flight.reprompted &&
+        now() - flight.spawnedAt > briefGraceMs
+      ) {
+        // The agent started but the brief never landed (a startup race shep
+        // cannot see). Submit it once more; the stall timer is the backstop.
+        flight.reprompted = true
+        const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
+        if (ok) {
+          flight.lastChange = now()
+          deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
+        }
+      } else if (!deps.draining && size === flight.lastSize && now() - flight.lastChange > stallMs) {
+        if (deps.bookedWait?.(id)) {
+          // booked wait: a live child spur holds this pane (ADR 0006) —
+          // the silence is explained, so the stall clock restarts
+          flight.lastChange = now()
+        } else {
+          settle(id, false, { unit: id, result: "stalled", pass: false })
+          deps.shep.retire(`w-${id}`)
+          deps.inFlight.delete(id)
+          deps.attempts.delete(id)
+          deps.shep.wake(id, "blocked", `no log output for ${stallMs}ms`)
+        }
+      } else if (size !== flight.lastSize) {
+        flight.lastSize = size
+        flight.lastChange = now()
       }
-    } else if (size !== flight.lastSize) {
-      flight.lastSize = size
-      flight.lastChange = now()
     }
   }
 
