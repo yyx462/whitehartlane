@@ -9,9 +9,9 @@ rewrite rails.
 
 ## Start
 
-`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`.
+`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`. `whl` is the same door for any agent: a thin shim that calls `run` and walks away (ADR 0006).
 
-The chat still stands a Job up itself. That is a second door. It must call `run`. It does not, yet.
+The chat extension is passive now (the stand_up tool, /standup, and --route routing are retired): it binds the conversation's OS session, delivers wakes into the chat, announces orphans, lists Jobs, and caps error-turn retries. Standing up belongs to the doors — `agentic-os run` and `whl` — never to the chat itself.
 
 `run` reads the folder you pass and writes the Job under the session disk. The source is code and config. A run does not write it. Hook commands in the Job dir are absolute paths back to that source. The chat's materialize still copies a hooks folder.
 
@@ -19,6 +19,16 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 
 ## Rails — machinery every workflow uses and none may rewrite
 
+- **One Rail class (`src/rail.ts`).** The shared machinery every
+  orchestrator runs on: the Job ledger, pane bookkeeping (birth,
+  session booking, retire, the receipt), layout, the verbose lane,
+  and the permission sweep. `bin/fan-out-orchestrator` and
+  `bin/lab-orchestrator` are thin entries that construct one `Rail`
+  and drive their engine against it; the fan-out engine
+  (`runOrchestrator`) speaks the port the Rail implements. Engines
+  address workers by name only — every shep/herdr call funnels through
+  the Rail's injected runners, so the day panes become remote
+  machines, the swap is one file and the engines do not change.
 - **The trace.** One `events.jsonl` per session, append-only, the
   single source. `job.json`, `report.json`, `state.json` are
   projections (`projectJob` rebuilds them from events). Event kinds:
@@ -47,11 +57,14 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   compiled fallback), so tuning lands without a deploy. And a repeat
   ask for the same non-dangerous path escalates to a durable allow:
   persistence is the asserted need, covering the judge's misses;
-  hard-deny never escalates. The rail applies the verdict (dialog
+  hard-deny never escalates. The Rail applies the verdict (dialog
   cleared, message injected, root made durable on allow), books a
-  `permission` event, and caps the asks — over 6 the member is dead.
+  `permission` event, and caps the asks — over `PERMISSION_CAP` (6)
+  the worker is done: fan-out settles the unit blocked, coworker ends
+  the member, lab answers before waking the orchestrator pane.
   With this, worker permissions are restrictive by default: no
-  dialog ever waits for a person.
+  dialog ever waits for a person — in every workflow, not just
+  coworker.
 - **Fail recovery, both halves.** Detect: `audit` (unadmitted panes),
   `sweep` (running Job, dead orchestrator pid). Recover, ask-first: a
   dead orchestrator parks the Job `orphaned` in a derived queue —
