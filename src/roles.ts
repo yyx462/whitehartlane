@@ -1,21 +1,9 @@
-export function paneName(role: "orchestrator" | "actor" | "mock", id?: string): string {
+export function paneName(role: "actor" | "mock", id?: string): string {
   if (role === "mock") {
     if (!id || !id.trim()) throw new Error("mock pane needs a name")
     return `mock-${id}`
   }
   return role
-}
-
-export function orchestratorBrief(): string {
-  return [
-    "You are the orchestrator.",
-    "Stay idle. Do not run commands. Do not call herdr. Do not call shep.",
-    "A prompt will arrive if a pane is blocked. It names the pane and the block.",
-    "Write one line to decision.txt: allow <path> or leave.",
-    "Then stop. Do not watch. Do not wait.",
-    "You do not spawn panes.",
-    "You do not decide the next wave.",
-  ].join("\n")
 }
 
 export function actorBrief(jobText: string): string {

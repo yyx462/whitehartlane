@@ -12,7 +12,7 @@ import { runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector
 import { emptyBoard } from "./lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
 import { gradeCall } from "./live-grade.ts"
-import { actorBrief, orchestratorBrief, paneName } from "./roles.ts"
+import { actorBrief, paneName } from "./roles.ts"
 import { writeReport, type Report } from "./report.ts"
 import { waitChange, type Rail } from "./rail.ts"
 import { writeWorkerPermissions } from "./store.ts"
@@ -67,17 +67,11 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   let board = emptyBoard()
   if (rail.wantVerbose()) rail.openVerbose()
   mkdirSync(join(taskDir, "briefs"), { recursive: true })
-  const orchPath = join(taskDir, "briefs", "orchestrator.md")
-  writeFileSync(orchPath, orchestratorBrief())
-  const orch = rail.ensureRole(board, "orchestrator", taskDir)
-  board = orch.board
-  if (orch.pane && rail.inhabitPane("orchestrator", "pi", orch.pane, orchPath, taskDir)) {
-    rail.renamePane(orch.pane, "orchestrator")
-    log(`name orchestrator pane ${orch.pane}`)
-    rail.say("rail", "birth orchestrator")
-  } else {
-    log("orchestrator pane failed")
-  }
+  // No orchestrator pane: the only mind a lab needs is the actor's
+  // (protocol.json is consumed). A blocked mock is a question for the
+  // typed decider, and a deny-pattern block settles blocked — no
+  // judgment seat with an unread output channel (decision.txt was
+  // never consumed).
   const actorPath = join(taskDir, "briefs", "actor.md")
   writeFileSync(actorPath, actorBrief(jobText))
   const born = new Map<string, number>()
@@ -248,21 +242,31 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       if (signal.kind === "wave") spawnWave(signal.wave.units)
     }
     for (const id of wakesFor(ends, woke)) {
-      // Privilege (zen 6): a blocked mock is first a question for the
-      // typed decider — answer the dialog; only a capped or genuinely
-      // non-dialog block wakes the orchestrator pane (the mind). The
-      // id joins `woke` only on a real wake, so a fresh dialog on the
-      // same pane is answered again next beat.
+      // Privilege (zen 6): a blocked mock is a question for the typed
+      // decider — answer the dialog. A capped block (a deny pattern)
+      // settles the mock blocked, exactly as fan-out settles a capped
+      // unit; a non-dialog block simply stands as blocked in the
+      // report. The id joins `woke` only on a real cap, so a fresh
+      // dialog on the same pane is answered again next beat.
       const verdict = rail.answerPermission(paneName("mock", id))
       if (verdict === "allow" || verdict === "deny") {
-        log(`answered permission for ${paneName("mock", id)} (${verdict}) — no orchestrator wake`)
+        log(`answered permission for ${paneName("mock", id)} (${verdict})`)
         continue
       }
+      if (verdict !== "capped") continue
       woke.push(id)
-      rail.promptAgent("orchestrator", `${paneName("mock", id)} is blocked: waiting for a permission or a decision. Name that pane. Do not spawn.`)
-      log(`wake orchestrator ${paneName("mock", id)} blocked`)
-      rail.say("watcher", `${paneName("mock", id)} blocked`)
-      rail.say("rail", `prompt orchestrator ${paneName("mock", id)}`)
+      const pane = mockPane.get(id)
+      const name = paneName("mock", id)
+      closed.add(id)
+      settled.push({ unit: id, result: "blocked (deny cap)", pass: false })
+      if (pane) {
+        rail.closePane(pane)
+        rail.retire(name)
+        board = rail.dropPane(board, pane)
+      }
+      log(`mock ${name} hit the deny cap — settled blocked`)
+      rail.say("watcher", `${name} deny cap`)
+      rail.say("operator", `close ${name}`)
     }
     if (reopened) {
       await waitChange(taskDir, 30_000)
