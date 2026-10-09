@@ -1,15 +1,15 @@
 # Agentic OS
 
-A shell and supervisor for subagent work. The user talks in the First Mate; every pane is born booked.
+A shell and supervisor for subagent work. The user talks to a levy; every pane is born booked.
 
 ## Language
 
-**First Mate**:
-The pi chat the user works in — the shell. It talks, plans, and may propose panes. It is not itself a pane, and it never takes a pane's answer.
-_Avoid_: front door, orchestrator, scheduler, kernel
+**Levy**:
+Any main agent that levies a spur — plans the work, chooses the workflow, calls `whl run --from <tool>:<session-id>`, carries on, and receives exactly one wake at the end. A position relative to a spur, not a privileged entry: the skill (`yyx-whl`) gives every agent the context to hold it, and a levy may itself be a worker of another spur (spurs may nest; the wake goes to the pointer regardless). It does not babysit what it levied, and it never takes a pane's answer.
+_Avoid_: front door, orchestrator, scheduler, kernel, first mate (the old entry-only word; `first_mate` survives only as a legacy wire value)
 
 **Session**:
-The OS record on disk at `sessions/<sid>/`: events, jobs, pane records, and a binding. One per key. A First Mate chat is keyed by `(tool, host session id)`. A CLI start is keyed by `(agentic-os, folder path)`. May have no Job.
+The OS record on disk at `sessions/<sid>/`: events, jobs, pane records, and a binding. One per key. A levy chat is keyed by `(tool, host session id)`. A CLI start is keyed by `(agentic-os, folder path)`. May have no Job.
 Example: `s-a1b2` holds `events.jsonl` and `jobs/`.
 _Avoid_: host session, pi chat, opencode `ses_…`, task, chat history, folder
 
@@ -36,12 +36,12 @@ Example: skill-rsi.
 _Avoid_: workflow, Job, scheduler, pipeline, project
 
 **Project**:
-The namespace a dag_id is unique in. A pid minted once, kept in `project.json` inside the program folder and indexed on the OS disk. Worktrees and clones copy the file, so runs combine under one group wherever the folder lives — no warning, by design. Paths are never identity; move the folder, the trace continues. Git is never required.
+The namespace a spur id is unique in. A pid minted once, kept in `project.json` inside the program folder and indexed on the OS disk. Worktrees and clones copy the file, so runs combine under one group wherever the folder lives — no warning, by design. Paths are never identity; move the folder, the trace continues. Git is never required.
 _Avoid_: repo, worktree, folder path, git origin
 
-**Dag id**:
-The group runs gather under, unique inside its Project. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the dag identity: project, dag_id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify.
-_Avoid_: workflow name collision, run id, Job id, tag
+**Spur id**:
+The group runs gather under, unique inside its Project — a branch line off the main track: it stands up, runs to completion, and reports back while the main session carries on. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the spur identity: project, the id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify. The word is `spur` everywhere a human reads; `dag`/`dag_id` remain the historical key spelling on disk, in `workflow.toml`, and on the API — a format, never the word.
+_Avoid_: workflow name collision, run id, Job id, tag, dag, loop
 
 **Workflow**:
 A component that receives an input and has an orchestrator. The index is `workflow.toml`: it names the hook commands. It is not the loop. Fan-out and Coworker must produce a report. Direct must not finish. A project fills hooks. A project does not skip the report, and it does not draw a graph.
@@ -125,7 +125,7 @@ The task-specific part a project fills in: what one unit of work is, the worker 
 _Avoid_: workflow, rail, operator
 
 **Report**:
-The readable finish fan-out must produce. A `report.json` with a status, named counts, a table, and where to check. First Mate shows it. Direct does not produce one.
+The readable finish fan-out must produce. A `report.json` with a status, named counts, a table, and where to check. The levy reads it. Direct does not produce one.
 Example: `{"status":"done","counts":{"lookups":3}}`.
 Not a report: the trace, the orchestrator log, a wake, the receipt, a pane's answer.
 _Avoid_: log, trace, receipt, wake, dashboard
@@ -176,7 +176,7 @@ Superseded by zen 2. One folder used to hold both OS state and project bytes. Th
 _Avoid_: use Session and Binding
 
 **Wake**:
-A pane's claim on a parent's attention. First Mate's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake First Mate once at the end.
+A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end.
 _Avoid_: notification, ping
 
 **Receipt**:
