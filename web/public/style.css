@@ -22,6 +22,7 @@
   --muted: #A8B0C4;         /* mist — secondary text, column headers */
   --th-text: #A8B0C4;       /* table header text */
   --on-well: #C9D5E8;       /* text inside wells (code, logs, briefs) */
+  --stripe: color-mix(in srgb, var(--hover) 75%, transparent); /* zebra rows */
   /* lines */
   --line: #2A3558;          /* borders, table rules, chip outlines */
   /* brand accents */
@@ -67,6 +68,7 @@
   --muted: #5C6578;         /* slate — secondary text, timestamps */
   --th-text: #132257;       /* navy table headers */
   --on-well: #132257;       /* code / log text */
+  --stripe: color-mix(in srgb, var(--chrome) 55%, transparent); /* zebra rows */
   /* lines */
   --line: #C8CDD8;          /* silver — borders, dividers */
   /* brand accents */
@@ -363,6 +365,7 @@ table { width: 100%; border-collapse: collapse; }
 }
 
 .data-table tbody tr { cursor: pointer; }
+.data-table tbody tr:nth-child(even) { background: var(--stripe); }
 .data-table tbody tr:hover { background: var(--hover); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table .num { text-align: right; }
