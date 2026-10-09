@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { decidePermission, escalateOnRepeat } from "../src/permission.ts"
@@ -157,4 +157,56 @@ test("a judge miss is still covered: the judge's deny-unneeded escalates on repe
   assert.equal(first.escalatable, true)
   const second = escalateOnRepeat(first, 1)
   assert.equal(second.decision, "allow")
+})
+
+// j-2b508e: the same ask arrived in two forms —
+// `/Users/sagebot/projects/NWi/…` and (home-stripped) `/projects/NWi/…`
+// — and wobbled both the verdict's reason and the escalation ladder.
+// Normalization keys one path.
+
+test("a home-stripped path form resolves to the real path, not an outside-home deny", () => {
+  const home = mkdtempSync(join(tmpdir(), "aos-home-"))
+  const real = join(home, "projects", "NWi", "whl", "lazada-ozon-port", "units", "g0-shared")
+  mkdirSync(real, { recursive: true })
+  const v = decidePermission({
+    question: `Permission required\n\nthe agent wants to read /projects/NWi/whl/lazada-ozon-port/units/g0-shared/`,
+    allowedRoots: [],
+    home,
+  })
+  assert.doesNotMatch(v.message, /outside the home tree/)
+  assert.equal(v.path, real)
+  // a stripped form with no real counterpart stays literal
+  const ghost = decidePermission({
+    question: "Access /definitely/not/on/disk",
+    allowedRoots: [],
+    home,
+  })
+  assert.match(ghost.message, /outside the home tree/)
+})
+
+test("a tilde-form path resolves against home", () => {
+  const home = mkdtempSync(join(tmpdir(), "aos-home-"))
+  const real = join(home, ".vista", "sessions")
+  mkdirSync(real, { recursive: true })
+  const v = decidePermission({
+    question: "Access external directory ~/.vista/sessions",
+    allowedRoots: [],
+    home,
+  })
+  assert.equal(v.path, real)
+})
+
+test("stripped and full forms of one path key identically for escalation", () => {
+  const home = mkdtempSync(join(tmpdir(), "aos-home-"))
+  const full = join(home, "projects", "NWi", "units")
+  mkdirSync(full, { recursive: true })
+  const stripped = decidePermission({
+    question: "Access /projects/NWi/units",
+    allowedRoots: [],
+    home,
+  })
+  assert.equal(stripped.path, full)
+  // same key → escalateOnRepeat's prior counts both forms together
+  const escalated = escalateOnRepeat(stripped, 1)
+  assert.equal(escalated.decision, "allow")
 })

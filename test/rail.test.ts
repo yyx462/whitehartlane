@@ -46,7 +46,8 @@ function fakeLedger(): RailLedger & { events: { kind: string; payload: Record<st
 function makeRail(opts: {
   taskDir: string
   blocked?: string[]
-  term?: string
+  term?: string | (() => string)
+  home?: string
   promptFails?: number
   judge?: (input: { path: string; ask: string; context?: string }) => number
   logs?: string[]
@@ -62,7 +63,7 @@ function makeRail(opts: {
       return { status: 0, stdout: `{"result":{"agent":"${args[2]}","agent_status":"${status}"}}` }
     }
     if (args[0] === "agent" && args[1] === "read") {
-      return { status: 0, stdout: opts.term ?? "" }
+      return { status: 0, stdout: typeof opts.term === "function" ? opts.term() : (opts.term ?? "") }
     }
     if (args[0] === "agent" && args[1] === "prompt") {
       if (promptFailures > 0) {
@@ -84,6 +85,7 @@ function makeRail(opts: {
     argvDir: opts.taskDir,
     ledger: fakeLedger() as RailLedger,
     judge: opts.judge,
+    home: opts.home,
     log: opts.logs ? (msg) => opts.logs!.push(msg) : () => {},
     shepRunner,
     herdrRunner,
@@ -307,4 +309,37 @@ test("writePermissions stages the per-run opencode.json", async () => {
     permission: { external_directory: Record<string, string> }
   }
   assert.equal(cfg.permission.external_directory["*"], "ask")
+})
+
+test("mixed path forms of one ask share a ladder (j-2b508e)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-forms-"))
+  const home = await mkdtemp(join(tmpdir(), "rail-home-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) =>
+    fs.writeFile(briefPath, "work in the g0-shared worktree; never touch master/", "utf8"))
+  const full = join(home, "projects", "NWi", "whl", "lazada-ozon-port", "units")
+  mkdirSync(full, { recursive: true })
+  let form = 0
+  const one = makeRail({
+    taskDir,
+    home,
+    // ask #1 renders the full path, ask #2 the home-stripped form —
+    // the same directory in two renderings, exactly as the terminal
+    // wobbled in j-2b508e
+    term: () =>
+      `Permission required\n\nthe agent wants to read ${
+        ++form === 1 ? `${full}/` : "/projects/NWi/whl/lazada-ozon-port/units/"
+      }`,
+    judge: () => 0,
+  })
+  assert.equal(one.rail.spawnWorker("w-g0", "opencode", briefPath, taskDir), true)
+  const label = one.rail.scopedName("w-g0")
+  one.blocked.add(label)
+  assert.equal(one.rail.answerPermission("w-g0"), "deny", "the judge reads the brief: master/ is not needed")
+  one.blocked.add(label) // the pane blocks again — same ask, stripped form
+  assert.equal(one.rail.answerPermission("w-g0"), "allow", "the second form escalates on the first's ladder")
+  const enter = one.calls.filter((c) => c.tool === "herdr" && c.args[1] === "send-keys" && c.args[3] === "enter")
+  assert.equal(enter.length, 1, "enter sent exactly once — on the escalation")
+  const ledger = one.rail.ledger as ReturnType<typeof fakeLedger>
+  assert.equal(ledger.events.filter((e) => e.kind === "permission").at(-1)?.payload.path, full)
 })

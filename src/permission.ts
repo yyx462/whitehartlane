@@ -10,8 +10,13 @@
 // repeated ask for the same non-dangerous path IS the assertion of
 // need: escalateOnRepeat grants it on the second ask, so the deny
 // message's promise is true even when the judge misses. Hard-deny
-// never escalates. Every verdict carries a message the rail injects
-// into the pane. Prompts never queue for a human.
+// never escalates. The dialog's path is NORMALIZED first (see
+// normalizeDialogPath): `~`, cwd-relative, and home-stripped forms all
+// key one path, so the ladder and the reason hold steady while the
+// terminal's rendering wobbles. Every verdict carries a message the
+// rail injects into the pane. Prompts never queue for a human.
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
 
@@ -61,21 +66,42 @@ function under(path: string, root: string): boolean {
   return path === r || path.startsWith(`${r}/`)
 }
 
+// A dialog names its path in whatever form the terminal rendered it:
+// absolute, `~`-relative, cwd-relative, or home-STRIPPED (j-2b508e:
+// `/Users/sagebot/projects/NWi/…` shown as `/projects/NWi/…`). The
+// judgment and the escalation ladder must key ONE path, or a wobbling
+// form splits the ladder and flips the verdict's reason. Normalizing:
+// `~` and cwd-relative resolve by construction; a bare `/…` that does
+// not exist on disk while `home + path` does is the stripped form.
+export function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
+  let p = raw
+  if (p === "~" || p.startsWith("~/")) p = home.replace(/\/$/, "") + p.slice(1)
+  if (!p.startsWith("/")) p = cwd ? join(cwd, p) : p
+  const homePrefix = home.replace(/\/$/, "")
+  if (!p.startsWith(homePrefix) && !existsSync(p) && existsSync(homePrefix + p)) {
+    p = homePrefix + p
+  }
+  // a directory rendered with its trailing slash is the same path
+  return p.replace(/\/+$/, "") || p
+}
+
 export function decidePermission(
   input: {
     question: string
     allowedRoots: string[]
     home?: string
+    cwd?: string
     context?: string
   },
   judge?: PermissionJudge,
 ): PermissionDecision {
   const home = input.home ?? "/Users/"
-  // the longest absolute path mentioned in the dialog is the subject
-  const path = (input.question.match(/\/[A-Za-z0-9._~\/+-]+/g) ?? [])
+  // the longest path mentioned in the dialog is the subject; the
+  // leading `~` of a tilde-form path rides the match, or it is lost
+  const rawPath = (input.question.match(/~?\/[A-Za-z0-9._~\/+-]+/g) ?? [])
     .filter((p) => !p.endsWith("/") || p.length > 1)
     .sort((a, b) => b.length - a.length)[0]
-  if (path === undefined) {
+  if (rawPath === undefined) {
     return {
       decision: "deny-unneeded",
       escalatable: false,
@@ -83,6 +109,7 @@ export function decidePermission(
         "denied: no recognizable path in that permission ask. Stay in the target tree and the job dir; if you truly need something else, say why in your next message.",
     }
   }
+  const path = normalizeDialogPath(rawPath, home, input.cwd)
   if (HARD_DENY.some((re) => re.test(path))) {
     return {
       decision: "deny",
