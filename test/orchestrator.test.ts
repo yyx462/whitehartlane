@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
 import {
@@ -411,6 +411,47 @@ test("runOrchestrator wakes on the log, not on the check interval", async () => 
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error("still polling")), 2000)),
   ])
   assert.equal(report.status, "done")
+})
+
+// j-ba18b7: the worker appended its done line and fs.watch never fired —
+// the rail sat blind until a 10-minute stall timer. The done below lands
+// as a fresh inode (rename), so every file watcher is blind to it; only
+// the log poller's stat sweep can see it.
+test("a done-append no watcher can see still settles via the log poller", async () => {
+  const dir = await copyExample("orch-poll-")
+  const { port } = fakeShep({
+    spawnWorker: (name, _kind, _brief, cwd) => {
+      appendFileSync(join(cwd, "log.txt"), `progress ${name.slice(2)} started\n`)
+      return true
+    },
+  })
+  const engine = runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    slots: 3,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    logPollMs: 100,
+    log: () => {},
+  })
+  // let every flight spawn, then land the dones where no watcher sees them
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const ids = readFileSync(join(dir, "units.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => (JSON.parse(line) as { id: string }).id)
+  for (const id of ids) {
+    writeFileSync(join(dir, "units", id, "result.md"), "capital\n")
+    const staged = join(dir, "units", id, "log.txt.staged")
+    writeFileSync(staged, `progress ${id} started\ndone ${id}\n`)
+    renameSync(staged, join(dir, "units", id, "log.txt"))
+  }
+  const report = await Promise.race([
+    engine,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("poller did not fire")), 4000)),
+  ])
+  assert.equal(report.status, "done")
+  assert.deepEqual(report.counts, { lookups: 3, failed: 0 })
 })
 
 test("runOrchestrator settles everything, writes the report, and quotes the receipt", async () => {
