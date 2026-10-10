@@ -1016,18 +1016,10 @@ function shortenCmd(cmd, max = 36) {
 function hookStripHtml(hooks) {
   if (!hooks || !hooks.length) return "";
   const chips = hooks.map((h) =>
-    `<span class="hchip ${esc(h.section || "hooks")}" title="${esc(h.section || "hook")} · ${esc(h.command || "")}">` +
+    `<span class="hchip ${esc(h.section || "hooks")}" title="${esc(h.section || "hook")} · ${esc(h.command || "")}${h.fires ? ` · fires: ${esc(h.fires)}` : ""}">` +
     `<span class="hsec">${esc(h.section || "hook")}</span>${esc(h.name)}` +
-    (h.command ? `<span class="muted">· ${esc(shortenCmd(h.command))}</span>` : "") +
     `</span>`).join("");
   return `<div class="hookstrip">${chips}</div>`;
-}
-
-// hooks LIVE in the diagram now: a labeled rail across the top of the
-// canvas, so "where is the hook" answers itself at a glance
-function hooksRailHtml(hooks) {
-  if (!hooks || !hooks.length) return "";
-  return `<div class="g-hooks"><span class="g-hooks-label">hooks · detectors · gates</span>${hookStripHtml(hooks)}</div>`;
 }
 
 function renderDiagramBody() {
@@ -1084,7 +1076,6 @@ function drawDiagram(body, defn, dk) {
     ${staleBar}
     <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}</div>
     <div class="diagram-view">
-      ${hooksRailHtml(defn.hooks)}
       <div class="g-canvas" style="width:${W}px;height:${H}px" id="d-canvas">
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
           <defs>
@@ -1097,6 +1088,7 @@ function drawDiagram(body, defn, dk) {
           `<div class="g-node" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief">` +
           `<div class="g-id">${esc(n.id)}</div>` +
           (n.does ? `<div class="g-does">${esc(n.does)}</div>` : "") +
+          hookStripHtml(n.hooks) +
           (n.brief || n.does ? `<div class="g-open">brief ⌄</div>` : "") +
           `</div>`).join("")}
       </div>

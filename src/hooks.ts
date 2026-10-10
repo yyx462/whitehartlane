@@ -53,6 +53,28 @@ export function resolvedLayout(manifest: Manifest): Layout {
 
 export class HookError extends Error {}
 
+// Hook-run telemetry (issue #40): every units/grade/counts execution is
+// reported through the installed note — status, target, duration — so
+// the trace (and the window) can say when a hook last fired, not just
+// that it exists. The rail installs the note; nothing here knows jobs.
+export type HookRunNote = {
+  hook: "units" | "grade" | "counts"
+  target?: string
+  status: number
+  ms: number
+}
+let noteHookRun: ((note: HookRunNote) => void) | null = null
+export function setHookRunNote(fn: ((note: HookRunNote) => void) | null): void {
+  noteHookRun = fn
+}
+function note(note: HookRunNote): void {
+  try {
+    noteHookRun?.(note)
+  } catch {
+    // telemetry never breaks the hook
+  }
+}
+
 const HOOK_TIMEOUT_MS = 120_000
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
@@ -157,7 +179,8 @@ function str(value: unknown, field: string): string {
 function runHook(
   cmd: string,
   taskDir: string,
-): { stdout: string; status: number; stderr: string } {
+): { stdout: string; status: number; stderr: string; ms: number } {
+  const startedAt = Date.now()
   try {
     const stdout = execSync(cmd, {
       cwd: taskDir,
@@ -165,12 +188,12 @@ function runHook(
       timeout: HOOK_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "pipe"],
     })
-    return { stdout: stdout ?? "", status: 0, stderr: "" }
+    return { stdout: stdout ?? "", status: 0, stderr: "", ms: Date.now() - startedAt }
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; status?: number; killed?: boolean }
     if (e.killed) throw new HookError(`hook timed out after ${HOOK_TIMEOUT_MS}ms: ${cmd}`)
     if (typeof e.status !== "number") throw err
-    return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "" }
+    return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "", ms: Date.now() - startedAt }
   }
 }
 
@@ -179,7 +202,8 @@ function quote(value: string): string {
 }
 
 export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
-  const { stdout, status, stderr } = runHook(manifest.hooks.units, taskDir)
+  const { stdout, status, stderr, ms } = runHook(manifest.hooks.units, taskDir)
+  note({ hook: "units", status, ms })
   if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "units hook exited 75")
   if (status !== 0) {
     throw new HookError(`units hook exited ${status}: ${manifest.hooks.units}\n${stderr.split("\n")[0] ?? ""}`)
@@ -208,7 +232,8 @@ export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
 }
 
 export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade {
-  const { stdout, status } = runHook(`${manifest.hooks.grade} ${quote(unit.id)}`, taskDir)
+  const { stdout, status, ms } = runHook(`${manifest.hooks.grade} ${quote(unit.id)}`, taskDir)
+  note({ hook: "grade", target: unit.id, status, ms })
   const row = stdout.split("\n")[0]?.trim()
   return { pass: status === 0, row: row || (status === 0 ? "ok" : "failed") }
 }
@@ -220,7 +245,8 @@ export function runCounts(
 ): Record<string, number> {
   const tablePath = join(taskDir, "table.json")
   writeFileSync(tablePath, JSON.stringify(table))
-  const { stdout, status } = runHook(`${manifest.hooks.counts} ${quote(tablePath)}`, taskDir)
+  const { stdout, status, ms } = runHook(`${manifest.hooks.counts} ${quote(tablePath)}`, taskDir)
+  note({ hook: "counts", status, ms })
   if (status !== 0) throw new HookError(`counts hook exited ${status}: ${manifest.hooks.counts}`)
   let parsed: unknown
   try {
