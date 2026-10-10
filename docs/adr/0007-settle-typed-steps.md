@@ -97,3 +97,29 @@ settle → finish (`finishUnit`, `unit.finished` event, `finishedIds`), settled
 → finished. The two track words are untouched — the worker's `done` line,
 state.json's `done`/`failed` keys, the report's `done` status. Lattice: one
 umbrella word (finish), two track words (done, failed). "Settle" is retired.
+
+## Stage 3 landed (2026-10-10)
+
+Wake steps execute. The rail levies the child program through the same
+admission the door uses (`prepareRun`), books ITSELF as spawner —
+`{tool: "rail", session_id: <parent sid>}` — and spawns the child
+orchestrator detached. Consequences:
+
+- A rail spawner is a process, not a conversation: no pane prompt, no
+  doorbell. The durable `wake.json` IS the receipt; delivery stays
+  "queued" and the parent polls it (fs.watch on the child job dir, with
+  the gate-debounce backstop).
+- The levy is durable on the parent's task dir (`wakes/<step>.json`):
+  a paused or crashed parent re-nurses the SAME child — never a second
+  levy. The child survives the parent's death; it is detached by
+  design.
+- The receipt colors the step: `outcome: "done"` finishes it done,
+  anything else (failed, aborted, orphaned) finishes it failed with the
+  outcome in the row. A paused child keeps the step open — the parent's
+  deadline still guards.
+- An unreachable wake step (an earlier wave failed) is never levied and
+  cannot count against the run finishing — same rule as checks.
+- Staging absolutizes `folder =` against the source tree, so the staged
+  manifest points at the child program wherever the run lives.
+- No levy port (a rail that cannot spawn child jobs) still refuses a
+  wake-step manifest with a named error — never a silent lie.

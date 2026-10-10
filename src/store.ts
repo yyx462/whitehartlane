@@ -376,12 +376,18 @@ export function wakeFirstMate(
   } catch {
     /* the trace event below still books the wake */
   }
+  // ADR 0007 stage 3 — a rail spawner is a process, not a conversation:
+  // no pane holds it and no doorbell serves it. The durable wake.json
+  // IS the receipt the parent rail polls; delivery stays "queued".
+  const railSpawner = job.spawner.tool === "rail"
   // delivery 1: in-band — a live pane of a running Job holds the
   // spawner's host session (spurs may nest; the wake goes to the
   // pointer regardless)
   let delivery: WakeDelivery = "queued"
   let to: string | undefined
-  const promptPane =
+  const promptPane = railSpawner
+    ? undefined
+    :
     port.promptPane ??
     ((label, text) => {
       try {
@@ -396,8 +402,9 @@ export function wakeFirstMate(
     to = holder.label
   }
   // delivery 2 (fallback): the doorbell — the levy is a chat a person
-  // holds, or no live pane took the prompt
-  if (delivery !== "pane") {
+  // holds, or no live pane took the prompt. A rail spawner skips it:
+  // machines are not doorbelled.
+  if (delivery !== "pane" && !railSpawner) {
     const notify =
       port.notify ??
       ((text) => {

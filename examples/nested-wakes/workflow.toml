@@ -1,0 +1,28 @@
+# nested-wakes — ADR 0007 stage 3 in miniature: a wave of work, then a
+# whole child program as a step. The manifest says the topology; the
+# rail levies the child, books itself as spawner, and the step finishes
+# on the child's wake (the receipt colors it).
+#   run it:  agentic-os run nested-wakes
+[workflow]
+name = "nested-wakes"
+worker_kind = "opencode"
+slots = 2
+
+[hooks]
+units = "true"                 # steps define the units (ADR 0007)
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[[step]]
+id = "g0"
+finished_by = "end"                # a worker pane runs members/g0.md
+wave = "w1"
+
+[[step]]
+id = "sub"
+finished_by = "wake"               # a child rail runs child/ — no pane
+folder = "./child"
+wave = "w2"
+
+[report]
+where = "units/"
