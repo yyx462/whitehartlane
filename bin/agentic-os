@@ -152,6 +152,17 @@ async function main() {
       process.exitCode = 2
       return
     }
+    // A Job nobody hears finishing is an information gap (j-b6067c:
+    // levied without --from, its end reached nobody). Book a levy by
+    // default; the humanless path is an explicit choice, not a
+    // forgotten flag.
+    const unattended = args.includes("--unattended")
+    if (!spawner && !unattended) {
+      console.error("run: no levy booked — pass --from <tool>:<session-id> (the Job wakes it exactly once at the end),")
+      console.error("run: or --unattended if truly nobody waits. The durable receipt lands either way; the wake is the gap you are closing.")
+      process.exitCode = 2
+      return
+    }
     const folder = args.find((arg, i) => !arg.startsWith("-") && !(fromIdx !== -1 && i === fromIdx + 1))
     if (!folder) {
       console.error("usage: agentic-os run <folder> [--from <tool>:<session-id>] [--verbose]")

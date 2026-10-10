@@ -27,6 +27,9 @@ spur should do.
 
 ```
 whl run <folder> --from <tool>:<session-id>   # levy; prints job:, log:, trace: — then STOP
+                                              # (--from is REQUIRED — a Job nobody hears
+                                              #  finishing is an information gap; the only
+                                              #  spell without it is --unattended, chosen)
 whl jobs                                       # every Job on the OS disk, one line each
 whl events [sid]                               # the trace, oldest first
 whl pause <jid> [--wait 2m]                    # graceful park (drains to a boundary)
@@ -51,7 +54,7 @@ Runs; the events trace pane shows every booked fact.
    brief is a prompt, write it like one). Copy a shape from
    `examples/agentic-program/` in this checkout
    (`/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/examples/agentic-program/`).
-3. **Levy**: `whl run <folder> --from opencode:<your session id>`.
+3. **Levy**: `whl run <folder> --from opencode:<your session id>` — never omit `--from`: the door refuses (a Job must wake somebody; `--unattended` is the explicit humanless exception, not the default).
    Your session id is in your own context (env/session metadata); if you
    genuinely cannot determine it, omit `--from` — the spur runs
    unattended and nobody gets the wake. Say so to the user.
