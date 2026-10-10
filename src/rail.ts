@@ -12,6 +12,7 @@
 // happens there, in one file; engines and bins do not change.
 import { spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { basename, join, resolve } from "node:path"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
@@ -85,6 +86,10 @@ export type RailOpts = {
   herdrRunner?: (args: string[]) => RunnerResult
   ledger?: RailLedger | null
   judge?: PermissionJudge
+  // the home tree dialogs normalize against (default: the real one);
+  // tests inject a tmp home so the stripped-form resolver hits real
+  // directories without touching ~
+  home?: string
 }
 
 function taskLine(dir: string): string {
@@ -128,6 +133,10 @@ export class Rail implements ShepPort {
   private readonly shepRun: (args: string[]) => RunnerResult
   private readonly herdrRun: (args: string[]) => RunnerResult
   private readonly judge: PermissionJudge | undefined
+  // the home tree dialog paths normalize against (j-2b508e: a path
+  // shown without its /Users/<who> prefix is the same ask as the full
+  // form — one ladder, one reason)
+  private readonly home: string
   private readonly scopedFn: (name: string) => string
   // per-pane memory the permission sweep derives roots and context from
   private readonly cwdOf = new Map<string, string>()
@@ -162,6 +171,7 @@ export class Rail implements ShepPort {
     this.herdrRun = opts.herdrRunner ?? defaultRunner("herdr")
     this.programRoots = opts.programRoots ?? []
     this.judge = opts.judge
+    this.home = opts.home ?? homedir()
     this.ledger = opts.ledger !== undefined ? opts.ledger : this.openLedger(opts.argvDir ?? null, opts.workflow ?? "fan-out")
     this.taskDir = opts.argvDir ?? this.ledger?.job.dir ?? resolve(process.cwd())
     this.workerModel = opts.workerModel !== undefined ? opts.workerModel : modelIn(this.taskDir)
@@ -715,6 +725,8 @@ export class Rail implements ShepPort {
       {
         question,
         allowedRoots: opts.roots ?? [cwd, this.taskDir, ...this.programRoots].filter((r) => r.length > 0),
+        home: this.home,
+        cwd,
         context,
       },
       this.judge ?? tunedPermissionJudge(),
