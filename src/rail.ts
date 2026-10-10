@@ -751,18 +751,29 @@ export class Rail implements ShepPort {
       if (rc.status !== 0) this.pendingNote.set(label, note)
       this.denyCount.set(label, (this.denyCount.get(label) ?? 0) + 1)
     }
-    this.ledger?.emit("permission", { member: label, decision: verdict.decision, path: verdict.path, ask: asked })
-    this.log(`permission ${label} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"}`)
+    this.ledger?.emit("permission", {
+      member: label,
+      decision: verdict.decision,
+      path: verdict.path,
+      ask: asked,
+      // the verdict message carries the reasoning (and the jev score
+      // when the judge allowed) — postmortems see WHY, not just what
+      message: verdict.message,
+    })
+    this.log(`permission ${label} #${asked}: ${verdict.decision} ${verdict.path ?? "(no path)"} — ${verdict.message}`)
     this.say("watcher", `permission ${label} ${verdict.decision}`)
     return (this.denyCount.get(label) ?? 0) >= PERMISSION_CAP ? "capped" : verdict.decision === "allow" ? "allow" : "deny"
   }
 
   // Flush queued permission notes into panes that can take them (a
   // blocked or working pane refuses prompts — the note waits).
+  // The queue is keyed by the SCOPED pane label; herdr is called with
+  // it directly — agentState() would scope an already-scoped label
+  // and ask for styler-x-x (j-a532f9).
   flushPendingNotes(): number {
     let flushed = 0
     for (const [held, note] of this.pendingNote) {
-      const st = this.agentState(held)
+      const st = this.herdr("agent", "get", held).stdout
       if (st.includes('"agent_status":"blocked"') || st.includes('"agent_status":"working"')) continue
       if (this.herdr("agent", "prompt", held, note).status === 0) {
         this.pendingNote.delete(held)
@@ -771,6 +782,13 @@ export class Rail implements ShepPort {
       }
     }
     return flushed
+  }
+
+  // A queued permission note waiting on this member (scoped by name)?
+  // The stall guard defers a nudge-cap kill while guidance is pending —
+  // the member cannot act on a message it has not received.
+  hasPendingNote(name: string): boolean {
+    return this.pendingNote.has(this.scopedFn(name))
   }
 
   // -- lab board layout (lanes.ts) ---------------------------------------------
