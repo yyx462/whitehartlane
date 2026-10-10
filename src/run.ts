@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { loadDagFile, type Dag } from "./dag.ts"
 import { HookError, loadManifest } from "./hooks.ts"
@@ -199,6 +200,47 @@ function stageDag(dag: Dag, dir: string, toml: boolean): (store: string) => void
   }
 }
 
+// Issue #51: a program whose briefs name paths no root covers is a
+// manifest-level mismatch — better refused at the door than discovered
+// by the worker dying mid-run (j-a532f9: a missing roots.txt turned
+// every target-tree touch into a jev gray-zone ask). Scans the static
+// text the program ships (task.txt, actor.md, members/*.md) for
+// existing absolute paths; any not under the program dir, a roots.txt
+// entry, or temp scratch is named in the refusal.
+function uncoveredBriefPaths(source: string): string[] {
+  const roots = [source]
+  const rootsTxt = join(source, "roots.txt")
+  if (existsSync(rootsTxt)) {
+    for (const line of readFileSync(rootsTxt, "utf8").split("\n")) {
+      const t = line.trim().replace(/^~(?=\/)/, homedir())
+      if (t) roots.push(t)
+    }
+  }
+  const texts: string[] = []
+  for (const name of ["task.txt", "actor.md"]) {
+    const f = join(source, name)
+    if (existsSync(f)) texts.push(readFileSync(f, "utf8"))
+  }
+  const membersDir = join(source, "members")
+  if (existsSync(membersDir)) {
+    for (const f of readdirSync(membersDir)) {
+      if (f.endsWith(".md")) texts.push(readFileSync(join(membersDir, f), "utf8"))
+    }
+  }
+  const tempRoots = ["/tmp", "/private/tmp", "/var/folders", tmpdir()]
+  const uncovered = new Set<string>()
+  for (const text of texts) {
+    for (const raw of text.match(/~?\/[A-Za-z0-9._~+-]+(?:\/[A-Za-z0-9._~+-]+)+/g) ?? []) {
+      const p = raw.replace(/^~(?=\/)/, homedir())
+      if (roots.some((r) => p === r || p.startsWith(`${r}/`))) continue
+      if (tempRoots.some((t) => p === t || p.startsWith(`${t}/`))) continue
+      if (!existsSync(p)) continue // to-be-created scratch is not a boundary
+      uncovered.add(p)
+    }
+  }
+  return [...uncovered]
+}
+
 export function prepareRun(folder: string): RunReady | RunRefused {
   const dagFile = dagFileOf(folder)
   if (dagFile) {
@@ -251,6 +293,17 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   } catch (err) {
     const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
     return { ok: false, why, code: 1 }
+  }
+  // #51: briefs naming existing paths outside every root are the
+  // door's to catch — the alternative is the worker discovering it by
+  // dying (j-a532f9)
+  const uncovered = uncoveredBriefPaths(dir)
+  if (uncovered.length > 0) {
+    return {
+      ok: false,
+      why: `briefs name existing paths no root covers: ${uncovered.join(", ")} — add them to roots.txt (or drop them from the briefs)`,
+      code: 1,
+    }
   }
   return book(dir, kind, task, slots, (store) => stageRun(dir, store))
 }
