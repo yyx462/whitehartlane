@@ -1,0 +1,16 @@
+Draw what ADR 0007 declared: the steps window gains chain edges (wave-to-wave topology) and box-in-box for wake steps (a child program nested inside its parent step, click-through to the child job's own view). The manifest said the topology; the window finally draws the whole chain.
+
+Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/steps-viz
+  (files: web/public/app.js, web/public/style.css, web/server.mjs — all
+  three are yours THIS time: the box-in-box data plumbing needs server
+  work. Tests under test/ must stay green: run `npm test` in the tree.)
+
+Worktree server (for verification only):
+  HOST=127.0.0.1 PORT=8899 node web/server.mjs   # from the target tree root
+  stdout to /tmp/steps-viz-server.log — never write logs inside the tree.
+  Port 8787 is the LIVE master window server — never touch it.
+
+No git commands, no commits — leave the tree dirty. Node stdlib only.
+vista CLI: ~/.local/bin/vista (one camera per session; vista down when done).
+Reading: docs/adr/0007-settle-typed-steps.md, CONTEXT.md entries
+finished_by / Check step / Wake, examples/nested-wakes/.
