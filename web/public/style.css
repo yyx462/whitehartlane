@@ -771,6 +771,23 @@ td.empty, .empty {
 
 .g-node:hover .g-open { opacity: 1; }
 
+/* ADR 0007 step nodes: a gate waits (dashed), a program nests (double) */
+.g-node.g-gate {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.g-node.g-program {
+  border-style: double;
+  border-width: 3px;
+}
+.g-settles {
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--muted);
+}
+
 /* hooks live ON their component (issue #40): entry member carries what
    runs before work, last member what runs after — chips inside the
    node box, hover says when they fire */

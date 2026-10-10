@@ -24,11 +24,59 @@ export type Layout = {
   orchestrator: "left" | "right"
 }
 
+// ADR 0007 — settle-typed steps. A step is a topology node typed by the
+// signal that settles it: end (a worker's log), check (a command exits
+// 0 — nothing works on it), wake (a child job's receipt). Waves are
+// grouping, not steps; the report is the epilogue after the last wave.
+export type Step = {
+  id: string
+  settles: "end" | "check" | "wake"
+  wave: string
+  brief?: string
+  check?: string
+  folder?: string
+}
+
+function stepsFromRaw(raw: unknown): Step[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) throw new HookError("steps must be an array of [[step]] tables")
+  const steps: Step[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    const t = entry as Record<string, unknown>
+    const id = str(t.id, "step.id")
+    if (!SHEP_SAFE_ID.test(id)) throw new HookError(`step id is not shep-safe: ${id}`)
+    if (seen.has(id)) throw new HookError(`step repeats id ${id}`)
+    seen.add(id)
+    const settles = str(t.settles, `step ${id} settles`)
+    if (settles !== "end" && settles !== "check" && settles !== "wake") {
+      throw new HookError(`step ${id} settles must be end, check, or wake (ADR 0007): ${settles}`)
+    }
+    const wave = typeof t.wave === "string" && t.wave ? t.wave : "main"
+    const step: Step = { id, settles, wave }
+    if (settles === "check") {
+      step.check = str(t.check, `step ${id} check`)
+    } else {
+      if (t.check !== undefined) throw new HookError(`step ${id} is settles=${settles}: check belongs to check steps`)
+    }
+    if (settles === "wake") {
+      step.folder = str(t.folder, `step ${id} folder`)
+    } else {
+      if (t.folder !== undefined) throw new HookError(`step ${id} is settles=${settles}: folder belongs to wake steps`)
+    }
+    if (settles === "end" && typeof t.brief === "string" && t.brief) step.brief = t.brief
+    steps.push(step)
+  }
+  if (steps.length === 0) throw new HookError("steps table is empty — remove it or declare [[step]] entries")
+  return steps
+}
+
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; dag_id?: string; drain_timeout_ms?: number }
   hooks: { units: string; grade: string; counts: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
+  steps?: Step[]
   report?: { where?: string }
   layout?: Partial<Layout>
 }
@@ -152,6 +200,7 @@ export function loadManifest(taskDir: string): Manifest {
     const cmd = optCmd(value, `gates.${id}`)
     if (cmd !== undefined) gates[id] = cmd
   }
+  const steps = stepsFromRaw(m.step)
   return {
     workflow: { name, worker_kind: workerKind, slots, model, ...(dagId ? { dag_id: dagId } : {}), drain_timeout_ms: drainTimeoutMs },
     hooks: {
@@ -161,6 +210,7 @@ export function loadManifest(taskDir: string): Manifest {
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     gates: Object.keys(gates).length > 0 ? gates : undefined,
+    steps,
     report: report.where ? { where: str(report.where, "report.where") } : {},
     layout: {
       tab: tab as "same" | "new" | undefined,
@@ -199,6 +249,26 @@ function runHook(
 
 function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
+// Steps define the units (ADR 0007): end-steps ARE the units, briefs
+// read from members/<id>.md unless the step names another path. Check
+// and wake steps are topology — never units.
+export function unitsFromSteps(taskDir: string, steps: Step[]): Unit[] {
+  const units: Unit[] = []
+  for (const step of steps) {
+    if (step.settles !== "end") continue
+    const briefPath = step.brief ?? join(taskDir, "members", `${step.id}.md`)
+    let brief: string
+    try {
+      brief = readFileSync(briefPath, "utf8")
+    } catch {
+      throw new HookError(`end step ${step.id} has no brief: ${briefPath} does not exist`)
+    }
+    units.push({ id: step.id, brief })
+  }
+  if (units.length === 0) throw new HookError("steps declare no end steps — nothing can run")
+  return units
 }
 
 export function runUnits(taskDir: string, manifest: Manifest): Unit[] {

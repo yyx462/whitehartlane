@@ -514,6 +514,10 @@ async function dagShape(job, sid, jid) {
     };
   }
 
+  // steps manifest (ADR 0007): the workflow.toml draws itself
+  const steps = stepsDefn(runDir);
+  if (steps) return steps;
+
   // coworker job: members as nodes, relay edges between consecutive members
   const membersDir = path.join(runDir, "members");
   let memberFiles = [];
@@ -752,11 +756,86 @@ function sourceOf(job, sid, jid) {
   return { sid, jid, runDir, files, hooks };
 }
 
+// ADR 0007: parse [[step]] array-of-tables blocks (id/settles/wave/
+// check/folder/brief as plain strings) — same quoting rules as
+// tomlEntries, no toml dependency.
+function stepsFromToml(tomlText) {
+  const steps = [];
+  let cur = null;
+  for (const raw of String(tomlText || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (/^\[\[\s*step\s*\]\]$/.test(line)) {
+      cur = {};
+      steps.push(cur);
+      continue;
+    }
+    if (!cur || !line || line.startsWith("#")) continue;
+    if (line.startsWith("[")) {
+      cur = null; // a new top-level section ends the block
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.+?)\s*$/);
+    if (!kv) continue;
+    let value = kv[2].replace(/\s+#.*$/, "").trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    cur[kv[1]] = value;
+  }
+  return steps.filter((s) => s.id && s.settles);
+}
+
+// ADR 0007: a steps manifest draws itself — one node per step, chained
+// wave to wave in declaration order. end-steps carry their member brief;
+// checks show their command; wakes show the child folder.
+function stepsDefn(folder) {
+  let wf = "";
+  try {
+    wf = fs.readFileSync(path.join(folder, "workflow.toml"), "utf8");
+  } catch {
+    return null;
+  }
+  const steps = stepsFromToml(wf);
+  if (!steps.length) return null;
+  const HUMAN = { end: "work", check: "gate", wake: "program" };
+  const nodes = steps.map((s) => ({
+    id: s.id,
+    does: HUMAN[s.settles] || s.settles,
+    settles: s.settles,
+    brief:
+      s.settles === "end"
+        ? memberBrief(path.join(folder, "members", `${s.id}.md`)) || (s.brief ? s.brief : null)
+        : null,
+    check: s.check || null,
+    folder: s.folder || null,
+  }));
+  const waves = [];
+  for (const s of steps) {
+    const w = s.wave || "main";
+    if (!waves.includes(w)) waves.push(w);
+  }
+  const edges = [];
+  for (let i = 1; i < waves.length; i++) {
+    const prev = steps.filter((s) => (s.wave || "main") === waves[i - 1]);
+    const next = steps.filter((s) => (s.wave || "main") === waves[i]);
+    if (prev.length && next.length) edges.push({ from: prev[prev.length - 1].id, to: next[0].id });
+  }
+  const hooks = stagedHooks(folder);
+  attachComponentHooks(nodes, hooks);
+  return { kind: "steps", nodes, edges, hooks };
+}
+
 // v5.2: one definition shape from any program folder — the live SOURCE,
 // or (when the source dangles) a run's staged copy. Same shape either
 // way; the endpoint's `stale` marker is the only difference the caller
 // ever sees.
 async function definitionFromFolder(folder) {
+  const steps = stepsDefn(folder);
+  if (steps) return steps;
   const hooks = stagedHooks(folder);
   const lab = await labGraph(path.join(folder, "dag.mjs"));
   if (lab) {
