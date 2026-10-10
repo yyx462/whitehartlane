@@ -31,6 +31,27 @@ const RUN_DOOR =
     "/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os",
   ].find((p) => p && fs.existsSync(p)) || null;
 
+// launchd runs this server on macOS's minimal PATH (no node, no
+// ~/.local/bin): spawning the door script directly hits its
+// `#!/usr/bin/env node` shebang and dies with "env: node: No such file
+// or directory" (the j-389b25 abort from the window UI). So the door
+// runs on the node binary running THIS server — absolute, no PATH
+// lookup — and gets a PATH that provably reaches the shep/herdr CLIs
+// it shells out to.
+const CHILD_PATH = [
+  path.dirname(process.execPath),
+  path.join(os.homedir(), ".local", "bin"),
+  process.env.PATH,
+].filter(Boolean).join(path.delimiter);
+
+/** spawn the run door on this server's own node; args follow the script path */
+function spawnDoor(args, extraOpts = {}) {
+  return spawn(process.execPath, [RUN_DOOR, ...args], {
+    env: { ...process.env, PATH: CHILD_PATH },
+    ...extraOpts,
+  });
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -1203,10 +1224,9 @@ function readBody(req, limit = 64 * 1024) {
 // daemonizes the orchestrator and exits, so a short cap is enough.
 function spawnRun(folder) {
   return new Promise((resolve) => {
-    const child = spawn(RUN_DOOR, ["run", folder], {
+    const child = spawnDoor(["run", folder], {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin" },
     });
     const out = [];
     const err = [];
@@ -1262,9 +1282,8 @@ function spawnRun(folder) {
 // the one-shot CLI finish on its own.
 function spawnVerb(verb, jid, extraArgs = [], capMs = 120_000) {
   return new Promise((resolve) => {
-    const child = spawn(RUN_DOOR, [verb, jid, ...extraArgs], {
+    const child = spawnDoor([verb, jid, ...extraArgs], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin" },
     });
     const out = [];
     const err = [];
@@ -1707,7 +1726,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && pathname === "/api/health") {
-    return sendJson(res, 200, { ok: true, port: PORT, osRoot: OS_ROOT, runDoor: RUN_DOOR });
+    return sendJson(res, 200, { ok: true, port: PORT, osRoot: OS_ROOT, runDoor: RUN_DOOR, doorNode: process.execPath });
   }
 
   if (req.method === "POST" && pathname === "/api/run") {
