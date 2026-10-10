@@ -73,7 +73,7 @@ The per-tool adapter that turns a transcript pointer into readable bytes: pi →
 _Avoid_: parser, converter
 
 **Pane**:
-A herdr split the workflow's workers run in. `shep` opens and closes these. `shep` is not this product.
+A herdr split an agent runs in, of two kinds: a worker pane is born booked (a rail asked herdr to open it for a Job, it dies with the Job); a levy pane is self-registered (`whl register` from inside it — the levy's own chat, renewed by presence). Both are admitted by the ledger; herdr owns the tty either way.
 _Avoid_: worker, subagent
 
 **Worker**:
@@ -200,7 +200,7 @@ A pane's idle that a live child spur explains: the pane's booked session is the 
 _Avoid_: keepalive, heartbeat, blocked, sleeping
 
 **Wake**:
-A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end — in-band as a prompt into a live pane levy first, the doorbell only as fallback, `whl fork` for the pane already gone. A rail levy (ADR 0007 wake steps) is a process, not a conversation: no prompt, no doorbell — the durable wake.json on the child job dir is the receipt the parent polls.
+A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end, best-first (ADR 0008): a prompt into a live worker pane, a prompt into the levy's registered pane, the fork (an unregistered chat is dead to the ladder by rule — registration is the only aliveness claim that outranks it), the wake spool (opt-in plugin, herdr-less hosts), then the doorbell; the durable wake.json waits regardless. A rail levy (ADR 0007 wake steps) is a process, not a conversation: no prompt, no fork, no spool, no doorbell — the wake.json is the receipt the parent polls.
 _Avoid_: notification, ping
 
 **Receipt**:
