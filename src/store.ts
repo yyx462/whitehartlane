@@ -7,6 +7,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { loadManifest } from "./hooks.ts"
+import { TEMP_ROOTS } from "./permission.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
@@ -714,7 +715,11 @@ export function writePiSettings(dir: string, model: string): void {
 
 // Grant one more root to a live worker's permission file — durable for
 // the next session start; the current dialog is cleared by the rail.
+// A degenerate root ("/", "") is refused: one temp allow must never
+// whitelist the whole disk for the next session (j-b6067c granted
+// "/**" by parent-stripping /tmp).
 export function addWorkerRoot(runDir: string, root: string): void {
+  if (root === "" || root === "/") return
   try {
     const cfgPath = join(runDir, "opencode.json")
     const cfg = existsSync(cfgPath)
@@ -723,6 +728,7 @@ export function addWorkerRoot(runDir: string, root: string): void {
     cfg.permission ??= {}
     cfg.permission.external_directory ??= { "*": "ask" }
     for (const form of new Set([root, realpathSync(root)])) {
+      if (form === "" || form === "/") continue
       cfg.permission.external_directory[form] = "allow"
       cfg.permission.external_directory[`${form}/**`] = "allow"
     }
@@ -732,11 +738,15 @@ export function addWorkerRoot(runDir: string, root: string): void {
   }
 }
 
+// Temp scratch is pre-seeded, not re-allowed beat after beat (j-b6067c:
+// five /tmp dialogs, one per 30s beat). The rail already treats temp as
+// no boundary (permission.ts TEMP_ROOTS) — the worker's own config says
+// so from session start, so a mktemp/git/pip write never prompts.
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
     const real = realpathSync(runDir)
     const external = { "*": "ask" } as Record<string, string>
-    const roots = [runDir, real, ...extraRoots]
+    const roots = [runDir, real, ...TEMP_ROOTS, ...extraRoots]
     for (const root of roots) {
       try {
         const forms = new Set([root, realpathSync(root)])
