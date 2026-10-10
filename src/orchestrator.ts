@@ -36,20 +36,12 @@ export type ShepPort = {
   // Blocks until the pane is done, blocked, or the timeout hits.
   // Absent in tests: file growth and the deadline timer are enough.
   waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
-  // Privilege (zen 6): when the host tool blocks a worker on a
-  // permission dialog, the rail answers it before the stall timer
-  // kills the unit. paneBlocked reports the dialog; answerPermission
-  // resolves it — "allow"/"deny" (answered; the worker carries on),
-  // "none" (no dialog after all), or "capped" (deny cap hit — the
-  // caller finished_by the unit like a block. Allows are free). Both
-  // optional: absent ports keep the pre-permission behavior.
-  paneBlocked?: (name: string) => boolean
-  answerPermission?: (name: string) => "allow" | "deny" | "capped" | "none"
-  // Privilege notes queued for a pane that could not take them while
-  // blocked (the deny guidance): each cycle hands idle panes their
-  // mail — j-2b508e's worker never learned why it was denied, because
-  // only coworker ever flushed. Absent: the notes simply wait.
-  flushPendingNotes?: () => number
+  // Privilege (zen 6, rail-owned): one sweep per cycle answers every
+  // blocked pane's dialog at the rail — engines carry only the
+  // consequence. answered = a dialog was answered (allow or deny — the
+  // injected verdict is progress); capped = the deny cap hit (the
+  // caller finished_by the unit like a block. Allows are free).
+  tickPrivilege: () => { answered: Set<string>; capped: Set<string> }
 }
 
 // The booked pointer a continued pane resumes from (ADR 5).
@@ -284,9 +276,11 @@ export function cycle(deps: CycleDeps): boolean {
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
   const briefGraceMs = deps.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const now = deps.now ?? Date.now
-  // queued privilege notes ride every cycle — a pane that unblocked
-  // since its deny gets the guidance on the next beat, not never
-  deps.shep.flushPendingNotes?.()
+  // one sweep per cycle: every blocked pane the rail holds gets its
+  // dialog answered at the rail (queued notes ride the sweep) —
+  // j-2b508e's worker never learned why it was denied; now no pane
+  // waits on an engine's list to be swept
+  const sweep = deps.shep.tickPrivilege()
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
 
   // Every unit's finish flows through here: state.json (resume projection) plus
@@ -340,9 +334,11 @@ export function cycle(deps: CycleDeps): boolean {
       // port to answer it first; only an unanswered pane (verdict
       // "none") falls through to the grace/stall/growth ladder. A
       // capped pane finished_by like a block — the wake carries the story.
-      const verdict = deps.shep.paneBlocked?.(`w-${id}`)
-        ? deps.shep.answerPermission?.(`w-${id}`) ?? "none"
-        : "none"
+      const verdict = sweep.capped.has(`w-${id}`)
+        ? "capped"
+        : sweep.answered.has(`w-${id}`)
+          ? "answered"
+          : "none"
       if (verdict === "capped") {
         finish(id, false, { unit: id, result: "blocked", pass: false })
         deps.shep.retire(`w-${id}`)

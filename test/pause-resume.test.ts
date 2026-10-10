@@ -44,6 +44,7 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
     },
     verify: () => "pane-reap: 0 remaining",
     wake: () => {},
+    tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
   }
   return { port, spawned, resumed, retired, calls }
 }

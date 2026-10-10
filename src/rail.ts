@@ -145,6 +145,13 @@ export class Rail implements ShepPort {
   private layout: { tab: "same" | "new"; orchestrator: "left" | "right" } = { tab: "same", orchestrator: "left" }
   private fleetRoot: string | null = null
   private viewerPane: string | null = null
+  // Privilege sweep bookkeeping: every pane the rail holds (mine), the
+  // panes born as ENGINE workers via spawnWorker (workers — engines
+  // carry the capped consequence for these), and the pane id per label
+  // so an untracked capped pane can be closed.
+  private readonly workers = new Set<string>()
+  private readonly paneOf = new Map<string, string>()
+  private readonly unscopedOf = new Map<string, string>()
   private colPane: string | null = null
   private colUsed = false
   private readonly liveWorkerPanes: string[] = []
@@ -257,7 +264,9 @@ export class Rail implements ShepPort {
   // -- helpers the bins reach through -----------------------------------------
 
   scopedName(name: string): string {
-    return this.scopedFn(name)
+    const scoped = this.scopedFn(name)
+    this.unscopedOf.set(scoped, name)
+    return scoped
   }
 
   writePermissions(dir: string = this.taskDir, extraRoots: string[] = []): void {
@@ -440,7 +449,7 @@ export class Rail implements ShepPort {
     resumeSession: string | undefined = undefined,
   ): boolean {
     const since = new Date().toISOString()
-    const name = this.scopedFn(rawName)
+    const name = this.scopedName(rawName)
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
     const rec = this.shep("record", pane, name)
@@ -476,6 +485,8 @@ export class Rail implements ShepPort {
       }
     }
     this.mine.add(name)
+    this.workers.add(name)
+    this.paneOf.set(name, pane)
     const sessionId = resumeSession ?? this.resolveLiveSession(kind, cwd, since)
     this.ledger?.attach(
       name,
@@ -504,7 +515,7 @@ export class Rail implements ShepPort {
   }
 
   spawnWorker(name: string, kind: string, briefPath: string, cwd: string): boolean {
-    const label = this.scopedFn(name)
+    const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
     if (this.layout.tab === "new" && this.colPane) {
@@ -529,6 +540,7 @@ export class Rail implements ShepPort {
       return false
     }
     this.mine.add(label)
+    this.workers.add(label)
     this.ledger?.attach(label, undefined, name, { tool: kind, cwd, since: new Date().toISOString() } as TranscriptPointer)
     this.log(`spawned ${label} (${kind})`)
     return true
@@ -539,7 +551,7 @@ export class Rail implements ShepPort {
   // brief. The shep path has no arg pass-through — a fresh pane with the
   // continue brief covers it (the unit dir is the outliving memory).
   resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string): boolean {
-    const label = this.scopedFn(name)
+    const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
     if (this.layout.tab === "new" && this.colPane) {
@@ -564,6 +576,7 @@ export class Rail implements ShepPort {
       return false
     }
     this.mine.add(label)
+    this.workers.add(label)
     this.ledger?.attach(label, undefined, name, {
       tool: session.tool,
       cwd,
@@ -670,8 +683,18 @@ export class Rail implements ShepPort {
     name: string,
     opts: { roots?: string[]; context?: string } = {},
   ): "allow" | "deny" | "none" | "capped" {
-    const label = this.scopedFn(name)
-    if (!this.agentState(name).includes('"agent_status":"blocked"')) return "none"
+    const label = this.scopedName(name)
+    const state = this.herdr("agent", "get", label).stdout
+    if (!state.includes('"agent_status":"blocked"')) return "none"
+    return this.answerDialog(label, opts)
+  }
+
+  // The dialog answer itself, keyed by the SCOPED label (cwdOf/briefOf/
+  // askedCount are label-keyed). Callers pre-check blocked.
+  private answerDialog(
+    label: string,
+    opts: { roots?: string[]; context?: string } = {},
+  ): "allow" | "deny" | "capped" {
     const term = this.herdr("agent", "read", label).stdout
     const at = term.lastIndexOf("Permission required")
     const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
@@ -749,7 +772,41 @@ export class Rail implements ShepPort {
   // The stall guard defers a nudge-cap kill while guidance is pending —
   // the member cannot act on a message it has not received.
   hasPendingNote(name: string): boolean {
-    return this.pendingNote.has(this.scopedFn(name))
+    return this.pendingNote.has(this.scopedName(name))
+  }
+
+  // -- the sweep (zen 6, rail-owned) ---------------------------------------------
+  //
+  // One sweep for every pane the rail holds: engines no longer choose
+  // which panes get their dialogs answered — the rail answers them all
+  // each tick, panes beyond any engine's list included. Engines map the
+  // returned UNSCOPED names to their own consequence (fan-out finishes
+  // the unit blocked, coworker ends the member, lab finishes the mock).
+  // A capped pane no engine owns — not born through spawnWorker — is
+  // retired HERE: an untracked privileged mind dies at the cap, it
+  // never hangs on a dialog nobody watches. Queued notes ride every
+  // tick.
+
+  tickPrivilege(): { answered: Set<string>; capped: Set<string> } {
+    const answered = new Set<string>()
+    const capped = new Set<string>()
+    for (const label of [...this.mine]) {
+      const st = this.herdr("agent", "get", label).stdout
+      if (!st.includes('"agent_status":"blocked"')) continue
+      const verdict = this.answerDialog(label)
+      const name = this.unscopedOf.get(label) ?? label
+      answered.add(name)
+      if (verdict !== "capped") continue
+      capped.add(name)
+      if (this.workers.has(label)) continue
+      const pane = this.paneOf.get(label)
+      if (pane) this.herdr("pane", "close", pane)
+      this.shep("retire", label)
+      this.mine.delete(label)
+      this.log(`untracked pane ${label} hit the deny cap — retired by the sweep`)
+    }
+    this.flushPendingNotes()
+    return { answered, capped }
   }
 
   // -- lab board layout (lanes.ts) ---------------------------------------------
