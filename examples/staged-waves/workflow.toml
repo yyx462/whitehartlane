@@ -1,7 +1,8 @@
 # staged-waves — ADR 0007's grammar in miniature: a serial first wave,
 # a human-file gate, then a parallel wave. The manifest says the whole
 # topology; nothing is inferred, no phase files, no relaunch.
-#   run it:  agentic-os run staged-waves
+#   run it:  whl run staged-waves --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
 #   gate:    touch gates/GO when wave 1's work is reviewable
 [workflow]
 name = "staged-waves"

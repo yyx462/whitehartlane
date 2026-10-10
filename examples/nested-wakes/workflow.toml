@@ -2,7 +2,8 @@
 # whole child program as a step. The manifest says the topology; the
 # rail levies the child, books itself as spawner, and the step finishes
 # on the child's wake (the receipt colors it).
-#   run it:  agentic-os run nested-wakes
+#   run it:  whl run nested-wakes --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
 [workflow]
 name = "nested-wakes"
 worker_kind = "opencode"
