@@ -27,7 +27,7 @@ The managed group of panes on a session, with state and policy. Created by the f
 _Avoid_: fleet, run, campaign, host session, program
 
 **Unattended**:
-A Job path with no person in the loop. `agentic-os run` is that path. Direct is not. A dead orchestrator and promote still wait for a person, and neither is the happy path.
+A Job path with no person in the loop. `agentic-os run --unattended` is that path — explicit on the door, because a Job nobody hears finishing is an information gap; the default books a levy and wakes it once. Direct is not that path. A dead orchestrator and promote still wait for a person, and neither is the happy path.
 _Avoid_: direct, grill, promote
 
 **Program**:
