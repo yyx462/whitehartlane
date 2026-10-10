@@ -780,6 +780,145 @@ td.empty, .empty {
   border-style: double;
   border-width: 3px;
 }
+
+/* the wake step is a CONTAINER (box-in-box): it holds a miniature of
+   the child program's own steps, labeled with the child job id and
+   its state — wider and taller than a work node, reserved from the
+   first paint so positions never move when the child lands */
+.g-node.g-box {
+  width: 256px;
+  justify-content: flex-start;
+  cursor: grab;
+}
+.g-node.g-box.dragging { cursor: grabbing; }
+
+.g-child-slot { width: 100%; }
+
+.g-child {
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--well) 72%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+/* hollow: the booking is missing, the child unlevied or gone — the
+   reason rides inside, never a lie */
+.g-child.hollow {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  background: transparent;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.g-child-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+}
+.g-child-jid {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--on-well);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip.mini {
+  font-size: 9px;
+  padding: 0 6px;
+  flex: none;
+}
+.g-child-outcome {
+  font-size: 10px;
+  font-family: var(--mono);
+}
+.g-child-outcome.ok { color: var(--success); }
+.g-child-outcome.bad { color: var(--danger); }
+
+/* the child's own steps, in miniature: a state dot, the id, the type */
+.g-child-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.g-crow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--on-well);
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+.g-cdot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.g-crow.done .g-cdot { background: var(--success); }
+.g-crow.failed .g-cdot { background: var(--danger); }
+.g-crow .g-cid {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-crow .g-ctype {
+  margin-left: auto;
+  flex: none;
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--muted);
+}
+.g-child-steps.none { padding: 2px 0; }
+
+.g-child-open {
+  font-size: 9px;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.g-node.g-box:hover .g-child-open { opacity: 1; }
+
+/* step finish states (selected run): finished wears its track color
+   softly; unreachable fades hard — it can never be asked */
+.g-node.g-done {
+  border-color: color-mix(in srgb, var(--success) 55%, transparent);
+}
+.g-node.g-failed {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.g-node.g-unreach {
+  opacity: 0.45;
+  border-style: dotted;
+}
+
+/* chain edge states (ADR 0007 topology): both ends finished dims the
+   edge (the work is done); a failed upstream reads at a glance in the
+   danger tone — same width, same arrowhead, only the color speaks */
+.d-svg line.d-edge.settled {
+  stroke: var(--muted);
+  opacity: 0.32;
+}
+.d-svg line.d-edge.failed {
+  stroke: var(--danger);
+  opacity: 0.9;
+}
+
 .g-finished_by {
   margin-left: 6px;
   font-size: 9px;
