@@ -26,7 +26,7 @@
   /* lines */
   --line: #2A3558;          /* borders, table rules, chip outlines */
   /* brand accents */
-  --accent: #7BA3D0;        /* soft sky — links, focus, running */
+  --accent: #527FB4;        /* deep steel — links, focus, running; darker by owner's eye */
   --accent-dim: color-mix(in srgb, var(--accent) 45%, var(--chrome));
   --gold: #C5A572;          /* rare accent only — active nav tick, CTA hover */
   /* status */
@@ -721,7 +721,17 @@ td.empty, .empty {
   background: var(--well);
   border: 1px solid var(--line);
   border-radius: 6px;
-  min-height: 200px;
+  min-height: 220px;
+  flex: 1;
+}
+
+/* the diagram fills the pane's height: when the body holds a
+   .diagram-view it lays out as a column and the well takes whatever
+   the meta line leaves — the canvas then matches it (fitCanvasSize's
+   wellH floor), so the pane never wastes its lower half */
+.sp-body:has(> .diagram-view) {
+  display: flex;
+  flex-direction: column;
 }
 
 .g-canvas { position: relative; margin: 0 auto; }
