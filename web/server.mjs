@@ -1362,26 +1362,10 @@ function buildHome() {
     if (b && r.status in b) b[r.status]++;
   }
 
-  const durationTrend = buildDags()
-    .filter((g) => g.dag_id !== UNGROUPED)
-    .map((g) => ({
-      dag_id: g.dag_id,
-      project: g.project,
-      points: [...g.runs]
-        .sort((a, b) => (a.created || "").localeCompare(b.created || ""))
-        .map((r) => ({
-          jid: r.jid,
-          durationMs: r.durationMs,
-          version: r.version ?? null,
-          status: r.status,
-        })),
-    }));
-
   return {
     generatedAt: new Date().toISOString(),
     kpis,
     runsPerDay,
-    durationTrend,
     permissionMix: permissionMixAll(),
   };
 }
