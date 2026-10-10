@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
-// continue | fork | promote — the start door is run. It reads workflow.toml and
+// continue | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
 // starts that workflow's engine. The rest read and finish the OS disk
 // (~/.local/share/agentic-os). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
@@ -15,13 +15,16 @@
 // booked wake into a reborn levy pane (ADR 0006 §3 — the spawner seed
 // resumed from the checkpoint, the wake as the first prompt).
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun } from "../src/run.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkPrompt, forkSeedOf } from "../src/fork.ts"
+import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
 import { seedSessionFile } from "../src/transcripts.ts"
 import { admitFork } from "../src/policy.ts"
 import {
@@ -30,6 +33,7 @@ import {
   continueJob,
   eventsPath,
   findOrOpenSession,
+  homeRoot,
   killPane,
   listJobs,
   orphanJob,
@@ -130,6 +134,13 @@ function livePanesOf(job, live) {
 async function main() {
   const cmd = process.argv[2]
   const jobs = listJobs()
+
+  // renewal-by-presence (ADR 0008): living in a registered levy pane
+  // and using the door IS the heartbeat — touch the registration.
+  if (process.env.HERDR_PANE_ID) {
+    const reg = levyPaneByPane(process.env.HERDR_PANE_ID)
+    if (reg) registerLevyPane({ ...reg, at: new Date().toISOString() })
+  }
 
   if (cmd === "run") {
     const args = process.argv.slice(3)
@@ -238,7 +249,10 @@ async function main() {
 
   if (cmd === "audit") {
     const live = shepStatus()
-    const admitted = new Set(jobs.flatMap((job) => job.panes.map((p) => p.label)))
+    const admitted = new Set([
+      ...jobs.flatMap((job) => job.panes.map((p) => p.label)),
+      ...allLevyPanes().map((r) => r.pane),
+    ])
     const bastards = live.filter((p) => !admitted.has(p.label))
     const stalled = jobs.filter((job) => job.state === "running" && !pidAlive(job.pid))
     console.log(`panes live in shep: ${live.length}; admitted by Jobs: ${live.length - bastards.length}`)
@@ -492,6 +506,107 @@ async function main() {
     return
   }
 
+  // register — the levy pane (ADR 0008 rung 2): a chat that lives in
+  // a herdr pane volunteers the binding herdr cannot know on its own —
+  // which host session runs in which pane. Run from INSIDE the pane
+  // (HERDR_PANE_ID names it); herdr must already detect an agent there
+  // (it detects every supported kind, opencode and pi included). Any
+  // later door command run in that pane renews the registration.
+  if (cmd === "register") {
+    const args = process.argv.slice(3)
+    const fromIdx = args.indexOf("--from")
+    const fromVal = fromIdx !== -1 ? args[fromIdx + 1] : undefined
+    const paneIdx = args.indexOf("--pane")
+    const pane = paneIdx !== -1 ? args[paneIdx + 1] : process.env.HERDR_PANE_ID
+    if (!fromVal || !/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(fromVal)) {
+      console.error("register: --from wants <tool>:<session-id>, e.g. --from opencode:ses_01abc")
+      process.exitCode = 2
+      return
+    }
+    if (!pane) {
+      console.error("register: run me from INSIDE the herdr pane that holds your chat (HERDR_PANE_ID is not set)")
+      console.error("register: or pass --pane <pane-id> explicitly")
+      process.exitCode = 2
+      return
+    }
+    const i = fromVal.indexOf(":")
+    const tool = fromVal.slice(0, i)
+    const session_id = fromVal.slice(i + 1)
+    // the pane must hold a live detected agent of the booked kind —
+    // registration binds a conversation, not an empty shell
+    let agent = null
+    try {
+      const list = JSON.parse(execFileSync("herdr", ["agent", "list"], { encoding: "utf8", timeout: 30_000 }))
+      agent = (list?.result?.agents ?? []).find((a) => a.pane_id === pane) ?? null
+    } catch { /* herdr down: the get below will say so */ }
+    if (!agent) {
+      console.error(`register: herdr detects no agent in pane ${pane} — open your chat there first (any supported kind)`)
+      process.exitCode = 1
+      return
+    }
+    if (agent.agent !== tool) {
+      console.error(`register: pane ${pane} runs a '${agent.agent}' agent, but --from books '${tool}' — mismatched binding refused`)
+      process.exitCode = 1
+      return
+    }
+    registerLevyPane({ session_id, tool, pane, cwd: agent.cwd, at: new Date().toISOString() })
+    console.log(`register: session ${tool}:${session_id} ↔ pane ${pane}`)
+    console.log(`register: wakes now prompt this pane in-band (rung 2) — live there and use the door to renew`)
+    return
+  }
+
+  // plugin install|uninstall|status — the in-band wake channel's reader half
+  // (ADR 0008). The plugin file is OWNED by this checkout; the install
+  // is a symlink, so git pulls update it — no second source to drift.
+  if (cmd === "plugin") {
+    const sub = process.argv[3]
+    const src = realpathSync(join(fileURLToPath(new URL(".", import.meta.url)), "..", "plugin", "opencode-wake.js"))
+    const dst = join(homedir(), ".config", "opencode", "plugins", "agentic-wake.js")
+    if (sub === "install") {
+      if (!existsSync(src)) {
+        console.error(`plugin: source missing: ${src}`)
+        process.exitCode = 1
+        return
+      }
+      mkdirSync(join(homedir(), ".config", "opencode", "plugins"), { recursive: true })
+      let how = "symlink"
+      try {
+        rmSync(dst, { force: true })
+        symlinkSync(src, dst)
+      } catch {
+        // a copy still works — it just needs re-install to update
+        copyFileSync(src, dst)
+        how = "copy"
+      }
+      console.log(`plugin: installed ${how === "symlink" ? "(symlink — git pull updates it)" : "(copy — re-run to update)"}`)
+      console.log(`plugin: ${dst}`)
+      console.log(`plugin: restart opencode for it to load; wakes then land in-band (spool at ${join(homeRoot(), "wake-spool")})`)
+      return
+    }
+    if (sub === "uninstall") {
+      rmSync(dst, { force: true })
+      console.log(`plugin: uninstalled (${dst}) — the spool rung goes dormant until you reinstall`)
+      return
+    }
+    if (sub === "status") {
+      const linked = existsSync(dst)
+      console.log(`plugin: ${linked ? `installed at ${dst}` : "not installed — run: whl plugin install"}`)
+      if (linked) {
+        try {
+          const real = realpathSync(dst)
+          const same = real === src
+          console.log(`plugin: resolves to ${real}${same ? "" : "  (NOT this checkout — stale copy?)"}`)
+        } catch {
+          console.log("plugin: DANGLING — the symlink target is gone; re-run: whl plugin install")
+        }
+      }
+      return
+    }
+    console.error("usage: agentic-os plugin install|status")
+    process.exitCode = 2
+    return
+  }
+
   if (cmd === "abort") {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
@@ -532,7 +647,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | fork <jid> | promote <jid>")
+  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | fork <jid> | register --from <tool>:<sid> | plugin install|uninstall|status | promote <jid>")
   process.exitCode = 2
 }
 

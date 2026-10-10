@@ -1,4 +1,4 @@
-/Users/sagebot/projects/Agentic-Workspace/agentic-os/steps-viz
+/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-drag
 /Users/sagebot/.local/share/agentic-os
 /Users/sagebot/.config/opencode/skills
 /Users/sagebot/.vista
