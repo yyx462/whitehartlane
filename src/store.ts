@@ -8,6 +8,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSyn
 import { spawnSync } from "node:child_process"
 import { loadManifest } from "./hooks.ts"
 import { TEMP_ROOTS } from "./permission.ts"
+import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
@@ -343,7 +344,7 @@ export function killPane(job: JobRecord, label: string): JobRecord {
 // machine's notify CLI doorbell as fallback (best-effort; AGENTIC_OS_NOTIFY=0
 // or absence disables), and the durable record waiting for `whl fork`.
 // No spawner -> no wake (the Job is unattended, nothing to tell).
-export type WakeDelivery = "pane" | "doorbell" | "queued"
+export type WakeDelivery = "pane" | "inband" | "doorbell" | "queued"
 
 export type WakePort = {
   // prompt a live pane (herdr agent prompt <label>); false = not live
@@ -402,10 +403,25 @@ export function wakeFirstMate(
     delivery = "pane"
     to = holder.label
   }
+  // delivery 1.5 (ADR 0008): the in-band spool — an opencode levy that
+  // is NOT a pane. The booked session id addresses a per-session spool
+  // dir; the agentic-wake plugin riding the levy's own opencode process
+  // drains it into the conversation as a real turn. A fresh heartbeat
+  // means someone is listening in-band — for them the doorbell stays
+  // silent; stale or absent falls through to it.
+  else if (
+    !railSpawner &&
+    job.spawner.tool === "opencode" &&
+    spoolAlive(job.spawner.session_id) &&
+    appendSpoolWake({ at, to: job.spawner.session_id, jid: job.id, text: message })
+  ) {
+    delivery = "inband"
+    to = job.spawner.session_id
+  }
   // delivery 2 (fallback): the doorbell — the levy is a chat a person
-  // holds, or no live pane took the prompt. A rail spawner skips it:
-  // machines are not doorbelled.
-  if (delivery !== "pane" && !railSpawner) {
+  // holds, or no live pane took the prompt and no spool is listening.
+  // A rail spawner skips it: machines are not doorbelled.
+  if (delivery !== "pane" && delivery !== "inband" && !railSpawner) {
     const notify =
       port.notify ??
       ((text) => {
