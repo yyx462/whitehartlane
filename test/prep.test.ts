@@ -29,7 +29,7 @@ test("compacted view keeps the summary and drops what it replaced", () => {
 test("trace context keeps failed units and earlier jobs", () => {
   const text = traceContext([
     { ts: "t", actor: "first_mate", kind: "job.born", task: "add --dry-run" },
-    { ts: "t", actor: "orchestrator", kind: "unit.settled", unit: "flag", pass: false, result: "wrote --noop" },
+    { ts: "t", actor: "orchestrator", kind: "unit.finished", unit: "flag", pass: false, result: "wrote --noop" },
   ])
   assert.match(text, /add --dry-run/)
   assert.match(text, /wrote --noop/)

@@ -599,7 +599,7 @@ function tomlEntries(tomlText, sections) {
 // must explain itself)
 const FIRES_WHEN = {
   "hooks.units": "at unit (re)stamping — spawn and phase changes",
-  "hooks.grade": "after each settled unit",
+  "hooks.grade": "after each finished unit",
   "hooks.counts": "once, at report time",
   "detectors.signal": "each rail beat — feeds the photograph",
   "detectors.end": "each rail beat — reads ends",
@@ -624,7 +624,7 @@ function stagedHooks(runDir) {
 // issue #40: hooks belong to the components they act on. For member
 // graphs (coworker/fan-out): the entry member carries what runs BEFORE
 // work (units stamping, the signal detector); the last member carries
-// what runs AFTER (grade per settle, counts at report, the gates that
+// what runs AFTER (grade per finish, counts at report, the gates that
 // hold the report, the end detector). The diagram rail is gone.
 function attachComponentHooks(nodes, hooks) {
   if (!nodes.length || !hooks?.length) return;
@@ -756,7 +756,7 @@ function sourceOf(job, sid, jid) {
   return { sid, jid, runDir, files, hooks };
 }
 
-// ADR 0007: parse [[step]] array-of-tables blocks (id/settles/wave/
+// ADR 0007: parse [[step]] array-of-tables blocks (id/finished_by/wave/
 // check/folder/brief as plain strings) — same quoting rules as
 // tomlEntries, no toml dependency.
 function stepsFromToml(tomlText) {
@@ -786,7 +786,7 @@ function stepsFromToml(tomlText) {
     }
     cur[kv[1]] = value;
   }
-  return steps.filter((s) => s.id && s.settles);
+  return steps.filter((s) => s.id && s.finished_by);
 }
 
 // ADR 0007: a steps manifest draws itself — one node per step, chained
@@ -804,10 +804,10 @@ function stepsDefn(folder) {
   const HUMAN = { end: "work", check: "gate", wake: "program" };
   const nodes = steps.map((s) => ({
     id: s.id,
-    does: HUMAN[s.settles] || s.settles,
-    settles: s.settles,
+    does: HUMAN[s.finished_by] || s.finished_by,
+    finished_by: s.finished_by,
     brief:
-      s.settles === "end"
+      s.finished_by === "end"
         ? memberBrief(path.join(folder, "members", `${s.id}.md`)) || (s.brief ? s.brief : null)
         : null,
     check: s.check || null,
@@ -1345,12 +1345,12 @@ function spawnRun(folder) {
     });
     const out = [];
     const err = [];
-    let settled = false;
+    let finished = false;
     const cap = 4000; // ms
     const timer = setTimeout(() => finish("timeout"), cap);
     function finish(reason) {
-      if (settled) return;
-      settled = true;
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       // if the CLI is somehow still hanging, drop our pipes; never kill a
       // child that may already have printed job: (orchestrator is detached)
@@ -1402,11 +1402,11 @@ function spawnVerb(verb, jid, extraArgs = [], capMs = 120_000) {
     });
     const out = [];
     const err = [];
-    let settled = false;
+    let finished = false;
     const timer = setTimeout(() => finish("timeout"), capMs);
     function finish(reason) {
-      if (settled) return;
-      settled = true;
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       resolve({
         lines: out,

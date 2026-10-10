@@ -91,7 +91,7 @@ test("an error turn continues three times, then stops with the message", async (
   assert.equal(stop.entries[0]!.content, "Stopped after 3 retries.")
 })
 
-test("an error turn that cannot continue is left to settle on its own", async () => {
+test("an error turn that cannot continue is left to finish on its own", async () => {
   const pi = await loadExtension()
   const handler = pi.handlers.get("agent_before_settle")![0]!
 

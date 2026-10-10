@@ -61,7 +61,7 @@ Example: the lender pane in a Coworker Job, forked from three hours of the old p
 _Avoid_: adopt, enlist, takeover, session copy, polluting the original
 
 **Trace**:
-The append-only `events.jsonl` on a session disk: every route, admission, pane birth and death, settle, retire, abort, wake. The single source; all records are projections of it.
+The append-only `events.jsonl` on a session disk: every route, admission, pane birth and death, finish, retire, abort, wake. The single source; all records are projections of it.
 _Avoid_: log, history, audit log
 
 **Transcript**:
@@ -104,8 +104,28 @@ _Avoid_: iteration, job, chunk, fleet, pass
 A named finish of one pane. herdr names some. The Rail may add a name. It is not one word for every failure.
 _Avoid_: stuck, status, error
 
+**Finish**:
+The umbrella over a step's final state — reached when its signal lands, whatever the color. Writes state.json (done ∪ failed), one `unit.finished` event, one report row. The lattice: finish is the umbrella; done/failed are the tracks. `done` alone is a worker's claim — the grade decides the color.
+_Avoid_: settle (retired), complete, resolve, close
+
+**finished_by**:
+The manifest field typing a step by the signal that finishes it: `end` (a worker's log line), `check` (a command exits 0 — stdout ignored), `wake` (a child Job's receipt). ADR 0007.
+_Avoid_: settles (retired), returns, output, does
+
+**Check step**:
+A step where nothing works: a command is asked, exit 0 finishes it, nonzero means not-yet (re-asked on the gate debounce). Different contract from `[gates]` report detectors, which print `done` (ADR 0003).
+_Avoid_: gate (ambiguous), poll, sensor
+
+**Unreachable**:
+A check whose earlier waves hold a failure — it can never be asked, so it cannot count against the run finishing. Terminal by rule; the run finishes honestly failed instead of waiting forever.
+_Avoid_: deadlock, skipped (different concept)
+
+**Football reading**:
+The onboarding layer, not the canonical words: levy = the chairman (commissions the fixture, walks away, gets the full-time call); Job = a fixture at the Lane; worker = a player playing a position; brief = the manager's team talk; rail = the manager on the touchline (never leaves); wave = a wave of attack; check = a VAR check; wake = the result elsewhere; `done` = the shot; grade = does the goal stand; finish = full-time; pause/continue = half-time / the abandoned match resumed from the booked minute; deadline = stoppage time; blocked = an injury; report = the match report. Where football has no word (signal, slot, spawn, retire, arm), plain English wins — a faked metaphor word breaks the dictionary worse than an honest plain one.
+_Avoid_: extending the metaphor into the machinery
+
 **Fan-out**:
-The workflow for independent units. Workers do not depend on each other. The orchestrator starts them and settles results.
+The workflow for independent units. Workers do not depend on each other. The orchestrator starts them and finishes results.
 _Avoid_: fleet, hierarchy, swarm
 
 **Coworker**:
@@ -135,7 +155,7 @@ State that remains after the worker that wrote it is gone, so another worker can
 _Avoid_: snapshot, context, chat history
 
 **Resumable**:
-A Job property: it can park — pause or abort — and a later Continue picks up from outliving memory, not from scratch. The pane records with their session pointers, the settle projection, and the mail make a Job resumable. The context window never does.
+A Job property: it can park — pause or abort — and a later Continue picks up from outliving memory, not from scratch. The pane records with their session pointers, the finish projection, and the mail make a Job resumable. The context window never does.
 _Avoid_: statefulness, checkpointable, durable
 
 **Pause**:
@@ -143,7 +163,7 @@ The graceful park: stop taking new work, drain in-flight work to its boundary, r
 _Avoid_: suspend, freeze, hibernate
 
 **Drain**:
-The wait inside a Pause. In-flight work finishes to its boundary: a unit settles in fan-out, a member ends its turn in Coworker. Pending mail is not drained; it waits. Not backpressure, not a concurrency cap.
+The wait inside a Pause. In-flight work finishes to its boundary: a unit finishes in fan-out, a member ends its turn in Coworker. Pending mail is not drained; it waits. Not backpressure, not a concurrency cap.
 _Avoid_: graceful shutdown, cooldown
 
 **Abort**:

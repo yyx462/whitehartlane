@@ -211,7 +211,7 @@ export function tick(dag: Dag, state: TickIn): TickAction[] {
   }
 
   const upstreamDone = (step: Step | undefined) => !!step && step.after.every((id) => done.has(id))
-  // the actor is re-prompted only when grading has settled: with a grade
+  // the actor is re-prompted only when grading has finished: with a grade
   // step, after it finished (every done end graded); without one, after
   // the wave closed.
   const gradeSettled = grade ? done.has(grade.id) : upstreamDone(wave)

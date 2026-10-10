@@ -162,7 +162,7 @@ test("a gray-zone path is denied, then a repeated ask escalates to allow", async
   assert.equal(enter.length, 1, "enter sent exactly once — on the escalation")
 })
 
-test(`a deny pattern ends in "capped" at ${PERMISSION_CAP} denies and the caller settles`, async () => {
+test(`a deny pattern ends in "capped" at ${PERMISSION_CAP} denies and the caller finished_by`, async () => {
   const taskDir = await mkdtemp(join(tmpdir(), "rail-cap-"))
   const briefPath = join(taskDir, "brief.md")
   await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "wandering worker", "utf8"))
