@@ -25,12 +25,10 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
   const wakes: Wake[] = []
   const calls: string[] = []
   const reprompts: string[] = []
-  const seq: string[] = []
   const port: ShepPort = {
     setLayout: (overrides.setLayout as ShepPort["setLayout"]) ?? (() => {}),
     spawnWorker: (name, kind, briefPath, cwd) => {
       spawned.push(name)
-      seq.push(`spawn:${name}`)
       const fn = overrides.spawnWorker as ShepPort["spawnWorker"] | undefined
       return fn ? fn(name, kind, briefPath, cwd) : true
     },
@@ -50,16 +48,11 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
     wake: (label, kind, detail) => {
       wakes.push({ label, kind, detail })
     },
-    tailPane: (logPath) => {
-      seq.push("tail")
-      const fn = overrides.tailPane as ShepPort["tailPane"] | undefined
-      return fn ? fn(logPath) : true
-    },
     paneBlocked: overrides.paneBlocked as ShepPort["paneBlocked"] | undefined,
     answerPermission: overrides.answerPermission as ShepPort["answerPermission"] | undefined,
     flushPendingNotes: (overrides.flushPendingNotes as ShepPort["flushPendingNotes"] | undefined) ?? (() => 0),
   }
-  return { port, spawned, retired, wakes, calls, reprompts, seq }
+  return { port, spawned, retired, wakes, calls, reprompts }
 }
 
 function deps(
@@ -456,7 +449,7 @@ test("a done-append no watcher can see still finished_by via the log poller", as
 
 test("runOrchestrator finished_by everything, writes the report, and quotes the receipt", async () => {
   const dir = await copyExample("orch-full-")
-  const { port, wakes, calls, retired, seq } = fakeShep({
+  const { port, wakes, calls, retired } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       const id = name.slice(2)
       writeFileSync(join(cwd, "result.md"), "capital\n")
@@ -485,9 +478,6 @@ test("runOrchestrator finished_by everything, writes the report, and quotes the 
   assert.ok(wakes[0].detail.includes("pane-reap: 0 remaining"))
   const written = JSON.parse(readFileSync(join(dir, "report.json"), "utf8"))
   assert.equal(written.status, "done")
-  // default layout is new-tab with the orchestrator lane on the left:
-  // the lane opens before any worker spawns
-  assert.equal(seq.indexOf("tail") < seq.indexOf("spawn:w-france"), true)
 })
 
 test("hook runs land in the trace as hook.run (issue #40)", async () => {
@@ -633,28 +623,6 @@ test("runOrchestrator stops at the deadline, finished_by the rest failed, and wa
   assert.equal(report.status, "failed")
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
   assert.ok(wakes.length >= 1)
-})
-
-test("an orchestrator-side layout of right opens the lane after the first cycle", async () => {
-  const pi = await copyExample("orch-side-right-")
-  const { port, seq } = fakeShep({
-    spawnWorker: (name, _kind, _brief, cwd) => {
-      const id = name.slice(2)
-      writeFileSync(join(cwd, "result.md"), "capital\n")
-      appendFileSync(join(cwd, "log.txt"), `done ${id}\n`)
-      return true
-    },
-  })
-
-  await runOrchestrator({
-    taskDir: pi,
-    shep: port,
-    layout: { tab: "same", orchestrator: "right" },
-    checkMs: 10,
-    log: () => {},
-  })
-
-  assert.equal(seq.indexOf("spawn:w-france") < seq.indexOf("tail"), true)
 })
 
 test("the manifest layout section resolves with defaults and rejects bad values", async () => {
