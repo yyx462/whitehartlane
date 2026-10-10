@@ -69,7 +69,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   mkdirSync(join(taskDir, "briefs"), { recursive: true })
   // No orchestrator pane: the only mind a lab needs is the actor's
   // (protocol.json is consumed). A blocked mock is a question for the
-  // typed decider, and a deny-pattern block settles blocked — no
+  // typed decider, and a deny-pattern block finished_by blocked — no
   // judgment seat with an unread output channel (decision.txt was
   // never consumed).
   const actorPath = join(taskDir, "briefs", "actor.md")
@@ -79,7 +79,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   const closed = new Set<string>()
   const graded = new Map<string, { pass: boolean; row: string }>()
   const woke: string[] = []
-  const settled: { unit: string; result: string; pass: boolean }[] = []
+  const finished: { unit: string; result: string; pass: boolean }[] = []
   let prompted = ""
   const kind = (() => {
     try {
@@ -244,7 +244,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     for (const id of wakesFor(ends, woke)) {
       // Privilege (zen 6): a blocked mock is a question for the typed
       // decider — answer the dialog. A capped block (a deny pattern)
-      // settles the mock blocked, exactly as fan-out settles a capped
+      // finished_by the mock blocked, exactly as fan-out finished_by a capped
       // unit; a non-dialog block simply stands as blocked in the
       // report. The id joins `woke` only on a real cap, so a fresh
       // dialog on the same pane is answered again next beat.
@@ -258,13 +258,13 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       const pane = mockPane.get(id)
       const name = paneName("mock", id)
       closed.add(id)
-      settled.push({ unit: id, result: "blocked (deny cap)", pass: false })
+      finished.push({ unit: id, result: "blocked (deny cap)", pass: false })
       if (pane) {
         rail.closePane(pane)
         rail.retire(name)
         board = rail.dropPane(board, pane)
       }
-      log(`mock ${name} hit the deny cap — settled blocked`)
+      log(`mock ${name} hit the deny cap — finished blocked`)
       rail.say("watcher", `${name} deny cap`)
       rail.say("operator", `close ${name}`)
     }
@@ -278,7 +278,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       const pane = mockPane.get(row.id)
       const name = paneName("mock", row.id)
       closed.add(row.id)
-      settled.push({
+      finished.push({
         unit: row.id,
         result: graded.get(row.id)?.row ?? row.end ?? "open",
         pass: graded.has(row.id) ? graded.get(row.id)!.pass : row.end === "done",
@@ -301,7 +301,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   }
   const finalEnds = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
   const rows = dag
-    ? [...settled, ...finalEnds
+    ? [...finished, ...finalEnds
         .filter((row) => !closes(row.end))
         .map((row) => ({ unit: row.id, result: row.end ?? "open", pass: row.end === "done" }))]
     : finalEnds.map((row) => {

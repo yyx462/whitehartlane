@@ -43,7 +43,7 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
 
   const done = new Set<string>()
   const graded = new Map<string, { pass: boolean; row: string }>()
-  const settled: { unit: string; result: string; pass: boolean }[] = []
+  const finished: { unit: string; result: string; pass: boolean }[] = []
   const born = new Map<string, number>()
   const closed = new Set<string>()
   let actorBorn = false
@@ -111,11 +111,11 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
         reported = true
       }
     }
-    if (reopened) continue // the rail skips the settle pass on a reopen beat
+    if (reopened) continue // the rail skips the finish pass on a reopen beat
     for (const row of ends) {
       if (row.end !== "done" || closed.has(row.id)) continue
       closed.add(row.id)
-      settled.push({
+      finished.push({
         unit: row.id,
         result: graded.get(row.id)?.row ?? "done",
         pass: graded.has(row.id) ? graded.get(row.id).pass : true,
@@ -124,7 +124,7 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
   }
   assert.equal(reported, true, `${name}: the run must reach its report`)
   abortJob(booked.job, "test", 0, "cli")
-  return { dir, dag, rows: settled, beats }
+  return { dir, dag, rows: finished, beats }
 }
 
 function writeProtocol(dir: string, units: Unit[]): void {

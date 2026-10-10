@@ -15,7 +15,7 @@ if (existsSync(replyPath)) {
     row = "thin"
   }
 }
-// the graded marker settles the ticket in the signal's eyes; the
+// the graded marker finished_by the ticket in the signal's eyes; the
 // human verdict is the recovery path, not a regrade
 mkdirSync(join(cwd, "units", id), { recursive: true })
 writeFileSync(join(cwd, "units", id, "graded"), "")

@@ -33,7 +33,7 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   single source. `job.json`, `report.json`, `state.json` are
   projections (`projectJob` rebuilds them from events). Event kinds:
   `route, admit, reject, job.born, job.orphaned, job.relaunched,
-  pane.born, pane.died, reprompt, backpressure, unit.settled,
+  pane.born, pane.died, reprompt, backpressure, unit.finished,
   job.retired, job.aborted, wake.consumed, fatal`.
 - **Booked birth (JEV).** `src/policy.ts` admits — deterministic checks
   (slots, retry cap, one Job; a fork's seed must resolve); every pane
@@ -67,8 +67,8 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `permission` event, and caps the DENIES — over `PERMISSION_CAP` (6)
   deny-family answers the worker is done (allows spend nothing: a
   working member touching legitimately-needed outside-roots paths
-  must not die at the cap). Fan-out settles the unit blocked,
-  coworker ends the member, lab settles the mock blocked. No mind is
+  must not die at the cap). Fan-out finishes the unit blocked,
+  coworker ends the member, lab finishes the mock blocked. No mind is
   woken anywhere: a workflow earns an agent pane only when a runtime
   judgment is needed that no typed gate can hold AND its output has a
   consumed channel — no workflow passes (the actor's `protocol.json`
@@ -111,7 +111,7 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 ## Hooks — the per-task surface a planner may write
 
 - `units` (decompose the task), `brief` (worker instructions),
-  `grade` (settle a unit), `report.where` + `counts` (named counts),
+  `grade` (finish a unit), `report.where` + `counts` (named counts),
   `slots` (per-task concurrency, default 2).
 - Hook commands run as `sh -c "<command> '<argument>'"` — positional
   `$1` is only real inside a script FILE (`bash hooks/grade.sh` gets

@@ -78,8 +78,8 @@ test("the lab engine runs a wave: actor names it, the mock plants it, the actor 
   assert.match(String(flag.result), /planted/)
   assert.equal(existsSync(join(dir, "units", "flag", "result.md")), true)
   assert.equal(existsSync(join(dir, "report.json")), true)
-  // births booked on the ledger (runLab reports settles, the rail
-  // books the panes — unit.settled is the fan-out engine's event)
+  // births booked on the ledger (runLab reports finished_by, the rail
+  // books the panes — unit.finished is the fan-out engine's event)
   assert.ok(ledger.attached.some((label) => label.includes("mock-flag")))
   assert.ok(ledger.attached.some((label) => label.includes("actor")))
 })

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
 // continue | fork | promote — the start door is run. It reads workflow.toml and
-// starts that workflow's engine. The rest read and settle the OS disk
+// starts that workflow's engine. The rest read and finish the OS disk
 // (~/.local/share/agentic-os). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
 // pane is born booked — a live pane no Job admits is a violation); sweep
@@ -260,7 +260,7 @@ async function main() {
         console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
     }
-    console.log(swept === 0 ? "sweep: nothing to settle" : `sweep: ${swept} Job(s) parked for a continue decision`)
+    console.log(swept === 0 ? "sweep: nothing to finish" : `sweep: ${swept} Job(s) parked for a continue decision`)
     return
   }
 
@@ -303,7 +303,7 @@ async function main() {
   }
 
   // pause (ADR 5): SIGTERM is the drain — the orchestrator stops
-  // claiming, lets in-flight units settle, retires its panes, and
+  // claiming, lets in-flight units finish, retires its panes, and
   // books paused. --wait is a one-shot drain-ceiling override (2m, 90s).
   if (cmd === "pause") {
     const jid = process.argv[3]
@@ -497,7 +497,7 @@ async function main() {
     if (job.state === "running" && pidAlive(job.pid)) {
       // kill semantics (ADR 5): SIGKILL — the orchestrator cannot book,
       // so the CLI books the abort and retires the panes itself.
-      // Unsettled units stay open; their booked sessions survive for
+      // Unfinished units stay open; their booked sessions survive for
       // a later continue. (SIGTERM is pause, not abort.)
       try {
         process.kill(job.pid, "SIGKILL")

@@ -43,7 +43,7 @@ export function admitFork(input: {
 }
 
 export function admitWorkerSpawn(input: {
-  settled: boolean
+  finished: boolean
   shutdown: boolean
   active: number
   slots: number
@@ -51,7 +51,7 @@ export function admitWorkerSpawn(input: {
   cap: number
 }): Admission {
   if (input.shutdown) return { admit: false, why: "orchestrator shutting down" }
-  if (input.settled) return { admit: false, why: "unit already settled" }
+  if (input.finished) return { admit: false, why: "unit already finished" }
   if (input.active >= input.slots) {
     return { admit: false, why: `slots full (${input.active}/${input.slots})` }
   }

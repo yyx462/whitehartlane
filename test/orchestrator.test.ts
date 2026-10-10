@@ -13,7 +13,7 @@ import {
 import { RefusedError } from "../src/backpressure.ts"
 import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
-import { readState, settleUnit } from "../src/state.ts"
+import { readState, finishUnit } from "../src/state.ts"
 
 import { copyExample, copyExampleNamed } from "./util.ts"
 
@@ -107,7 +107,7 @@ test("canary runs one unit, stops the job on a fail, and scales on a pass", asyn
   assert.deepEqual(goShep.spawned, ["w-france", "w-japan", "w-peru"])
 })
 
-test("cycle spawns one worker per unsettled unit, up to the slots", async () => {
+test("cycle spawns one worker per unfinished unit, up to the slots", async () => {
   const dir = await copyExample("orch-spawn-")
   const { port, spawned } = fakeShep()
 
@@ -118,7 +118,7 @@ test("cycle spawns one worker per unsettled unit, up to the slots", async () => 
   assert.deepEqual(readState(dir), { done: [], failed: [] })
 })
 
-test("the default slot cap is 2 — the third unit waits for a settle", async () => {
+test("the default slot cap is 2 — the third unit waits for a finish", async () => {
   const dir = await copyExample("orch-slots-")
   const { port, spawned } = fakeShep()
   const base = deps(dir, port)
@@ -133,7 +133,7 @@ test("the default slot cap is 2 — the third unit waits for a settle", async ()
   assert.deepEqual(spawned, ["w-france", "w-japan", "w-peru"])
 })
 
-test("a done sentinel grades the unit, settles it, and wakes nobody", async () => {
+test("a done sentinel grades the unit, finished_by it, and wakes nobody", async () => {
   const dir = await copyExample("orch-done-")
   const { port, spawned, retired, wakes } = fakeShep()
   const base = deps(dir, port)
@@ -147,13 +147,13 @@ test("a done sentinel grades the unit, settles it, and wakes nobody", async () =
 
   assert.equal(done, false)
   assert.deepEqual(readState(dir).done, [id])
-  assert.deepEqual(base.events.find((e) => e.kind === "unit.settled")?.payload.result, "found")
+  assert.deepEqual(base.events.find((e) => e.kind === "unit.finished")?.payload.result, "found")
   assert.ok(retired.includes(`w-${id}`))
   assert.deepEqual(wakes, [])
   assert.equal(spawned.length, 3)
 })
 
-test("a failed grade settles the unit failed and wakes the shepherd", async () => {
+test("a failed grade finished_by the unit failed and wakes the shepherd", async () => {
   const dir = await copyExample("orch-grade-")
   const { port, wakes } = fakeShep()
   const base = deps(dir, port)
@@ -165,12 +165,12 @@ test("a failed grade settles the unit failed and wakes the shepherd", async () =
   cycle(base)
 
   assert.deepEqual(readState(dir).failed, [id])
-  assert.deepEqual(base.events.find((e) => e.kind === "unit.settled")?.payload.result, "missing")
+  assert.deepEqual(base.events.find((e) => e.kind === "unit.finished")?.payload.result, "missing")
   assert.equal(wakes.length, 1)
   assert.equal(wakes[0].kind, "blocked")
 })
 
-test("a blocked line settles the unit failed and wakes the shepherd", async () => {
+test("a blocked line finished_by the unit failed and wakes the shepherd", async () => {
   const dir = await copyExample("orch-blocked-")
   const { port, wakes } = fakeShep()
   const base = deps(dir, port)
@@ -186,7 +186,7 @@ test("a blocked line settles the unit failed and wakes the shepherd", async () =
   assert.equal(wakes[0].label, id)
 })
 
-test("a dead pane settles the unit failed and wakes the shepherd", async () => {
+test("a dead pane finished_by the unit failed and wakes the shepherd", async () => {
   const dir = await copyExample("orch-dead-")
   const { port, wakes } = fakeShep({ paneAlive: () => false })
   const base = deps(dir, port)
@@ -199,7 +199,7 @@ test("a dead pane settles the unit failed and wakes the shepherd", async () => {
   assert.equal(wakes.length, 3)
 })
 
-test("a worker whose log goes quiet past the stall window settles failed", async () => {
+test("a worker whose log goes quiet past the stall window finished_by failed", async () => {
   const dir = await copyExample("orch-stall-")
   let clock = 0
   const { port, wakes } = fakeShep()
@@ -319,7 +319,7 @@ test("acquireUnits fails fast on a deterministic planner failure", async () => {
   assert.equal(calls, 1)
 })
 
-test("a reprompted worker that then writes its sentinel settles normally", async () => {
+test("a reprompted worker that then writes its sentinel finished_by normally", async () => {
   const dir = await copyExample("orch-reprompt-ok-")
   let clock = 0
   const { port, reprompts, wakes } = fakeShep({
@@ -335,18 +335,18 @@ test("a reprompted worker that then writes its sentinel settles normally", async
 
   cycle(base)
   clock = 90_000
-  const settled = cycle(base)   // reprompt fires here, sentinels land
-  const done = cycle(base)      // next poll settles them
+  const finished = cycle(base)   // reprompt fires here, sentinels land
+  const done = cycle(base)      // next poll finished_by them
 
-  assert.equal(settled, false)
+  assert.equal(finished, false)
   assert.equal(done, true)
   assert.deepEqual(readState(dir).done, ["france", "japan", "peru"])
   assert.deepEqual(wakes.filter((w) => w.kind === "blocked"), [])
 })
 
-test("cycle skips units already settled", async () => {
+test("cycle skips units already finished", async () => {
   const dir = await copyExample("orch-resume-")
-  settleUnit(dir, "france", true, { unit: "france", result: "found", pass: true })
+  finishUnit(dir, "france", true, { unit: "france", result: "found", pass: true })
   const { port, spawned } = fakeShep()
 
   cycle(deps(dir, port))
@@ -379,7 +379,7 @@ test("pane labels are run-scoped, idempotent, and shep-safe", () => {
   assert.notEqual(otherRun("w-europe-capitals"), a)
 })
 
-test("a unit whose spawn fails three times settles failed and wakes", async () => {
+test("a unit whose spawn fails three times finished_by failed and wakes", async () => {
   const dir = await copyExample("orch-spawnfail-")
   const { port, wakes, spawned } = fakeShep({ spawnWorker: () => false })
   const base = deps(dir, port)
@@ -417,7 +417,7 @@ test("runOrchestrator wakes on the log, not on the check interval", async () => 
 // the rail sat blind until a 10-minute stall timer. The done below lands
 // as a fresh inode (rename), so every file watcher is blind to it; only
 // the log poller's stat sweep can see it.
-test("a done-append no watcher can see still settles via the log poller", async () => {
+test("a done-append no watcher can see still finished_by via the log poller", async () => {
   const dir = await copyExample("orch-poll-")
   const { port } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
@@ -454,7 +454,7 @@ test("a done-append no watcher can see still settles via the log poller", async 
   assert.deepEqual(report.counts, { lookups: 3, failed: 0 })
 })
 
-test("runOrchestrator settles everything, writes the report, and quotes the receipt", async () => {
+test("runOrchestrator finished_by everything, writes the report, and quotes the receipt", async () => {
   const dir = await copyExample("orch-full-")
   const { port, wakes, calls, retired, seq } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
@@ -513,7 +513,7 @@ test("hook runs land in the trace as hook.run (issue #40)", async () => {
   assert.equal(report.status, "done")
   const names = hookRuns.map((h) => h.hook)
   assert.ok(names.includes("units"), "units hook reported")
-  assert.equal(names.filter((n) => n === "grade").length, 3, "grade reported per settled unit")
+  assert.equal(names.filter((n) => n === "grade").length, 3, "grade reported per finished unit")
   assert.ok(names.includes("counts"), "counts reported at report time")
   const one = hookRuns.find((h) => h.hook === "grade")
   assert.ok(one?.target, "grade notes its target unit")
@@ -521,7 +521,7 @@ test("hook runs land in the trace as hook.run (issue #40)", async () => {
   assert.ok(one.ms >= 0)
 })
 
-// ADR 0007 — settle-typed steps: waves gate spawning, checks poll, wake
+// ADR 0007 — finish-typed steps: waves gate spawning, checks poll, wake
 // refuses until stage 3.
 
 test("a steps manifest parses with wave order and per-type fields (ADR 0007)", async () => {
@@ -529,7 +529,7 @@ test("a steps manifest parses with wave order and per-type fields (ADR 0007)", a
   const { loadManifest } = await import("../src/hooks.ts")
   const m = loadManifest(dir)
   assert.equal(m.steps?.length, 4)
-  assert.deepEqual(m.steps?.map((s) => [s.id, s.settles, s.wave]), [
+  assert.deepEqual(m.steps?.map((s) => [s.id, s.finished_by, s.wave]), [
     ["g0", "end", "w1"],
     ["review", "check", "w2"],
     ["g1", "end", "w3"],
@@ -597,7 +597,7 @@ test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async 
       briefGraceMs: 60_000,
       log: () => {},
     }),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("blocked settle never landed")), 4000)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("blocked finish never landed")), 4000)),
   ])
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
@@ -609,7 +609,7 @@ test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async 
 test("a wake step refuses to run — parsed, never silently nested (ADR 0007 stage 3)", async () => {
   const dir = await copyExampleNamed("staged-waves", "orch-wake-")
   const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
-    '\n[[step]]\nid = "nested"\nsettles = "wake"\nfolder = "./g0-substrate"\nwave = "w4"\n'
+    '\n[[step]]\nid = "nested"\nfinished_by = "wake"\nfolder = "./g0-substrate"\nwave = "w4"\n'
   writeFileSync(join(dir, "workflow.toml"), wf)
   const { port } = fakeShep()
   await assert.rejects(
@@ -618,7 +618,7 @@ test("a wake step refuses to run — parsed, never silently nested (ADR 0007 sta
   )
 })
 
-test("runOrchestrator stops at the deadline, settles the rest failed, and wakes", async () => {
+test("runOrchestrator stops at the deadline, finished_by the rest failed, and wakes", async () => {
   const dir = await copyExample("orch-deadline-")
   const { port, wakes } = fakeShep()
 
@@ -696,7 +696,7 @@ test("a permission dialog the rail answers does not stall the unit (zen 6)", asy
   const d = deps(dir, shep.port, { stallMs: 10, now: () => 1_000_000 })
   cycle(d) // spawns w-france
   assert.deepEqual(answered, [])
-  cycle(d) // dialog seen, answered — the unit stays open, nothing settles
+  cycle(d) // dialog seen, answered — the unit stays open, nothing finished_by
 
   assert.deepEqual(answered, ["w-france"])
   assert.deepEqual(shep.retired, [])
@@ -705,7 +705,7 @@ test("a permission dialog the rail answers does not stall the unit (zen 6)", asy
   assert.equal(d.inFlight.has("france"), true)
 })
 
-test("a worker past the permission cap settles blocked with a wake that says so", async () => {
+test("a worker past the permission cap finished_by blocked with a wake that says so", async () => {
   const dir = await copyExample("orch-perm-cap-")
   const shep = fakeShep({
     paneBlocked: () => true,
@@ -714,7 +714,7 @@ test("a worker past the permission cap settles blocked with a wake that says so"
 
   const d = deps(dir, shep.port, { slots: 1 })
   cycle(d) // spawn
-  cycle(d) // capped — settles like a block
+  cycle(d) // capped — finished_by like a block
 
   assert.deepEqual(readState(dir).failed, ["france"])
   assert.deepEqual(shep.retired, ["w-france"])

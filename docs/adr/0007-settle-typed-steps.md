@@ -89,3 +89,11 @@ child job); worker-as-levy stays an ordinary work node.
   programs that want it.
 - dag.ts keeps its internal verbs (`actor|wave|grade|report|gate`) — lab
   code says in code what manifests now say in TOML.
+
+## Renamed after adoption (2026-10-10)
+
+One word per concept, per the dictionary rule: `settles` → `finished_by`,
+settle → finish (`finishUnit`, `unit.finished` event, `finishedIds`), settled
+→ finished. The two track words are untouched — the worker's `done` line,
+state.json's `done`/`failed` keys, the report's `done` status. Lattice: one
+umbrella word (finish), two track words (done, failed). "Settle" is retired.

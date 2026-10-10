@@ -24,7 +24,7 @@ export function readState(taskDir: string): Settled {
   }
 }
 
-export function settleUnit(
+export function finishUnit(
   taskDir: string,
   unitId: string,
   pass: boolean,

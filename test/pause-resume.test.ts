@@ -82,8 +82,8 @@ test("draining claims no new units", async () => {
   assert.equal(done, false)
 })
 
-test("draining still settles an in-flight unit that finishes", async () => {
-  const dir = await copyExampleWithUnits("pause-settle-")
+test("draining still finished_by an in-flight unit that finishes", async () => {
+  const dir = await copyExampleWithUnits("pause-finish-")
   const { port, spawned } = fakeShep()
   const d = deps(dir, port)
   cycle(d)
@@ -100,7 +100,7 @@ test("draining still settles an in-flight unit that finishes", async () => {
   assert.equal(done, false)
 })
 
-test("draining leaves a dead pane's unit open for resume — no failed settle", async () => {
+test("draining leaves a dead pane's unit open for resume — no failed finish", async () => {
   const dir = await copyExampleWithUnits("pause-dead-")
   const alive = fakeShep()
   const dead = fakeShep({ paneAlive: () => false })
@@ -162,7 +162,7 @@ test("drainDeadline honors the one-shot file, then clears it", () => {
   assert.equal(existsSync(join(dir, "drain.deadline")), false)
 })
 
-test("runOrchestrator parks on SIGTERM: drained units settle, stragglers stay open, no report", async () => {
+test("runOrchestrator parks on SIGTERM: drained units finish, stragglers stay open, no report", async () => {
   const dir = await copyExampleWithUnits("pause-loop-")
   const spawnedOnce = new Set<string>()
   const { port, retired, calls } = fakeShep({
@@ -198,7 +198,7 @@ test("runOrchestrator parks on SIGTERM: drained units settle, stragglers stay op
   assert.equal(existsSync(join(dir, "report.json")), false)
 })
 
-test("continueBriefFor restates the settle protocol for both resume shapes", () => {
+test("continueBriefFor restates the finish protocol for both resume shapes", () => {
   const paths = { dir: "/d", briefPath: "/d/brief.md", logPath: "/d/log.txt" }
   const withSession = continueBriefFor({ id: "u9", brief: "b" }, { tool: "pi", session_id: "s1", cwd: "/w" }, paths)
   assert.match(withSession, /done u9/)

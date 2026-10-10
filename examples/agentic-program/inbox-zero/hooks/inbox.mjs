@@ -17,8 +17,8 @@ for (const file of readdirSync(join(cwd, mailbox)).sort()) {
   if (!file.endsWith(".ticket")) continue
   const id = `t${file.replace(/\.ticket$/, "")}`
   const home = join(cwd, "units", id)
-  const settled = existsSync(join(home, "reply-sent")) && existsSync(join(home, "graded"))
-  if (settled) continue
+  const finished = existsSync(join(home, "reply-sent")) && existsSync(join(home, "graded"))
+  if (finished) continue
   units.push({
     id,
     brief: [

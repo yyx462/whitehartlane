@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 const rows = JSON.parse(readFileSync(process.argv[2], "utf8"))
-// a requeued ticket settles twice (rejected row, then its redraft);
+// a requeued ticket finished_by twice (rejected row, then its redraft);
 // the counts name the tickets, not the attempts
 const byId = new Map(rows.map((r) => [r.unit, r]))
 const tickets = [...byId.values()]

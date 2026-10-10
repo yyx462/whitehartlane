@@ -35,7 +35,7 @@ paused | aborted | orphaned ── continue (typed) ─────────�
 ## Boundaries
 
 - **fan-out**: drain = take no new unit claims; every in-flight unit
-  settles (existing event loop already converges; a `draining` flag
+  finishes (existing event loop already converges; a `draining` flag
   stops new spawns and exits when `inFlight` is empty).
 - **coworker**: drain = the relay stops delivering; a member mid-turn
   ends its turn (writes mail or goes idle). Pending undelivered mail
