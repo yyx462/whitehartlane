@@ -226,3 +226,28 @@ test("pane.born carries the JEV parent stamp", () => {
 test("cleanup: the temp home is disposable", () => {
   rmSync(process.env.AGENTIC_OS_HOME!, { recursive: true, force: true })
 })
+
+test("worker configs pre-seed temp scratch so a /tmp write never prompts (j-b6067c)", async () => {
+  const { writeWorkerPermissions } = await import("../src/store.ts")
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-tempseed-"))
+  writeWorkerPermissions(dir)
+  const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
+  assert.equal(oc.permission.external_directory["/tmp/**"], "allow")
+  assert.equal(oc.permission.external_directory[`${tmpdir()}/**`], "allow")
+  assert.ok(!("/​**" in oc.permission.external_directory), "seeding temp never grants the disk")
+})
+
+test("addWorkerRoot refuses degenerate roots — no /, no empty key (j-b6067c)", async () => {
+  const { addWorkerRoot, writeWorkerPermissions } = await import("../src/store.ts")
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-degen-"))
+  writeWorkerPermissions(dir)
+  const before = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")) as {
+    permission: { external_directory: Record<string, string> }
+  }
+  addWorkerRoot(dir, "/")
+  addWorkerRoot(dir, "")
+  const after = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")) as {
+    permission: { external_directory: Record<string, string> }
+  }
+  assert.deepEqual(Object.keys(after.permission.external_directory).sort(), Object.keys(before.permission.external_directory).sort())
+})

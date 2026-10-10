@@ -72,7 +72,10 @@ function under(path: string, root: string): boolean {
 // land there, and a flat outside-home deny stall-reaps a worker that
 // only wanted scratch (j-ba18b7: /tmp). Sensitive paths stay
 // hard-denied above; wandering elsewhere outside home is judged below.
-const TEMP_ROOTS: string[] = (() => {
+// Exported so the sandbox configs pre-seed the same roots (j-b6067c):
+// a dialog the rail would only re-allow every beat is wasted turns —
+// the worker's own opencode.json allows temp before a dialog fires.
+export const TEMP_ROOTS: string[] = (() => {
   const roots = new Set(["/tmp", "/private/tmp", "/var/folders", tmpdir()])
   try {
     roots.add(realpathSync(tmpdir()))

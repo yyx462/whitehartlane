@@ -741,8 +741,11 @@ export class Rail implements ShepPort {
       // an allow spends nothing: the need was judged real (or asserted
       // by repeat ask) — a working member touching legitimately-needed
       // outside-roots paths (a vista job reading its shots) must not
-      // die at the cap
-      addWorkerRoot(cwd, verdict.path.replace(/\/[^/]*$/, ""))
+      // die at the cap. The durable grant is the parent dir, but a
+      // top-level path's parent is "/" — granting that whitelists the
+      // disk, so the path itself is the grant (j-b6067c: /tmp -> /**).
+      const parent = verdict.path.replace(/\/[^/]*$/, "")
+      addWorkerRoot(cwd, parent === "" || parent === "/" ? verdict.path : parent)
       this.herdr("agent", "send-keys", label, "enter")
     } else {
       this.herdr("agent", "send-keys", label, "esc")
