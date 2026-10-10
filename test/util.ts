@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Rail, type RailLedger, type RunnerResult } from "../src/rail.ts"
+import type { PermissionJudge } from "../src/permission.ts"
 import type { JobRecord } from "../src/store.ts"
 
 export const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
@@ -65,6 +66,9 @@ export type FakeHerdr = {
   runner: (args: string[]) => RunnerResult
   calls: string[][]
   phase: Record<string, string>
+  // panes that refuse prompts even when idle (j-a532f9: the pane the
+  // guidance could not reach) — set a scoped label to hold it
+  hold: Set<string>
   // the scripted agent brain: (pane name, prompt text) → side effects;
   // use `later(fn)` to make writes the engines' watches can catch
   onPrompt: (name: string, text: string, later: (fn: () => void) => void) => void
@@ -76,9 +80,11 @@ export function fakeHerdr(): FakeHerdr {
   const calls: string[][] = []
   const seq = { n: 0 }
   const phase: Record<string, string> = {}
+  const hold = new Set<string>()
   const fake: FakeHerdr = {
     calls,
     phase,
+    hold,
     onPrompt: () => {},
     readFor: () => "",
     onKeys: () => {},
@@ -112,6 +118,11 @@ export function fakeHerdr(): FakeHerdr {
         return { status: 0, stdout: fake.readFor(args[2]!) }
       }
       if (args[0] === "agent" && args[1] === "prompt") {
+        // reality (j-a532f9): a blocked pane refuses prompts — the
+        // rail queues the note for the next unblocked beat. A held
+        // pane refuses even idle (the unreachable-guidance race).
+        const ph = phase[args[2]!]
+        if (ph === "dialog" || hold.has(args[2]!)) return { status: 1, stdout: "" }
         fake.onPrompt(args[2]!, args[3] ?? "", (fn) => setTimeout(fn, 50).unref?.())
         return line({})
       }
@@ -125,11 +136,18 @@ export function fakeHerdr(): FakeHerdr {
   return fake
 }
 
-export function fakeRail(taskDir: string, herdr: FakeHerdr, ledger: RailLedger | null): Rail {
+export function fakeRail(
+  taskDir: string,
+  herdr: FakeHerdr,
+  ledger: RailLedger | null,
+  railOpts: { judge?: PermissionJudge; home?: string; log?: (msg: string) => void } = {},
+): Rail {
   return new Rail({
     argvDir: taskDir,
     ledger,
-    log: () => {},
+    judge: railOpts.judge,
+    home: railOpts.home,
+    log: railOpts.log ?? (() => {}),
     shepRunner: () => ({ status: 0, stdout: "" }),
     herdrRunner: herdr.runner,
   })

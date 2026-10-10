@@ -15,7 +15,10 @@ import { waitChange, type Rail } from "./rail.ts"
 import { writeReport, type Report } from "./report.ts"
 import { liveSpawnerSessionIds, writeWorkerPermissions } from "./store.ts"
 
-export async function runCoworker(rail: Rail): Promise<Report | null> {
+export async function runCoworker(
+  rail: Rail,
+  opts: { stallMs?: number; beatMs?: number } = {},
+): Promise<Report | null> {
   const taskDir = rail.taskDir
   const log = rail.log
   const ledger = rail.ledger
@@ -110,6 +113,10 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
   }
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
   const deadline = Date.now() + 2 * 60 * 60_000
+  // the stall guard's clock and the loop's beat — parameterized so
+  // tests drive the nudge ladder in milliseconds
+  const stallMs = opts.stallMs ?? 120_000
+  const beatMs = opts.beatMs ?? 5_000
   const dead: string[] = []
   // why each member died — the report's exchange row carries it, so a
   // "failed" never arrives without its reason (j-5b245e read "ended by
@@ -120,6 +127,9 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
   // must never stall the exchange forever.
   const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
   const nudged = new Map<string, number>()
+  // a nudge-cap kill deferred because guidance was still queued — once
+  // per member; the second expiry is honest death
+  const deferred = new Set<string>()
   // Booked wait (ADR 0006): a member whose booked session a running
   // child spur names as its spawner is idle on purpose — the nudge
   // clock stands down (and resets) while the child runs. Disk-derived
@@ -167,9 +177,12 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
         ended = "paused"
         break
       }
-      await waitChange(join(taskDir, "messages"), 5_000)
+      await waitChange(join(taskDir, "messages"), beatMs)
       continue
     }
+    // queued privilege notes ride every beat — a pane that unblocked
+    // since its deny gets the guidance now, not at the next stall
+    rail.flushPendingNotes()
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
     for (const b of bad) {
       if (refused.includes(b.file)) continue
@@ -179,8 +192,6 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
       log(`refused message ${b.file}: ${b.why}`)
       rail.say("watcher", `refuse ${b.file}`)
     }
-    // flush queued permission notes into panes that can take them
-    rail.flushPendingNotes()
     const plan = relayPlan(messages, delivered, CAP)
     for (const r of plan.relays) {
       // a working member takes mail on a later beat — never mid-turn
@@ -216,9 +227,11 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
     // sweep (roots, judge, escalation, deny cap); this loop only
     // carries the consequence: a capped member is dead and ends the
     // exchange. No dialog ever waits for a person.
+    const answered = new Set<string>()
     for (const m of members) {
       if (dead.includes(m.name)) continue
       const verdict = rail.answerPermission(m.name)
+      if (verdict !== "none") answered.add(m.name)
       if (verdict === "capped") {
         dead.push(m.name)
         deadWhy.set(m.name, `${m.name} blocked past the deny cap`)
@@ -226,13 +239,17 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
         log(`member ${m.name} hit the deny cap — ending`)
       }
     }
+    // a dialog the rail just answered is progress: the stall clock
+    // resets, or permission churn eats the whole nudge budget while
+    // the member is talking to the rail, not idling (j-a532f9)
+    if (ballOn.name && answered.has(ballOn.name)) ballOn.since = Date.now()
     // the stall guard: whoever holds the ball and idles too long gets
     // nudged — twice, then the exchange ends. Working resets the clock.
     if (ballOn.name && !dead.includes(ballOn.name)) {
       const st = rail.agentStatus(ballOn.name)
       if (st.includes('"agent_status":"working"')) {
         ballOn.since = Date.now()
-      } else if (Date.now() - ballOn.since > 120_000 && memberBookedWait(ballOn.name)) {
+      } else if (Date.now() - ballOn.since > stallMs && memberBookedWait(ballOn.name)) {
         // booked wait: a live child spur holds this member — stand the
         // nudge clock down without spending a nudge (ADR 0006)
         if (!stoodDown.has(ballOn.name)) {
@@ -240,7 +257,7 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
           log(`booked wait ${ballOn.name}: a live child spur holds it — nudges stand down`)
         }
         ballOn.since = Date.now()
-      } else if (Date.now() - ballOn.since > 120_000) {
+      } else if (Date.now() - ballOn.since > stallMs) {
         const used = nudged.get(ballOn.name) ?? 0
         if (used < 2) {
           nudged.set(ballOn.name, used + 1)
@@ -253,6 +270,17 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
           ballOn.since = Date.now()
           log(`nudge ${ballOn.name} (${used + 1}/2)`)
           ledger?.emit("reprompt", { member: ballOn.name, nudge: used + 1 })
+        } else if (rail.hasPendingNote(ballOn.name) && !deferred.has(ballOn.name)) {
+          // the guidance is still queued — a blocked pane refused it and
+          // the kill raced the message that could save the member
+          // (j-a532f9: dead 5s after the deny, note undelivered).
+          // Defer death one beat and try to flush now; the second
+          // expiry is honest death.
+          deferred.add(ballOn.name)
+          ballOn.since = Date.now()
+          rail.flushPendingNotes()
+          log(`member ${ballOn.name} at the nudge cap — guidance still queued, deferring one beat`)
+          ledger?.emit("reprompt", { member: ballOn.name, deferred: true })
         } else {
           dead.push(ballOn.name)
           deadWhy.set(ballOn.name, `${ballOn.name} stalled past the nudge cap`)
@@ -275,7 +303,9 @@ export async function runCoworker(rail: Rail): Promise<Report | null> {
       ended = "dead"
       break
     }
-    await waitChange(join(taskDir, "messages"), 30_000)
+    // the beat: mail wakes the loop early, the timer is the backstop —
+    // beatMs also paces the stall ladder and the permission sweep
+    await waitChange(join(taskDir, "messages"), beatMs)
   }
   if (!ended) ended = "deadline"
   // ADR 5: parked — not a finish. No report; the delivery ledger and

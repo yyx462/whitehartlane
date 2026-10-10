@@ -2,3 +2,4 @@
 /Users/sagebot/.local/share/agentic-os
 /Users/sagebot/.config/opencode/skills
 /Users/sagebot/.vista
+~/.local/bin
