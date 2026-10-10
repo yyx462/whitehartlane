@@ -1,21 +1,23 @@
 // The permission half of JEV (zen 6): when a worker pane blocks on a
 // permission dialog, the rail asks this typed decider — a script, not
 // an agent, never a person waiting. Allow what is inside the member's
-// roots; deny the dangerous patterns outright; the gray zone (inside
-// home, outside roots, not dangerous) is a jev question, not a flat
-// no: a tuned typed judgment reads the ask plus the worker's task and
-// decides plausibly-needed (a vista job may read its session shots)
-// against wandering. The prompt and threshold it asks with are the
-// jev-tuner's landed winner — a dead jev fails restrictive. And a
-// repeated ask for the same non-dangerous path IS the assertion of
-// need: escalateOnRepeat grants it on the second ask, so the deny
-// message's promise is true even when the judge misses. Hard-deny
-// never escalates. The dialog's path is NORMALIZED first (see
-// normalizeDialogPath): `~`, cwd-relative, and home-stripped forms all
-// key one path, so the ladder and the reason hold steady while the
-// terminal's rendering wobbles. Every verdict carries a message the
-// rail injects into the pane. Prompts never queue for a human.
-import { existsSync } from "node:fs"
+// roots and temp scratch; deny the dangerous patterns outright; the
+// gray zone (not roots, not temp, not dangerous — inside home or out)
+// is a jev question, not a flat no: a tuned typed judgment reads the
+// ask plus the worker's task and decides plausibly-needed (a vista job
+// may read its session shots) against wandering. The prompt and
+// threshold it asks with are the jev-tuner's landed winner — a dead
+// jev fails restrictive. And a repeated ask for the same non-dangerous
+// path IS the assertion of need: escalateOnRepeat grants it on the
+// second ask, so the deny message's promise is true even when the
+// judge misses. Hard-deny never escalates. The dialog's path is
+// NORMALIZED first (see normalizeDialogPath): `~`, cwd-relative, and
+// home-stripped forms all key one path, so the ladder and the reason
+// hold steady while the terminal's rendering wobbles. Every verdict
+// carries a message the rail injects into the pane. Prompts never
+// queue for a human.
+import { existsSync, realpathSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
@@ -65,6 +67,20 @@ function under(path: string, root: string): boolean {
   const r = root.endsWith("/") ? root.slice(0, -1) : root
   return path === r || path.startsWith(`${r}/`)
 }
+
+// Temp space is working scratch, not a boundary: mktemp/git/pip writes
+// land there, and a flat outside-home deny stall-reaps a worker that
+// only wanted scratch (j-ba18b7: /tmp). Sensitive paths stay
+// hard-denied above; wandering elsewhere outside home is judged below.
+const TEMP_ROOTS: string[] = (() => {
+  const roots = new Set(["/tmp", "/private/tmp", "/var/folders", tmpdir()])
+  try {
+    roots.add(realpathSync(tmpdir()))
+  } catch {
+    // keep the static spellings
+  }
+  return [...roots]
+})()
 
 // A dialog names its path in whatever form the terminal rendered it:
 // absolute, `~`-relative, cwd-relative, or home-STRIPPED (j-2b508e:
@@ -125,17 +141,20 @@ export function decidePermission(
       message: `granted: ${path} is inside this Job's roots.`,
     }
   }
-  if (!path.startsWith(home)) {
+  // temp scratch is free OUTSIDE home only — a home planted under the
+  // temp tree (tests, sandboxes) keeps its judged gray zone
+  const homePrefix = home.replace(/\/$/, "")
+  if (!path.startsWith(homePrefix) && TEMP_ROOTS.some((root) => under(path, root))) {
     return {
-      decision: "deny",
+      decision: "allow",
       path,
-      escalatable: true,
-      message: `denied: ${path} is outside the home tree this Job runs in. If you truly need it, ask again — a repeated ask for the same path is granted.`,
+      message: `granted: ${path} is temp scratch — no boundary there.`,
     }
   }
-  // the gray zone: inside home, outside roots. A judge reads the ask
-  // in context; no judge (or a dead one) stays restrictive. Whatever
-  // the judge says, a repeat ask still escalates below.
+  // the gray zone: anywhere the roots and temp scratch do not cover —
+  // inside home or out. A judge reads the ask in context; no judge (or
+  // a dead one) stays restrictive. Whatever the judge says, a repeat
+  // ask still escalates below.
   if (judge) {
     let p: number
     try {
