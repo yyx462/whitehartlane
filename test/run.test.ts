@@ -17,7 +17,7 @@ writeFileSync(stub, "import { writeFileSync } from 'node:fs'\nimport { join } fr
 
 function runCli(folder: string): { status: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync(process.execPath, ["--experimental-strip-types", bin, "run", folder], {
+    const stdout = execFileSync(process.execPath, ["--experimental-strip-types", bin, "run", folder, "--unattended"], {
       encoding: "utf8",
       env: {
         ...process.env,
