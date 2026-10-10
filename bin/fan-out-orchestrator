@@ -11,6 +11,7 @@ import { resolve } from "node:path"
 import { runOrchestrator } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
+import { levyChildProgram } from "../src/levy.ts"
 
 const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 const rail = new Rail({ argvDir, workflow: "fan-out" })
@@ -57,6 +58,14 @@ const engine = () => {
     drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
     resumes,
     bookedWait,
+    // ADR 0007 stage 3 — the rail as levy: wake steps spawn whole child
+    // programs through the same admission the door uses, booking this
+    // rail's session as spawner (tool "rail" — no doorbell; the durable
+    // wake.json is the receipt the engine polls).
+    levyChild: ledger
+      ? (unitId, folder) =>
+          levyChildProgram({ folder, parentSid: ledger.job.sid, orchestratorRoot: import.meta.dirname })
+      : undefined,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows: rail.existingRows(),
     worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,

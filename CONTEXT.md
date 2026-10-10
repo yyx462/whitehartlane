@@ -200,7 +200,7 @@ A pane's idle that a live child spur explains: the pane's booked session is the 
 _Avoid_: keepalive, heartbeat, blocked, sleeping
 
 **Wake**:
-A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end — in-band as a prompt into a live pane levy first, the doorbell only as fallback, `whl fork` for the pane already gone.
+A pane's claim on a parent's attention. A levy's direct panes may report done; orchestrator workers wake only on failure or stuck; a Job may wake its levy once at the end — in-band as a prompt into a live pane levy first, the doorbell only as fallback, `whl fork` for the pane already gone. A rail levy (ADR 0007 wake steps) is a process, not a conversation: no prompt, no doorbell — the durable wake.json on the child job dir is the receipt the parent polls.
 _Avoid_: notification, ping
 
 **Receipt**:

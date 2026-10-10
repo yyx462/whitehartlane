@@ -1,9 +1,15 @@
 import { execSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, type Hooks, type Layout, type Manifest, type Step, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
+import {
+  readChildWake,
+  readWakeBooking,
+  writeWakeBooking,
+  type LevyOutcome,
+} from "./levy.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
 
@@ -465,22 +471,23 @@ export function cycle(deps: CycleDeps): boolean {
   const finalFinished = new Set([...finalState.done, ...finalState.failed])
   if (deps.canary?.failed && deps.inFlight.size === 0) return true
   // ADR 0007: with steps declared, the run is done when every unit AND
-  // every check step finished — a pending gate keeps the rail alive, an
-  // UNREACHABLE one (an earlier wave failed) cannot, and must not.
+  // every check step AND every wake step finished — a pending gate or
+  // child job keeps the rail alive, an UNREACHABLE one (an earlier wave
+  // failed) cannot, and must not.
   const steps = deps.steps ?? []
   const finalFailed = new Set(finalState.failed)
   const waveOrder: string[] = []
   for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
-  const checksFinished = steps
-    .filter((s) => s.finished_by === "check")
-    .every((s) => {
-      if (finalFinished.has(s.id)) return true
-      const priors = waveOrder.slice(0, waveOrder.indexOf(s.wave))
-      return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
-    })
+  const unreachable = (step: Step): boolean => {
+    const priors = waveOrder.slice(0, waveOrder.indexOf(step.wave))
+    return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
+  }
+  const stepsFinished = steps
+    .filter((s) => s.finished_by === "check" || s.finished_by === "wake")
+    .every((s) => finalFinished.has(s.id) || unreachable(s))
   return (
     units.every((unit) => finalFinished.has(unit.id)) &&
-    checksFinished &&
+    stepsFinished &&
     deps.inFlight.size === 0
   )
 }
@@ -517,17 +524,23 @@ export async function runOrchestrator(input: {
   // live child spur names the pane's session as its spawner, the wait
   // is booked and the stall stands down.
   bookedWait?: (unitId: string) => boolean
+  // ADR 0007 stage 3 — wake steps: the rail levies a whole child
+  // program per wake step and finishes the step on the child's wake
+  // (the receipt colors it). The bin wires the real levy; tests inject
+  // a fake. Absent + wake steps in the manifest = honest refusal.
+  levyChild?: (unitId: string, folder: string) => LevyOutcome
 }): Promise<Report | null> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
     : hooksFromDir(input.taskDir)
   const manifest = loaded.manifest ?? loadManifest(input.taskDir)
-  // ADR 0007 stage 2: waves and checks execute; wake steps (child jobs)
-  // are parsed and validated but refuse to run until stage 3 — never a
-  // silent lie about nesting.
+  // ADR 0007 stage 3: wake steps execute — the rail levies the child
+  // job, books itself as spawner, and the step finishes on the child's
+  // wake. No levy port (a rail that cannot spawn child jobs) still
+  // refuses honestly — never a silent lie about nesting.
   const steps = manifest.steps
-  if (steps?.some((s) => s.finished_by === "wake")) {
-    throw new HookError("wake steps are not executable yet — ADR 0007 stage 3 (issue #39); the manifest parses, the rail refuses")
+  if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
+    throw new HookError("wake steps need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)")
   }
   if (steps?.length) {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromSteps(input.taskDir, steps) }
@@ -577,6 +590,7 @@ export async function runOrchestrator(input: {
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const watchers: FSWatcher[] = []
   const watchedFiles = new Set<string>()
+  const watchedDirs = new Set<string>()
   let running = false
   let finished = false
   let parked = false
@@ -758,26 +772,35 @@ export async function runOrchestrator(input: {
   const gateCache = new Map<string, { at: number; pass: boolean }>()
   let gatesPending = 0
   const hasChecks = steps?.some((s) => s.finished_by === "check") ?? false
+  const waveOrder: string[] = []
+  for (const s of steps ?? []) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+  const stateSets = () => {
+    const state = readState(input.taskDir)
+    return {
+      finishedIds: new Set<string>([...state.done, ...state.failed]) as Set<string>,
+      failedIds: new Set<string>(state.failed) as Set<string>,
+    }
+  }
+  // a step's wave is on the frontier when every step of every earlier
+  // wave finished (and none failed) — shared by gates and wake levies
+  const frontier = (wave: string, finishedIds: Set<string>, failedIds: Set<string>): boolean => {
+    for (const prior of waveOrder.slice(0, waveOrder.indexOf(wave))) {
+      for (const s of steps ?? []) {
+        if (s.wave !== prior) continue
+        if (failedIds.has(s.id) || !finishedIds.has(s.id)) return false
+      }
+    }
+    return true
+  }
   const evaluateGates = (): number => {
     let passed = 0
     gatesPending = 0
     if (!steps?.length || !hasChecks) return 0
-    const state = readState(input.taskDir)
-    const finishedIds = new Set([...state.done, ...state.failed])
-    const failedIds = new Set(state.failed)
-    const waveOrder: string[] = []
-    for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+    const { finishedIds, failedIds } = stateSets()
     for (const step of steps) {
       if (step.finished_by !== "check" || finishedIds.has(step.id)) continue
       // frontier only — earlier waves must be finished done
-      let ready = true
-      for (const prior of waveOrder.slice(0, waveOrder.indexOf(step.wave))) {
-        for (const s of steps) {
-          if (s.wave !== prior) continue
-          if (failedIds.has(s.id) || !finishedIds.has(s.id)) ready = false
-        }
-      }
-      if (!ready) continue
+      if (!frontier(step.wave, finishedIds, failedIds)) continue
       gatesPending += 1
       const cached = gateCache.get(step.id)
       if (cached && !cached.pass && now() - cached.at < gateCheckMs) continue
@@ -801,6 +824,75 @@ export async function runOrchestrator(input: {
     return passed
   }
 
+  // ADR 0007 stage 3 — wake steps: the rail as levy. Each frontier wake
+  // step gets ONE child job (booked durably under wakes/<id>.json — a
+  // paused or crashed parent re-nurses the same child, never a second
+  // levy), and the step finishes on the child's wake.json — the receipt
+  // colors it. An unreachable wake step (earlier wave failed) is never
+  // levied and cannot count against the run finishing.
+  let wakesPending = 0
+  const hasWakes = steps?.some((s) => s.finished_by === "wake") ?? false
+  const watchChild = (jobDir: string): void => {
+    if (watchedDirs.has(jobDir)) return
+    watchedDirs.add(jobDir)
+    try {
+      watchers.push(watch(jobDir, () => enqueue("wake")))
+    } catch {
+      /* the arm() backstop covers it */
+    }
+  }
+  const nurseWakes = (): number => {
+    let acted = 0
+    wakesPending = 0
+    if (!steps?.length || !hasWakes || !input.levyChild) return 0
+    const { finishedIds, failedIds } = stateSets()
+    for (const step of steps) {
+      if (step.finished_by !== "wake" || finishedIds.has(step.id)) continue
+      if (!frontier(step.wave, finishedIds, failedIds)) continue
+      wakesPending += 1
+      let booking = readWakeBooking(input.taskDir, step.id)
+      if (!booking) {
+        const folder = resolve(input.taskDir, step.folder ?? ".")
+        const outcome = input.levyChild(step.id, folder)
+        if (!outcome.ok) {
+          // deterministic refusal (missing manifest, policy) — an honest
+          // failed row, not a retry loop
+          finishUnit(input.taskDir, step.id, false, {
+            unit: step.id,
+            result: `levy failed: ${outcome.why}`,
+            pass: false,
+          })
+          emit("unit.finished", { unit: step.id, pass: false, result: `levy failed: ${outcome.why}` })
+          rows.push({ unit: step.id, result: `levy failed: ${outcome.why}`, pass: false })
+          log(`wake ${step.id}: levy failed — ${outcome.why}`)
+          wakesPending -= 1
+          acted += 1
+          continue
+        }
+        booking = { jid: outcome.jid, jobDir: outcome.jobDir, folder, leviedAt: new Date().toISOString() }
+        writeWakeBooking(input.taskDir, step.id, booking)
+        emit("child.levied", { unit: step.id, jid: booking.jid, folder })
+        log(`wake ${step.id}: levied child job ${booking.jid} (${folder})`)
+        acted += 1
+      }
+      watchChild(booking.jobDir)
+      const wake = readChildWake(booking.jobDir)
+      if (!wake) continue
+      const pass = wake.outcome === "done"
+      const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}`
+      finishUnit(input.taskDir, step.id, pass, { unit: step.id, result, pass })
+      emit("unit.finished", { unit: step.id, pass, result })
+      rows.push({ unit: step.id, result, pass })
+      wakesPending -= 1
+      log(`wake ${step.id}: child ${booking.jid} ${wake.outcome} — step ${pass ? "done" : "failed"}`)
+      if (!pass) {
+        input.shep.wake(step.id, "blocked", `child job ${booking.jid} ${wake.outcome}`)
+      }
+      acted += 1
+    }
+    return acted
+  }
+
   const arm = (): void => {
     if (armed) {
       clearTimeout(armed)
@@ -816,6 +908,7 @@ export async function runOrchestrator(input: {
       waits.push(flight.lastChange + stallMs - now())
     }
     if (gatesPending > 0) waits.push(gateCheckMs)
+    if (wakesPending > 0) waits.push(gateCheckMs)
     const ms = Math.max(1, Math.min(...waits))
     armed = setTimeout(() => {
       if (armed) timers.delete(armed)
@@ -859,6 +952,10 @@ export async function runOrchestrator(input: {
     for (const id of inFlight.keys()) watchPane(id)
     if (inFlight.size > 0) startLogPoller()
     else stopLogPoller()
+    if (nurseWakes() > 0) {
+      run()
+      continue
+    }
     if (evaluateGates() > 0) {
       run()
       continue
