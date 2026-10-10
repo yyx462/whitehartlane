@@ -1271,7 +1271,7 @@ function borderPoint(box, towards) {
 // svg viewport instead of clipping them away.
 function fitCanvasSize(boxes, floor) {
   let w = Math.max(floor.fpW || 0, floor.wellW || 0);
-  let h = floor.fpH || 0;
+  let h = Math.max(floor.fpH || 0, floor.wellH || 0);
   for (const b of boxes || []) {
     if (b.x + b.w + 24 > w) w = b.x + b.w + 24;
     if (b.y + b.h + 24 > h) h = b.y + b.h + 24;
@@ -1301,6 +1301,7 @@ function redrawEdges() {
       fpW: Number(canvas.dataset.fpW) || 0,
       fpH: Number(canvas.dataset.fpH) || 0,
       wellW: view ? view.clientWidth : 0,
+      wellH: view ? view.clientHeight : 0,
     },
   );
   canvas.style.width = fit.w + "px";
@@ -1379,10 +1380,21 @@ function bindNodeDrag(dk) {
       const startX = e.clientX, startY = e.clientY;
       const ox = node.offsetLeft, oy = node.offsetTop;
       let moved = false;
+      // the drag is bounded on EVERY side: 0 at the top-left, and the
+      // max(footprint, well) at the bottom-right — no infinite right,
+      // no infinite bottom. The bound follows the well live, so
+      // dragging the split divider never strands a node beyond it.
+      const bound = () => {
+        const v = canvas.closest(".diagram-view");
+        const bx = Math.max(Number(canvas.dataset.fpW) || 0, v ? v.clientWidth : 0) - node.offsetWidth - 24;
+        const by = Math.max(Number(canvas.dataset.fpH) || 0, v ? v.clientHeight : 0) - node.offsetHeight - 24;
+        return { x: Math.max(bx, 0), y: Math.max(by, 0) };
+      };
       const move = (ev) => {
         if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true;
-        node.style.left = Math.max(0, ox + ev.clientX - startX) + "px";
-        node.style.top = Math.max(0, oy + ev.clientY - startY) + "px";
+        const b = bound();
+        node.style.left = Math.min(Math.max(0, ox + ev.clientX - startX), b.x) + "px";
+        node.style.top = Math.min(Math.max(0, oy + ev.clientY - startY), b.y) + "px";
         redrawEdges();
       };
       const up = () => {

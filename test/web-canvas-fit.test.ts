@@ -66,6 +66,16 @@ test("the render-time footprint floors the size — a wake-box slot reservation 
   assert.equal(empty.h, 260)
 })
 
+test("the well's height floors the canvas too — the pane never wastes its lower half", () => {
+  // a short diagram (footprint 260 tall) in a tall well (700): the
+  // canvas fills the well, not the content
+  const { h } = fitCanvasSize([{ x: 10, y: 10, w: 150, h: 90 }], { fpW: 300, fpH: 260, wellW: 500, wellH: 700 })
+  assert.equal(h, 700)
+  // a diagram taller than the well still grows past it (scroll on)
+  const tall = fitCanvasSize([{ x: 10, y: 10, w: 150, h: 90 }], { fpW: 300, fpH: 900, wellW: 500, wellH: 700 })
+  assert.equal(tall.h, 900)
+})
+
 test("dragging down grows the height the same way", () => {
   const { w, h } = fitCanvasSize(
     [{ x: 40, y: 1200, w: 168, h: 100 }],
