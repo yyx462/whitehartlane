@@ -480,14 +480,14 @@ export class Rail implements ShepPort {
     this.ledger?.attach(
       name,
       pane,
-      name.startsWith("orch-lane") ? undefined : name,
+      name,
       { tool: kind, cwd, since, ...(sessionId ? { session_id: sessionId } : {}) } as TranscriptPointer,
       seed,
     )
     // The session mints on the first message and may land in the tool's
     // store a beat later — probe again shortly so the booked pointer
     // carries the id a Continue resumes
-    if (!sessionId && !name.startsWith("orch-lane")) {
+    if (!sessionId) {
       setTimeout(() => {
         const late = this.resolveLiveSession(kind, cwd, since)
         if (late) this.ledger?.setSession(name, late)
@@ -646,48 +646,6 @@ export class Rail implements ShepPort {
         else res("woke")
       })
     })
-  }
-
-  tailPane(logPath: string): boolean {
-    // No mind rides the lane pane anymore: every workflow's lane pane
-    // is the engine's log viewer (the only consumed judgment channel
-    // in a lab is the actor's protocol.json)
-    if (this.layout.tab === "new" && this.viewerPane) {
-      const child = spawn("herdr", ["pane", "run", this.viewerPane, "tail", "-n", "+1", "-F", logPath], {
-        detached: true,
-        stdio: "ignore",
-      })
-      child.on("error", () => {})
-      child.unref()
-      this.log(`lane pane tailing this log (fleet tab pane ${this.viewerPane})`)
-      return true
-    }
-    mkdirSync(join(this.taskDir, "briefs"), { recursive: true })
-    const briefPath = join(this.taskDir, "briefs", "orch-lane.md")
-    writeFileSync(
-      briefPath,
-      [
-        "You are a log viewer. Run exactly this one command, then do nothing:",
-        `tail -n +1 -F ${logPath}`,
-        "",
-        "Never do any other work. Never edit any file. If the tail command",
-        "exits, run it again and idle.",
-      ].join("\n"),
-    )
-    const label = this.scopedFn("orch-lane")
-    const since = new Date().toISOString()
-    const r = this.shep(
-      "spawn", label, "--kind", "pi", "--cwd", this.taskDir,
-      "--dir", "right", "--brief", `@${briefPath}`,
-    )
-    if (r.status !== 0) {
-      this.shep("retire", label) // a failed spawn keeps its ledger entry — clear the ghost
-      this.log("lane pane unavailable — read the orchestrator log instead")
-      return false
-    }
-    this.mine.add(label)
-    this.ledger?.attach(label, undefined, undefined, { tool: "pi", cwd: this.taskDir, since } as TranscriptPointer)
-    return true
   }
 
   // -- permission sweep (zen 6) -------------------------------------------------

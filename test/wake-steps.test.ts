@@ -36,7 +36,6 @@ function fakeShep() {
     retireAll: () => {},
     verify: () => "pane-reap: 0 remaining",
     wake: (label, kind, detail) => wakes.push({ label, kind, detail }),
-    tailPane: () => true,
     flushPendingNotes: () => 0,
   }
   return { port, wakes, spawned }
