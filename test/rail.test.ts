@@ -343,3 +343,25 @@ test("mixed path forms of one ask share a ladder (j-2b508e)", async () => {
   const ledger = one.rail.ledger as ReturnType<typeof fakeLedger>
   assert.equal(ledger.events.filter((e) => e.kind === "permission").at(-1)?.payload.path, full)
 })
+
+test("a top-level temp allow grants the temp root itself, never the whole disk (j-b6067c)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-top-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "style the page", "utf8"))
+  const one = makeRail({ taskDir, term: askFor("/tmp") })
+  assert.equal(one.rail.spawnWorker("w-styler", "opencode", briefPath, taskDir), true)
+  const label = one.rail.scopedName("w-styler")
+  one.blocked.add(label)
+  assert.equal(one.rail.answerPermission("w-styler"), "allow", "temp scratch is no boundary")
+  const enter = one.calls.find((c) => c.tool === "herdr" && c.args[1] === "send-keys" && c.args[3] === "enter")
+  assert.ok(enter, "enter was sent")
+  // durable for the next session: /tmp itself, both spellings — and
+  // never "/" or "" (one /tmp allow must not whitelist the disk)
+  const cfg = JSON.parse(readFileSync(join(taskDir, "opencode.json"), "utf8")) as {
+    permission: { external_directory: Record<string, string> }
+  }
+  const ext = cfg.permission.external_directory
+  assert.equal(ext["/tmp/**"], "allow")
+  assert.ok(!("/​**" in ext), "the whole disk is never granted")
+  assert.ok(!("" in ext), "no degenerate empty root lands in the config")
+})

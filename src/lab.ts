@@ -269,7 +269,9 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       rail.say("operator", `close ${name}`)
     }
     if (reopened) {
-      await waitChange(taskDir, 30_000)
+      // 5s beats, not 30s: a blocked mock's dialog is answered on the
+      // next beat — the sweep's staleness is this backstop (j-b6067c)
+      await waitChange(taskDir, 5_000)
       continue
     }
     for (const row of ends) {
@@ -297,7 +299,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
         promptActor(ends)
       }
     }
-    await waitChange(taskDir, 30_000)
+    await waitChange(taskDir, 5_000)
   }
   const finalEnds = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
   const rows = dag
