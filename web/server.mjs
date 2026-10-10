@@ -15,7 +15,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PORT = Number(process.env.PORT || 8787);
 // bind the tailnet by default (Tailscale 100.x reach); set HOST=127.0.0.1 to go local-only
 const HOST = process.env.HOST || "0.0.0.0";
-const OS_ROOT = process.env.AGENTIC_OS_ROOT ||
+// the OS disk root: AGENTIC_OS_ROOT (window's own override) or
+// AGENTIC_OS_HOME (the store's name for the same root, src/store.ts)
+const OS_ROOT = process.env.AGENTIC_OS_ROOT || process.env.AGENTIC_OS_HOME ||
   path.join(process.env.HOME, ".local/share/agentic-os");
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -514,9 +516,10 @@ async function dagShape(job, sid, jid) {
     };
   }
 
-  // steps manifest (ADR 0007): the workflow.toml draws itself
+  // steps manifest (ADR 0007): the workflow.toml draws itself — the
+  // shape adds the run's own finish states so edges can dim/danger
   const steps = stepsDefn(runDir);
-  if (steps) return steps;
+  if (steps) return { ...steps, states: stepStatesOf(runDir) };
 
   // coworker job: members as nodes, relay edges between consecutive members
   const membersDir = path.join(runDir, "members");
@@ -792,6 +795,92 @@ function stepsFromToml(tomlText) {
 // ADR 0007: a steps manifest draws itself — one node per step, chained
 // wave to wave in declaration order. end-steps carry their member brief;
 // checks show their command; wakes show the child folder.
+// v6: the chain is the declared topology — every step of wave N fans to
+// every step of wave N+1 it could unblock (the frontier rule is
+// all-of-earlier-waves, so the fan is honest), and a wake step carries
+// its CHILD job (booking -> job record -> the child's own staged steps)
+// for the box-in-box. Missing bookings render hollow with the reason.
+function stepStatesOf(folder) {
+  const st = readJson(path.join(folder, "state.json")) || {};
+  return {
+    done: Array.isArray(st.done) ? st.done : [],
+    failed: Array.isArray(st.failed) ? st.failed : [],
+  };
+}
+
+// one wake step's child: { levied, jid, sid, state, status, outcome,
+// dag, steps, states } on success; { levied:false, reason } hollow.
+// `ctx` carries why an unlevied step has no booking yet (wave context).
+function wakeChildOf(folder, step, ctx) {
+  const booking = readJson(path.join(folder, "wakes", `${step.id}.json`));
+  if (!booking || typeof booking.jid !== "string" || typeof booking.jobDir !== "string") {
+    let reason = `not levied yet — no wakes/${step.id}.json booking`;
+    if (ctx.earlierFailed) reason = `unreachable — an earlier wave failed, so this wake is never levied`;
+    else if (!ctx.hasRun) reason = `no booking here — a run's staged copy carries wakes/; select a run to see its child`;
+    else if (ctx.earlierOpen) reason = `waiting — earlier waves have not all finished`;
+    return { levied: false, reason };
+  }
+  const child = {
+    levied: true,
+    jid: booking.jid,
+    jobDir: booking.jobDir,
+    folder: typeof booking.folder === "string" ? booking.folder : null,
+    leviedAt: booking.leviedAt || null,
+  };
+  // booking.jobDir is the child's RUN dir (job.dir) — the record sits
+  // beside it; try both spellings before giving up honestly
+  let job = null;
+  for (const cand of [
+    path.join(booking.jobDir, "job.json"),
+    path.join(booking.jobDir, "..", "job.json"),
+  ]) {
+    job = readJson(cand);
+    if (job && job.id) break;
+    job = null;
+  }
+  if (!job) {
+    return {
+      ...child,
+      sid: null,
+      dag: null,
+      state: "missing",
+      status: "unknown",
+      outcome: null,
+      steps: [],
+      states: { done: [], failed: [] },
+      reason: `child job record not found under ${booking.jobDir}`,
+    };
+  }
+  const report = reportOf(job);
+  const wake = readJson(path.join(booking.jobDir, "wake.json"));
+  // the child's OWN steps, parsed from its staged manifest — the
+  // miniature the box holds
+  let childSteps = [];
+  try {
+    childSteps = stepsFromToml(fs.readFileSync(path.join(booking.jobDir, "workflow.toml"), "utf8"));
+  } catch {
+    /* the child staged no steps manifest: the box says so, not lies */
+  }
+  const HUMAN = { end: "work", check: "gate", wake: "program" };
+  return {
+    ...child,
+    sid: job.sid || null,
+    dag: job.dag && job.dag.project && job.dag.dag_id
+      ? `${job.dag.project}/${job.dag.dag_id}`
+      : null,
+    state: job.state || "unknown",
+    status: statusOf(job, report),
+    outcome: typeof wake?.outcome === "string" ? wake.outcome : null,
+    steps: childSteps.map((s) => ({
+      id: s.id,
+      finished_by: s.finished_by,
+      wave: s.wave || "main",
+      does: HUMAN[s.finished_by] || s.finished_by,
+    })),
+    states: stepStatesOf(booking.jobDir),
+  };
+}
+
 function stepsDefn(folder) {
   let wf = "";
   try {
@@ -802,27 +891,53 @@ function stepsDefn(folder) {
   const steps = stepsFromToml(wf);
   if (!steps.length) return null;
   const HUMAN = { end: "work", check: "gate", wake: "program" };
-  const nodes = steps.map((s) => ({
-    id: s.id,
-    does: HUMAN[s.finished_by] || s.finished_by,
-    finished_by: s.finished_by,
-    brief:
-      s.finished_by === "end"
-        ? memberBrief(path.join(folder, "members", `${s.id}.md`)) || (s.brief ? s.brief : null)
-        : null,
-    check: s.check || null,
-    folder: s.folder || null,
-  }));
   const waves = [];
   for (const s of steps) {
     const w = s.wave || "main";
     if (!waves.includes(w)) waves.push(w);
   }
+  const states = stepStatesOf(folder);
+  const hasRun = fs.existsSync(path.join(folder, "state.json"));
+  const finished = new Set([...states.done, ...states.failed]);
+  const failed = new Set(states.failed);
+  const nodes = steps.map((s) => {
+    const wave = s.wave || "main";
+    const wi = waves.indexOf(wave);
+    // wave context for an unlevied wake: did an earlier wave fail, or
+    // is it simply not this step's turn yet?
+    const earlier = steps.filter((o) => waves.indexOf(o.wave || "main") < wi);
+    return {
+      id: s.id,
+      does: HUMAN[s.finished_by] || s.finished_by,
+      finished_by: s.finished_by,
+      wave,
+      brief:
+        s.finished_by === "end"
+          ? memberBrief(path.join(folder, "members", `${s.id}.md`)) || (s.brief ? s.brief : null)
+          : null,
+      check: s.check || null,
+      folder: s.folder || null,
+      ...(s.finished_by === "wake"
+        ? {
+            child: wakeChildOf(folder, s, {
+              hasRun,
+              earlierFailed: earlier.some((o) => failed.has(o.id)),
+              earlierOpen: earlier.some((o) => !finished.has(o.id)),
+            }),
+          }
+        : {}),
+    };
+  });
+  // the chain: every step of wave N -> every step of wave N+1 (the
+  // frontier rule unblocks the whole next wave, so the fan is the
+  // declared topology — not a guess)
   const edges = [];
   for (let i = 1; i < waves.length; i++) {
     const prev = steps.filter((s) => (s.wave || "main") === waves[i - 1]);
     const next = steps.filter((s) => (s.wave || "main") === waves[i]);
-    if (prev.length && next.length) edges.push({ from: prev[prev.length - 1].id, to: next[0].id });
+    for (const p of prev) {
+      for (const nx of next) edges.push({ from: p.id, to: nx.id });
+    }
   }
   const hooks = stagedHooks(folder);
   attachComponentHooks(nodes, hooks);
