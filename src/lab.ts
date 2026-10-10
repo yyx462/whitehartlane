@@ -241,22 +241,22 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       if (signal.kind === "stop") break
       if (signal.kind === "wave") spawnWave(signal.wave.units)
     }
+    // Privilege (zen 6, rail-owned): the sweep answers every blocked
+    // pane's dialog at the rail — this loop carries the consequence. A
+    // capped block (a deny pattern) finished_by the mock blocked,
+    // exactly as fan-out finished_by a capped unit; a non-dialog block
+    // simply stands as blocked in the report. The id joins `woke` only
+    // on a real cap, so a fresh dialog on the same pane is answered
+    // again next beat.
+    const sweep = rail.tickPrivilege()
     for (const id of wakesFor(ends, woke)) {
-      // Privilege (zen 6): a blocked mock is a question for the typed
-      // decider — answer the dialog. A capped block (a deny pattern)
-      // finished_by the mock blocked, exactly as fan-out finished_by a capped
-      // unit; a non-dialog block simply stands as blocked in the
-      // report. The id joins `woke` only on a real cap, so a fresh
-      // dialog on the same pane is answered again next beat.
-      const verdict = rail.answerPermission(paneName("mock", id))
-      if (verdict === "allow" || verdict === "deny") {
-        log(`answered permission for ${paneName("mock", id)} (${verdict})`)
+      const name = paneName("mock", id)
+      if (!sweep.capped.has(name)) {
+        if (sweep.answered.has(name)) log(`answered permission for ${name}`)
         continue
       }
-      if (verdict !== "capped") continue
       woke.push(id)
       const pane = mockPane.get(id)
-      const name = paneName("mock", id)
       closed.add(id)
       finished.push({ unit: id, result: "blocked (deny cap)", pass: false })
       if (pane) {

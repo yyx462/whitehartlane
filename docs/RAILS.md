@@ -68,13 +68,19 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   deny-family answers the worker is done (allows spend nothing: a
   working member touching legitimately-needed outside-roots paths
   must not die at the cap). Fan-out finishes the unit blocked,
-  coworker ends the member, lab finishes the mock blocked. No mind is
-  woken anywhere: a workflow earns an agent pane only when a runtime
-  judgment is needed that no typed gate can hold AND its output has a
-  consumed channel — no workflow passes (the actor's `protocol.json`
+  coworker ends the member, lab finishes the mock blocked. The sweep
+  is RAIL-OWNED (`rail.tickPrivilege()`): one tick answers every
+  blocked pane the rail holds — engines no longer choose which panes
+  get swept, and a pane no engine owns (not born through a worker
+  birth path) that hits the cap is retired by the rail itself.
+  No mind is woken anywhere: a workflow earns an agent pane only
+  when a runtime judgment is needed that no typed gate can hold AND
+  its output has a consumed channel — no workflow passes (the actor's
+  `protocol.json`
   is the one consumed judgment channel). The window
   (http://127.0.0.1:8787) is the engine's viewer; the log itself lives
-  at `<job>/run/orchestrator.log` — no lane pane, no tailing mind. Members may also pre-declare
+  at `<job>/run/orchestrator.log` — no lane pane, no tailing mind.
+  Members may also pre-declare
   external roots in `workflow.toml` (`roots = ["~/.vista"]` under
   `[members.<name>]`) — granted at session start, those dialogs never
   fire at all.
