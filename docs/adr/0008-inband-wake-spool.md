@@ -54,6 +54,38 @@ agentic-os-owned opencode plugin.
   spawner is never spooled nor doorbelled (ADR 0007: it polls
   `wake.json` — a machine is not a conversation).
 
+## Why two in-band rungs (the semantic division)
+
+The pane relay (rung 1) and the spool (rung 1.5) are one ladder over
+**disjoint levy kinds**, not two systems:
+
+- A **pane levy** is a worker of a running Job (nested spurs — the
+  machine phase: no human, rails-owned lifecycle). The pane ledger is
+  the deterministic aliveness proof, and `herdr agent prompt` does
+  more than deliver text — it unblocks a stalled agent turn, which a
+  file row cannot.
+- A **chat levy** is the main agent's own conversation (the
+  interactive phase). It has no pane and no label — only the booked
+  session pointer — and only an in-process plugin can inject a turn
+  there. Its aliveness proof is the heartbeat; its "accidentally
+  closed" recovery is the ladder's floor: doorbell, durable
+  `wake.json`, and `whl fork` rebirth (session seed re-checked, pane
+  resumed, wake as first prompt — ADR 0006 §3).
+
+Neither rung can subsume the other: the plugin cannot reach a pi pane
+or unblock a stall; herdr cannot prompt a conversation that is not a
+pane.
+
+## Per-tool readers, one contract
+
+Only the reader half is host-tool-specific. The spool contract (dir
+layout, jsonl rows, alive.json heartbeat, byte-offset semantics) is
+tool-agnostic; each coding agent gets its own reader under
+`plugin/<tool>-wake.js`, installed by `whl plugin install` for the
+tools present. opencode ships now (our chats are opencode); pi is the
+next reader when a pi chat levy exists — pi *worker panes* need
+nothing, the pane relay already covers any tool running in a pane.
+
 ## Consequences
 
 - A main-agent levy gets its wake as a turn in its own conversation —
