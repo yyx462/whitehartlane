@@ -503,8 +503,8 @@ export function orphanJob(job: JobRecord, reason: string, panesRemaining: number
   return job
 }
 
-// Pause parks a drained Job (ADR 5): panes retired, settled units stay
-// settled, in-flight units stay open for a resumed session. Not a
+// Pause parks a drained Job (ADR 5): panes retired, finished units stay
+// finished, in-flight units stay open for a resumed session. Not a
 // finish — no receipt.
 export function pauseJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
   job.state = "paused"

@@ -780,7 +780,7 @@ td.empty, .empty {
   border-style: double;
   border-width: 3px;
 }
-.g-settles {
+.g-finished_by {
   margin-left: 6px;
   font-size: 9px;
   text-transform: uppercase;

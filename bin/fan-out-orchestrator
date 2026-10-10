@@ -43,9 +43,9 @@ const bookedWait = (unitId) => {
 
 const engine = () => {
   // ADR 5: unfinished units of an earlier generation resume from the
-  // pane ledger — the latest pane record per unsettled unit carries the
+  // pane ledger — the latest pane record per unfinished unit carries the
   // booked session pointer (write-ahead at spawn, session id at birth).
-  const resumes = rail.resumesForUnsettled()
+  const resumes = rail.resumesForUnfinished()
   if (resumes.size > 0) {
     rail.log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
   }

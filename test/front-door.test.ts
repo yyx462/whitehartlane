@@ -352,7 +352,7 @@ test("project mode runs the example workflow from its manifest", async () => {
   assert.deepEqual(state, { done: ["france", "japan", "peru"], failed: [] })
 })
 
-test("project mode settles a missing artifact as failed", async () => {
+test("project mode finished_by a missing artifact as failed", async () => {
   const dir = await copyExample()
   for (const id of ["france", "peru"]) {
     mkdirSync(join(dir, "units", id), { recursive: true })

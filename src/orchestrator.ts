@@ -5,7 +5,7 @@ import { withBackpressure } from "./backpressure.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, type Hooks, type Layout, type Manifest, type Step, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
-import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
+import { readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
@@ -36,7 +36,7 @@ export type ShepPort = {
   // kills the unit. paneBlocked reports the dialog; answerPermission
   // resolves it — "allow"/"deny" (answered; the worker carries on),
   // "none" (no dialog after all), or "capped" (deny cap hit — the
-  // caller settles the unit like a block. Allows are free). Both
+  // caller finished_by the unit like a block. Allows are free). Both
   // optional: absent ports keep the pre-permission behavior.
   paneBlocked?: (name: string) => boolean
   answerPermission?: (name: string) => "allow" | "deny" | "capped" | "none"
@@ -88,7 +88,7 @@ export type CycleDeps = {
   worktree?: string
   canary?: CanaryState
   // Pause drain (ADR 5): while draining, no new panes are claimed and a
-  // dead or stalled pane does not settle — the drain ceiling decides,
+  // dead or stalled pane does not finish — the drain ceiling decides,
   // and the unit stays open for a resumed session.
   draining?: boolean
   // Units parked mid-flight on an earlier generation, keyed by unit id:
@@ -97,8 +97,8 @@ export type CycleDeps = {
   // Booked wait (ADR 0006): true while a live child spur names this
   // unit's pane session as its spawner — the stall clock stands down.
   bookedWait?: (unitId: string) => boolean
-  // ADR 0007: the manifest's settle-typed steps, when declared. Drives
-  // wave gating and the done condition (check steps must settle too).
+  // ADR 0007: the manifest's finish-typed steps, when declared. Drives
+  // wave gating and the done condition (check steps must finish too).
   steps?: Step[]
 }
 
@@ -284,11 +284,11 @@ export function cycle(deps: CycleDeps): boolean {
   deps.shep.flushPendingNotes?.()
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
 
-  // Every settle flows through here: state.json (resume projection) plus
-  // the unit.settled event — the grade row's one and only home.
-  const settle = (id: string, pass: boolean, row: ReportRow): void => {
-    settleUnit(deps.taskDir, id, pass, row)
-    deps.emit?.("unit.settled", { unit: id, pass, result: row.result })
+  // Every unit's finish flows through here: state.json (resume projection) plus
+  // the unit.finished event — the grade row's one and only home.
+  const finish = (id: string, pass: boolean, row: ReportRow): void => {
+    finishUnit(deps.taskDir, id, pass, row)
+    deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
     if (deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
       else deps.canary.failed = true
@@ -303,7 +303,7 @@ export function cycle(deps: CycleDeps): boolean {
         writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
       }
       const grade = deps.hooks.grade(flight.unit)
-      settle(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
+      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -312,7 +312,7 @@ export function cycle(deps: CycleDeps): boolean {
       }
     } else if (text.includes(`blocked ${id}`)) {
       const why = text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? ""
-      settle(id, false, { unit: id, result: "blocked", pass: false })
+      finish(id, false, { unit: id, result: "blocked", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -324,7 +324,7 @@ export function cycle(deps: CycleDeps): boolean {
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
       } else {
-        settle(id, false, { unit: id, result: "pane dead", pass: false })
+        finish(id, false, { unit: id, result: "pane dead", pass: false })
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -334,12 +334,12 @@ export function cycle(deps: CycleDeps): boolean {
       // Privilege (zen 6): a permission dialog is not a stall. Ask the
       // port to answer it first; only an unanswered pane (verdict
       // "none") falls through to the grace/stall/growth ladder. A
-      // capped pane settles like a block — the wake carries the story.
+      // capped pane finished_by like a block — the wake carries the story.
       const verdict = deps.shep.paneBlocked?.(`w-${id}`)
         ? deps.shep.answerPermission?.(`w-${id}`) ?? "none"
         : "none"
       if (verdict === "capped") {
-        settle(id, false, { unit: id, result: "blocked", pass: false })
+        finish(id, false, { unit: id, result: "blocked", pass: false })
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -366,7 +366,7 @@ export function cycle(deps: CycleDeps): boolean {
           // the silence is explained, so the stall clock restarts
           flight.lastChange = now()
         } else {
-          settle(id, false, { unit: id, result: "stalled", pass: false })
+          finish(id, false, { unit: id, result: "stalled", pass: false })
           deps.shep.retire(`w-${id}`)
           deps.inFlight.delete(id)
           deps.attempts.delete(id)
@@ -379,17 +379,17 @@ export function cycle(deps: CycleDeps): boolean {
     }
   }
 
-  const settled = readState(deps.taskDir)
-  const settledIds = new Set([...settled.done, ...settled.failed])
-  let unsettled = units.filter(
-    (unit) => !settledIds.has(unit.id) && !deps.inFlight.has(unit.id),
+  const finished = readState(deps.taskDir)
+  const finishedIds = new Set([...finished.done, ...finished.failed])
+  let unfinished = units.filter(
+    (unit) => !finishedIds.has(unit.id) && !deps.inFlight.has(unit.id),
   )
   // ADR 0007 — waves gate spawning. A wave opens when every step of
-  // every EARLIER wave settled done; a failed earlier step blocks the
-  // downstream end-steps, which settle as blocked rows so the report
+  // every EARLIER wave finished done; a failed earlier step blocks the
+  // downstream end-steps, which finish as blocked rows so the report
   // never lies by omission.
   if (deps.steps?.length) {
-    const failedIds = new Set(settled.failed)
+    const failedIds = new Set(finished.failed)
     const waveOrder: string[] = []
     for (const s of deps.steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
     const waveOf = new Map(deps.steps.map((s) => [s.id, s.wave] as const))
@@ -400,29 +400,29 @@ export function cycle(deps: CycleDeps): boolean {
         for (const s of deps.steps!) {
           if (s.wave !== prior) continue
           if (failedIds.has(s.id)) return { open: false, blockedBy: s.id }
-          if (!settledIds.has(s.id)) return { open: false }
+          if (!finishedIds.has(s.id)) return { open: false }
         }
       }
       return { open: true }
     }
-    const spawnable: typeof unsettled = []
-    for (const unit of unsettled) {
+    const spawnable: typeof unfinished = []
+    for (const unit of unfinished) {
       const r = ready(unit.id)
       if (r.open) spawnable.push(unit)
       else if (r.blockedBy) {
-        settle(unit.id, false, {
+        finish(unit.id, false, {
           unit: unit.id,
           result: `wave blocked by failed ${r.blockedBy}`,
           pass: false,
         })
       }
     }
-    unsettled = spawnable
+    unfinished = spawnable
   }
   const cap = deps.canary?.enabled && !deps.canary.released ? 1 : slots
   if (!deps.canary?.failed) {
-    while (!deps.draining && deps.inFlight.size < cap && unsettled.length > 0) {
-      const unit = unsettled.shift()!
+    while (!deps.draining && deps.inFlight.size < cap && unfinished.length > 0) {
+      const unit = unfinished.shift()!
       const paths = unitPaths(deps.taskDir, unit.id)
       mkdirSync(paths.dir, { recursive: true })
       writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir, deps.worktree))
@@ -450,7 +450,7 @@ export function cycle(deps: CycleDeps): boolean {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
       deps.attempts.set(unit.id, attempts)
       if (attempts >= RETRY_CAP) {
-        settle(unit.id, false, {
+        finish(unit.id, false, {
           unit: unit.id,
           result: "spawn failed",
           pass: false,
@@ -462,25 +462,25 @@ export function cycle(deps: CycleDeps): boolean {
   }
 
   const finalState = readState(deps.taskDir)
-  const finalSettled = new Set([...finalState.done, ...finalState.failed])
+  const finalFinished = new Set([...finalState.done, ...finalState.failed])
   if (deps.canary?.failed && deps.inFlight.size === 0) return true
   // ADR 0007: with steps declared, the run is done when every unit AND
-  // every check step settled — a pending gate keeps the rail alive, an
+  // every check step finished — a pending gate keeps the rail alive, an
   // UNREACHABLE one (an earlier wave failed) cannot, and must not.
   const steps = deps.steps ?? []
   const finalFailed = new Set(finalState.failed)
   const waveOrder: string[] = []
   for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
-  const checksDone = steps
-    .filter((s) => s.settles === "check")
+  const checksFinished = steps
+    .filter((s) => s.finished_by === "check")
     .every((s) => {
-      if (finalSettled.has(s.id)) return true
+      if (finalFinished.has(s.id)) return true
       const priors = waveOrder.slice(0, waveOrder.indexOf(s.wave))
       return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
     })
   return (
-    units.every((unit) => finalSettled.has(unit.id)) &&
-    checksDone &&
+    units.every((unit) => finalFinished.has(unit.id)) &&
+    checksFinished &&
     deps.inFlight.size === 0
   )
 }
@@ -526,7 +526,7 @@ export async function runOrchestrator(input: {
   // are parsed and validated but refuse to run until stage 3 — never a
   // silent lie about nesting.
   const steps = manifest.steps
-  if (steps?.some((s) => s.settles === "wake")) {
+  if (steps?.some((s) => s.finished_by === "wake")) {
     throw new HookError("wake steps are not executable yet — ADR 0007 stage 3 (issue #39); the manifest parses, the rail refuses")
   }
   if (steps?.length) {
@@ -546,7 +546,7 @@ export async function runOrchestrator(input: {
   const inFlight = new Map<string, Flight>()
   const attempts = new Map<string, number>()
   const started = now()
-  // Rows accumulate here across cycles (the events carry each settle;
+  // Rows accumulate here across cycles (the events carry each finish;
   // existingRows covers a resumed orchestrator's earlier work).
   const rows: ReportRow[] = [...(input.existingRows ?? [])]
   const emit = input.emit ?? (() => {})
@@ -603,7 +603,7 @@ export async function runOrchestrator(input: {
     if (running || finished) return
     running = true
     try {
-      const done = cycle({
+      const complete = cycle({
         taskDir: input.taskDir,
         hooks: loaded.hooks,
         shep: input.shep,
@@ -621,7 +621,7 @@ export async function runOrchestrator(input: {
         steps,
         emit: (kind, payload) => {
           emit(kind, payload)
-          if (kind === "unit.settled" && typeof payload.unit === "string") {
+          if (kind === "unit.finished" && typeof payload.unit === "string") {
             rows.push({
               unit: payload.unit,
               result: String(payload.result ?? ""),
@@ -634,7 +634,7 @@ export async function runOrchestrator(input: {
         firstCycle = false
         if (layout.orchestrator === "right") openLane()
       }
-      if (done) {
+      if (complete) {
         finished = true
         cleanup()
         return
@@ -648,7 +648,7 @@ export async function runOrchestrator(input: {
           return
         }
         if (drainUntil !== null && now() > drainUntil) {
-          log("orchestrator: drain ceiling passed — retiring in-flight panes unsettled (sessions stay booked)")
+          log("orchestrator: drain ceiling passed — retiring in-flight panes unfinished (sessions stay booked)")
           for (const [id] of [...inFlight]) {
             input.shep.retire(`w-${id}`)
             inFlight.delete(id)
@@ -662,8 +662,8 @@ export async function runOrchestrator(input: {
       if (now() - started > deadlineMs) {
         log("orchestrator: deadline passed; settling the rest failed")
         for (const [id, flight] of [...inFlight]) {
-          settleUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
-          emit("unit.settled", { unit: id, pass: false, result: "deadline" })
+          finishUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
+          emit("unit.finished", { unit: id, pass: false, result: "deadline" })
           rows.push({ unit: id, result: "deadline", pass: false })
           input.shep.retire(`w-${id}`)
           inFlight.delete(id)
@@ -672,12 +672,12 @@ export async function runOrchestrator(input: {
         const units = loadUnitsFor(input.taskDir, loaded.hooks)
         for (const unit of units) {
           if (!state.done.includes(unit.id) && !state.failed.includes(unit.id)) {
-            settleUnit(input.taskDir, unit.id, false, {
+            finishUnit(input.taskDir, unit.id, false, {
               unit: unit.id,
               result: "deadline",
               pass: false,
             })
-            emit("unit.settled", { unit: unit.id, pass: false, result: "deadline" })
+            emit("unit.finished", { unit: unit.id, pass: false, result: "deadline" })
             rows.push({ unit: unit.id, result: "deadline", pass: false })
           }
         }
@@ -714,7 +714,7 @@ export async function runOrchestrator(input: {
   }
 
   // SIGTERM is the drain (ADR 5): stop claiming, let in-flight units
-  // settle, then park. SIGINT stays an immediate stop (the bin books
+  // finish, then park. SIGINT stays an immediate stop (the bin books
   // the abort); SIGKILL cannot be caught and is the abort verb's own.
   const requestPause = (): void => {
     if (finished || draining) return
@@ -751,30 +751,30 @@ export async function runOrchestrator(input: {
 
   // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
   // (unlike [gates] report detectors, which print "done" per ADR 0003).
-  // Frontier gates (every earlier wave settled) are asked at most once
-  // per gateCheckMs; a pass settles the gate into state and opens the
+  // Frontier gates (every earlier wave finished) are asked at most once
+  // per gateCheckMs; a pass finished_by the gate into state and opens the
   // downstream wave on the next run(). gatesPending feeds arm() so a
   // waiting gate can never dead-sleep.
   const gateCache = new Map<string, { at: number; pass: boolean }>()
   let gatesPending = 0
-  const hasChecks = steps?.some((s) => s.settles === "check") ?? false
+  const hasChecks = steps?.some((s) => s.finished_by === "check") ?? false
   const evaluateGates = (): number => {
     let passed = 0
     gatesPending = 0
     if (!steps?.length || !hasChecks) return 0
     const state = readState(input.taskDir)
-    const settledIds = new Set([...state.done, ...state.failed])
+    const finishedIds = new Set([...state.done, ...state.failed])
     const failedIds = new Set(state.failed)
     const waveOrder: string[] = []
     for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
     for (const step of steps) {
-      if (step.settles !== "check" || settledIds.has(step.id)) continue
-      // frontier only — earlier waves must be settled done
+      if (step.finished_by !== "check" || finishedIds.has(step.id)) continue
+      // frontier only — earlier waves must be finished done
       let ready = true
       for (const prior of waveOrder.slice(0, waveOrder.indexOf(step.wave))) {
         for (const s of steps) {
           if (s.wave !== prior) continue
-          if (failedIds.has(s.id) || !settledIds.has(s.id)) ready = false
+          if (failedIds.has(s.id) || !finishedIds.has(s.id)) ready = false
         }
       }
       if (!ready) continue
@@ -790,10 +790,10 @@ export async function runOrchestrator(input: {
       }
       gateCache.set(step.id, { at: now(), pass })
       if (pass) {
-        settleUnit(input.taskDir, step.id, true, { unit: step.id, result: "gate passed", pass: true })
-        emit("unit.settled", { unit: step.id, pass: true, result: "gate passed" })
+        finishUnit(input.taskDir, step.id, true, { unit: step.id, result: "gate passed", pass: true })
+        emit("unit.finished", { unit: step.id, pass: true, result: "gate passed" })
         rows.push({ unit: step.id, result: "gate passed", pass: true })
-        log(`gate ${step.id} passed — wave ${step.wave} can settle`)
+        log(`gate ${step.id} passed — wave ${step.wave} can finish`)
         gatesPending -= 1
         passed += 1
       }

@@ -15,23 +15,23 @@ counts = "bash hooks/counts.sh"
 
 [[step]]
 id = "g0"
-settles = "end"                # a worker pane runs members/g0.md
+finished_by = "end"                # a worker pane runs members/g0.md
 wave = "w1"
 
 [[step]]
 id = "review"
-settles = "check"              # nothing works — test -f gates/GO must exit 0
+finished_by = "check"              # nothing works — test -f gates/GO must exit 0
 check = "test -f gates/GO"
 wave = "w2"
 
 [[step]]
 id = "g1"
-settles = "end"
+finished_by = "end"
 wave = "w3"
 
 [[step]]
 id = "g2"
-settles = "end"
+finished_by = "end"
 wave = "w3"
 
 [report]
