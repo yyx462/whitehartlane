@@ -102,6 +102,12 @@ const DEFAULT_SLOTS = 2
 const DEFAULT_STALL_MS = 10 * 60_000
 const DEFAULT_BRIEF_GRACE_MS = 90_000
 const DEFAULT_CHECK_MS = 10 * 60_000
+// j-ba18b7: fs.watch (FSEvents) dropped a worker's done-append and the
+// rail sat blind until a 10-minute stall timer fired on an already-done
+// unit. While any flight is live, a cheap stat sweep of the unit logs
+// backstops the file watchers — the ends live in the files, so the
+// files are polled, not trusted.
+const LOG_POLL_MS = 5_000
 const RETRY_CAP = 3
 const SHEP_LABEL_MAX = 32
 
@@ -431,6 +437,7 @@ export async function runOrchestrator(input: {
   stallMs?: number
   briefGraceMs?: number
   checkMs?: number
+  logPollMs?: number
   deadlineMs?: number
   now?: () => number
   log?: (msg: string) => void
@@ -459,6 +466,7 @@ export async function runOrchestrator(input: {
   const stallMs = input.stallMs ?? DEFAULT_STALL_MS
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
+  const logPollMs = input.logPollMs ?? LOG_POLL_MS
   const deadlineMs = input.deadlineMs ?? 2 * 60 * 60_000
   const now = input.now ?? Date.now
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
@@ -501,11 +509,13 @@ export async function runOrchestrator(input: {
   const drainMs = input.drainMs ?? manifest.workflow.drain_timeout_ms ?? stallMs
   let firstCycle = true
   let fallback: ReturnType<typeof setInterval> | null = null
+  let poller: ReturnType<typeof setInterval> | null = null
 
   const cleanup = () => {
     for (const t of timers) clearTimeout(t)
     timers.clear()
     if (fallback) clearInterval(fallback)
+    if (poller) clearInterval(poller)
     for (const w of watchers) w.close()
     watchers.length = 0
   }
@@ -692,6 +702,18 @@ export async function runOrchestrator(input: {
     })
   }
 
+  // the watcher backstop (j-ba18b7): alive only while a flight is
+  // live, so an idle rail costs nothing
+  const startLogPoller = (): void => {
+    if (poller !== null) return
+    poller = setInterval(() => kickIfReady(), logPollMs)
+  }
+  const stopLogPoller = (): void => {
+    if (poller === null) return
+    clearInterval(poller)
+    poller = null
+  }
+
   try {
     watchers.push(watch(unitsDir, () => enqueue("units")))
   } catch {
@@ -702,6 +724,8 @@ export async function runOrchestrator(input: {
   while (!finished) {
     kickIfReady()
     for (const id of inFlight.keys()) watchPane(id)
+    if (inFlight.size > 0) startLogPoller()
+    else stopLogPoller()
     if (queued) {
       queued = false
       run()
