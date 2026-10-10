@@ -44,12 +44,45 @@ test("auth-bearing configs are denied outright, not judged", () => {
   }
 })
 
-test("outside the home tree is denied", () => {
+test("temp scratch is allowed outright — inside or outside home (j-ba18b7)", () => {
+  for (const p of ["/tmp/build-cache", "/tmp", "/private/tmp/pytest-of-me", join(tmpdir(), "aos-run-1")]) {
+    const v = decidePermission({
+      question: `Access external directory ${p}`,
+      allowedRoots: roots,
+    })
+    assert.equal(v.decision, "allow", p)
+    assert.match(v.message, /temp scratch/)
+  }
+})
+
+test("outside-home non-temp is judged, not flat-denied", () => {
   const v = decidePermission({
     question: "Access external directory /etc/hosts",
     allowedRoots: roots,
   })
+  assert.equal(v.decision, "deny-unneeded")
+  assert.match(v.message, /I don't think you need/)
+  assert.equal(v.escalatable, true)
+  // a judge that sees the need allows even outside home
+  const judged = decidePermission(
+    {
+      question: "Access external directory /etc/hosts",
+      allowedRoots: roots,
+      context: "Diagnose why the crawler resolves the broker host wrongly.",
+    },
+    () => 0.9,
+  )
+  assert.equal(judged.decision, "allow")
+})
+
+test("brute-force key hunting is denied even when the key does not exist", () => {
+  const v = decidePermission({
+    question: "Access external directory /Users/me/.ssh/id_rsa_github_backup",
+    allowedRoots: roots,
+    context: "probing for credentials to set up git push",
+  })
   assert.equal(v.decision, "deny")
+  assert.equal(escalateOnRepeat(v, 5).decision, "deny")
 })
 
 test("home-but-unrooted wandering is denied as unneeded, with guidance", () => {
@@ -127,9 +160,13 @@ test("a repeat ask escalates to allow — persistence is the asserted need", () 
   const second = escalateOnRepeat(first, 1)
   assert.equal(second.decision, "allow")
   assert.match(second.message, /granted on repeat/)
-  // outside-home denies escalate too; hard-deny never does
+  // outside-home non-temp denies escalate too; hard-deny never does
+  const outside = decidePermission({ question: "Access /opt/tools/bin", allowedRoots: roots })
+  assert.equal(outside.decision, "deny-unneeded")
+  assert.equal(escalateOnRepeat(outside, 1).decision, "allow")
+  // temp scratch allows on first ask — nothing to escalate
   const tmp = decidePermission({ question: "Access /tmp/build-cache", allowedRoots: roots })
-  assert.equal(escalateOnRepeat(tmp, 1).decision, "allow")
+  assert.equal(tmp.decision, "allow")
   const secret = decidePermission({
     question: "Access /Users/me/proj/ui-window/web/.env",
     allowedRoots: roots,
@@ -175,13 +212,15 @@ test("a home-stripped path form resolves to the real path, not an outside-home d
   })
   assert.doesNotMatch(v.message, /outside the home tree/)
   assert.equal(v.path, real)
-  // a stripped form with no real counterpart stays literal
+  // a stripped form with no real counterpart stays literal — judged,
+  // not granted
   const ghost = decidePermission({
     question: "Access /definitely/not/on/disk",
     allowedRoots: [],
     home,
   })
-  assert.match(ghost.message, /outside the home tree/)
+  assert.match(ghost.message, /I don't think you need/)
+  assert.equal(ghost.escalatable, true)
 })
 
 test("a tilde-form path resolves against home", () => {
