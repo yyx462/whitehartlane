@@ -57,7 +57,12 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   compiled fallback), so tuning lands without a deploy. And a repeat
   ask for the same non-dangerous path escalates to a durable allow:
   persistence is the asserted need, covering the judge's misses;
-  hard-deny never escalates. The Rail applies the verdict (dialog
+  hard-deny never escalates. The dialog's path is NORMALIZED first —
+  `~` forms, home-stripped renderings, trailing slashes all key one
+  path (j-2b508e: one ask in two forms split the ladder and flipped
+  the deny's reason) — and the deny guidance reaches idle panes every
+  cycle: a note queued while the pane was blocked is flushed on the
+  next beat, in every workflow. The Rail applies the verdict (dialog
   cleared, message injected, root made durable on allow), books a
   `permission` event, and caps the DENIES — over `PERMISSION_CAP` (6)
   deny-family answers the worker is done (allows spend nothing: a
