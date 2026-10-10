@@ -606,7 +606,7 @@ test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async 
   assert.match(byUnit.g2, /wave blocked by failed g0/)
 })
 
-test("a wake step refuses to run — parsed, never silently nested (ADR 0007 stage 3)", async () => {
+test("a wake step without a levy port refuses to run — no silent nesting (ADR 0007 stage 3)", async () => {
   const dir = await copyExampleNamed("staged-waves", "orch-wake-")
   const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
     '\n[[step]]\nid = "nested"\nfinished_by = "wake"\nfolder = "./g0-substrate"\nwave = "w4"\n'
@@ -614,7 +614,7 @@ test("a wake step refuses to run — parsed, never silently nested (ADR 0007 sta
   const { port } = fakeShep()
   await assert.rejects(
     () => runOrchestrator({ taskDir: dir, shep: port, log: () => {} }),
-    /wake steps are not executable/,
+    /wake steps need a levy port/,
   )
 })
 
