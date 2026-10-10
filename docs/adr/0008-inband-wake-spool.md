@@ -49,9 +49,35 @@ agentic-os-owned opencode plugin.
   digest. Torn tails (crash mid-append) wait for their newline;
   malformed lines are consumed and skipped — one bad byte cannot wedge
   the queue.
-- **The ladder order becomes**: pane prompt → in-band spool (opencode
-  levy, fresh heartbeat) → doorbell → durable `queued`. A rail
-  spawner is never spooled nor doorbelled (ADR 0007: it polls
+- **The levy pane — registration (rung 2).** The levy's own chat may
+  live inside a herdr pane (herdr detects agent panes it never
+  started, any supported kind). `whl register --from opencode:<sid>`
+  run inside that pane books the one binding herdr cannot know —
+  which host session lives in which pane — on the OS disk
+  (`levy-panes/<sid>.json`). HERDR_PANE_ID is the address, `herdr
+  agent get <pane>` the aliveness oracle, `herdr agent prompt <pane>`
+  the injection — tool-independent. Renewal-by-presence: any door
+  command run in a registered pane re-touches it. Registration is
+  voluntary by definition: the OS never claims a pane uninvited, and
+  `audit` admits registered panes by their registration.
+- **The fork rung (rung 3) — the owner's rule.** A chat levy that
+  never registered is DEAD to the ladder, even if a process holds it:
+  registration is the only aliveness claim that outranks the fork.
+  The wake rebirths the levy into a fresh pane (the `whl fork` body:
+  session resumed from the checkpoint, wake as the first prompt) and
+  books the consumption. Honest caveat, accepted: the unregistered
+  original may still be alive — the fork becomes the levy's live
+  incarnation and the original stays ignorant; register to not be
+  reborn. Disarmed by `AGENTIC_OS_FORK_WAKE=0` (herdr-less hosts).
+- **The spool is opt-in (rung 4), never auto-installed.** The plugin
+  is installed only by an explicit `whl plugin install`; `whl plugin
+  uninstall` removes it. It serves hosts where the levy's chat does
+  NOT live in herdr — on the owner's machine the fork covers that
+  case, so the plugin stays uninstalled. A fresh spool heartbeat does
+  NOT outrank the fork — deliberately.
+- **The ladder order becomes**: worker pane → registered levy pane →
+  fork → spool → doorbell → durable `queued`. A rail spawner is never
+  prompted, forked, spooled nor doorbelled (ADR 0007: it polls
   `wake.json` — a machine is not a conversation).
 
 ## Why two in-band rungs (the semantic division)
