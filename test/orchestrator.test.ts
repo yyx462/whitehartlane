@@ -15,7 +15,7 @@ import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
 import { readState, settleUnit } from "../src/state.ts"
 
-import { copyExample } from "./util.ts"
+import { copyExample, copyExampleNamed } from "./util.ts"
 
 type Wake = { label: string; kind: string; detail: string }
 
@@ -519,6 +519,103 @@ test("hook runs land in the trace as hook.run (issue #40)", async () => {
   assert.ok(one?.target, "grade notes its target unit")
   assert.equal(one.status, 0)
   assert.ok(one.ms >= 0)
+})
+
+// ADR 0007 — settle-typed steps: waves gate spawning, checks poll, wake
+// refuses until stage 3.
+
+test("a steps manifest parses with wave order and per-type fields (ADR 0007)", async () => {
+  const dir = await copyExampleNamed("staged-waves", "orch-steps-parse-")
+  const { loadManifest } = await import("../src/hooks.ts")
+  const m = loadManifest(dir)
+  assert.equal(m.steps?.length, 4)
+  assert.deepEqual(m.steps?.map((s) => [s.id, s.settles, s.wave]), [
+    ["g0", "end", "w1"],
+    ["review", "check", "w2"],
+    ["g1", "end", "w3"],
+    ["g2", "end", "w3"],
+  ])
+  assert.equal(m.steps?.[1].check, "test -f gates/GO")
+  const { unitsFromSteps } = await import("../src/hooks.ts")
+  const units = unitsFromSteps(dir, m.steps!)
+  assert.deepEqual(units.map((u) => u.id), ["g0", "g1", "g2"])
+  assert.match(units[0].brief, /capital of France/)
+})
+
+test("waves gate spawning until the check step passes (ADR 0007)", async () => {
+  const dir = await copyExampleNamed("staged-waves", "orch-waves-")
+  const spawnedNames: string[] = []
+  const { port } = fakeShep({
+    spawnWorker: (name, _kind, _brief, cwd) => {
+      spawnedNames.push(name)
+      const id = name.slice(2)
+      writeFileSync(join(cwd, "result.md"), "capital\n")
+      appendFileSync(join(cwd, "log.txt"), `done ${id}\n`)
+      return true
+    },
+  })
+  const engine = runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    gateCheckMs: 100,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  // wave 1 only: the gate has not passed, w3 never spawned
+  assert.deepEqual(spawnedNames, ["w-g0"])
+  mkdirSync(join(dir, "gates"), { recursive: true })
+  writeFileSync(join(dir, "gates", "GO"), "")
+  const report = await Promise.race([
+    engine,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("gate never passed")), 4000)),
+  ])
+  assert.equal(report.status, "done")
+  assert.deepEqual([...new Set(spawnedNames)].sort(), ["w-g0", "w-g1", "w-g2"])
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.equal(byUnit.review, "gate passed")
+  assert.equal(byUnit.g0, "found")
+})
+
+test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async () => {
+  const dir = await copyExampleNamed("staged-waves", "orch-waves-block-")
+  const { port } = fakeShep({
+    spawnWorker: (name, _kind, _brief, cwd) => {
+      appendFileSync(join(cwd, "log.txt"), `blocked ${name.slice(2)}: substrate broken\n`)
+      return true
+    },
+  })
+  const report = await Promise.race([
+    runOrchestrator({
+      taskDir: dir,
+      shep: port,
+      gateCheckMs: 100,
+      logPollMs: 50,
+      stallMs: 60_000,
+      briefGraceMs: 60_000,
+      log: () => {},
+    }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("blocked settle never landed")), 4000)),
+  ])
+  assert.equal(report.status, "failed")
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.equal(byUnit.g0, "blocked")
+  assert.match(byUnit.g1, /wave blocked by failed g0/)
+  assert.match(byUnit.g2, /wave blocked by failed g0/)
+})
+
+test("a wake step refuses to run — parsed, never silently nested (ADR 0007 stage 3)", async () => {
+  const dir = await copyExampleNamed("staged-waves", "orch-wake-")
+  const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
+    '\n[[step]]\nid = "nested"\nsettles = "wake"\nfolder = "./g0-substrate"\nwave = "w4"\n'
+  writeFileSync(join(dir, "workflow.toml"), wf)
+  const { port } = fakeShep()
+  await assert.rejects(
+    () => runOrchestrator({ taskDir: dir, shep: port, log: () => {} }),
+    /wake steps are not executable/,
+  )
 })
 
 test("runOrchestrator stops at the deadline, settles the rest failed, and wakes", async () => {
