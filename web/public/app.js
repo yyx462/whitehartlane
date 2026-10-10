@@ -104,12 +104,6 @@ function createdElapsed(created) {
   return Math.max(Date.now() - new Date(created).getTime(), 0);
 }
 
-function fmtAxisMs(ms) {
-  if (ms < 120000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 7200000) return `${Math.round(ms / 60000)}m`;
-  return `${(ms / 3600000).toFixed(1)}h`;
-}
-
 function showToast(text, kind) {
   toastEl.textContent = text;
   toastEl.className = `toast ${kind || ""}`;
@@ -407,38 +401,6 @@ function svgRunsPerDay(days) {
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="runs per day">${g}${bars}</svg>`;
 }
 
-function verColor(v) {
-  return brandHashColor("v:" + String(v || "?"));
-}
-
-function svgDurationTrend(t) {
-  const pts = (t.points || []).filter((p) => p.durationMs != null);
-  if (!pts.length) return paneEmpty("no completed runs yet");
-  const W = 880, H = 212, padL = 46, padR = 20, padT = 32, padB = 26;
-  const iw = W - padL - padR, ih = H - padT - padB;
-  const max = Math.max(...pts.map((p) => p.durationMs));
-  const step = niceStep(max);
-  const top = Math.max(Math.ceil(max / step) * step, step);
-  const y = (v) => padT + ih - (v / top) * ih;
-  const n = pts.length;
-  const x = (i) => padL + (n === 1 ? iw / 2 : (i * iw) / (n - 1));
-  let grid = "";
-  for (let v = 0; v <= top; v += step) {
-    grid += `<line x1="${padL}" y1="${y(v)}" x2="${W - padR}" y2="${y(v)}" class="c-grid"></line>` +
-      `<text x="${padL - 6}" y="${y(v) + 3}" class="c-yaxis" text-anchor="end">${fmtAxisMs(v)}</text>`;
-  }
-  const path = pts.map((p, i) => `${i ? "L" : "M"} ${x(i).toFixed(1)} ${y(p.durationMs).toFixed(1)}`).join(" ");
-  const dots = pts.map((p, i) => {
-    const cx = x(i), cy = y(p.durationMs);
-    const chipY = i % 2 === 0 ? Math.max(cy - 30, 2) : Math.min(cy + 12, H - 20);
-    return `<circle cx="${cx}" cy="${cy}" r="4.5" class="c-dot ${stOf(p.status)}"><title>${esc(p.jid)} · ${esc(humanAge(p.durationMs))} · ${esc(p.status)} · version ${esc(p.version || "–")}</title></circle>` +
-      `<rect x="${cx - 31}" y="${chipY}" width="62" height="15" rx="4" style="fill:${verColor(p.version)}" opacity="0.24"></rect>` +
-      `<text x="${cx}" y="${chipY + 11}" text-anchor="middle" class="c-vchip">${esc(String(p.version || "?").slice(0, 7))}</text>` +
-      `<text x="${cx}" y="${H - 8}" text-anchor="middle" class="c-xaxis">${esc(String(p.jid || "").replace(/^j-/, ""))}</text>`;
-  }).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="duration trend ${esc(t.dag_id)}">${grid}<path d="${path}" class="c-line"></path>${dots}</svg>`;
-}
-
 function mixHtml(mix) {
   const total = (mix.allow || 0) + (mix.deny || 0) + (mix.denyUnneeded || 0);
   if (!total) return paneEmpty("no permission events in session traces yet");
@@ -462,7 +424,6 @@ function renderHome() {
   const h = state.home;
   if (!h) return;
   const k = h.kpis || {};
-  const trend = h.durationTrend || [];
   viewEl.innerHTML = `
     <section class="kpis">
       ${kpiCard("jobs · 24h", k.jobs24h ?? "–", "all jobs started in window")}
@@ -482,15 +443,6 @@ function renderHome() {
       <div class="legend">${STATUSES.map((s) =>
         `<span class="li"><span class="sw" style="background:var(--${s})"></span>${s}</span>`).join("")}</div>
     </section>
-    ${trend.length ? trend.map((t) => `
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Duration trend — ${esc(t.dag_id)}</h2>
-          <span class="muted small">${esc(t.project || "")} · version-hash chips on the points — did the new version slow us down?</span>
-        </div>
-        <div class="chart-wrap">${svgDurationTrend(t)}</div>
-      </section>`).join("")
-      : `<section class="panel">${paneEmpty("no duration trend yet")}</section>`}
     <section class="panel">
       <div class="panel-head">
         <h2>Permission mix</h2>
@@ -1133,7 +1085,7 @@ function drawDiagram(body, defn, dk) {
     ${staleBar}
     <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}${defn.kind === "steps" ? " · edges chain wave to wave — dim = both ends finished, red = failed upstream" : ""}</div>
     <div class="diagram-view">
-      <div class="g-canvas" style="width:${W}px;height:${H}px" id="d-canvas">
+      <div class="g-canvas" style="width:${W}px;height:${H}px" data-fp-w="${W}" data-fp-h="${H}" id="d-canvas">
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
           <defs>
             <marker id="d-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -1307,11 +1259,54 @@ function borderPoint(box, towards) {
   return { x: cx + dx * s, y: cy + dy * s };
 }
 
+// fit-canvas:start
+// The canvas fit, pure: the live node boxes plus floors -> the canvas
+// and svg size. Floors: fpW/fpH — the render-time footprint (a
+// wake-box slot reservation must not shrink the canvas below what
+// drawDiagram laid out), and wellW — the .diagram-view clientWidth,
+// so a narrow diagram still fills the well (the centered dead margin
+// and its invisible left wall die: left=0 becomes the well's true
+// left edge). Boxes beyond the floors grow the canvas, so a node
+// dragged past the old fixed width keeps its edge lines inside the
+// svg viewport instead of clipping them away.
+function fitCanvasSize(boxes, floor) {
+  let w = Math.max(floor.fpW || 0, floor.wellW || 0);
+  let h = floor.fpH || 0;
+  for (const b of boxes || []) {
+    if (b.x + b.w + 24 > w) w = b.x + b.w + 24;
+    if (b.y + b.h + 24 > h) h = b.y + b.h + 24;
+  }
+  return { w, h };
+}
+// fit-canvas:end
+
 function redrawEdges() {
   const svg = $("#d-svg");
   const canvas = $("#d-canvas");
   const sp = state.split;
   if (!svg || !canvas || !sp || !sp.defn) return;
+  // the canvas tracks its content: recompute the size every pass from
+  // the ACTUAL node boxes (a drag moves one, a wake box landing grows
+  // one), floored at the render-time footprint and at the well's
+  // clientWidth. Sizing once at render left a narrow canvas centered
+  // in the well (margin: 0 auto) with a drag clamp at left=0 — an
+  // invisible wall left of nothing — and clipped edges past the fixed
+  // width; both die here.
+  const view = canvas.parentElement; // .diagram-view
+  const fit = fitCanvasSize(
+    $$(".g-node", canvas).map((el) => ({
+      x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight,
+    })),
+    {
+      fpW: Number(canvas.dataset.fpW) || 0,
+      fpH: Number(canvas.dataset.fpH) || 0,
+      wellW: view ? view.clientWidth : 0,
+    },
+  );
+  canvas.style.width = fit.w + "px";
+  canvas.style.height = fit.h + "px";
+  svg.setAttribute("width", String(fit.w));
+  svg.setAttribute("height", String(fit.h));
   svg.querySelectorAll("line.d-edge").forEach((el) => el.remove());
   canvas.querySelectorAll(".g-badge").forEach((el) => el.remove());
   // the drawn set = definition edges + the run's relay LOOP edges (a
