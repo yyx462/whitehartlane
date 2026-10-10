@@ -13,7 +13,6 @@ const LEFT_TABS = ["diagram", "runs", "config"];
 const RIGHT_TABS = ["receipt", "report", "events"];
 const STATUSES = ["success", "failed", "aborted", "running", "paused", "orphaned"];
 const SPLIT_KEY = "ui4-split-pct";
-const RESIZE_KEY = "ui4-split-resized";
 
 const SORT_NAMES = {
   dag: "spur name",
@@ -681,7 +680,6 @@ function mountSplit(r, seq) {
     filePath: null, fileData: null, fileLoading: false, fileCache: {},
     events: null, eventsError: null, eventsLoadedKey: null,
     es: null, esKey: null,
-    resizeCount: Number(sessionStorage.getItem(RESIZE_KEY) || 0),
   };
   initSplitLayout();
   updateSplit(seq);
@@ -692,15 +690,11 @@ function initSplitLayout() {
   const left = $("#split-left");
   const grip = $("#split-grip");
   const note = $("#split-note");
-  const sp = state.split;
   let pct = parseFloat(localStorage.getItem(SPLIT_KEY));
   if (!(pct >= 20 && pct <= 80)) pct = 45;
   const apply = () => { left.style.flex = `0 0 ${pct}%`; };
   const noteUpdate = () => {
-    if (note) {
-      note.textContent = `divider ${Math.round(pct)}% · resized ${sp.resizeCount}×`;
-      if (sp.resizeCount > 0) note.classList.add("did");
-    }
+    if (note) note.textContent = `divider ${Math.round(pct)}%`;
   };
   apply();
   noteUpdate();
@@ -717,8 +711,6 @@ function initSplitLayout() {
       grip.removeEventListener("pointermove", move);
       grip.removeEventListener("pointerup", up);
       localStorage.setItem(SPLIT_KEY, String(pct));
-      sp.resizeCount += 1;
-      sessionStorage.setItem(RESIZE_KEY, String(sp.resizeCount));
       noteUpdate();
       root.dispatchEvent(new CustomEvent("pl-resized"));
     };
@@ -729,8 +721,6 @@ function initSplitLayout() {
     localStorage.removeItem(SPLIT_KEY);
     pct = 45;
     apply();
-    sp.resizeCount += 1;
-    sessionStorage.setItem(RESIZE_KEY, String(sp.resizeCount));
     noteUpdate();
     root.dispatchEvent(new CustomEvent("pl-resized"));
   });

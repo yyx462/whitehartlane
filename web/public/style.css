@@ -569,7 +569,6 @@ td.empty, .empty {
 .split-bar .grow { flex: 1; }
 
 #split-note { font-family: var(--mono); font-size: 11px; }
-#split-note.did { color: var(--orphaned); }
 
 .split {
   display: flex;
