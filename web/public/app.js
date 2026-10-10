@@ -825,6 +825,14 @@ async function updateSplit(seq) {
     sp.evSel = null; sp.evSideHtml = null; sp.evSideMember = null; sp.msgCache = {};
     closeEventsStream();
     closeNodePopup();
+    // the open diagram repaints at once: the previous run's shape
+    // coloring and wake children must not linger while the new shape
+    // loads (the 5s loop would catch it — this makes it immediate)
+    if (r.tab === "diagram" && $("#d-canvas")) {
+      paintWakeBoxes();
+      paintStepStates();
+      redrawEdges();
+    }
   }
   const lk = `${r.legacy ? "legacy" : r.dag}|${r.legacy ? "" : r.tab}`;
   if (lk !== sp.leftKey) {
@@ -974,8 +982,12 @@ function savePositions(dk, pos) {
   try { localStorage.setItem(diagramStoreKey(dk), JSON.stringify(pos)); } catch { /* quota */ }
 }
 
-function layoutGraph(nodes, edges) {
+// level layout (longest path) with per-node widths — a wake step is a
+// CONTAINER (box-in-box, ADR 0007) and reserves a wider slot than a
+// work node, so waves never overlap no matter when the child lands
+function layoutGraph(nodes, edges, widthOf) {
   const BW = 168, BH = 54, VGAP = 64, HGAP = 32;
+  const wOf = widthOf || (() => BW);
   const level = {};
   nodes.forEach((n) => { level[n.id] = 0; });
   for (let i = 0; i < nodes.length; i++) {
@@ -991,19 +1003,34 @@ function layoutGraph(nodes, edges) {
   const byLevel = {};
   nodes.forEach((n) => { (byLevel[level[n.id]] ||= []).push(n); });
   const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
+  const rowExtent = (row) => row.reduce((w, n) => w + wOf(n), 0) + (row.length - 1) * HGAP;
+  const rowH = (row) => Math.max(...row.map((n) => nodeFootprint(n).h), BH);
   const maxRow = Math.max(...levels.map((lv) => byLevel[lv].length), 1);
-  const width = maxRow * BW + (maxRow - 1) * HGAP + HGAP * 2;
-  const height = levels.length * BH + (levels.length - 1) * VGAP + VGAP;
+  const width = Math.max(...levels.map((lv) => rowExtent(byLevel[lv])), maxRow * BW) + HGAP * 2;
+  const height = levels.reduce((h, lv) => h + rowH(byLevel[lv]) + VGAP, VGAP / 2);
   const pos = {};
+  let y = VGAP / 2;
   levels.forEach((lv) => {
     const row = byLevel[lv];
-    const rowW = row.length * BW + (row.length - 1) * HGAP;
-    const x0 = (width - rowW) / 2;
-    row.forEach((n, i) => {
-      pos[n.id] = { x: x0 + i * (BW + HGAP), y: VGAP / 2 + lv * (BH + VGAP) };
+    const x0 = (width - rowExtent(row)) / 2;
+    let x = x0;
+    row.forEach((n) => {
+      pos[n.id] = { x, y };
+      x += wOf(n) + HGAP;
     });
+    y += rowH(row) + VGAP;
   });
   return pos;
+}
+
+// the diagram's per-node footprint: a wake step is a box-in-box
+// container — wide and tall enough to hold the child's miniature from
+// the FIRST paint (positions never animate, so the slot is reserved
+// even while the box is still hollow)
+function isWakeNode(n) { return n && n.finished_by === "wake"; }
+function nodeFootprint(n) {
+  if (isWakeNode(n)) return { w: 256, h: 132 + 20 * Math.min(n.child && n.child.steps ? n.child.steps.length : 3, 6) };
+  return { w: 168, h: 100 };
 }
 
 function shortenCmd(cmd, max = 36) {
@@ -1053,19 +1080,49 @@ function renderDiagramBody() {
   drawDiagram(body, sp.defn, dk);
 }
 
+// the wake step's box-in-box interior: the CHILD program's own steps
+// in miniature, labeled with the child job id and its state. A missing
+// or unlevied child renders hollow with the reason.
+function wakeBoxHtml(n) {
+  const c = n.child;
+  if (!c || !c.levied) {
+    return `<div class="g-child hollow"><span class="muted small">${esc(c && c.reason ? c.reason : "no child booked")}</span></div>`;
+  }
+  const cs = c.states || { done: [], failed: [] };
+  const rowState = (id) => cs.done.includes(id) ? "done" : cs.failed.includes(id) ? "failed" : "open";
+  const chipCls = c.state === "retired"
+    ? "st-" + stOf(c.status)
+    : ["running", "paused", "orphaned", "aborted"].includes(c.state) ? "st-" + c.state : "st-running";
+  const rows = (c.steps || []).map((s) =>
+    `<div class="g-crow ${rowState(s.id)}" title="${esc(s.id)} · ${esc(s.finished_by)} · ${esc(s.wave || "main")}">` +
+    `<span class="g-cdot"></span><span class="g-cid mono">${esc(s.id)}</span>` +
+    `<span class="g-ctype">${esc(s.finished_by)}</span></div>`).join("");
+  return `<div class="g-child">` +
+    `<div class="g-child-head">` +
+      `<span class="g-child-jid mono" title="child job — click the box to open its run view">${esc(c.jid)}</span>` +
+      `<span class="chip mini ${chipCls}">${esc(c.state === "retired" ? c.status : c.state)}</span>` +
+    `</div>` +
+    (c.outcome ? `<div class="g-child-outcome ${c.outcome === "done" ? "ok" : "bad"}">wake: ${esc(c.outcome)}</div>` : "") +
+    (rows
+      ? `<div class="g-child-steps">${rows}</div>`
+      : `<div class="g-child-steps none"><span class="muted small">no [[step]] manifest — units-hook shape</span></div>`) +
+    `<div class="g-child-open">open child ⌄</div>` +
+  `</div>`;
+}
+
 function drawDiagram(body, defn, dk) {
   const nodes = defn.nodes || [];
   const edges = (defn.edges || []).filter((e) =>
     nodes.some((n) => n.id === e.from) && nodes.some((n) => n.id === e.to));
   const saved = loadPositions(dk);
-  const defaults = layoutGraph(nodes, edges);
+  const defaults = layoutGraph(nodes, edges, (n) => nodeFootprint(n).w);
   const pos = {};
   nodes.forEach((n) => {
     const s = saved[n.id];
     pos[n.id] = Array.isArray(s) && s.length === 2 ? { x: Math.max(0, s[0]), y: Math.max(0, s[1]) } : defaults[n.id];
   });
-  const W = Math.max(...nodes.map((n) => pos[n.id].x + 190), 300) + 24;
-  const H = Math.max(...nodes.map((n) => pos[n.id].y + 100), 200) + 24;
+  const W = Math.max(...nodes.map((n) => pos[n.id].x + nodeFootprint(n).w + 22), 300) + 24;
+  const H = Math.max(...nodes.map((n) => pos[n.id].y + nodeFootprint(n).h), 200) + 24;
   const staleBar = defn.stale ? `
     <div class="stale-bar" title="${esc(defn.stale.reason)}">
       <b>source folder gone</b> — showing the staged copy of run <span class="mono">${esc(defn.stale.fromRun)}</span>
@@ -1074,7 +1131,7 @@ function drawDiagram(body, defn, dk) {
     </div>` : "";
   body.innerHTML = `
     ${staleBar}
-    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}</div>
+    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}${defn.kind === "steps" ? " · edges chain wave to wave — dim = both ends finished, red = failed upstream" : ""}</div>
     <div class="diagram-view">
       <div class="g-canvas" style="width:${W}px;height:${H}px" id="d-canvas">
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
@@ -1085,15 +1142,19 @@ function drawDiagram(body, defn, dk) {
           </defs>
         </svg>
         ${nodes.map((n) =>
-          `<div class="g-node ${n.finished_by === "check" ? "g-gate" : n.finished_by === "wake" ? "g-program" : ""}" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief${n.check ? ` · check: ${esc(n.check)}` : ""}${n.folder ? ` · program: ${esc(n.folder)}` : ""}">` +
+          `<div class="g-node ${n.finished_by === "check" ? "g-gate" : n.finished_by === "wake" ? "g-program g-box" : ""}" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief${n.check ? ` · check: ${esc(n.check)}` : ""}${n.folder ? ` · program: ${esc(n.folder)}` : ""}">` +
           `<div class="g-id">${esc(n.id)}${n.finished_by ? `<span class="g-finished_by">${esc(n.finished_by)}</span>` : ""}</div>` +
-          (n.does ? `<div class="g-does">${esc(n.does)}</div>` : "") +
+          (isWakeNode(n)
+            ? `<div class="g-child-slot">${wakeBoxHtml(n)}</div>`
+            : (n.does ? `<div class="g-does">${esc(n.does)}</div>` : "")) +
           hookStripHtml(n.hooks) +
-          (n.brief || n.does ? `<div class="g-open">brief ⌄</div>` : "") +
+          (!isWakeNode(n) && (n.brief || n.does) ? `<div class="g-open">brief ⌄</div>` : "") +
           `</div>`).join("")}
       </div>
     </div>
     <div id="node-pop-slot"></div>`;
+  paintWakeBoxes();
+  paintStepStates();
   redrawEdges();
   bindNodeDrag(dk);
   // the selected run's live shape (×N relayed messages), on the 5s loop
@@ -1138,7 +1199,95 @@ async function loadShape(seq) {
   } catch {
     sp.shape = null;
   }
-  if (sp.route.tab === "diagram" && $("#d-canvas")) redrawEdges();
+  if (sp.route.tab === "diagram" && $("#d-canvas")) {
+    paintWakeBoxes();
+    paintStepStates();
+    redrawEdges();
+  }
+}
+
+// ----- steps overlay: the run paints the declared topology -----
+
+// merge a definition node with the selected run's shape node (the shape
+// re-reads the run dir, so its wake children and states are fresher)
+function mergedNode(id) {
+  const sp = state.split;
+  const d = (sp.defn && sp.defn.nodes || []).find((x) => x.id === id) || null;
+  const s = (sp.shape && sp.shape.nodes || []).find((x) => x.id === id) || null;
+  if (!d) return s;
+  if (!s) return d;
+  return { ...d, ...s, child: s.child || d.child || null };
+}
+
+// the wake boxes: fill/hollow each container from the freshest child
+// data (definition + shape merged), and arm the click-through to the
+// child job's own run view. In-place only — drag positions never move.
+function paintWakeBoxes() {
+  const sp = state.split;
+  const canvas = $("#d-canvas");
+  if (!sp || !sp.defn || sp.defn.kind !== "steps" || !canvas) return;
+  $$(".g-node.g-box", canvas).forEach((el) => {
+    const n = mergedNode(el.dataset.node);
+    if (!n || !isWakeNode(n)) return;
+    const slot = el.querySelector(".g-child-slot");
+    if (slot) slot.innerHTML = wakeBoxHtml(n);
+    const c = n.child;
+    if (c && c.levied && c.sid && c.jid) {
+      el.dataset.childRoute = `#/spur-status?run=${enc(c.sid)}/${enc(c.jid)}`;
+      el.title = `${n.id} — child job ${c.jid} (${c.state}${c.outcome ? " · wake " + c.outcome : ""}) — click to open its run view`;
+    } else {
+      delete el.dataset.childRoute;
+      el.title = `${n.id} — ${c && c.reason ? c.reason : "no child booked"}${n.folder ? ` · program: ${n.folder}` : ""}`;
+    }
+  });
+}
+
+// step finish states from the selected run: done/failed nodes wear it,
+// and a step whose EARLIER waves hold a failure is unreachable — it
+// can never be asked (CONTEXT.md: terminal by rule)
+function paintStepStates() {
+  const sp = state.split;
+  const canvas = $("#d-canvas");
+  if (!sp || !sp.defn || sp.defn.kind !== "steps" || !canvas) return;
+  const states = sp.shape && sp.shape.states;
+  if (!states) {
+    // no selected run (or its shape not loaded yet): the declared
+    // topology stands alone — no run-state coloring lingers
+    $$(".g-node", canvas).forEach((el) =>
+      el.classList.remove("g-done", "g-failed", "g-unreach"));
+    return;
+  }
+  const done = new Set(states.done || []);
+  const failed = new Set(states.failed || []);
+  const finishedAt = {}; // wave index -> { failed: bool, open: bool }
+  const waveOrder = [];
+  for (const n of sp.defn.nodes || []) {
+    const w = n.wave || "main";
+    if (!waveOrder.includes(w)) waveOrder.push(w);
+  }
+  const wiOf = (n) => waveOrder.indexOf(n.wave || "main");
+  for (const n of sp.defn.nodes || []) {
+    const wi = wiOf(n);
+    const f = finishedAt[wi] ||= { failed: false, open: false };
+    if (failed.has(n.id)) f.failed = true;
+    if (!done.has(n.id) && !failed.has(n.id)) f.open = true;
+  }
+  $$(".g-node", canvas).forEach((el) => {
+    const n = mergedNode(el.dataset.node);
+    if (!n) return;
+    el.classList.remove("g-done", "g-failed", "g-unreach");
+    if (done.has(n.id)) el.classList.add("g-done");
+    else if (failed.has(n.id)) el.classList.add("g-failed");
+    else {
+      // a not-yet-finished step behind a failed earlier wave is
+      // unreachable — never asked, cannot count against the finish
+      const wi = wiOf(n);
+      const blocked = Object.entries(finishedAt)
+        .filter(([w]) => Number(w) < wi)
+        .some(([, f]) => f.failed);
+      if (blocked) el.classList.add("g-unreach");
+    }
+  });
 }
 
 function nodeBox(canvas, id) {
@@ -1175,6 +1324,12 @@ function redrawEdges() {
     if (!seen.has(k)) { seen.add(k); all.push({ from: e.from, to: e.to, loop: true }); }
   }
   const tally = shapeTally();
+  // steps runs: the chain colors by the selected run's finish states —
+  // a failed upstream reads at a glance (danger), both-ends-finished
+  // dims (the work is done); otherwise the edge stays subtle-live
+  const st = sp.shape && sp.shape.kind === "steps" ? sp.shape.states : null;
+  const fin = st ? new Set([...(st.done || []), ...(st.failed || [])]) : null;
+  const fail = st ? new Set(st.failed || []) : null;
   for (const e of all) {
     const a = nodeBox(canvas, e.from), b = nodeBox(canvas, e.to);
     if (!a || !b) continue;
@@ -1182,15 +1337,24 @@ function redrawEdges() {
     const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
     const p1 = borderPoint(a, bc), p2 = borderPoint(b, ac);
     const n = tally.get(`${e.from}->${e.to}`) || 0;
+    let cls = "d-edge";
+    if (fail && fail.has(e.from)) cls += " failed";
+    else if (fin && fin.has(e.from) && fin.has(e.to)) cls += " settled";
+    if (n > 0) cls += " has-msg";
+    if (e.loop) cls += " loop";
     const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
     ln.setAttribute("x1", p1.x.toFixed(1));
     ln.setAttribute("y1", p1.y.toFixed(1));
     ln.setAttribute("x2", p2.x.toFixed(1));
     ln.setAttribute("y2", p2.y.toFixed(1));
-    ln.setAttribute("class", "d-edge" + (n > 0 ? " has-msg" : "") + (e.loop ? " loop" : ""));
+    ln.setAttribute("class", cls);
     ln.setAttribute("marker-end", "url(#d-arrow)");
     const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    t.textContent = `${e.from} → ${e.to}` + (n > 0 ? ` · ${n} message${n === 1 ? "" : "s"} relayed` : "");
+    let label = `${e.from} → ${e.to}`;
+    if (fail && fail.has(e.from)) label += ` · ${e.from} failed — this unblock will not come`;
+    else if (fin && fin.has(e.from) && fin.has(e.to)) label += " · both ends finished";
+    if (n > 0) label += ` · ${n} message${n === 1 ? "" : "s"} relayed`;
+    t.textContent = label;
     ln.appendChild(t);
     svg.appendChild(ln);
     if (n > 0) {
@@ -1235,8 +1399,11 @@ function bindNodeDrag(dk) {
           $$(".g-node", canvas).forEach((n) => { all[n.dataset.node] = [n.offsetLeft, n.offsetTop]; });
           savePositions(dk, all);
         } else {
-          // a press without movement is a click — open the node's brief
-          openNodePopup(node.dataset.node);
+          // a press without movement is a click — a wake box with a
+          // levied child opens the CHILD job's own run view; every
+          // other node opens its brief
+          if (node.dataset.childRoute) setHash(node.dataset.childRoute);
+          else openNodePopup(node.dataset.node);
         }
       };
       node.addEventListener("pointermove", move);
@@ -1256,11 +1423,25 @@ function openNodePopup(id) {
   const sp = state.split;
   const slot = $("#node-pop-slot");
   if (!slot || !sp || !sp.defn) return;
-  const n = (sp.defn.nodes || []).find((x) => x.id === id);
+  const n = mergedNode(id);
   if (!n) return;
   const mail = memberMailTotals(id);
   const runKey = sp.route.run;
   const brief = n.brief || n.does || null;
+  // a wake step's stage is its CHILD: job id, state, the receipt's
+  // outcome, and where the program lives — the box's own story
+  const wakeInfo = isWakeNode(n)
+    ? `<div class="node-pop-body"><div class="node-pop-label">child program</div>` +
+      (n.child
+        ? (n.child.levied
+          ? `<pre>job      ${esc(n.child.jid)}${n.child.sid ? ` (${esc(n.child.sid)})` : ""}\nstate    ${esc(n.child.state)}${n.child.outcome ? `\nwake     ${esc(n.child.outcome)}` : ""}${n.child.folder ? `\nprogram  ${esc(n.child.folder)}` : ""}${n.child.jobDir ? `\njob dir  ${esc(n.child.jobDir)}` : ""}</pre>` +
+            (n.child.sid && n.child.jid
+              ? `<button class="btn" id="node-pop-child" data-route="#/spur-status?run=${enc(n.child.sid)}/${enc(n.child.jid)}">open the child run ⌄</button>`
+              : "")
+          : `<pre>${esc(n.child.reason || "not levied")}</pre>`)
+        : `<pre>not levied</pre>`) +
+      `</div>`
+    : "";
   slot.innerHTML = `
     <div class="node-pop" id="node-pop">
       <div class="node-pop-head">
@@ -1273,11 +1454,16 @@ function openNodePopup(id) {
       ${runKey ? `<div class="node-pop-mail">${mail.sent || mail.recv
         ? `<span class="ok">↗ ${mail.sent} sent</span> · <span class="ok">↘ ${mail.recv} received</span> <span class="muted small">— relayed messages in the selected run</span>`
         : `<span class="muted small">no relayed messages in the selected run${sp.shape ? "" : " (shape not loaded)"}</span>`}</div>` : ""}
-      ${brief
+      ${wakeInfo}
+      ${!isWakeNode(n) && brief
         ? `<div class="node-pop-body"><div class="node-pop-label">full brief</div><pre>${esc(brief)}</pre></div>`
-        : `<div class="node-pop-body"><span class="muted small">no brief recorded for this node</span></div>`}
+        : (!isWakeNode(n)
+          ? `<div class="node-pop-body"><span class="muted small">no brief recorded for this node</span></div>`
+          : "")}
     </div>`;
   $("#node-pop-close").addEventListener("click", closeNodePopup);
+  const childBtn = $("#node-pop-child");
+  if (childBtn) childBtn.addEventListener("click", () => setHash(childBtn.dataset.route));
   const pop = $("#node-pop");
   pop.addEventListener("pointerdown", (e) => e.stopPropagation());
 }
