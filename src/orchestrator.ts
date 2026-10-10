@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
-import { hooksFromDir, loadManifest, resolvedLayout, runUnits, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
+import { hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
@@ -477,6 +477,9 @@ export async function runOrchestrator(input: {
   // existingRows covers a resumed orchestrator's earlier work).
   const rows: ReportRow[] = [...(input.existingRows ?? [])]
   const emit = input.emit ?? (() => {})
+  // issue #40: every units/grade/counts execution lands in the trace as
+  // hook.run — the window's "last fired" rides on it
+  setHookRunNote((n) => emit("hook.run", n))
   const canary: CanaryState = { enabled: input.canary === true, released: false, failed: false }
 
   log(`orchestrator: started (taskDir=${input.taskDir}, layout=${layout.tab}/${layout.orchestrator}, idle until a queue message)`)
@@ -518,6 +521,9 @@ export async function runOrchestrator(input: {
     if (poller) clearInterval(poller)
     for (const w of watchers) w.close()
     watchers.length = 0
+    // note: the hook-run note is NOT cleared here — the report (and its
+    // counts hook) is written after cleanup; the note comes out at the
+    // run's true exits below
   }
 
   const run = (): void => {
@@ -750,6 +756,7 @@ export async function runOrchestrator(input: {
   if (parked) {
     input.shep.retireAll()
     log("orchestrator: parked — paused; a typed continue resumes the unfinished units from booked sessions")
+    setHookRunNote(null)
     return null
   }
   const report = writeReport(
@@ -759,6 +766,7 @@ export async function runOrchestrator(input: {
     loaded.hooks.counts,
     canary.failed ? "canary-stopped" : undefined,
   )
+  setHookRunNote(null)
   input.shep.retireAll()
   const receipt = input.shep.verify()
   log(`orchestrator: report ${report.status} at ${join(input.taskDir, "report.json")} — ${receipt}`)
