@@ -8,8 +8,12 @@ import type { JobRecord } from "../src/store.ts"
 export const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
 
 export async function copyExample(prefix = "agentic-os-"): Promise<string> {
+  return copyExampleNamed("three-lookups", prefix)
+}
+
+export async function copyExampleNamed(name: string, prefix = "agentic-os-"): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
-  cpSync(EXAMPLE, dir, { recursive: true })
+  cpSync(join(import.meta.dirname, "..", "examples", name), dir, { recursive: true })
   return dir
 }
 

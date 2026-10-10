@@ -1085,8 +1085,8 @@ function drawDiagram(body, defn, dk) {
           </defs>
         </svg>
         ${nodes.map((n) =>
-          `<div class="g-node" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief">` +
-          `<div class="g-id">${esc(n.id)}</div>` +
+          `<div class="g-node ${n.settles === "check" ? "g-gate" : n.settles === "wake" ? "g-program" : ""}" data-node="${esc(n.id)}" style="left:${pos[n.id].x}px;top:${pos[n.id].y}px" title="${esc(n.id)} — click for the full brief${n.check ? ` · check: ${esc(n.check)}` : ""}${n.folder ? ` · program: ${esc(n.folder)}` : ""}">` +
+          `<div class="g-id">${esc(n.id)}${n.settles ? `<span class="g-settles">${esc(n.settles)}</span>` : ""}</div>` +
           (n.does ? `<div class="g-does">${esc(n.does)}</div>` : "") +
           hookStripHtml(n.hooks) +
           (n.brief || n.does ? `<div class="g-open">brief ⌄</div>` : "") +

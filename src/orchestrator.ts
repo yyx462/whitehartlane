@@ -1,7 +1,8 @@
+import { execSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
-import { hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, type Hooks, type Layout, type Manifest, type Unit } from "./hooks.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, type Hooks, type Layout, type Manifest, type Step, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { readState, settleUnit, writeUnitsSnapshot } from "./state.ts"
@@ -96,6 +97,9 @@ export type CycleDeps = {
   // Booked wait (ADR 0006): true while a live child spur names this
   // unit's pane session as its spawner — the stall clock stands down.
   bookedWait?: (unitId: string) => boolean
+  // ADR 0007: the manifest's settle-typed steps, when declared. Drives
+  // wave gating and the done condition (check steps must settle too).
+  steps?: Step[]
 }
 
 const DEFAULT_SLOTS = 2
@@ -108,6 +112,10 @@ const DEFAULT_CHECK_MS = 10 * 60_000
 // backstops the file watchers — the ends live in the files, so the
 // files are polled, not trusted.
 const LOG_POLL_MS = 5_000
+// ADR 0007: a check step polls — a gate that has not passed is re-asked
+// at most this often (the arm'd sleep never exceeds it while gates
+// pend, so an unpassed gate cannot dead-sleep the rail)
+const DEFAULT_GATE_CHECK_MS = 30_000
 const RETRY_CAP = 3
 const SHEP_LABEL_MAX = 32
 
@@ -373,9 +381,44 @@ export function cycle(deps: CycleDeps): boolean {
 
   const settled = readState(deps.taskDir)
   const settledIds = new Set([...settled.done, ...settled.failed])
-  const unsettled = units.filter(
+  let unsettled = units.filter(
     (unit) => !settledIds.has(unit.id) && !deps.inFlight.has(unit.id),
   )
+  // ADR 0007 — waves gate spawning. A wave opens when every step of
+  // every EARLIER wave settled done; a failed earlier step blocks the
+  // downstream end-steps, which settle as blocked rows so the report
+  // never lies by omission.
+  if (deps.steps?.length) {
+    const failedIds = new Set(settled.failed)
+    const waveOrder: string[] = []
+    for (const s of deps.steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+    const waveOf = new Map(deps.steps.map((s) => [s.id, s.wave] as const))
+    const ready = (unitId: string): { open: boolean; blockedBy?: string } => {
+      const w = waveOf.get(unitId)
+      if (w === undefined) return { open: true }
+      for (const prior of waveOrder.slice(0, waveOrder.indexOf(w))) {
+        for (const s of deps.steps!) {
+          if (s.wave !== prior) continue
+          if (failedIds.has(s.id)) return { open: false, blockedBy: s.id }
+          if (!settledIds.has(s.id)) return { open: false }
+        }
+      }
+      return { open: true }
+    }
+    const spawnable: typeof unsettled = []
+    for (const unit of unsettled) {
+      const r = ready(unit.id)
+      if (r.open) spawnable.push(unit)
+      else if (r.blockedBy) {
+        settle(unit.id, false, {
+          unit: unit.id,
+          result: `wave blocked by failed ${r.blockedBy}`,
+          pass: false,
+        })
+      }
+    }
+    unsettled = spawnable
+  }
   const cap = deps.canary?.enabled && !deps.canary.released ? 1 : slots
   if (!deps.canary?.failed) {
     while (!deps.draining && deps.inFlight.size < cap && unsettled.length > 0) {
@@ -421,7 +464,25 @@ export function cycle(deps: CycleDeps): boolean {
   const finalState = readState(deps.taskDir)
   const finalSettled = new Set([...finalState.done, ...finalState.failed])
   if (deps.canary?.failed && deps.inFlight.size === 0) return true
-  return units.every((unit) => finalSettled.has(unit.id)) && deps.inFlight.size === 0
+  // ADR 0007: with steps declared, the run is done when every unit AND
+  // every check step settled — a pending gate keeps the rail alive, an
+  // UNREACHABLE one (an earlier wave failed) cannot, and must not.
+  const steps = deps.steps ?? []
+  const finalFailed = new Set(finalState.failed)
+  const waveOrder: string[] = []
+  for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+  const checksDone = steps
+    .filter((s) => s.settles === "check")
+    .every((s) => {
+      if (finalSettled.has(s.id)) return true
+      const priors = waveOrder.slice(0, waveOrder.indexOf(s.wave))
+      return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
+    })
+  return (
+    units.every((unit) => finalSettled.has(unit.id)) &&
+    checksDone &&
+    deps.inFlight.size === 0
+  )
 }
 
 // Runs the fan-out rail. Resolves with the Report on finish, or null
@@ -438,6 +499,7 @@ export async function runOrchestrator(input: {
   briefGraceMs?: number
   checkMs?: number
   logPollMs?: number
+  gateCheckMs?: number
   deadlineMs?: number
   now?: () => number
   log?: (msg: string) => void
@@ -460,6 +522,16 @@ export async function runOrchestrator(input: {
     ? { hooks: input.hooks, manifest: input.manifest }
     : hooksFromDir(input.taskDir)
   const manifest = loaded.manifest ?? loadManifest(input.taskDir)
+  // ADR 0007 stage 2: waves and checks execute; wake steps (child jobs)
+  // are parsed and validated but refuse to run until stage 3 — never a
+  // silent lie about nesting.
+  const steps = manifest.steps
+  if (steps?.some((s) => s.settles === "wake")) {
+    throw new HookError("wake steps are not executable yet — ADR 0007 stage 3 (issue #39); the manifest parses, the rail refuses")
+  }
+  if (steps?.length) {
+    loaded.hooks = { ...loaded.hooks, units: () => unitsFromSteps(input.taskDir, steps) }
+  }
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
@@ -467,6 +539,7 @@ export async function runOrchestrator(input: {
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
   const logPollMs = input.logPollMs ?? LOG_POLL_MS
+  const gateCheckMs = input.gateCheckMs ?? DEFAULT_GATE_CHECK_MS
   const deadlineMs = input.deadlineMs ?? 2 * 60 * 60_000
   const now = input.now ?? Date.now
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
@@ -545,6 +618,7 @@ export async function runOrchestrator(input: {
         draining,
         resumes: input.resumes,
         bookedWait: input.bookedWait,
+        steps,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.settled" && typeof payload.unit === "string") {
@@ -675,6 +749,58 @@ export async function runOrchestrator(input: {
     }
   }
 
+  // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
+  // (unlike [gates] report detectors, which print "done" per ADR 0003).
+  // Frontier gates (every earlier wave settled) are asked at most once
+  // per gateCheckMs; a pass settles the gate into state and opens the
+  // downstream wave on the next run(). gatesPending feeds arm() so a
+  // waiting gate can never dead-sleep.
+  const gateCache = new Map<string, { at: number; pass: boolean }>()
+  let gatesPending = 0
+  const hasChecks = steps?.some((s) => s.settles === "check") ?? false
+  const evaluateGates = (): number => {
+    let passed = 0
+    gatesPending = 0
+    if (!steps?.length || !hasChecks) return 0
+    const state = readState(input.taskDir)
+    const settledIds = new Set([...state.done, ...state.failed])
+    const failedIds = new Set(state.failed)
+    const waveOrder: string[] = []
+    for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+    for (const step of steps) {
+      if (step.settles !== "check" || settledIds.has(step.id)) continue
+      // frontier only — earlier waves must be settled done
+      let ready = true
+      for (const prior of waveOrder.slice(0, waveOrder.indexOf(step.wave))) {
+        for (const s of steps) {
+          if (s.wave !== prior) continue
+          if (failedIds.has(s.id) || !settledIds.has(s.id)) ready = false
+        }
+      }
+      if (!ready) continue
+      gatesPending += 1
+      const cached = gateCache.get(step.id)
+      if (cached && !cached.pass && now() - cached.at < gateCheckMs) continue
+      let pass = false
+      try {
+        execSync(step.check!, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "ignore"] })
+        pass = true
+      } catch {
+        pass = false // not-yet — the debounce owns the retry
+      }
+      gateCache.set(step.id, { at: now(), pass })
+      if (pass) {
+        settleUnit(input.taskDir, step.id, true, { unit: step.id, result: "gate passed", pass: true })
+        emit("unit.settled", { unit: step.id, pass: true, result: "gate passed" })
+        rows.push({ unit: step.id, result: "gate passed", pass: true })
+        log(`gate ${step.id} passed — wave ${step.wave} can settle`)
+        gatesPending -= 1
+        passed += 1
+      }
+    }
+    return passed
+  }
+
   const arm = (): void => {
     if (armed) {
       clearTimeout(armed)
@@ -689,6 +815,7 @@ export async function runOrchestrator(input: {
       }
       waits.push(flight.lastChange + stallMs - now())
     }
+    if (gatesPending > 0) waits.push(gateCheckMs)
     const ms = Math.max(1, Math.min(...waits))
     armed = setTimeout(() => {
       if (armed) timers.delete(armed)
@@ -732,6 +859,10 @@ export async function runOrchestrator(input: {
     for (const id of inFlight.keys()) watchPane(id)
     if (inFlight.size > 0) startLogPoller()
     else stopLogPoller()
+    if (evaluateGates() > 0) {
+      run()
+      continue
+    }
     if (queued) {
       queued = false
       run()
