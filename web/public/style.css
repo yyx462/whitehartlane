@@ -771,30 +771,17 @@ td.empty, .empty {
 
 .g-node:hover .g-open { opacity: 1; }
 
-/* hooks live IN the diagram: a labeled rail pinned to the top of the
-   canvas — "where is the hook" answers itself */
-.g-hooks {
-  position: sticky;
-  top: 0;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 7px 10px;
-  background: var(--well);
-  border-bottom: 1px solid var(--line);
+/* hooks live ON their component (issue #40): entry member carries what
+   runs before work, last member what runs after — chips inside the
+   node box, hover says when they fire */
+.g-node .hookstrip {
+  padding: 3px 0 0;
 }
-
-.g-hooks-label {
+.g-node .hchip {
   font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: var(--track-caps);
-  color: var(--muted);
-  white-space: nowrap;
+  padding: 1px 6px;
+  max-width: 100%;
 }
-
-.g-hooks .hookstrip { padding: 0; }
 
 /* ×N relay badge on an edge — the selected run's live traffic */
 .g-badge {

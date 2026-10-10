@@ -549,12 +549,13 @@ async function dagShape(job, sid, jid) {
         edges.push({ from, to, messages: n });
       }
     }
-    return { kind: "coworker", nodes, edges, hooks: stagedHooks(runDir) };
+    const coworkerHooks = stagedHooks(runDir);
+    attachComponentHooks(nodes, coworkerHooks);
+    return { kind: "coworker", nodes, edges, hooks: coworkerHooks };
   }
 
   return { kind: "none", nodes: [], edges: [], hooks: [] };
 }
-
 // ---- v2: source viewer -------------------------------------------------
 
 // parse `key = "value"` entries out of the named top-level TOML tables
@@ -589,7 +590,20 @@ function tomlEntries(tomlText, sections) {
 }
 
 // v3: hook chips from the staged workflow.toml — every entry of the
-// [hooks], [detectors] and [gates] tables as {name, command, section}
+// [hooks], [detectors] and [gates] tables as {name, command, section,
+// fires} — `fires` says WHEN the rail runs it (issue #40: a listed hook
+// must explain itself)
+const FIRES_WHEN = {
+  "hooks.units": "at unit (re)stamping — spawn and phase changes",
+  "hooks.grade": "after each settled unit",
+  "hooks.counts": "once, at report time",
+  "detectors.signal": "each rail beat — feeds the photograph",
+  "detectors.end": "each rail beat — reads ends",
+};
+function firesWhen(h) {
+  if (h.section === "gates") return "holds the report until it passes";
+  return FIRES_WHEN[`${h.section}.${h.name}`] || "rail-owned lifecycle";
+}
 function stagedHooks(runDir) {
   let text = "";
   try {
@@ -597,11 +611,32 @@ function stagedHooks(runDir) {
   } catch {
     return [];
   }
-  return tomlEntries(text, ["hooks", "detectors", "gates"]).map((e) => ({
-    name: e.name,
-    command: e.value,
-    section: e.section,
-  }));
+  return tomlEntries(text, ["hooks", "detectors", "gates"]).map((e) => {
+    const chip = { name: e.name, command: e.value, section: e.section };
+    return { ...chip, fires: firesWhen(chip) };
+  });
+}
+
+// issue #40: hooks belong to the components they act on. For member
+// graphs (coworker/fan-out): the entry member carries what runs BEFORE
+// work (units stamping, the signal detector); the last member carries
+// what runs AFTER (grade per settle, counts at report, the gates that
+// hold the report, the end detector). The diagram rail is gone.
+function attachComponentHooks(nodes, hooks) {
+  if (!nodes.length || !hooks?.length) return;
+  const entry = nodes[0];
+  const exit = nodes[nodes.length - 1];
+  entry.hooks = hooks.filter(
+    (h) => (h.section === "hooks" && h.name === "units") || (h.section === "detectors" && h.name === "signal"),
+  );
+  exit.hooks = (exit.hooks || []).concat(
+    hooks.filter(
+      (h) =>
+        (h.section === "hooks" && (h.name === "grade" || h.name === "counts")) ||
+        h.section === "gates" ||
+        (h.section === "detectors" && h.name === "end"),
+    ),
+  );
 }
 
 // pull `key = "cmd"` pairs out of the [hooks] table and return the first
@@ -752,6 +787,7 @@ async function definitionFromFolder(folder) {
     for (let i = 1; i < nodes.length; i++) {
       edges.push({ from: nodes[i - 1].id, to: nodes[i].id });
     }
+    attachComponentHooks(nodes, hooks);
     return { kind: "coworker", nodes, edges, hooks };
   }
   return null;

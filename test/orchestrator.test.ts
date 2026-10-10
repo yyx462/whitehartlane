@@ -490,6 +490,37 @@ test("runOrchestrator settles everything, writes the report, and quotes the rece
   assert.equal(seq.indexOf("tail") < seq.indexOf("spawn:w-france"), true)
 })
 
+test("hook runs land in the trace as hook.run (issue #40)", async () => {
+  const dir = await copyExample("orch-hookruns-")
+  const { port } = fakeShep({
+    spawnWorker: (name, _kind, _brief, cwd) => {
+      const id = name.slice(2)
+      writeFileSync(join(cwd, "result.md"), "capital\n")
+      appendFileSync(join(cwd, "log.txt"), `done ${id}\n`)
+      return true
+    },
+  })
+  const hookRuns: { hook: string; target?: string; status: number; ms: number }[] = []
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    checkMs: 10,
+    log: () => {},
+    emit: (kind, payload) => {
+      if (kind === "hook.run") hookRuns.push(payload as { hook: string; target?: string; status: number; ms: number })
+    },
+  })
+  assert.equal(report.status, "done")
+  const names = hookRuns.map((h) => h.hook)
+  assert.ok(names.includes("units"), "units hook reported")
+  assert.equal(names.filter((n) => n === "grade").length, 3, "grade reported per settled unit")
+  assert.ok(names.includes("counts"), "counts reported at report time")
+  const one = hookRuns.find((h) => h.hook === "grade")
+  assert.ok(one?.target, "grade notes its target unit")
+  assert.equal(one.status, 0)
+  assert.ok(one.ms >= 0)
+})
+
 test("runOrchestrator stops at the deadline, settles the rest failed, and wakes", async () => {
   const dir = await copyExample("orch-deadline-")
   const { port, wakes } = fakeShep()
