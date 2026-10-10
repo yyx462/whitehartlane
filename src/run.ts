@@ -55,6 +55,14 @@ export function stageRun(source: string, store: string): void {
   for (const cmd of cmds) {
     if (cmd) raw = raw.replaceAll(cmd, absolutize(cmd, source))
   }
+  // ADR 0007 wake steps: a child program's folder is staged absolute
+  // against the source tree — the staged manifest in the OS store must
+  // point at the program the author declared, wherever the run lives
+  raw = raw.replace(/(^(\s*)folder\s*=\s*")([^"]+)(")/gm, (m, pre, _ws, path, post) => {
+    if (path.startsWith("/")) return m
+    const abs = resolve(source, path)
+    return existsSync(abs) ? `${pre}${abs}${post}` : m
+  })
   writeFileSync(join(store, "workflow.toml"), raw)
   copyBeside(source, store)
 }
