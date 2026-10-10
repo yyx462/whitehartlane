@@ -86,7 +86,7 @@ test("grade passes when the worker artifact exists and fails when it does not", 
   })
 })
 
-test("counts summarizes the settled table", async () => {
+test("counts summarizes the finished table", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
   const counts = runCounts(dir, manifest, [
@@ -109,7 +109,7 @@ test("hooksFromDir binds the manifest into the Hooks shape", async () => {
   })
 })
 
-test("the settled table lands in table.json for the counts hook", async () => {
+test("the finished table lands in table.json for the counts hook", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
   runCounts(dir, manifest, [{ unit: "france", result: "found" }])

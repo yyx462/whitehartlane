@@ -23,10 +23,10 @@ Your camera: the vista CLI (~/.local/bin/vista), ONE session:
   vista act click --x … --y … --expect … # drive the theme toggle
   vista inspect --x … --y … --width … --height …   # a named region
   vista pixels --x … --y … --width … --height … --rows 1 --columns 1
-                                         # exact color settles
+                                         # exact color finished_by
   vista down                              # when finished
 Judge on the full shot; inspect/pixels only when a detail or an exact
-hex must be settled. Saving a file changes nothing — only
+hex must be finished. Saving a file changes nothing — only
 vista act reload does. vista down when done.
 
 Acceptance walk (both themes, every page the nav offers: Home, Spurs,

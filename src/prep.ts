@@ -61,7 +61,7 @@ export function traceContext(events: OsEvent[]): string {
     if (event.kind === "job.born" && typeof event.task === "string") {
       lines.push(`earlier job: ${event.task}`)
     }
-    if (event.kind === "unit.settled" && event.pass === false) {
+    if (event.kind === "unit.finished" && event.pass === false) {
       lines.push(`unit ${event.unit} failed: ${event.result}`)
     }
   }

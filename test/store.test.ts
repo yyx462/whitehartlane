@@ -71,7 +71,7 @@ test("a Job's life is events; the record is a faithful projection", () => {
   attachPane(job, { label: "w-europe-r1", pane: "p1", unit: "europe", transcript: { tool: "pi", cwd: "/run/units/europe", since } })
   attachPane(job, { label: "w-europe-r1", pane: "p1", unit: "europe", transcript: { tool: "pi", cwd: "/run/units/europe", since } }) // idempotent
   attachPane(job, { label: "w-asia-r1", pane: "p2", unit: "asia", transcript: { tool: "opencode", cwd: "/run/units/asia", since } })
-  appendEvent(session.id, { actor: "orchestrator", kind: "unit.settled", jid: job.id, unit: "europe", pass: true, result: "Paris ✓" })
+  appendEvent(session.id, { actor: "orchestrator", kind: "unit.finished", jid: job.id, unit: "europe", pass: true, result: "Paris ✓" })
   killPane(job, "w-europe-r1")
   killPane(job, "w-asia-r1")
   finishJob(job, { panesRemaining: 0, panesTotal: 2, unitsDone: 2, unitsFailed: 0, status: "done" })
@@ -100,7 +100,7 @@ test("a Job's life is events; the record is a faithful projection", () => {
   const kinds = readEvents(session.id).map((e) => e.kind)
   assert.deepEqual(
     kinds.filter((k) => k !== "route"),
-    ["job.born", "pane.born", "pane.born", "unit.settled", "pane.died", "pane.died", "job.retired"],
+    ["job.born", "pane.born", "pane.born", "unit.finished", "pane.died", "pane.died", "job.retired"],
   )
 })
 

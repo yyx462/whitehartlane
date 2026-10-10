@@ -16,10 +16,10 @@ test("fan-out needs a resolved manifest and sane slots", () => {
   assert.equal(admitFanOut({ manifestResolved: true, slots: 1.5 }).admit, false)
 })
 
-test("worker spawns are refused when settled, full, capped, or shutting down", () => {
-  const base = { settled: false, shutdown: false, active: 0, slots: 2, attempts: 0, cap: 3 }
+test("worker spawns are refused when finished, full, capped, or shutting down", () => {
+  const base = { finished: false, shutdown: false, active: 0, slots: 2, attempts: 0, cap: 3 }
   assert.equal(admitWorkerSpawn(base).admit, true)
-  assert.equal(admitWorkerSpawn({ ...base, settled: true }).admit, false)
+  assert.equal(admitWorkerSpawn({ ...base, finished: true }).admit, false)
   assert.equal(admitWorkerSpawn({ ...base, shutdown: true }).admit, false)
   assert.equal(admitWorkerSpawn({ ...base, active: 2 }).admit, false)
   assert.equal(admitWorkerSpawn({ ...base, attempts: 3 }).admit, false)

@@ -59,7 +59,7 @@ test("units.sh passes the JSONL through on success", () => {
   assert.match(r.stdout, /\{"id":"a","brief":"do a"\}/)
 })
 
-test("units.sh hands the planner the settled context", () => {
+test("units.sh hands the planner the finished context", () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-units-"))
   writeFileSync(join(dir, "task.txt"), "add a flag\n")
   writeFileSync(join(dir, "context.md"), "The flag is --dry-run. Do not touch billing.\n")

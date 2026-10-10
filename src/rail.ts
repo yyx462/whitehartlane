@@ -267,18 +267,18 @@ export class Rail implements ShepPort {
   existingRows(): { unit: string; result: string; pass: boolean }[] | undefined {
     if (!this.ledger) return undefined
     return readEvents(this.ledger.job.sid)
-      .filter((e) => e.jid === this.ledger!.job.id && e.kind === "unit.settled")
+      .filter((e) => e.jid === this.ledger!.job.id && e.kind === "unit.finished")
       .map((e) => ({ unit: String(e.unit), result: String(e.result ?? ""), pass: e.pass === true }))
   }
 
   // ADR 5: unfinished units of an earlier generation resume from the
-  // pane ledger — the latest pane record per unsettled unit carries the
+  // pane ledger — the latest pane record per unfinished unit carries the
   // booked session pointer (write-ahead at spawn, session id at birth).
-  resumesForUnsettled(): Map<string, ResumePointerLike> {
+  resumesForUnfinished(): Map<string, ResumePointerLike> {
     const resumes = new Map<string, ResumePointerLike>()
     if (!this.ledger) return resumes
-    const settled = readState(this.taskDir)
-    const closed = new Set([...settled.done, ...settled.failed])
+    const finished = readState(this.taskDir)
+    const closed = new Set([...finished.done, ...finished.failed])
     const latest = new Map<string, PaneRecordLike>()
     for (const p of this.ledger.job.panes) {
       if (!p.unit || !p.transcript) continue
@@ -705,7 +705,7 @@ export class Rail implements ShepPort {
   // to the pane's booked cwd plus the task dir and program roots;
   // context defaults to the pane's booked brief. Returns the verdict:
   // "none" (no dialog), "allow", "deny", or "capped" (deny cap hit —
-  // the caller settles or kills the worker. Allows are free: only a
+  // the caller finished_by or kills the worker. Allows are free: only a
   // deny pattern — wandering asks, or a hard-deny re-ask loop —
   // spends the cap).
   answerPermission(
