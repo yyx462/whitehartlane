@@ -1,0 +1,38 @@
+# staged-waves — ADR 0007's grammar in miniature: a serial first wave,
+# a human-file gate, then a parallel wave. The manifest says the whole
+# topology; nothing is inferred, no phase files, no relaunch.
+#   run it:  agentic-os run staged-waves
+#   gate:    touch gates/GO when wave 1's work is reviewable
+[workflow]
+name = "staged-waves"
+worker_kind = "opencode"
+slots = 2
+
+[hooks]
+units = "true"                 # steps define the units (ADR 0007)
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[[step]]
+id = "g0"
+settles = "end"                # a worker pane runs members/g0.md
+wave = "w1"
+
+[[step]]
+id = "review"
+settles = "check"              # nothing works — test -f gates/GO must exit 0
+check = "test -f gates/GO"
+wave = "w2"
+
+[[step]]
+id = "g1"
+settles = "end"
+wave = "w3"
+
+[[step]]
+id = "g2"
+settles = "end"
+wave = "w3"
+
+[report]
+where = "units/"
