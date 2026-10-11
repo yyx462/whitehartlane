@@ -126,6 +126,40 @@ test("a dialog inside the worker's booked cwd is allowed, granted durably, and e
   assert.equal(ledger.events.at(-1)?.payload.decision, "allow")
 })
 
+test("the sweep answers every blocked pane the rail holds — one tick, unscoped names out (zen 6, rail-owned)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-sweep-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "do the thing", "utf8"))
+  mkdirSync(join(taskDir, "sub"), { recursive: true })
+  const one = makeRail({ taskDir, term: askFor(`${taskDir}/sub/file.txt`) })
+  assert.equal(one.rail.spawnWorker("w-france", "opencode", briefPath, taskDir), true)
+  assert.equal(one.rail.spawnWorker("w-japan", "opencode", briefPath, taskDir), true)
+  one.blocked.add(one.rail.scopedName("w-france"))
+  one.blocked.add(one.rail.scopedName("w-japan"))
+  const { answered, capped } = one.rail.tickPrivilege()
+  assert.deepEqual([...answered].sort(), ["w-france", "w-japan"])
+  assert.equal(capped.size, 0)
+  const ledger = one.rail.ledger as ReturnType<typeof fakeLedger>
+  assert.equal(ledger.events.filter((e) => e.kind === "permission").length, 2)
+})
+
+test("a capped worker is reported to the engine, not retired by the sweep", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-sweep-cap-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "wandering worker", "utf8"))
+  // a hard-deny re-ask loop: same secret every time, never escalates
+  const one = makeRail({ taskDir, term: askFor(`/Users/tester/.ssh/id_rsa`) })
+  assert.equal(one.rail.spawnWorker("w-peru", "opencode", briefPath, taskDir), true)
+  one.blocked.add(one.rail.scopedName("w-peru"))
+  let last: { answered: Set<string>; capped: Set<string> } | null = null
+  for (let i = 0; i < PERMISSION_CAP; i++) last = one.rail.tickPrivilege()
+  assert.ok(last)
+  assert.deepEqual([...last.capped], ["w-peru"])
+  // the engine owns a capped worker's death — the sweep never retires it
+  const retired = one.calls.filter((c) => c.tool === "shep" && c.args[0] === "retire")
+  assert.equal(retired.length, 0)
+})
+
 test("a secrets-shaped dialog is denied outright and never escalates", async () => {
   const taskDir = await mkdtemp(join(tmpdir(), "rail-deny-"))
   const briefPath = join(taskDir, "brief.md")

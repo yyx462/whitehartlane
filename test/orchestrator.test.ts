@@ -48,9 +48,9 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
     wake: (label, kind, detail) => {
       wakes.push({ label, kind, detail })
     },
-    paneBlocked: overrides.paneBlocked as ShepPort["paneBlocked"] | undefined,
-    answerPermission: overrides.answerPermission as ShepPort["answerPermission"] | undefined,
-    flushPendingNotes: (overrides.flushPendingNotes as ShepPort["flushPendingNotes"] | undefined) ?? (() => 0),
+    tickPrivilege:
+      (overrides.tickPrivilege as ShepPort["tickPrivilege"] | undefined) ??
+      (() => ({ answered: new Set<string>(), capped: new Set<string>() })),
   }
   return { port, spawned, retired, wakes, calls, reprompts }
 }
@@ -652,21 +652,14 @@ test("the manifest layout section resolves with defaults and rejects bad values"
 
 test("a permission dialog the rail answers does not stall the unit (zen 6)", async () => {
   const dir = await copyExample("orch-permission-")
-  const answered: string[] = []
   const shep = fakeShep({
-    paneBlocked: (name) => name === "w-france",
-    answerPermission: (name) => {
-      answered.push(name)
-      return "allow"
-    },
+    tickPrivilege: () => ({ answered: new Set(["w-france"]), capped: new Set<string>() }),
   })
 
   const d = deps(dir, shep.port, { stallMs: 10, now: () => 1_000_000 })
-  cycle(d) // spawns w-france
-  assert.deepEqual(answered, [])
-  cycle(d) // dialog seen, answered — the unit stays open, nothing finished_by
+  cycle(d) // spawns w-france — the sweep ran before the spawn, nothing answered yet
+  cycle(d) // dialog seen by the sweep — the unit stays open, nothing finished_by
 
-  assert.deepEqual(answered, ["w-france"])
   assert.deepEqual(shep.retired, [])
   assert.deepEqual(shep.wakes, [])
   assert.deepEqual(readState(dir), { done: [], failed: [] })
@@ -676,8 +669,7 @@ test("a permission dialog the rail answers does not stall the unit (zen 6)", asy
 test("a worker past the permission cap finished_by blocked with a wake that says so", async () => {
   const dir = await copyExample("orch-perm-cap-")
   const shep = fakeShep({
-    paneBlocked: () => true,
-    answerPermission: () => "capped",
+    tickPrivilege: () => ({ answered: new Set(["w-france"]), capped: new Set(["w-france"]) }),
   })
 
   const d = deps(dir, shep.port, { slots: 1 })
@@ -690,17 +682,17 @@ test("a worker past the permission cap finished_by blocked with a wake that says
   assert.match(shep.wakes[0]!.detail, /permission deny cap/)
 })
 
-test("every cycle flushes queued privilege notes (j-2b508e: the guidance never landed)", async () => {
+test("every cycle sweeps privileges — the rail answers, the engine carries the consequence (j-2b508e)", async () => {
   const dir = await copyExample("orch-note-flush-")
-  let flushes = 0
+  let sweeps = 0
   const shep = fakeShep({
-    flushPendingNotes: () => {
-      flushes += 1
-      return 0
+    tickPrivilege: () => {
+      sweeps += 1
+      return { answered: new Set<string>(), capped: new Set<string>() }
     },
   })
   const d = deps(dir, shep.port, { slots: 1 })
   cycle(d) // spawn
   cycle(d) // a beat with a pane in flight
-  assert.ok(flushes >= 2, `the engine flushed on every cycle (got ${flushes})`)
+  assert.ok(sweeps >= 2, `the engine swept on every cycle (got ${sweeps})`)
 })
