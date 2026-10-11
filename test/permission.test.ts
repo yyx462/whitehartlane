@@ -249,3 +249,37 @@ test("stripped and full forms of one path key identically for escalation", () =>
   const escalated = escalateOnRepeat(stripped, 1)
   assert.equal(escalated.decision, "allow")
 })
+
+
+test("underscore-mangled home prefix is repaired (issue #82)", () => {
+  const v = decidePermission({
+    question: "Access external directory /Users_me/proj/ui-window/web",
+    allowedRoots: ["/Users/me/proj/ui-window/web"],
+    home: "/Users/me",
+  })
+  assert.equal(v.decision, "allow")
+  assert.equal(v.path, "/Users/me/proj/ui-window/web")
+})
+
+test("an underscore path whose repair does not exist is not reshaped (issue #82)", () => {
+  const v = decidePermission({
+    question: "Access external directory /Users_ghost/nowhere",
+    allowedRoots: ["/Users/me/work"],
+    home: "/Users/me",
+  })
+  assert.equal(v.path, "/Users_ghost/nowhere")
+  assert.match(v.message, /does not exist on disk/)
+})
+
+test("a literal existing underscore path is never reshaped", () => {
+  const home = mkdtempSync(join(tmpdir(), "aos-home-"))
+  const literal = join(home, "Users_literal")
+  mkdirSync(literal, { recursive: true })
+  const v = decidePermission({
+    question: `Access external directory ${literal}`,
+    allowedRoots: [literal],
+    home,
+  })
+  assert.equal(v.decision, "allow")
+  assert.equal(v.path, literal)
+})
