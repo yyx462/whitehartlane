@@ -251,8 +251,7 @@ test("two-signoffs: the report waits for both independent checks (ADR 0007)", as
     retireAll: () => {},
     verify: () => "pane-reap: 0 remaining",
     wake: () => {},
-    tailPane: () => true,
-    flushPendingNotes: () => 0,
+    tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
   }
   const engine = orch.runOrchestrator({
     taskDir: dir,
