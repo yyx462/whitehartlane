@@ -7,8 +7,8 @@
 // Plain JS on purpose: this file has no extension, so Node will not
 // type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
-import { join, resolve } from "node:path"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { basename, isAbsolute, join, resolve } from "node:path"
 import { runOrchestrator, worktreeChurnedSince } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
