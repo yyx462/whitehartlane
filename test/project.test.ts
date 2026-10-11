@@ -6,7 +6,7 @@ import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-project-"))
 
-const { contentHashOf, dagIdOf, ensureProject, labelsFor, registerDag } = await import("../src/project.ts")
+const { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf } = await import("../src/project.ts")
 const { createJob, findOrOpenSession, projectJob, readEvents } = await import("../src/store.ts")
 
 function programFolder(name = "prog"): string {
@@ -61,17 +61,17 @@ test("a worktree copies project.json — runs combine, no warning, labels differ
   assert.deepEqual(labelsFor(programFolder("no-git")), {})
   // a program nested inside a repo walks up and labels by its checkout
   const nestedRoot = join(mkdtempSync(join(tmpdir(), "agentic-os-nest-")), "repo")
-  const nested = join(nestedRoot, "programs", "deep", "dag")
+  const nested = join(nestedRoot, "programs", "deep", "spur")
   mkdirSync(nested, { recursive: true })
   writeFileSync(join(nestedRoot, ".git"), "gitdir: /somewhere/.bear/worktrees/nested-lane\n")
   assert.deepEqual(labelsFor(nested), { branch: "nested-lane", worktree: "nested-lane" })
 })
 
-test("dag_id: explicit wins, the name groups silently, the hash is loud and derived", () => {
-  assert.deepEqual(dagIdOf({ dagId: "front-back", name: "ui", toml: "" }), { dagId: "front-back", derived: false })
-  assert.deepEqual(dagIdOf({ name: "ui-window", toml: "" }), { dagId: "ui-window", derived: false })
-  const hashed = dagIdOf({ toml: "[workflow]\n" })
-  assert.match(hashed.dagId, /^dag-[0-9a-f]{8}$/)
+test("spur_id: explicit wins, the name groups silently, the hash is loud and derived", () => {
+  assert.deepEqual(spurIdOf({ spurId: "front-back", name: "ui", toml: "" }), { spurId: "front-back", derived: false })
+  assert.deepEqual(spurIdOf({ name: "ui-window", toml: "" }), { spurId: "ui-window", derived: false })
+  const hashed = spurIdOf({ toml: "[workflow]\n" })
+  assert.match(hashed.spurId, /^spur-[0-9a-f]{8}$/)
   assert.equal(hashed.derived, true)
 })
 
@@ -83,18 +83,18 @@ test("the content hash versions the program; a change is a new version", () => {
   assert.notEqual(contentHashOf(dir), v1)
 })
 
-test("duplicate dag_id under one project with different content warns, never refuses", () => {
+test("duplicate spur_id under one project with different content warns, never refuses", () => {
   const dir = programFolder("dupes")
   const { pid } = ensureProject(dir)
   const home = process.env.AGENTIC_OS_HOME ?? ""
-  assert.equal(registerDag(pid, "ui", "h1", dir, { home }), null)
-  assert.equal(registerDag(pid, "ui", "h2", dir, { home }), null) // same path, new version
-  const warn = registerDag(pid, "ui", "h3", "/another/folder", { home })
+  assert.equal(registerSpur(pid, "ui", "h1", dir, { home }), null)
+  assert.equal(registerSpur(pid, "ui", "h2", dir, { home }), null) // same path, new version
+  const warn = registerSpur(pid, "ui", "h3", "/another/folder", { home })
   assert.match(warn ?? "", /already runs different content/)
 })
 
-test("job.born carries the dag identity and the projection restores it", () => {
-  const { session } = findOrOpenSession({ cwd: "/tmp/dag-run" })
+test("job.born carries the spur identity and the projection restores it", () => {
+  const { session } = findOrOpenSession({ cwd: "/tmp/spur-run" })
   const dir = programFolder("grouped")
   const { pid, name } = ensureProject(dir)
   const job = createJob({
@@ -103,18 +103,18 @@ test("job.born carries the dag identity and the projection restores it", () => {
     workflow: "coworker",
     task: "grouped",
     runDir: true,
-    dag: {
+    spur: {
       project: pid,
       project_name: name,
-      dag_id: "ui-window",
+      spur_id: "ui-window",
       content_hash: "h1",
       source: dir,
       labels: { branch: "lane-x" },
     },
   })
   const born = readEvents(session.id).find((e) => e.kind === "job.born" && e.jid === job.id)!
-  assert.equal((born.dag as { dag_id: string }).dag_id, "ui-window")
+  assert.equal((born.spur as { spur_id: string }).spur_id, "ui-window")
   const projected = projectJob(session.id, job.id)
-  assert.equal(projected?.dag?.project, pid)
-  assert.equal(projected?.dag?.labels?.branch, "lane-x")
+  assert.equal(projected?.spur?.project, pid)
+  assert.equal(projected?.spur?.labels?.branch, "lane-x")
 })

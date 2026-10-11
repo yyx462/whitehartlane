@@ -1,10 +1,10 @@
 # ui-pause — a coworker program: pause/abort/continue in the window,
-# plus the flat Dag Runs list. Two members: backend (GLM-5.3, the
+# plus the flat Spur Runs list. Two members: backend (GLM-5.3, the
 # senior, initiates) extends the server; frontend (GLM-5.3-Flash)
 # extends the pages. They talk through the rail.
 [workflow]
 name = "ui-pause"
-dag_id = "ui-pause"
+spur_id = "ui-pause"
 kind = "coworker"
 worker_kind = "opencode"
 

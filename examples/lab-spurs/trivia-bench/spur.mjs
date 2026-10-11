@@ -1,4 +1,4 @@
-export const dag = {
+export const spur = {
   name: "trivia-bench",
   steps: [
     { id: "professor", does: "actor" },

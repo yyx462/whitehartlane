@@ -1,6 +1,6 @@
 [workflow]
 name = "ui-theme"
-dag_id = "ui-theme"
+spur_id = "ui-theme"
 kind = "coworker"
 worker_kind = "opencode"
 

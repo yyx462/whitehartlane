@@ -3,12 +3,12 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import type { Dag } from "../src/dag.ts"
+import type { Spur } from "../src/spur.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-toys-"))
 
 const { prepareRun } = await import("../src/run.ts")
-const { loadDagFile, tick } = await import("../src/dag.ts")
+const { loadSpurFile, tick } = await import("../src/spur.ts")
 const { loadManifest, runCounts, runGrade, runSignalDetector, runEndDetector, runGateDetector } = await import("../src/hooks.ts")
 const { readSignal, endOf } = await import("../src/live-run.ts")
 const { abortJob } = await import("../src/store.ts")
@@ -30,14 +30,14 @@ type World = {
 // staged detectors and hooks, and the real tick — the harness only
 // plays the world: the professor's pen, the students' keyboards, the
 // human's verdict files
-function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: { unit: string; result: string; pass: boolean }[]; beats: number } {
+function driveLife(name: string, world: World): { dir: string; spur: Spur; rows: { unit: string; result: string; pass: boolean }[]; beats: number } {
   const src = mkdtempSync(join(tmpdir(), `toy-${name}-`))
   cpSync(join(PROG, name), src, { recursive: true })
   const booked = prepareRun(src)
   assert.equal(booked.ok, true, booked.ok ? "" : booked.why)
   if (!booked.ok) throw new Error(booked.why)
   const dir = booked.job.dir
-  const dag = loadDagFile(join(dir, "dag.mjs"))
+  const spur = loadSpurFile(join(dir, "spur.mjs"))
   const manifest = loadManifest(dir)
   world.onStart?.(dir)
 
@@ -66,11 +66,11 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
     const waveClosed = ends.length > 0 && ends.every((row) => row.end !== null)
     world.onBeat?.(dir, beats, { waveClosed, graded: [...graded.keys()] })
     const gatesReady: string[] = []
-    for (const step of dag.steps.filter((s) => s.does === "gate")) {
+    for (const step of spur.steps.filter((s) => s.does === "gate")) {
       if (done.has(step.id) || !step.after.every((id) => done.has(id))) continue
       if (runGateDetector(dir, manifest, step.id)) gatesReady.push(step.id)
     }
-    const actions = tick(dag, {
+    const actions = tick(spur, {
       done: [...done],
       actorBorn,
       signal: signal.kind,
@@ -124,7 +124,7 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
   }
   assert.equal(reported, true, `${name}: the run must reach its report`)
   abortJob(booked.job, "test", 0, "cli")
-  return { dir, dag, rows: finished, beats }
+  return { dir, spur, rows: finished, beats }
 }
 
 function writeProtocol(dir: string, units: Unit[]): void {

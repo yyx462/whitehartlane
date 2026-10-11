@@ -50,6 +50,22 @@ test("a task directory without workflow.toml is a clean error", async () => {
   assert.throws(() => loadManifest(empty), HookError)
 })
 
+test("a legacy dag_id key still resolves the spur_id, loudly (ADR 0009)", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  // legacy-only: dag_id resolves to spur_id with a loud warning
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('name = "three-lookups"\n', 'name = "three-lookups"\ndag_id = "legacy-id"\n'))
+  const warnings: string[] = []
+  const manifest = loadManifest(dir, (m) => warnings.push(m))
+  assert.equal(manifest.workflow.spur_id, "legacy-id")
+  assert.deepEqual(warnings, ["legacy dag_id in workflow.toml — rename to spur_id"])
+  // both keys: spur_id wins, no warning — nothing new is written in the old spelling
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('dag_id = "legacy-id"\n', 'dag_id = "legacy-id"\nspur_id = "new-id"\n'))
+  const both: string[] = []
+  assert.equal(loadManifest(dir, (m) => both.push(m)).workflow.spur_id, "new-id")
+  assert.deepEqual(both, [])
+})
+
 test("units prints one JSONL unit each, with its own brief", () => {
   const manifest = loadManifest(EXAMPLE)
   const units = runUnits(EXAMPLE, manifest)

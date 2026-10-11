@@ -4,7 +4,7 @@
 # They talk through the rail — message files on the job dir.
 [workflow]
 name = "ui-window"
-dag_id = "ui-window"
+spur_id = "ui-window"
 kind = "coworker"
 worker_kind = "opencode"
 
