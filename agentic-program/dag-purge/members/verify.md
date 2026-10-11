@@ -2,7 +2,7 @@
 
 You are a worker pane for the agentic-os repo. Repo checkout (a gwt
 worktree — work ONLY here):
-`/Users/sagebot/projects/Agentic-Workspace/agentic-os/spur-word`
+`/Users/sagebot/projects/Agentic-Workspace/agentic-os/dag-purge-2`
 
 Waves 1–2 (examples reorg + two-signoffs conversion; ADR 0009 + docs;
 the code rename) claim to be done. You are the gate before the levy

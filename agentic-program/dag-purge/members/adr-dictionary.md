@@ -2,7 +2,7 @@
 
 You are a worker pane for the agentic-os repo. Repo checkout (a gwt
 worktree — work ONLY here):
-`/Users/sagebot/projects/Agentic-Workspace/agentic-os/spur-word`
+`/Users/sagebot/projects/Agentic-Workspace/agentic-os/dag-purge-2`
 
 Mandate: the dictionary (root `CONTEXT.md`, entry **Spur id**) already
 says "The word is `spur` everywhere a human reads; `dag`/`dag_id` remain

@@ -1,9 +1,6 @@
-# dag-purge — retire the word "dag" from agentic-os: the dictionary
-# says the word is "spur" everywhere a human reads; this program makes
-# it true of the format too (spur.mjs, spur_id) and reorganizes the
-# examples into lab-spurs/ fan-out-spurs/ coworker-spurs/.
-# Wave grammar per ADR 0007: w1 two parallel workers (disjoint file
-# ownership), w2 a sync check beside the code rename, w3 verify.
+# dag-purge (continued) — reorg wave landed on spur-word (63539c3,
+# cherry-picked here); this run finishes the job: the dictionary/ADR/
+# skill wave, the code rename, then verify.
 #   run it:  whl run agentic-program/dag-purge --from opencode:<sid>
 [workflow]
 name = "dag-purge"
@@ -17,20 +14,9 @@ grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
 [[step]]
-id = "reorg-examples"
-finished_by = "end"           # a worker pane runs members/reorg-examples.md
-wave = "w1"
-
-[[step]]
 id = "adr-dictionary"
 finished_by = "end"           # a worker pane runs members/adr-dictionary.md
 wave = "w1"
-
-[[step]]
-id = "reorg-landed"
-finished_by = "check"         # nothing works — the three folders exist
-check = "test ! -d examples/agentic-program && test -d examples/lab-spurs && test -d examples/fan-out-spurs && test -d examples/coworker-spurs"
-wave = "w2"
 
 [[step]]
 id = "rename-code"

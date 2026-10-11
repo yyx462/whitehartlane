@@ -2,7 +2,7 @@
 
 You are a worker pane for the agentic-os repo. Repo checkout (a gwt
 worktree — work ONLY here):
-`/Users/sagebot/projects/Agentic-Workspace/agentic-os/spur-word`
+`/Users/sagebot/projects/Agentic-Workspace/agentic-os/dag-purge-2`
 
 Mandate: `docs/adr/0009-spur-word-everywhere.md` (written in wave 1 —
 read it FIRST; it is the contract) renames the dag spelling to spur.
