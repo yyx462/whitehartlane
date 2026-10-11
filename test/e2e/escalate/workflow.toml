@@ -1,0 +1,12 @@
+[workflow]
+name = "e2e-escalate"
+spur_id = "e2e-escalate"
+worker_kind = "opencode"
+
+[hooks]
+units = "bash hooks/units.sh"
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[report]
+where = "units/"
