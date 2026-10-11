@@ -180,9 +180,8 @@ export async function runCoworker(
       await waitChange(join(taskDir, "messages"), beatMs)
       continue
     }
-    // queued privilege notes ride every beat — a pane that unblocked
-    // since its deny gets the guidance now, not at the next stall
-    rail.flushPendingNotes()
+    // queued privilege notes ride the sweep (tickPrivilege flushes);
+    // readMessages follows it on the same beat
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
     for (const b of bad) {
       if (refused.includes(b.file)) continue
@@ -222,17 +221,17 @@ export async function runCoworker(
       ended = plan.why ?? "stop"
       break
     }
-    // the permission half of JEV (zen 6): a blocked member is a
-    // question, and the typed decider answers it — the Rail owns the
-    // sweep (roots, judge, escalation, deny cap); this loop only
-    // carries the consequence: a capped member is dead and ends the
-    // exchange. No dialog ever waits for a person.
+    // the permission half of JEV (zen 6, rail-owned): a blocked member
+    // is a question, and the rail's sweep answers it — every pane the
+    // rail holds, this loop's members and anything else alike. This
+    // loop only carries the consequence: a capped member is dead and
+    // ends the exchange. No dialog ever waits for a person.
+    const sweep = rail.tickPrivilege()
     const answered = new Set<string>()
     for (const m of members) {
       if (dead.includes(m.name)) continue
-      const verdict = rail.answerPermission(m.name)
-      if (verdict !== "none") answered.add(m.name)
-      if (verdict === "capped") {
+      if (sweep.answered.has(m.name)) answered.add(m.name)
+      if (sweep.capped.has(m.name)) {
         dead.push(m.name)
         deadWhy.set(m.name, `${m.name} blocked past the deny cap`)
         ledger?.emit("wake", { why: `member ${m.name} blocked past the deny cap` })

@@ -36,7 +36,7 @@ function fakeShep() {
     retireAll: () => {},
     verify: () => "pane-reap: 0 remaining",
     wake: (label, kind, detail) => wakes.push({ label, kind, detail }),
-    flushPendingNotes: () => 0,
+    tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
   }
   return { port, wakes, spawned }
 }
