@@ -1,11 +1,11 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { loadDagFile, type Dag } from "./dag.ts"
+import { loadSpurFile, type Spur } from "./spur.ts"
 import { HookError, loadManifest } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
-import { contentHashOf, dagIdOf, ensureProject, labelsFor, registerDag } from "./project.ts"
+import { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf, type SpurIdentity } from "./project.ts"
 import {
   appendEvent,
   createJob,
@@ -69,12 +69,12 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "dag.mjs", "roots.txt", "project.json"]) {
+  for (const name of ["actor.md", "task.txt", "spur.mjs", "dag.mjs", "roots.txt", "project.json"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
   // a program may carry a data/ folder — the files the briefs and hooks
-  // read; it is staged beside the dag so the run is self-contained
+  // read; it is staged beside the spur so the run is self-contained
   const data = join(source, "data")
   if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
   // a coworker program carries member briefs in members/<name>.md
@@ -82,19 +82,41 @@ function copyBeside(source: string, store: string): void {
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
 }
 
-export function dagFileOf(input: string): string | null {
+export type SpurFile = { path: string; legacy: boolean }
+
+// The run door resolves the program file (ADR 0009): spur.mjs is the
+// spelling; a legacy dag.mjs still admits the program (the `legacy`
+// flag turns into a loud warning at the door); a folder holding BOTH
+// spellings is refused — an ambiguous program books nothing.
+export function spurFileOf(input: string): SpurFile | null {
   const resolved = resolve(input)
   if (!existsSync(resolved)) return null
-  if (statSync(resolved).isFile()) return basename(resolved) === "dag.mjs" ? resolved : null
-  const nested = join(resolved, "dag.mjs")
-  return existsSync(nested) ? nested : null
+  if (statSync(resolved).isFile()) {
+    const base = basename(resolved)
+    if (base === "spur.mjs") return { path: resolved, legacy: false }
+    if (base === "dag.mjs") {
+      if (existsSync(join(dirname(resolved), "spur.mjs"))) {
+        throw new Error("ambiguous program: both spur.mjs and dag.mjs")
+      }
+      return { path: resolved, legacy: true }
+    }
+    return null
+  }
+  const spur = join(resolved, "spur.mjs")
+  const legacy = join(resolved, "dag.mjs")
+  if (existsSync(spur) && existsSync(legacy)) {
+    throw new Error("ambiguous program: both spur.mjs and dag.mjs")
+  }
+  if (existsSync(spur)) return { path: spur, legacy: false }
+  if (existsSync(legacy)) return { path: legacy, legacy: true }
+  return null
 }
 
-function defaultManifest(dag: Dag): string {
-  const name = dag.name.replaceAll('"', "")
+function defaultManifest(spur: Spur): string {
+  const name = spur.name.replaceAll('"', "")
   const counts = "node -p \"(r=>JSON.stringify({units:r.length,passed:r.filter(x=>x.pass).length,failed:r.filter(x=>!x.pass).length}))(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')))\""
   return [
-    "# written by agentic-os: a dag-only program names steps; the OS supplies the hooks",
+    "# written by agentic-os: a spur-only program names steps; the OS supplies the hooks",
     "[workflow]",
     `name = "${name}"`,
     'worker_kind = "opencode"',
@@ -113,6 +135,7 @@ function book(
   task: string,
   slots: number,
   stage: (store: string) => void,
+  preWarnings: string[] = [],
 ): RunReady | RunRefused {
   const taskFile = join(dir, "task.txt")
   if (existsSync(taskFile)) {
@@ -133,17 +156,17 @@ function book(
     appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: kind })
     return { ok: false, why: another.why ?? "a job is already running", code: 1 }
   }
-  const warnings: string[] = []
-  // dag identity: project pid (minted once into project.json), dag_id
+  const warnings: string[] = [...preWarnings]
+  // spur identity: project pid (minted once into project.json), spur_id
   // (explicit, else the name, else a hashed id + a loud warning), the
   // source content hash as the version, branch/worktree as labels.
   // Paths are never identity; worktrees copy project.json and combine.
   const proj = ensureProject(dir)
   if (proj.minted) warnings.push(`no project.json in ${dir} — minted ${proj.pid} and wrote it there`)
-  const dagId = dagIdOf({
-    dagId: (() => {
+  const spurId = spurIdOf({
+    spurId: (() => {
       try {
-        return loadManifest(dir).workflow.dag_id
+        return loadManifest(dir, (message) => warnings.push(message)).workflow.spur_id
       } catch {
         return undefined
       }
@@ -154,23 +177,27 @@ function book(
         return readFileSync(join(dir, "workflow.toml"), "utf8")
       } catch {
         try {
-          return readFileSync(join(dir, "dag.mjs"), "utf8")
+          return readFileSync(join(dir, "spur.mjs"), "utf8")
         } catch {
-          return task
+          try {
+            return readFileSync(join(dir, "dag.mjs"), "utf8")
+          } catch {
+            return task
+          }
         }
       }
     })(),
   })
-  if (dagId.derived) {
-    warnings.push(`no dag_id (and no name) in ${dir} — derived ${dagId.dagId} from content; define workflow.dag_id to group runs`)
+  if (spurId.derived) {
+    warnings.push(`no spur_id (and no name) in ${dir} — derived ${spurId.spurId} from content; define workflow.spur_id to group runs`)
   }
   const version = contentHashOf(dir)
-  const dup = registerDag(proj.pid, dagId.dagId, version, dir)
+  const dup = registerSpur(proj.pid, spurId.spurId, version, dir)
   if (dup) warnings.push(dup)
-  const dag = {
+  const spur = {
     project: proj.pid,
     project_name: proj.name,
-    dag_id: dagId.dagId,
+    spur_id: spurId.spurId,
     content_hash: version,
     source: dir,
     labels: labelsFor(dir),
@@ -181,21 +208,21 @@ function book(
     workflow: kind,
     task,
     runDir: true,
-    dag,
+    spur,
   })
   stage(job.dir)
   appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })
   return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind, warnings }
 }
 
-function stageDag(dag: Dag, dir: string, toml: boolean): (store: string) => void {
+function stageSpur(spur: Spur, dir: string, toml: boolean): (store: string) => void {
   return (store) => {
     if (toml) {
       stageRun(dir, store)
       return
     }
     mkdirSync(store, { recursive: true })
-    writeFileSync(join(store, "workflow.toml"), defaultManifest(dag))
+    writeFileSync(join(store, "workflow.toml"), defaultManifest(spur))
     copyBeside(dir, store)
   }
 }
@@ -241,43 +268,54 @@ function uncoveredBriefPaths(source: string): string[] {
   return [...uncovered]
 }
 
-export function prepareRun(folder: string): RunReady | RunRefused {
-  const dagFile = dagFileOf(folder)
-  if (dagFile) {
-    const dir = dirname(dagFile)
-    let dag: Dag
+// the lab path: a program file was found, the spur graph drives the run
+function prepareLabRun(spurFile: SpurFile): RunReady | RunRefused {
+  const warnings: string[] = []
+  // ADR 0009: a legacy dag.mjs still admits — loudly
+  if (spurFile.legacy) warnings.push("legacy dag.mjs — rename to spur.mjs")
+  const dir = dirname(spurFile.path)
+  let spur: Spur
+  try {
+    spur = loadSpurFile(spurFile.path, (message) => warnings.push(message))
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    return { ok: false, why, code: 1 }
+  }
+  let slots = 2
+  let task = spur.name
+  const toml = existsSync(join(dir, "workflow.toml"))
+  let gates: Record<string, string> | undefined
+  if (toml) {
     try {
-      dag = loadDagFile(dagFile)
+      const manifest = loadManifest(dir)
+      slots = manifest.workflow.slots ?? 2
+      task = manifest.workflow.name
+      gates = manifest.gates
     } catch (err) {
-      const why = err instanceof Error ? err.message : String(err)
+      const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
       return { ok: false, why, code: 1 }
     }
-    let slots = 2
-    let task = dag.name
-    const toml = existsSync(join(dir, "workflow.toml"))
-    let gates: Record<string, string> | undefined
-    if (toml) {
-      try {
-        const manifest = loadManifest(dir)
-        slots = manifest.workflow.slots ?? 2
-        task = manifest.workflow.name
-        gates = manifest.gates
-      } catch (err) {
-        const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
-        return { ok: false, why, code: 1 }
-      }
-    }
-    for (const step of dag.steps.filter((s) => s.does === "gate")) {
-      if (!gates?.[step.id]) {
-        return {
-          ok: false,
-          why: `gate step ${step.id} needs a [gates] ${step.id} detector command in workflow.toml`,
-          code: 1,
-        }
-      }
-    }
-    return book(dir, "lab", task, slots, stageDag(dag, dir, toml))
   }
+  for (const step of spur.steps.filter((s) => s.does === "gate")) {
+    if (!gates?.[step.id]) {
+      return {
+        ok: false,
+        why: `gate step ${step.id} needs a [gates] ${step.id} detector command in workflow.toml`,
+        code: 1,
+      }
+    }
+  }
+  return book(dir, "lab", task, slots, stageSpur(spur, dir, toml), warnings)
+}
+
+export function prepareRun(folder: string): RunReady | RunRefused {
+  let spurFile: SpurFile | null = null
+  try {
+    spurFile = spurFileOf(folder)
+  } catch (err) {
+    return { ok: false, why: err instanceof Error ? err.message : String(err), code: 1 }
+  }
+  if (spurFile) return prepareLabRun(spurFile)
   const dir = resolve(folder)
   if (!existsSync(join(dir, "workflow.toml"))) {
     return { ok: false, why: `no workflow.toml in ${dir}`, code: 1 }

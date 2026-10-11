@@ -1,4 +1,4 @@
-// The project half of dag identity: a dag_id is unique inside a
+// The project half of spur identity: a spur_id is unique inside a
 // Project, and a Project is a pid minted once, kept in project.json
 // inside the program folder, registered on the OS disk. Worktrees and
 // clones copy the file, so runs combine under one group wherever the
@@ -10,10 +10,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
 
-export type DagIdentity = {
+export type SpurIdentity = {
   project: string
   project_name: string
-  dag_id: string
+  spur_id: string
   content_hash: string
   source: string
   labels?: Record<string, string>
@@ -26,7 +26,9 @@ export type ProjectRegistry = {
   name: string
   first_seen: string
   paths: string[]
-  dags: Record<string, { first_seen: string; versions: string[]; last_path: string }>
+  // ADR 0009: registries before the rename spelled this block `dags` —
+  // read both, write the new spelling
+  spurs: Record<string, { first_seen: string; versions: string[]; last_path: string }>
 }
 
 function homeRoot(): string {
@@ -64,7 +66,7 @@ export function ensureProject(
   // the registry is the durable index (a moved folder re-registers)
   try {
     const regPath = join(homeRoot(), "projects", `${pid}.json`)
-    let reg: ProjectRegistry = { pid, name, first_seen: input.now?.() ?? new Date().toISOString(), paths: [], dags: {} }
+    let reg: ProjectRegistry = { pid, name, first_seen: input.now?.() ?? new Date().toISOString(), paths: [], spurs: {} }
     if (existsSync(regPath)) reg = JSON.parse(readFileSync(regPath, "utf8")) as ProjectRegistry
     if (!reg.paths.includes(dir)) reg.paths.push(dir)
     mkdirSync(join(homeRoot(), "projects"), { recursive: true })
@@ -75,13 +77,13 @@ export function ensureProject(
   return { pid, name, minted }
 }
 
-// dag_id: explicit in workflow.toml, else the workflow name, else a
+// spur_id: explicit in workflow.toml, else the workflow name, else a
 // content hash with a loud warning — grouping never silently falls
 // apart, and it always exists.
-export function dagIdOf(input: { dagId?: string; name?: string; toml: string }): { dagId: string; derived: boolean } {
-  if (input.dagId && input.dagId.trim()) return { dagId: input.dagId.trim(), derived: false }
-  if (input.name && input.name.trim()) return { dagId: input.name.trim(), derived: false }
-  return { dagId: `dag-${createHash("sha1").update(input.toml).digest("hex").slice(0, 8)}`, derived: true }
+export function spurIdOf(input: { spurId?: string; name?: string; toml: string }): { spurId: string; derived: boolean } {
+  if (input.spurId && input.spurId.trim()) return { spurId: input.spurId.trim(), derived: false }
+  if (input.name && input.name.trim()) return { spurId: input.name.trim(), derived: false }
+  return { spurId: `spur-${createHash("sha1").update(input.toml).digest("hex").slice(0, 8)}`, derived: true }
 }
 
 // the version of a program: sha1 over the staged files, sorted —
@@ -131,12 +133,12 @@ export function labelsFor(dir: string): Record<string, string> {
   return labels
 }
 
-// duplicate protection (light, by request): the same dag_id under one
+// duplicate protection (light, by request): the same spur_id under one
 // project showing different content from a different path deserves a
 // loud warning — never a refusal. Versions accumulate.
-export function registerDag(
+export function registerSpur(
   pid: string,
-  dagId: string,
+  spurId: string,
   hash: string,
   path: string,
   input: { now?: () => string; home?: string } = {},
@@ -146,15 +148,16 @@ export function registerDag(
     const regPath = join(root, "projects", `${pid}.json`)
     if (!existsSync(regPath)) return null
     const reg = JSON.parse(readFileSync(regPath, "utf8")) as ProjectRegistry
-    const dag = reg.dags[dagId]
+    const spurs = reg.spurs ?? (reg as { dags?: ProjectRegistry["spurs"] }).dags ?? {}
+    const spur = spurs[spurId]
     let warn: string | null = null
-    if (dag && !dag.versions.includes(hash) && dag.last_path !== path) {
-      warn = `dag_id ${dagId} already runs different content from ${dag.last_path} — versioned as new; check this is not accidental reuse`
+    if (spur && !spur.versions.includes(hash) && spur.last_path !== path) {
+      warn = `spur_id ${spurId} already runs different content from ${spur.last_path} — versioned as new; check this is not accidental reuse`
     }
-    const entry = dag ?? { first_seen: input.now?.() ?? new Date().toISOString(), versions: [], last_path: path }
+    const entry = spur ?? { first_seen: input.now?.() ?? new Date().toISOString(), versions: [], last_path: path }
     if (!entry.versions.includes(hash)) entry.versions.push(hash)
     entry.last_path = path
-    reg.dags[dagId] = entry
+    reg.spurs = { ...spurs, [spurId]: entry }
     writeFileSync(regPath, `${JSON.stringify(reg, null, 2)}\n`)
     return warn
   } catch {

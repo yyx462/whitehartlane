@@ -237,10 +237,24 @@ function runDirOf(job, sid, jid) {
   return canonical;
 }
 
+// ---- ADR 0009: spur identity, read both spellings ----------------------
+// Records written before the rename spell the block `dag` with a
+// `dag_id` key; new records write `spur` / `spur_id`. The API answers
+// the new spelling and mirrors the old key for one transition release.
+
+function spurOfJob(job) {
+  const raw = (job && (job.spur || job.dag)) || null;
+  if (!raw || typeof raw !== "object") return null;
+  const spurId = raw.spur_id || raw.dag_id || null;
+  if (!spurId) return null;
+  return { ...raw, project: raw.project || null, project_name: raw.project_name || null, spur_id: spurId, dag_id: spurId };
+}
+
 function flattenJob(job) {
   const panes = Array.isArray(job.panes) ? job.panes : [];
   const reportPath = path.join(job.dir || "", "report.json");
   const report = reportOf(job);
+  const spur = spurOfJob(job);
   return {
     id: job.id,
     sid: job.sid,
@@ -249,14 +263,15 @@ function flattenJob(job) {
     state: job.state || "unknown", // raw state, kept alongside the mapping
     status: statusOf(job, report), // v4 vocabulary: success|failed|running|paused|orphaned
     reportStatus: report?.status ?? null,
-    legacy: !job.dag, // v4: no dag block -> legacy, never shown as a dag
+    legacy: !spur, // no spur block -> legacy, never shown as grouped
     task: job.task || null,
     dir: job.dir || null,
     pid: job.pid ?? null,
     created: job.created || null,
     finished: finishedOf(job),
     durationMs: durationMsOf(job), // finished - created, null while running
-    dag: job.dag || null, // {project,project_name,dag_id,content_hash,source,labels} | null
+    spur, // {project,project_name,spur_id,content_hash,source,labels} | null (dag_id mirrored)
+    dag: spur, // transition mirror of `spur` — one release, then gone
     outcome: outcomeOf(job), // receipt | abort | orphan | inflight
     panes: {
       dead: panes.filter((p) => p && p.died).length,
@@ -308,33 +323,30 @@ function countBy(items, fn) {
   return m;
 }
 
-// ---- v2: DAG groups (Airflow-like) ------------------------------------
+// ---- v2: spur groups (Airflow-like) ------------------------------------
 
 const UNGROUPED = "(ungrouped)";
-
-function dagOf(job) {
-  return job && job.dag && typeof job.dag === "object" ? job.dag : null;
-}
 
 function buildDags() {
   const groups = new Map();
   for (const job of listAllJobs()) {
-    const dag = dagOf(job);
-    const key = dag ? `${dag.project || "?"}|${dag.dag_id || "?"}` : UNGROUPED;
+    const spur = spurOfJob(job);
+    const key = spur ? `${spur.project || "?"}|${spur.spur_id || "?"}` : UNGROUPED;
     let g = groups.get(key);
     if (!g) {
       g = {
-        project: dag ? dag.project || null : null,
-        project_name: dag ? dag.project_name || dag.dag_id || "-" : "-",
-        dag_id: dag ? dag.dag_id || "(unknown)" : UNGROUPED,
-        source: dag ? dag.source || null : null,
+        project: spur ? spur.project || null : null,
+        project_name: spur ? spur.project_name || spur.spur_id || "-" : "-",
+        spur_id: spur ? spur.spur_id || "(unknown)" : UNGROUPED,
+        dag_id: spur ? spur.spur_id || "(unknown)" : UNGROUPED, // transition mirror
+        source: spur ? spur.source || null : null,
         versions: [],
         runs: [],
       };
       groups.set(key, g);
     }
-    if (dag && dag.content_hash && !g.versions.includes(dag.content_hash)) {
-      g.versions.push(dag.content_hash);
+    if (spur && spur.content_hash && !g.versions.includes(spur.content_hash)) {
+      g.versions.push(spur.content_hash);
     }
     const report = reportOf(job);
     g.runs.push({
@@ -346,11 +358,11 @@ function buildDags() {
       created: job.created || null,
       finished: finishedOf(job),
       durationMs: durationMsOf(job),
-      version: dag?.content_hash || null,
-      labels: dag?.labels || {},
+      version: spur?.content_hash || null,
+      labels: spur?.labels || {},
     });
   }
-  const dags = [...groups.values()].map((g) => {
+  const spurs = [...groups.values()].map((g) => {
     g.runs.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
     // v3 summary fields (runs/versions kept for the detail views)
     g.runCount = g.runs.length;
@@ -360,7 +372,7 @@ function buildDags() {
       null,
     );
     const last = g.runs[0] || null;
-    // v4: the workflow of the latest run names the dag's kind
+    // v4: the workflow of the latest run names the spur's kind
     g.kind = last?.workflow || null; // fan-out | lab | coworker
     g.labels = last?.labels || {};
     // v4: latest run with the mapped status (start/end/durationMs/status)
@@ -386,37 +398,38 @@ function buildDags() {
       : null;
     return g;
   });
-  // real dags first, ordered by their newest run; ungrouped pinned last
-  const real = dags
-    .filter((g) => g.dag_id !== UNGROUPED)
+  // real spurs first, ordered by their newest run; ungrouped pinned last
+  const real = spurs
+    .filter((g) => g.spur_id !== UNGROUPED)
     .sort((a, b) =>
       ((b.runs[0]?.created || "")).localeCompare(a.runs[0]?.created || ""),
     );
-  const rest = dags.filter((g) => g.dag_id === UNGROUPED);
+  const rest = spurs.filter((g) => g.spur_id === UNGROUPED);
   return [...real, ...rest];
 }
 
-// ---- v2: dag shape (flow diagram data) --------------------------------
+// ---- v2: spur shape (flow diagram data) --------------------------------
 
-// import() a dag.mjs (staged or LIVE source — same shape) into
+// import() a spur.mjs (staged or LIVE source — same shape) into
 // {dagName, nodes:[{id,does}], edges:[{from,to,messages:0}]} or
 // {…, error}. Cached by mtime so config edits show up immediately.
-const labGraphCache = new Map(); // dag.mjs path -> {mtimeMs, graph}
+// A staged legacy dag.mjs (old runs, ADR 0009) imports the same way.
+const labGraphCache = new Map(); // program file path -> {mtimeMs, graph}
 
-async function labGraph(dagFile) {
+async function labGraph(spurFile) {
   let mtimeMs = 0;
   try {
-    mtimeMs = fs.statSync(dagFile).mtimeMs;
+    mtimeMs = fs.statSync(spurFile).mtimeMs;
   } catch {
-    return null; // no dag.mjs there
+    return null; // no program file there
   }
-  const hit = labGraphCache.get(dagFile);
+  const hit = labGraphCache.get(spurFile);
   if (hit && hit.mtimeMs === mtimeMs) return hit.graph;
   let graph;
   try {
-    const mod = await import(pathToFileURL(dagFile).href + "?v=" + mtimeMs);
-    const dag = mod.dag || mod.default?.dag || null;
-    const steps = Array.isArray(dag?.steps) ? dag.steps : [];
+    const mod = await import(pathToFileURL(spurFile).href + "?v=" + mtimeMs);
+    const spur = mod.spur || mod.dag || mod.default?.spur || mod.default?.dag || null;
+    const steps = Array.isArray(spur?.steps) ? spur.steps : [];
     const nodes = [];
     const edges = [];
     for (const s of steps) {
@@ -428,7 +441,7 @@ async function labGraph(dagFile) {
       }
     }
     graph = {
-      dagName: typeof dag?.name === "string" ? dag.name : null,
+      dagName: typeof spur?.name === "string" ? spur.name : null,
       nodes,
       edges,
     };
@@ -437,11 +450,20 @@ async function labGraph(dagFile) {
       dagName: null,
       nodes: [],
       edges: [],
-      error: "dag.mjs import failed: " + (e && e.message ? e.message : String(e)),
+      error: path.basename(spurFile) + " import failed: " + (e && e.message ? e.message : String(e)),
     };
   }
-  labGraphCache.set(dagFile, { mtimeMs, graph });
+  labGraphCache.set(spurFile, { mtimeMs, graph });
   return graph;
+}
+
+// the staged program file of a run dir: spur.mjs preferred, a legacy
+// dag.mjs answers for old staged runs (ADR 0009)
+function stagedSpurFile(runDir) {
+  const spur = path.join(runDir, "spur.mjs");
+  if (fs.existsSync(spur)) return spur;
+  const legacy = path.join(runDir, "dag.mjs");
+  return fs.existsSync(legacy) ? legacy : null;
 }
 
 // v3: tally relay message files per from->to pair in a staged run dir
@@ -503,8 +525,8 @@ function memberBrief(file, cap = 12000) {
 async function dagShape(job, sid, jid) {
   const runDir = runDirOf(job, sid, jid);
 
-  // lab job: the staged dag.mjs IS data — import() it (cached by mtime)
-  const lab = await labGraph(path.join(runDir, "dag.mjs"));
+  // lab job: the staged spur file IS data — import() it (cached by mtime)
+  const lab = await labGraph(stagedSpurFile(runDir));
   if (lab) {
     return {
       kind: "lab",
@@ -736,8 +758,8 @@ function sourceOf(job, sid, jid) {
     });
   };
 
-  const dagFile = path.join(runDir, "dag.mjs");
-  if (fs.existsSync(dagFile)) push("dag.mjs", dagFile);
+  const spurFile = stagedSpurFile(runDir);
+  if (spurFile) push(path.basename(spurFile), spurFile);
 
   const wfFile = path.join(runDir, "workflow.toml");
   let wfText = "";
@@ -809,7 +831,7 @@ function stepStatesOf(folder) {
 }
 
 // one wake step's child: { levied, jid, sid, state, status, outcome,
-// dag, steps, states } on success; { levied:false, reason } hollow.
+// spur, steps, states } on success; { levied:false, reason } hollow.
 // `ctx` carries why an unlevied step has no booking yet (wave context).
 function wakeChildOf(folder, step, ctx) {
   const booking = readJson(path.join(folder, "wakes", `${step.id}.json`));
@@ -842,7 +864,7 @@ function wakeChildOf(folder, step, ctx) {
     return {
       ...child,
       sid: null,
-      dag: null,
+      spur: null,
       state: "missing",
       status: "unknown",
       outcome: null,
@@ -862,12 +884,13 @@ function wakeChildOf(folder, step, ctx) {
     /* the child staged no steps manifest: the box says so, not lies */
   }
   const HUMAN = { end: "work", check: "gate", wake: "program" };
+  const identity = spurOfJob(job);
+  const spurRef = identity && identity.project ? `${identity.project}/${identity.spur_id}` : null;
   return {
     ...child,
     sid: job.sid || null,
-    dag: job.dag && job.dag.project && job.dag.dag_id
-      ? `${job.dag.project}/${job.dag.dag_id}`
-      : null,
+    spur: spurRef,
+    dag: spurRef, // transition mirror
     state: job.state || "unknown",
     status: statusOf(job, report),
     outcome: typeof wake?.outcome === "string" ? wake.outcome : null,
@@ -952,7 +975,7 @@ async function definitionFromFolder(folder) {
   const steps = stepsDefn(folder);
   if (steps) return steps;
   const hooks = stagedHooks(folder);
-  const lab = await labGraph(path.join(folder, "dag.mjs"));
+  const lab = await labGraph(stagedSpurFile(folder));
   if (lab) {
     return {
       kind: "lab",
@@ -987,7 +1010,7 @@ async function definitionFromFolder(folder) {
   return null;
 }
 
-// the staged definition of one dag, newest-run-first: sessions/<sid>/
+// the staged definition of one spur, newest-run-first: sessions/<sid>/
 // jobs/<jid>/run keeps the program bytes the door copied at run time —
 // they outlive the source worktree, so the display never has to dangle
 async function stagedDefinition(g) {
@@ -1033,15 +1056,15 @@ function sortDirOf(order) {
   return null; // invalid
 }
 
-// find a dag group by "<pid>/<dag_id>" — the group knows its source folder
-function findDagGroup(dagRef) {
-  if (typeof dagRef !== "string") return null;
-  const i = dagRef.indexOf("/");
-  if (i <= 0 || i === dagRef.length - 1) return null;
-  const pid = dagRef.slice(0, i);
-  const dagId = dagRef.slice(i + 1);
+// find a spur group by "<pid>/<spur_id>" — the group knows its source folder
+function findDagGroup(spurRef) {
+  if (typeof spurRef !== "string") return null;
+  const i = spurRef.indexOf("/");
+  if (i <= 0 || i === spurRef.length - 1) return null;
+  const pid = spurRef.slice(0, i);
+  const spurId = spurRef.slice(i + 1);
   for (const g of buildDags()) {
-    if (g.dag_id !== UNGROUPED && g.project === pid && g.dag_id === dagId) return g;
+    if (g.spur_id !== UNGROUPED && g.project === pid && g.spur_id === spurId) return g;
   }
   return null;
 }
@@ -1062,7 +1085,7 @@ function sourceFolderError(folder) {
 }
 
 // editable program files — whitelisted shapes only, and the resolved path
-// must stay inside the dag's source folder (no .., no symlink escape)
+// must stay inside the spur's source folder (no .., no symlink escape)
 const PROGRAM_NAME_RE =
   /^(?:workflow\.toml|task\.txt|roots\.txt|project\.json|members\/[A-Za-z0-9._-]+\.md|hooks\/[A-Za-z0-9._-]+)$/;
 
@@ -1541,11 +1564,13 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && pathname === "/api/summary") {
     const sessions = readSessions();
     const jobs = listAllJobs().map(flattenJob);
+    const spursTotal = buildDags().filter((d) => d.spur_id !== "(ungrouped)").length;
     return sendJson(res, 200, {
       generatedAt: new Date().toISOString(),
       sessionsTotal: sessions.length,
       jobsTotal: jobs.length,
-      dagsTotal: buildDags().filter((d) => d.dag_id !== "(ungrouped)").length,
+      spursTotal,
+      dagsTotal: spursTotal, // transition mirror
       jobsByState: countBy(jobs, (j) => j.state),
       jobsByOutcome: countBy(jobs, (j) => j.outcome),
       sessions,
@@ -1559,12 +1584,12 @@ async function handleApi(req, res, url) {
       const ref = group;
       const i = ref.indexOf("/");
       if (i <= 0 || i === ref.length - 1) {
-        return sendError(res, 400, "bad group, want <pid>/<dag_id>");
+        return sendError(res, 400, "bad group, want <pid>/<spur_id>");
       }
       const pid = ref.slice(0, i);
-      const dagId = ref.slice(i + 1);
+      const spurId = ref.slice(i + 1);
       jobs = jobs.filter(
-        (j) => j.dag && j.dag.project === pid && j.dag.dag_id === dagId,
+        (j) => j.spur && j.spur.project === pid && j.spur.spur_id === spurId,
       );
     }
     const sort = q.get("sort");
@@ -1590,7 +1615,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && pathname === "/api/dags") {
-    // v4: sort by the latest run (start/end/duration/status) or dag name;
+    // v4: sort by the latest run (start/end/duration/status) or spur name;
     // v3 keys runs|last|created keep working. The (ungrouped) group is
     // EXCLUDED — legacy runs are reached via /api/jobs only.
     const sort = q.get("sort") || "last";
@@ -1599,7 +1624,7 @@ async function handleApi(req, res, url) {
       end: (g) => g.latestRun?.end ?? null,
       duration: (g) => g.latestRun?.durationMs ?? null,
       status: (g) => (g.latestRun?.status != null ? STATUS_RANK[g.latestRun.status] ?? 9 : null),
-      dag: (g) => g.dag_id,
+      dag: (g) => g.spur_id,
       runs: (g) => g.runCount,
       last: (g) => g.lastRun?.created ?? null,
       created: (g) => g.created ?? null,
@@ -1613,20 +1638,20 @@ async function handleApi(req, res, url) {
     }
     const dir = sortDirOf(q.get("order"));
     if (dir === null) return sendError(res, 400, "bad order, want asc|desc");
-    const dags = buildDags().filter((g) => g.dag_id !== UNGROUPED);
-    applySort(dags, keyFn, dir);
+    const spurs = buildDags().filter((g) => g.spur_id !== UNGROUPED);
+    applySort(spurs, keyFn, dir);
     return sendJson(res, 200, {
       generatedAt: new Date().toISOString(),
       sort,
       order: dir === 1 ? "asc" : "desc",
-      count: dags.length,
-      dags,
+      count: spurs.length,
+      dags: spurs, // transition envelope name; each row carries spur_id (dag_id mirrored)
     });
   }
 
-  // v4: the dag's definition, parsed LIVE from its SOURCE folder (not a
+  // v4: the spur's definition, parsed LIVE from its SOURCE folder (not a
   // run's staged copy) — config edits show up immediately. Lab programs:
-  // import() the source dag.mjs; coworker programs: members/*.md as nodes
+  // import() the source spur.mjs; coworker programs: members/*.md as nodes
   // with relay chain edges. PLUS hooks from the source workflow.toml.
   // v5.2: if the source folder is GONE (merged-and-removed worktree, a
   // moved folder — the dangling-pointer case), fall back READ-ONLY to
@@ -1636,14 +1661,15 @@ async function handleApi(req, res, url) {
   let m = pathname.match(/^\/api\/dag-definition\/([^/]+)\/([^/]+)$/);
   if (req.method === "GET" && m) {
     const pid = safeDecode(res, m[1]);
-    const dagId = safeDecode(res, m[2]);
-    if (pid === null || dagId === null) return;
-    const g = findDagGroup(pid + "/" + dagId);
-    if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
-    if (!g.source) return sendError(res, 400, "dag has no source folder");
+    const spurId = safeDecode(res, m[2]);
+    if (pid === null || spurId === null) return;
+    const g = findDagGroup(pid + "/" + spurId);
+    if (!g) return sendError(res, 404, "no such spur: " + pid + "/" + spurId);
+    if (!g.source) return sendError(res, 400, "spur has no source folder");
     const base = {
       project: g.project,
-      dag_id: g.dag_id,
+      spur_id: g.spur_id,
+      dag_id: g.spur_id, // transition mirror
       source: g.source,
     };
 
@@ -1679,7 +1705,7 @@ async function handleApi(req, res, url) {
         },
       });
     }
-    return sendError(res, 400, srcErr + " — and no run of this dag kept a staged copy");
+    return sendError(res, 400, srcErr + " — and no run of this spur kept a staged copy");
   }
 
   // v4: the read-only run-dir browser — the run dir's file tree, and
@@ -1971,16 +1997,16 @@ async function handleApi(req, res, url) {
     );
   }
 
-  // v3: trigger a dag on its source folder — same door as /api/run, but
+  // v3: trigger a spur on its source folder — same door as /api/run, but
   // the folder comes from the group, not the caller
   m = pathname.match(/^\/api\/dags\/([^/]+)\/([^/]+)\/trigger$/);
   if (req.method === "POST" && m) {
     const pid = safeDecode(res, m[1]);
-    const dagId = safeDecode(res, m[2]);
-    if (pid === null || dagId === null) return;
-    const g = findDagGroup(pid + "/" + dagId);
-    if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
-    if (!g.source) return sendError(res, 400, "dag has no source folder");
+    const spurId = safeDecode(res, m[2]);
+    if (pid === null || spurId === null) return;
+    const g = findDagGroup(pid + "/" + spurId);
+    if (!g) return sendError(res, 404, "no such spur: " + pid + "/" + spurId);
+    if (!g.source) return sendError(res, 400, "spur has no source folder");
     const err = sourceFolderError(g.source);
     if (err) return sendError(res, 400, err);
     const r = await spawnRun(g.source);
@@ -1989,7 +2015,12 @@ async function handleApi(req, res, url) {
       res,
       ok ? 200 : 500,
       Object.assign(
-        { ok, dag: { project: g.project, dag_id: g.dag_id }, source: g.source },
+        {
+          ok,
+          spur: { project: g.project, spur_id: g.spur_id },
+          dag: { project: g.project, dag_id: g.spur_id }, // transition mirror
+          source: g.source,
+        },
         r,
       ),
     );
@@ -1997,15 +2028,15 @@ async function handleApi(req, res, url) {
 
   // v3: run-with-edits — copy the source folder to a temp dir, apply the
   // edited files, run the door on the COPY. project.json travels with the
-  // copy, so the run still groups under the same dag. Nothing is saved.
+  // copy, so the run still groups under the same spur. Nothing is saved.
   m = pathname.match(/^\/api\/dags\/([^/]+)\/([^/]+)\/run-with-edits$/);
   if (req.method === "POST" && m) {
     const pid = safeDecode(res, m[1]);
-    const dagId = safeDecode(res, m[2]);
-    if (pid === null || dagId === null) return;
-    const g = findDagGroup(pid + "/" + dagId);
-    if (!g) return sendError(res, 404, "no such dag: " + pid + "/" + dagId);
-    if (!g.source) return sendError(res, 400, "dag has no source folder");
+    const spurId = safeDecode(res, m[2]);
+    if (pid === null || spurId === null) return;
+    const g = findDagGroup(pid + "/" + spurId);
+    if (!g) return sendError(res, 404, "no such spur: " + pid + "/" + spurId);
+    if (!g.source) return sendError(res, 400, "spur has no source folder");
     const err = sourceFolderError(g.source);
     if (err) return sendError(res, 400, err);
     let body;
@@ -2052,7 +2083,8 @@ async function handleApi(req, res, url) {
       Object.assign(
         {
           ok,
-          dag: { project: g.project, dag_id: g.dag_id },
+          spur: { project: g.project, spur_id: g.spur_id },
+          dag: { project: g.project, dag_id: g.spur_id }, // transition mirror
           source: g.source,
           edits: edits.map((f) => f.name),
           ephemeral: true,
@@ -2062,16 +2094,17 @@ async function handleApi(req, res, url) {
     );
   }
 
-  // v3: program files — list / read / save inside the dag's source folder
+  // v3: program files — list / read / save inside the spur's source folder
   if (pathname === "/api/program") {
     if (req.method === "GET") {
-      const g = findDagGroup(q.get("dag") || "");
-      if (!g) return sendError(res, 404, "no such dag: " + (q.get("dag") || "(none)"));
-      if (!g.source) return sendError(res, 400, "dag has no source folder");
+      const g = findDagGroup(q.get("spur") || q.get("dag") || "");
+      if (!g) return sendError(res, 404, "no such spur: " + (q.get("spur") || q.get("dag") || "(none)"));
+      if (!g.source) return sendError(res, 400, "spur has no source folder");
       const name = q.get("name");
       if (name === null || name === "") {
         return sendJson(res, 200, {
-          dag: { project: g.project, dag_id: g.dag_id, project_name: g.project_name },
+          spur: { project: g.project, spur_id: g.spur_id, project_name: g.project_name },
+          dag: { project: g.project, dag_id: g.spur_id, project_name: g.project_name }, // transition mirror
           source: g.source,
           files: programList(g.source),
         });
@@ -2085,7 +2118,8 @@ async function handleApi(req, res, url) {
         return sendError(res, 404, "no such file: " + name);
       }
       return sendJson(res, 200, {
-        dag: { project: g.project, dag_id: g.dag_id, project_name: g.project_name },
+        spur: { project: g.project, spur_id: g.spur_id, project_name: g.project_name },
+        dag: { project: g.project, dag_id: g.spur_id, project_name: g.project_name }, // transition mirror
         name,
         text,
         bytes: Buffer.byteLength(text),
@@ -2098,12 +2132,12 @@ async function handleApi(req, res, url) {
       } catch {
         return sendError(res, 400, "invalid JSON body");
       }
-      const dagRef = typeof body?.dag === "string" ? body.dag : "";
-      const g = findDagGroup(dagRef);
-      if (!g) return sendError(res, 404, "no such dag: " + (dagRef || "(none)"));
-      if (!g.source) return sendError(res, 400, "dag has no source folder");
+      const spurRef = typeof body?.spur === "string" ? body.spur : typeof body?.dag === "string" ? body.dag : "";
+      const g = findDagGroup(spurRef);
+      if (!g) return sendError(res, 404, "no such spur: " + (spurRef || "(none)"));
+      if (!g.source) return sendError(res, 400, "spur has no source folder");
       if (typeof body?.name !== "string" || typeof body?.text !== "string") {
-        return sendError(res, 400, "need {dag, name, text}");
+        return sendError(res, 400, "need {spur, name, text}");
       }
       if (Buffer.byteLength(body.text) > 200 * 1024) {
         return sendError(res, 400, "text too large (200KB cap)");
@@ -2119,10 +2153,11 @@ async function handleApi(req, res, url) {
       } catch (e) {
         return sendError(res, 500, "save failed: " + (e?.message || e));
       }
-      log("program saved:", dagRef, body.name, existed ? "(overwrote)" : "(new)");
+      log("program saved:", spurRef, body.name, existed ? "(overwrote)" : "(new)");
       return sendJson(res, 200, {
         ok: true,
-        dag: { project: g.project, dag_id: g.dag_id },
+        spur: { project: g.project, spur_id: g.spur_id },
+        dag: { project: g.project, dag_id: g.spur_id }, // transition mirror
         name: body.name,
         bytes: Buffer.byteLength(body.text),
         created: !existed,
@@ -2133,13 +2168,13 @@ async function handleApi(req, res, url) {
   return sendError(res, 404, "no such api: " + req.method + " " + pathname);
 }
 
-// decode one path segment for v3 dag routes ("p-fd72b2", "ui-window");
+// decode one path segment for v3 spur routes ("p-fd72b2", "ui-window");
 // answers the response itself and returns null on a bad escape
 function safeDecode(res, seg) {
   try {
     const d = decodeURIComponent(seg);
     if (d.includes("/") || d.length > 128 || d.includes("\u0000")) {
-      sendError(res, 400, "bad dag path segment");
+      sendError(res, 400, "bad spur path segment");
       return null;
     }
     return d;
