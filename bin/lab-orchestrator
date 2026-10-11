@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { runCoworker } from "../src/coworker-run.ts"
+import { sanitizeRoots } from "../src/permission.ts"
 import { runLab } from "../src/lab.ts"
 import { Rail } from "../src/rail.ts"
 import { workflowKind } from "../src/workflow-kind.ts"
@@ -22,10 +23,14 @@ const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 // special to the rail.
 const programRoots = (() => {
   try {
-    return readFileSync(join(argvDir ?? process.cwd(), "roots.txt"), "utf8")
+    const raw = readFileSync(join(argvDir ?? process.cwd(), "roots.txt"), "utf8")
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
+    // hard-deny paths never ride along (j-1deef9 — same hole as fan-out)
+    const { kept, stripped } = sanitizeRoots(raw)
+    for (const s of stripped) console.error(`warning: roots.txt names ${s} — hard-deny paths are never roots; stripped`)
+    return kept
   } catch {
     return []
   }
