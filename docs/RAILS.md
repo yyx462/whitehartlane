@@ -72,8 +72,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   woken anywhere: a workflow earns an agent pane only when a runtime
   judgment is needed that no typed gate can hold AND its output has a
   consumed channel — no workflow passes (the actor's `protocol.json`
-  is the one consumed judgment channel). The lane pane in every
-  workflow is the engine's log viewer. Members may also pre-declare
+  is the one consumed judgment channel). The window
+  (http://127.0.0.1:8787) is the engine's viewer; the log itself lives
+  at `<job>/run/orchestrator.log` — no lane pane, no tailing mind. Members may also pre-declare
   external roots in `workflow.toml` (`roots = ["~/.vista"]` under
   `[members.<name>]`) — granted at session start, those dialogs never
   fire at all.

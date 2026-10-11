@@ -33,7 +33,6 @@ export type ShepPort = {
   retireAll: () => void
   verify: () => string
   wake: (label: string, kind: string, detail: string) => void
-  tailPane: (logPath: string) => boolean
   // Blocks until the pane is done, blocked, or the timeout hits.
   // Absent in tests: file growth and the deadline timer are enough.
   waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
@@ -578,14 +577,7 @@ export async function runOrchestrator(input: {
     emit: (kind, payload) => emit(kind, payload),
   })
 
-  let laneOpened = false
-  const openLane = () => {
-    if (laneOpened) return
-    laneOpened = true
-    const ok = input.shep.tailPane(join(input.taskDir, "orchestrator.log"))
-    log(ok ? "orchestrator: lane pane tailing this log" : "orchestrator: no lane pane; read this log")
-  }
-  if (layout.orchestrator === "left") openLane()
+  log(`orchestrator: the window is the viewer; this log lives at ${join(input.taskDir, "orchestrator.log")}`)
 
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const watchers: FSWatcher[] = []
@@ -597,7 +589,6 @@ export async function runOrchestrator(input: {
   let draining = false
   let drainUntil: number | null = null
   const drainMs = input.drainMs ?? manifest.workflow.drain_timeout_ms ?? stallMs
-  let firstCycle = true
   let fallback: ReturnType<typeof setInterval> | null = null
   let poller: ReturnType<typeof setInterval> | null = null
 
@@ -644,10 +635,6 @@ export async function runOrchestrator(input: {
           }
         },
       })
-      if (firstCycle) {
-        firstCycle = false
-        if (layout.orchestrator === "right") openLane()
-      }
       if (complete) {
         finished = true
         cleanup()
