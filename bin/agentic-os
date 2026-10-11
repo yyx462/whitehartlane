@@ -214,8 +214,8 @@ async function main() {
     saveJob(ready.job)
     console.log(`job: ${ready.job.id}`)
     console.log(`workflow: ${ready.kind}`)
-    if (ready.job.spur ?? (ready.job as { dag?: unknown }).dag) {
-      const d = normalizeSpur(ready.job.spur ?? (ready.job as { dag?: unknown }).dag)
+    if (ready.job.spur ?? ready.job.dag) {
+      const d = normalizeSpur(ready.job.spur ?? ready.job.dag)
       if (d) {
         const labels = Object.entries(d.labels ?? {}).map(([k, v]) => ` ${k}:${v}`).join("")
         console.log(`spur: ${d.project}/${d.spur_id} version ${d.content_hash}${labels}`)
