@@ -8,7 +8,7 @@
 // type-strip it. The modules it imports are .ts and strip fine.
 // Usage: bin/fan-out-orchestrator <taskDir>
 import { resolve } from "node:path"
-import { runOrchestrator } from "../src/orchestrator.ts"
+import { runOrchestrator, worktreeChurnedSince } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
 import { levyChildProgram } from "../src/levy.ts"
@@ -69,6 +69,7 @@ const engine = () => {
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows: rail.existingRows(),
     worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
+    churnSince: worktreeChurnedSince,
     canary: process.env.AGENTIC_OS_CANARY !== "0",
   })
 }
