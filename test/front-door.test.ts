@@ -6,7 +6,7 @@ import { join } from "node:path"
 import test from "node:test"
 import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
 
-const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
+const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
 
 async function copyExample(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "agentic-os-proj-"))

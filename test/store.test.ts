@@ -137,7 +137,7 @@ test("listJobs spans sessions in creation order", async () => {
 test("materializeRunDir writes the per-run worker permission scope", async () => {
   const { materializeRunDir } = await import("../src/store.ts")
   const { realpathSync } = await import("node:fs")
-  const exampleSrc = join(import.meta.dirname, "..", "examples", "three-lookups", "workflow.toml")
+  const exampleSrc = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups", "workflow.toml")
   const runDir = join(process.env.AGENTIC_OS_HOME!, "sessions", "perm-test", "jobs", "j-x", "run")
   materializeRunDir(runDir, "t", exampleSrc)
   const oc = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8"))

@@ -24,7 +24,7 @@ function fixtureRoot(jobs: FixtureJob[]): string {
     const jobDir = join(root, "sessions", SID, "jobs", j.jid)
     const runDir = join(jobDir, "run")
     mkdirSync(join(runDir, "members"), { recursive: true })
-    writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "del"\ndag_id = "del"\nkind = "coworker"\n')
+    writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "del"\nspur_id = "del"\nkind = "coworker"\n')
     writeFileSync(join(runDir, "members", "solo.md"), "You are solo.\n")
     writeFileSync(
       join(jobDir, "job.json"),
@@ -36,10 +36,10 @@ function fixtureRoot(jobs: FixtureJob[]): string {
         dir: runDir,
         workflow: "coworker",
         panes: [],
-        dag: {
+        spur: {
           project: "p-webdel",
           project_name: "del-fixture",
-          dag_id: "del",
+          spur_id: "del",
           content_hash: "hash1",
           source: join(tmpdir(), "aos-gone-source-" + Date.now()),
         },

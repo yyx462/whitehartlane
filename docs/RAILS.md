@@ -137,12 +137,16 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   names it). Absent, the OS defaults run: `protocol.json` and the unit
   `log.txt`. Pane liveness stays rail-owned either way: a dead pane is
   dead even under a custom end detector.
-- `gates` — one command per `does: "gate"` step in `dag.mjs`; prints
-  `done` when the step may finish. The run door refuses a gate step
-  with no matching `[gates]` command — nothing is booked. Reopen,
+- `gates` — the legacy lab spell: one command per `does: "gate"` step
+  in a lab program — `spur.mjs` (a legacy `dag.mjs` is read with a
+  loud warning, ADR 0009); prints `done` when the step may finish. The
+  run door refuses a gate step with no matching `[gates]` command —
+  nothing is booked. The current grammar is `[[step]]` with
+  `finished_by = "check"` — a command exits 0 and the step finishes
+  (ADR 0007); `[gates]` remains for legacy-shaped lab programs. Reopen,
   retry, and the report still belong to `tick` and the rail.
 - `roots.txt` — a program's named extra worker roots, one absolute
-  path per line, staged beside the dag; the rail folds them into the
+  path per line, staged beside the spur; the rail folds them into the
   per-run worker permissions. The rail knows no program's env names.
 - Named as command strings in `workflow.toml`. A path may be absolute.
   A `hooks/` folder beside the toml is a copy convention, not the
