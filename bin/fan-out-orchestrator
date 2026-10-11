@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { basename, isAbsolute, join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
 import { runOrchestrator, worktreeChurnedSince } from "../src/orchestrator.ts"
+import { sanitizeRoots } from "../src/permission.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
 import { levyChildProgram } from "../src/levy.ts"
@@ -23,10 +24,15 @@ const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 // rescued only by repeat escalation).
 const programRoots = (() => {
   try {
-    return readFileSync(join(argvDir ?? process.cwd(), "roots.txt"), "utf8")
+    const raw = readFileSync(join(argvDir ?? process.cwd(), "roots.txt"), "utf8")
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
+    // hard-deny paths never ride along (j-1deef9: a rooted .env was
+    // pre-allowed and read silently — no dialog, no deny)
+    const { kept, stripped } = sanitizeRoots(raw)
+    for (const s of stripped) console.error(`warning: roots.txt names ${s} — hard-deny paths are never roots; stripped`)
+    return kept
   } catch {
     return []
   }

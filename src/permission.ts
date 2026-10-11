@@ -29,6 +29,22 @@ import { jevNoulQ } from "./jev.ts"
 // asks, or a hard-deny re-ask loop) spends the cap.
 export const PERMISSION_CAP = 6
 
+// Roots a program declares that can NEVER ride along: hard-deny paths.
+// The battery's secrets scenario proved the smuggling route — a
+// roots.txt naming ~/.e2e-vault/.env pre-allowed it in the worker's
+// opencode.json, so no dialog ever fired and the rail's HARD_DENY (which
+// outranks roots only AT a dialog) never got a say: the worker read the
+// secret silently. Such roots are stripped loudly instead.
+export function sanitizeRoots(roots: string[]): { kept: string[]; stripped: string[] } {
+  const kept: string[] = []
+  const stripped: string[] = []
+  for (const root of roots) {
+    if (HARD_DENY.some((re) => re.test(root))) stripped.push(root)
+    else kept.push(root)
+  }
+  return { kept, stripped }
+}
+
 export type PermissionDecision = {
   decision: "allow" | "deny" | "deny-unneeded"
   message: string
