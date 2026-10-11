@@ -1,10 +1,9 @@
-# dag-purge (continued) — reorg wave landed on spur-word (63539c3,
-# cherry-picked here); this run finishes the job: the dictionary/ADR/
-# skill wave, the code rename, then verify.
+# dag-purge (final leg) — adr-dictionary landed (68f484d), the rename
+# sits ~80% in the working tree; this run finishes it and verifies.
 #   run it:  whl run agentic-program/dag-purge --from opencode:<sid>
 [workflow]
 name = "dag-purge"
-dag_id = "dag-purge"          # legacy key spelling until ADR 0009 lands
+dag_id = "dag-purge"          # legacy key spelling until ADR 0009 lands everywhere
 worker_kind = "opencode"
 slots = 2
 
@@ -14,19 +13,14 @@ grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
 [[step]]
-id = "adr-dictionary"
-finished_by = "end"           # a worker pane runs members/adr-dictionary.md
-wave = "w1"
-
-[[step]]
 id = "rename-code"
 finished_by = "end"           # a worker pane runs members/rename-code.md
-wave = "w2"
+wave = "w1"
 
 [[step]]
 id = "verify"
 finished_by = "end"           # a worker pane runs members/verify.md
-wave = "w3"
+wave = "w2"
 
 [report]
 where = "units/"
