@@ -1,5 +1,6 @@
-import { execSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync, type FSWatcher } from "node:fs"
+import { execSync, spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFileSync, type FSWatcher } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, type Hooks, type Layout, type Manifest, type Step, type Unit } from "./hooks.ts"
@@ -69,6 +70,7 @@ export type Flight = {
   lastChange: number
   spawnedAt: number
   reprompted: boolean
+  worktree: string
 }
 
 export type CycleDeps = {
@@ -83,6 +85,10 @@ export type CycleDeps = {
   now?: () => number
   emit?: (kind: string, payload: Record<string, unknown>) => void
   worktree?: string
+  // j-3520f7: a worker grinding silently (log quiet, files moving) must
+  // not read as stalled — worktree churn is a heartbeat. Injectable so
+  // the fake clock in tests never touches real mtimes.
+  churnSince?: (worktree: string, sinceMs: number) => boolean
   canary?: CanaryState
   // Pause drain (ADR 5): while draining, no new panes are claimed and a
   // dead or stalled pane does not finish — the drain ceiling decides,
@@ -115,6 +121,32 @@ const LOG_POLL_MS = 5_000
 const DEFAULT_GATE_CHECK_MS = 30_000
 const RETRY_CAP = 3
 const SHEP_LABEL_MAX = 32
+
+// Worktree churn as a stall heartbeat (j-3520f7): a worker whose log is
+// quiet but whose tree is moving is working, not stalled. The check runs
+// ONLY at the kill decision (one bounded find per candidate death), via a
+// ref file stamped with the last-seen time — portable across BSD/GNU
+// find, and `-quit` stops at the first hit so big trees stay cheap.
+export function worktreeChurnedSince(worktree: string, sinceMs: number): boolean {
+  if (!existsSync(worktree)) return false
+  const ref = join(tmpdir(), `agentic-os-churn-${process.pid}`)
+  try {
+    writeFileSync(ref, "")
+    utimesSync(ref, new Date(sinceMs), new Date(sinceMs))
+    const out = spawnSync(
+      "find",
+      [worktree, "-newer", ref, "-not", "-name", ref, "-print", "-quit"],
+      { timeout: 10_000, encoding: "utf8" },
+    )
+    return (out.stdout ?? "").trim().length > 0
+  } catch {
+    return false // a failed probe must never extend a real stall
+  } finally {
+    try {
+      rmSync(ref, { force: true })
+    } catch {}
+  }
+}
 
 // Pane labels are scoped per run: two ad-hoc runs that generate the same
 // unit ids must not collide in the shared shep ledger (2026-09-29
@@ -361,11 +393,21 @@ export function cycle(deps: CycleDeps): boolean {
           flight.lastChange = now()
           deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
         }
-      } else if (!deps.draining && size === flight.lastSize && now() - flight.lastChange > stallMs) {
+      } else if (
+        !deps.draining &&
+        size === flight.lastSize &&
+        now() - flight.lastChange > stallMs
+      ) {
         if (deps.bookedWait?.(id)) {
           // booked wait: a live child spur holds this pane (ADR 0006) —
           // the silence is explained, so the stall clock restarts
           flight.lastChange = now()
+        } else if (deps.churnSince?.(flight.worktree, flight.lastChange)) {
+          // worktree churn while the log is quiet is still life — the
+          // worker is editing, just not talking. The clock restarts;
+          // the next silent window (quiet log AND quiet tree) re-arms.
+          flight.lastChange = now()
+          deps.emit?.("stall-deferred", { unit: id, reason: "worktree churn" })
         } else {
           finish(id, false, { unit: id, result: "stalled", pass: false })
           deps.shep.retire(`w-${id}`)
@@ -446,6 +488,7 @@ export function cycle(deps: CycleDeps): boolean {
         lastChange: now(),
         spawnedAt: now(),
         reprompted: false,
+        worktree: deps.worktree ?? paths.dir,
       })
     } else {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1

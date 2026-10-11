@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, utimesSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import {
@@ -7,6 +8,7 @@ import {
   cycle,
   paneLabeler,
   runOrchestrator,
+  worktreeChurnedSince,
   type CycleDeps,
   type ShepPort,
 } from "../src/orchestrator.ts"
@@ -205,6 +207,49 @@ test("a worker whose log goes quiet past the stall window finished_by failed", a
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
   assert.equal(done, true)
   assert.equal(wakes.length, 3)
+})
+
+test("worktree churn defers the stall; the kill returns when the tree goes quiet", async () => {
+  const dir = await copyExample("orch-churn-")
+  let clock = 0
+  let churning = true
+  const { port, wakes } = fakeShep()
+  const base = deps(dir, port, {
+    stallMs: 1000,
+    now: () => clock,
+    churnSince: (_wt, _since) => churning,
+  })
+  cycle(base)
+
+  // past the stall window with the log quiet: the tree is moving, so
+  // the workers live on (j-3520f7 — killed at 80% for silent logging)
+  clock = 2000
+  let done = cycle(base)
+  assert.equal(done, false)
+  assert.equal(readState(dir).failed.length, 0)
+  assert.equal(wakes.length, 0)
+  assert.equal(base.events.filter((e) => e.kind === "stall-deferred").length, 3)
+
+  // the tree goes quiet: the next silent window kills
+  churning = false
+  clock = 5000
+  done = cycle(base)
+  assert.equal(done, true)
+  assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
+  assert.equal(wakes.length, 3)
+})
+
+test("worktreeChurnedSince reads real mtimes and stays false on a dead probe", async () => {
+  const wt = mkdtempSync(join(tmpdir(), "churn-real-"))
+  const file = join(wt, "edit.txt")
+  writeFileSync(file, "work")
+  const t0 = Date.now() - 60_000
+  utimesSync(file, new Date(t0), new Date(t0))
+  utimesSync(wt, new Date(t0), new Date(t0))
+
+  assert.equal(worktreeChurnedSince(wt, t0 - 1000), true, "a file newer than since is churn")
+  assert.equal(worktreeChurnedSince(wt, t0 + 1000), false, "nothing newer than since")
+  assert.equal(worktreeChurnedSince(join(wt, "gone"), t0), false, "missing worktree is not churn")
 })
 
 test("a booked wait stands the stall clock down; the stall returns when the child is gone", async () => {
