@@ -124,9 +124,12 @@ const SHEP_LABEL_MAX = 32
 
 // Worktree churn as a stall heartbeat (j-3520f7): a worker whose log is
 // quiet but whose tree is moving is working, not stalled. The check runs
-// ONLY at the kill decision (one bounded find per candidate death), via a
-// ref file stamped with the last-seen time — portable across BSD/GNU
-// find, and `-quit` stops at the first hit so big trees stay cheap.
+// ONLY at the kill decision (one bounded find per candidate death).
+// .git and node_modules are pruned: 430MB of packages can eat the whole
+// timeout before the probe reaches src/ (j-443a63 — churn present, probe
+// timed out, worker killed at 80% twice). find is absolute (a detached
+// orchestrator's PATH is not guaranteed). A dead probe DEFERS — killing
+// a live worker is the worse failure; the next window retries.
 export function worktreeChurnedSince(worktree: string, sinceMs: number): boolean {
   if (!existsSync(worktree)) return false
   const ref = join(tmpdir(), `agentic-os-churn-${process.pid}`)
@@ -134,13 +137,23 @@ export function worktreeChurnedSince(worktree: string, sinceMs: number): boolean
     writeFileSync(ref, "")
     utimesSync(ref, new Date(sinceMs), new Date(sinceMs))
     const out = spawnSync(
-      "find",
-      [worktree, "-newer", ref, "-not", "-name", ref, "-print", "-quit"],
-      { timeout: 10_000, encoding: "utf8" },
+      "/usr/bin/find",
+      [
+        worktree,
+        "(", "-name", ".git", "-o", "-name", "node_modules", ")",
+        "-prune", "-o",
+        "-newer", ref,
+        "-print", "-quit",
+      ],
+      { timeout: 15_000, encoding: "utf8" },
     )
-    return (out.stdout ?? "").trim().length > 0
+    if ((out.stdout ?? "").trim().length > 0) return true
+    // no hit within the window — a healthy probe's honest answer, or a
+    // broken one (ENOENT, timeout mid-traverse). Only trust the "quiet"
+    // verdict when find actually ran to completion.
+    return out.status !== 0 || out.error ? true : false
   } catch {
-    return false // a failed probe must never extend a real stall
+    return true // a failed probe must never kill a live worker
   } finally {
     try {
       rmSync(ref, { force: true })

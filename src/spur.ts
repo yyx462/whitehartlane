@@ -12,7 +12,7 @@ export type Step = {
   after: string[]
 }
 
-export type Dag = {
+export type Spur = {
   name: string
   steps: Step[]
 }
@@ -33,21 +33,24 @@ function toJson(objectLiteral: string): string {
     .replace(/,(\s*[}\]])/g, "$1")
 }
 
-export function parseDag(source: string): Dag {
+export function parseSpur(source: string, warn?: (message: string) => void): Spur {
   assertProgram(source)
-  const matched = source.match(/export\s+const\s+dag\s*=\s*(\{[\s\S]*\})\s*;?\s*$/)
-  if (!matched) throw new Error("a program is export const dag = { ... }")
+  const matched = source.match(/export\s+const\s+(spur|dag)\s*=\s*(\{[\s\S]*\})\s*;?\s*$/)
+  if (!matched) throw new Error("a program is export const spur = { ... }")
+  // ADR 0009: the export renames with the file — a program still
+  // spelling `export const dag` is read, loudly, one transition window
+  if (matched[1] === "dag") warn?.("legacy export const dag — rename to export const spur")
   let raw: unknown
   try {
-    raw = JSON.parse(toJson(matched[1]))
+    raw = JSON.parse(toJson(matched[2]))
   } catch (err) {
-    throw new Error(`dag file is not a step list: ${err instanceof Error ? err.message : err}`)
+    throw new Error(`spur file is not a step list: ${err instanceof Error ? err.message : err}`)
   }
-  if (!raw || typeof raw !== "object") throw new Error("dag file is not a step list")
+  if (!raw || typeof raw !== "object") throw new Error("spur file is not a step list")
   const name = (raw as { name?: unknown }).name
   const steps = (raw as { steps?: unknown }).steps
-  if (typeof name !== "string" || !name.trim()) throw new Error("dag.name is required")
-  if (!Array.isArray(steps) || steps.length === 0) throw new Error("dag.steps is required")
+  if (typeof name !== "string" || !name.trim()) throw new Error("spur.name is required")
+  if (!Array.isArray(steps) || steps.length === 0) throw new Error("spur.steps is required")
   const parsed: Step[] = []
   const ids = new Set<string>()
   for (const step of steps) {
@@ -73,25 +76,25 @@ export function parseDag(source: string): Dag {
       throw new Error(`a program names one ${verb} step`)
     }
   }
-  const dag = { name, steps: parsed }
-  order(dag)
-  return dag
+  const spur = { name, steps: parsed }
+  order(spur)
+  return spur
 }
 
-export function loadDagFile(path: string): Dag {
-  return parseDag(readFileSync(path, "utf8"))
+export function loadSpurFile(path: string, warn?: (message: string) => void): Spur {
+  return parseSpur(readFileSync(path, "utf8"), warn)
 }
 
-export function ready(dag: Dag, done: ReadonlySet<string>): Step[] {
-  return dag.steps.filter((step) => !done.has(step.id) && step.after.every((id) => done.has(id)))
+export function ready(spur: Spur, done: ReadonlySet<string>): Step[] {
+  return spur.steps.filter((step) => !done.has(step.id) && step.after.every((id) => done.has(id)))
 }
 
-export function order(dag: Dag): string[] {
+export function order(spur: Spur): string[] {
   const done = new Set<string>()
   const out: string[] = []
-  while (out.length < dag.steps.length) {
-    const batch = ready(dag, done)
-    if (batch.length === 0) throw new Error("dag is cyclic")
+  while (out.length < spur.steps.length) {
+    const batch = ready(spur, done)
+    if (batch.length === 0) throw new Error("spur is cyclic")
     for (const step of batch) {
       done.add(step.id)
       out.push(step.id)
@@ -123,14 +126,14 @@ export type TickAction =
   | { do: "finish"; id: string }
   | { do: "reopen"; ids: string[] }
 
-function byDoes(dag: Dag, does: StepDoes): Step | undefined {
-  return dag.steps.find((step) => step.does === does)
+function byDoes(spur: Spur, does: StepDoes): Step | undefined {
+  return spur.steps.find((step) => step.does === does)
 }
 
-function downstreamOf(dag: Dag, id: string): Set<string> {
+function downstreamOf(spur: Spur, id: string): Set<string> {
   const out = new Set<string>()
   const grow = (from: string): void => {
-    for (const step of dag.steps) {
+    for (const step of spur.steps) {
       if (step.after.includes(from) && !out.has(step.id)) {
         out.add(step.id)
         grow(step.id)
@@ -145,13 +148,13 @@ function depsDone(step: Step | undefined, done: Set<string>): boolean {
   return !!step && step.after.every((id) => done.has(id))
 }
 
-export function tick(dag: Dag, state: TickIn): TickAction[] {
+export function tick(spur: Spur, state: TickIn): TickAction[] {
   const done = new Set(state.done)
   const actions: TickAction[] = []
-  const actor = byDoes(dag, "actor")
-  const wave = byDoes(dag, "wave")
-  const grade = byDoes(dag, "grade")
-  const report = byDoes(dag, "report")
+  const actor = byDoes(spur, "actor")
+  const wave = byDoes(spur, "wave")
+  const grade = byDoes(spur, "grade")
+  const report = byDoes(spur, "report")
 
   if (
     wave &&
@@ -162,8 +165,8 @@ export function tick(dag: Dag, state: TickIn): TickAction[] {
   ) {
     // a reopen clears everything that ran on the old wave: the wave, the
     // grade, and every gate downstream of it — same rule for every verb
-    const gatesAfterWave = [...downstreamOf(dag, wave.id)].filter((id) =>
-      dag.steps.find((step) => step.id === id)?.does === "gate",
+    const gatesAfterWave = [...downstreamOf(spur, wave.id)].filter((id) =>
+      spur.steps.find((step) => step.id === id)?.does === "gate",
     )
     const ids = [wave.id, grade?.id, ...gatesAfterWave].filter((id): id is string => !!id && done.has(id))
     if (ids.length > 0) return [{ do: "reopen", ids }]
@@ -204,7 +207,7 @@ export function tick(dag: Dag, state: TickIn): TickAction[] {
   // gate detectors printed done, and tick finishes them when their
   // after-edges allow it — the same finish, reopen, and report rules
   // as every other verb
-  for (const gate of dag.steps.filter((step) => step.does === "gate")) {
+  for (const gate of spur.steps.filter((step) => step.does === "gate")) {
     if (!done.has(gate.id) && depsDone(gate, done) && state.gatesReady.includes(gate.id)) {
       finish(gate)
     }

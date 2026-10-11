@@ -72,7 +72,7 @@ function stepsFromRaw(raw: unknown): Step[] | undefined {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; dag_id?: string; drain_timeout_ms?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number }
   hooks: { units: string; grade: string; counts: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
@@ -126,7 +126,7 @@ function note(note: HookRunNote): void {
 const HOOK_TIMEOUT_MS = 120_000
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
-export function loadManifest(taskDir: string): Manifest {
+export function loadManifest(taskDir: string, warn?: (message: string) => void): Manifest {
   const path = join(taskDir, "workflow.toml")
   if (!existsSync(path)) throw new HookError(`no workflow.toml in ${taskDir}`)
   let raw: unknown
@@ -176,12 +176,21 @@ export function loadManifest(taskDir: string): Manifest {
       throw new HookError(`workflow.model must be provider/model: ${model}`)
     }
   }
-  let dagId: string | undefined
-  if (workflow.dag_id !== undefined) {
-    dagId = str(workflow.dag_id, "workflow.dag_id")
-    if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/.test(dagId)) {
-      throw new HookError(`workflow.dag_id must be url-safe lowercase: ${dagId}`)
+  // ADR 0009: the manifest key renames dag_id -> spur_id. spur_id wins
+  // when both are present; a legacy-only dag_id still resolves, loudly.
+  const SPUR_ID_RE = /^[a-z0-9][a-z0-9_.-]{0,63}$/
+  let spurId: string | undefined
+  if (workflow.spur_id !== undefined) {
+    spurId = str(workflow.spur_id, "workflow.spur_id")
+    if (!SPUR_ID_RE.test(spurId)) {
+      throw new HookError(`workflow.spur_id must be url-safe lowercase: ${spurId}`)
     }
+  } else if (workflow.dag_id !== undefined) {
+    spurId = str(workflow.dag_id, "workflow.dag_id")
+    if (!SPUR_ID_RE.test(spurId)) {
+      throw new HookError(`workflow.dag_id must be url-safe lowercase: ${spurId}`)
+    }
+    warn?.("legacy dag_id in workflow.toml — rename to spur_id")
   }
   const detectors: { signal?: string; end?: string } = {}
   const optCmd = (value: unknown, field: string): string | undefined => {
@@ -202,7 +211,7 @@ export function loadManifest(taskDir: string): Manifest {
   }
   const steps = stepsFromRaw(m.step)
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(dagId ? { dag_id: dagId } : {}), drain_timeout_ms: drainTimeoutMs },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),

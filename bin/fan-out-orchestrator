@@ -84,7 +84,17 @@ const engine = () => {
       : undefined,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows: rail.existingRows(),
-    worktree: process.env.AGENTIC_OS_WORKTREE || ledger?.job.worktree,
+    // The ledger's worktree is a LABEL (basename, "never identity" per
+    // labelsFor) — j-443a63 fed it to the churn probe as a path and the
+    // probe existsSync'd air while the worker was killed at 80%. The
+    // tree the rail means is this door's own checkout; env or an
+    // absolute label override it.
+    worktree: (() => {
+      if (process.env.AGENTIC_OS_WORKTREE) return resolve(process.env.AGENTIC_OS_WORKTREE)
+      const label = ledger?.job.worktree
+      if (label?.startsWith("/")) return label
+      return resolve(import.meta.dirname, "..")
+    })(),
     churnSince: worktreeChurnedSince,
     canary: process.env.AGENTIC_OS_CANARY !== "0",
   })
