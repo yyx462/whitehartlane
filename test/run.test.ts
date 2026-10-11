@@ -164,7 +164,7 @@ test("run refuses a gate step with no [gates] detector and books nothing", async
 })
 
 test("run books git-wave and stages its detectors as absolute paths", async () => {
-  const dir = join(import.meta.dirname, "..", "examples", "git-wave")
+  const dir = join(import.meta.dirname, "..", "examples", "lab-spurs", "git-wave")
   const booked = prepareRun(dir)
   assert.equal(booked.ok, true)
   if (!booked.ok) return

@@ -18,7 +18,7 @@ import {
 } from "../src/hooks.ts"
 import { RefusedError } from "../src/backpressure.ts"
 
-const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
+const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
 
 async function copyExample(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "agentic-os-hooks-"))

@@ -6,10 +6,10 @@ import { Rail, type RailLedger, type RunnerResult } from "../src/rail.ts"
 import type { PermissionJudge } from "../src/permission.ts"
 import type { JobRecord } from "../src/store.ts"
 
-export const EXAMPLE = join(import.meta.dirname, "..", "examples", "three-lookups")
+export const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
 
 export async function copyExample(prefix = "agentic-os-"): Promise<string> {
-  return copyExampleNamed("three-lookups", prefix)
+  return copyExampleNamed("fan-out-spurs/three-lookups", prefix)
 }
 
 export async function copyExampleNamed(name: string, prefix = "agentic-os-"): Promise<string> {
