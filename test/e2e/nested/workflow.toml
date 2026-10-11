@@ -1,0 +1,26 @@
+# e2e-nested — box in box: a worker wave, then a whole child program as a
+# wake step. The rail levies the child, books itself as spawner, and the
+# step finishes on the child's wake (booked wait — no pane, no deadlock).
+[workflow]
+name = "e2e-nested"
+spur_id = "e2e-nested"
+worker_kind = "opencode"
+
+[hooks]
+units = "true"
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[[step]]
+id = "warmup"
+finished_by = "end"
+wave = "w1"
+
+[[step]]
+id = "child-run"
+finished_by = "wake"
+folder = "./child"
+wave = "w2"
+
+[report]
+where = "units/"
