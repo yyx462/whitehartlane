@@ -84,16 +84,28 @@ const engine = () => {
       : undefined,
     emit: (kind, payload) => ledger?.emit(kind, payload),
     existingRows: rail.existingRows(),
-    // The ledger's worktree is a LABEL (basename, "never identity" per
-    // labelsFor) — j-443a63 fed it to the churn probe as a path and the
-    // probe existsSync'd air while the worker was killed at 80%. The
-    // tree the rail means is this door's own checkout; env or an
-    // absolute label override it.
+    // The worktree is a PATH, never the display label — but it is the
+    // PROGRAM's tree, not the door's (j-battery: /tmp programs levied
+    // via master's door spawned workers in master and they died in
+    // seconds — wrong config tree, brief outside the project). Ladder:
+    // env override, then the checkout holding the program (walk up from
+    // its booked source for .git — a lane program finds its lane), else
+    // nothing — workers start in their unit dir, where the per-run
+    // opencode.json rules and the probe lineage proved correct.
     worktree: (() => {
       if (process.env.AGENTIC_OS_WORKTREE) return resolve(process.env.AGENTIC_OS_WORKTREE)
       const label = ledger?.job.worktree
       if (label?.startsWith("/")) return label
-      return resolve(import.meta.dirname, "..")
+      const source = ledger?.job.spur?.source
+      if (!source) return undefined
+      let here = resolve(source)
+      for (let up = 0; up < 8; up++) {
+        if (existsSync(join(here, ".git"))) return here
+        const parent = resolve(here, "..")
+        if (parent === here) break
+        here = parent
+      }
+      return undefined
     })(),
     churnSince: worktreeChurnedSince,
     canary: process.env.AGENTIC_OS_CANARY !== "0",
