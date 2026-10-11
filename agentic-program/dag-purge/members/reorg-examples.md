@@ -2,7 +2,7 @@
 
 You are a worker pane for the agentic-os repo (a supervisor OS for agent
 work). Repo checkout (a gwt worktree — work ONLY here):
-`/Users/sagebot/projects/Agentic-Workspace/agentic-os/spur-word`
+`/Users/sagebot/projects/Agentic-Workspace/agentic-os/dag-purge-2`
 
 Mandate: the examples are a mess of vintages. Reorganize into three
 folders by rail kind, convert one stale example to the current grammar,
@@ -60,7 +60,7 @@ must pass before you finish.
 ## Rules
 
 - Commit only the paths you own (examples/, the reference fixes): 
-  `git -C /Users/sagebot/projects/Agentic-Workspace/agentic-os/spur-word add <paths>`
+  `git -C /Users/sagebot/projects/Agentic-Workspace/agentic-os/dag-purge-2 add <paths>`
   then commit, message: `reorg: examples into {lab,fan-out,coworker}-spurs; two-signoffs to check steps`.
   Never push. If `.git/index.lock` is busy, wait and retry.
 - Never touch `server.log`, `agentic-program/dag-purge/` (this program),
