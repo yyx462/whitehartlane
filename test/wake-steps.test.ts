@@ -80,7 +80,7 @@ function childWakes(dir: string, outcome: string, report?: string): void {
 }
 
 test("a wake step levies once and finishes done on the child's wake (ADR 0007 stage 3)", async () => {
-  const dir = await copyExampleNamed("nested-wakes", "wake-once-")
+  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-once-")
   const shep = fakeShep()
   const levy = fakeLevy(dir)
   const engine = runOrchestrator({
@@ -97,7 +97,7 @@ test("a wake step levies once and finishes done on the child's wake (ADR 0007 st
   // exactly one levy for the wake step — never a second while it waits
   assert.equal(levy.levies.length, 1)
   assert.equal(levy.levies[0].unitId, "sub")
-  assert.ok(levy.levies[0].folder.endsWith(join("nested-wakes", "child")) || levy.levies[0].folder.endsWith("child"))
+  assert.ok(levy.levies[0].folder.endsWith(join("fan-out-spurs", "nested-wakes", "child")) || levy.levies[0].folder.endsWith("child"))
   // the booking is durable on the task dir
   assert.ok(existsSync(join(dir, "wakes", "sub.json")))
   childWakes(dir, "done")
@@ -112,7 +112,7 @@ test("a wake step levies once and finishes done on the child's wake (ADR 0007 st
 })
 
 test("a failed child receipt fails the step and blocks downstream waves honestly", async () => {
-  const dir = await copyExampleNamed("nested-wakes", "wake-fail-")
+  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-fail-")
   const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
     '\n[[step]]\nid = "audit"\nfinished_by = "check"\ncheck = "true"\nwave = "w3"\n'
   writeFileSync(join(dir, "workflow.toml"), wf)
@@ -143,7 +143,7 @@ test("a failed child receipt fails the step and blocks downstream waves honestly
 })
 
 test("a refused levy is an honest failed row, not a retry loop", async () => {
-  const dir = await copyExampleNamed("nested-wakes", "wake-refused-")
+  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-refused-")
   const shep = fakeShep()
   const report = await runOrchestrator({
     taskDir: dir,

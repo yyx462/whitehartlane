@@ -560,7 +560,7 @@ test("hook runs land in the trace as hook.run (issue #40)", async () => {
 // refuses until stage 3.
 
 test("a steps manifest parses with wave order and per-type fields (ADR 0007)", async () => {
-  const dir = await copyExampleNamed("staged-waves", "orch-steps-parse-")
+  const dir = await copyExampleNamed("fan-out-spurs/staged-waves", "orch-steps-parse-")
   const { loadManifest } = await import("../src/hooks.ts")
   const m = loadManifest(dir)
   assert.equal(m.steps?.length, 4)
@@ -578,7 +578,7 @@ test("a steps manifest parses with wave order and per-type fields (ADR 0007)", a
 })
 
 test("waves gate spawning until the check step passes (ADR 0007)", async () => {
-  const dir = await copyExampleNamed("staged-waves", "orch-waves-")
+  const dir = await copyExampleNamed("fan-out-spurs/staged-waves", "orch-waves-")
   const spawnedNames: string[] = []
   const { port } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
@@ -615,7 +615,7 @@ test("waves gate spawning until the check step passes (ADR 0007)", async () => {
 })
 
 test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async () => {
-  const dir = await copyExampleNamed("staged-waves", "orch-waves-block-")
+  const dir = await copyExampleNamed("fan-out-spurs/staged-waves", "orch-waves-block-")
   const { port } = fakeShep({
     spawnWorker: (name, _kind, _brief, cwd) => {
       appendFileSync(join(cwd, "log.txt"), `blocked ${name.slice(2)}: substrate broken\n`)
@@ -642,7 +642,7 @@ test("a failed wave blocks downstream steps into honest rows (ADR 0007)", async 
 })
 
 test("a wake step without a levy port refuses to run — no silent nesting (ADR 0007 stage 3)", async () => {
-  const dir = await copyExampleNamed("staged-waves", "orch-wake-")
+  const dir = await copyExampleNamed("fan-out-spurs/staged-waves", "orch-wake-")
   const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
     '\n[[step]]\nid = "nested"\nfinished_by = "wake"\nfolder = "./g0-substrate"\nwave = "w4"\n'
   writeFileSync(join(dir, "workflow.toml"), wf)

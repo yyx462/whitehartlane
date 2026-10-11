@@ -13,7 +13,7 @@ const { loadManifest, runCounts, runGrade, runSignalDetector, runEndDetector, ru
 const { readSignal, endOf } = await import("../src/live-run.ts")
 const { abortJob } = await import("../src/store.ts")
 
-const PROG = join(import.meta.dirname, "..", "examples", "agentic-program")
+const PROG = join(import.meta.dirname, "..", "examples", "lab-spurs")
 
 type Unit = { id: string; brief: string }
 type End = { id: string; end: string | null }
@@ -227,47 +227,60 @@ test("inbox-zero: a rejection requeues through the world and the report waits fo
   assert.deepEqual(counts, { tickets: 3, replied: 3, failed: 0 })
 })
 
-test("two-signoffs: the report waits for both independent gates", () => {
-  let secAt: number | null = null
-  const sections = readFileSync(join(PROG, "two-signoffs", "data", "sections.md"), "utf8").split(/\n---+\n/)
-  const life = driveLife("two-signoffs", {
-    onBirthActor(dir) {
-      const units: Unit[] = []
-      for (let s = 1; s <= 2; s++) {
-        for (const lang of ["de", "ja"]) {
-          units.push({
-            id: `s${s}-${lang}`,
-            brief: `Translate this timeline section to ${lang}. Preserve markdown headings and times.\n${sections[s - 1]}`,
-          })
-        }
+test("two-signoffs: the report waits for both independent checks (ADR 0007)", async () => {
+  const orch = await import("../src/orchestrator.ts")
+  const { copyExampleNamed } = await import("./util.ts")
+  const dir = await copyExampleNamed("fan-out-spurs/two-signoffs", "signoffs-wait-")
+  const spawned: string[] = []
+  const port: import("../src/orchestrator.ts").ShepPort = {
+    setLayout: () => {},
+    spawnWorker: (name, _kind, _briefPath, cwd) => {
+      spawned.push(name)
+      // the scripted packager: the deliverable lands in the run dir's
+      // data/signoffs/ (the brief's ../../data/signoffs/ from the unit dir)
+      const target = join(cwd, "..", "..", "data", "signoffs")
+      mkdirSync(target, { recursive: true })
+      for (const f of ["de-1", "de-2", "ja-1", "ja-2"]) {
+        writeFileSync(join(target, `${f}.md`), `(${f}) translated\n`)
       }
-      writeProtocol(dir, units)
+      appendFileSync(join(cwd, "log.txt"), `done ${name.slice(2)}\n`)
+      return true
     },
-    onWave(dir, units) {
-      for (const u of units) {
-        const home = join(dir, "units", u.id)
-        mkdirSync(home, { recursive: true })
-        writeFileSync(join(home, "draft.md"), `${u.brief}\n`)
-        appendFileSync(join(home, "log.txt"), `done ${u.id}\n`)
-      }
-    },
-    onPrompt(dir) {
-      writeFileSync(join(dir, "protocol.json"), JSON.stringify({ stop: true }))
-    },
-    onBeat(dir, beat, view) {
-      if (secAt === null && view.waveClosed) secAt = beat
-      if (secAt !== null && beat === secAt + 2) {
-        mkdirSync(join(dir, "signoffs"), { recursive: true })
-        writeFileSync(join(dir, "signoffs", "security.md"), "no internal hosts leaked\n")
-      }
-      if (secAt !== null && beat === secAt + 4) {
-        mkdirSync(join(dir, "signoffs"), { recursive: true })
-        writeFileSync(join(dir, "signoffs", "legal.md"), "no liability admitted\n")
-      }
-    },
+    paneAlive: () => true,
+    retire: () => {},
+    retireAll: () => {},
+    verify: () => "pane-reap: 0 remaining",
+    wake: () => {},
+    tailPane: () => true,
+    flushPendingNotes: () => 0,
+  }
+  const engine = orch.runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    gateCheckMs: 100,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
   })
-  assert.equal(existsSync(join(life.dir, "signoffs", "security.md")), true)
-  assert.equal(existsSync(join(life.dir, "signoffs", "legal.md")), true)
-  const counts = runCounts(life.dir, loadManifest(life.dir), life.rows)
-  assert.deepEqual(counts, { sections: 4, delivered: 4 })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  // the draft settled, but no signoff has landed — one check is not a report
+  assert.deepEqual(spawned, ["w-draft"])
+  mkdirSync(join(dir, "signoffs"), { recursive: true })
+  writeFileSync(join(dir, "signoffs", "security.md"), "no internal hosts leaked\n")
+  const stillWaiting = await Promise.race([
+    engine.then(() => "reported" as const),
+    new Promise((resolve) => setTimeout(() => resolve("waiting" as const), 400)),
+  ])
+  assert.equal(stillWaiting, "waiting")
+  writeFileSync(join(dir, "signoffs", "legal.md"), "no liability admitted\n")
+  const report = await Promise.race([
+    engine,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("both signoffs never finished the run")), 4000)),
+  ])
+  assert.equal(report.status, "done")
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.equal(byUnit["signoff-legal"], "gate passed")
+  assert.equal(byUnit["signoff-security"], "gate passed")
+  assert.equal(existsSync(join(dir, "data", "signoffs", "ja-2.md")), true)
 })

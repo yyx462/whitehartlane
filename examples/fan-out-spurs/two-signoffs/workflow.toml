@@ -1,0 +1,36 @@
+# two-signoffs — a deliverable whose quality cannot be measured, only
+# approved, twice, by independent authorities on their own clock.
+# ADR 0007's own named example, in the manifest grammar: one work wave,
+# then two check steps — the [gates] table deprecated into checks.
+#   run it:  agentic-os run two-signoffs
+#   checks:  drop signoffs/security.md and signoffs/legal.md (any
+#            order, any time apart) — the report lands only when both
+#            exist. A scanner CI job may write one of them.
+[workflow]
+name = "two-signoffs"
+worker_kind = "pi"
+
+[hooks]
+units = "true"                 # steps define the units (ADR 0007)
+grade = "true"
+counts = "node hooks/counts.mjs"
+
+[[step]]
+id = "draft"
+finished_by = "end"                # a worker pane runs members/draft.md
+wave = "w1"
+
+[[step]]
+id = "signoff-legal"
+finished_by = "check"              # nothing works — the file must exist
+check = "test -f signoffs/legal.md"
+wave = "w2"
+
+[[step]]
+id = "signoff-security"
+finished_by = "check"
+check = "test -f signoffs/security.md"
+wave = "w2"
+
+[report]
+where = "units/"

@@ -6,7 +6,7 @@ import { join } from "node:path"
 import test from "node:test"
 import { order, parseDag, ready, tick, type Dag, type TickIn } from "../src/dag.ts"
 
-const program = readFileSync(join(import.meta.dirname, "..", "examples", "lab-program", "dag.mjs"), "utf8")
+const program = readFileSync(join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "dag.mjs"), "utf8")
 
 function dag(): Dag {
   return parseDag(program)
@@ -32,7 +32,7 @@ test("a program is one small dag file and does not schedule", () => {
   assert.equal(program.includes("fan-out-orchestrator"), false)
   assert.equal(program.includes("while"), false)
   assert.deepEqual(order(dag()), ["professor", "students", "grade", "report"])
-  const ran = spawnSync(process.execPath, [join(import.meta.dirname, "..", "examples", "lab-program", "dag.mjs")], {
+  const ran = spawnSync(process.execPath, [join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "dag.mjs")], {
     encoding: "utf8",
   })
   assert.equal(ran.status, 0)
