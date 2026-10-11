@@ -1,4 +1,4 @@
-export const dag = {
+export const spur = {
   name: "git-wave",
   steps: [
     { id: "professor", does: "actor" },

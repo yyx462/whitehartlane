@@ -3,7 +3,7 @@
 #   run it:  whl run agentic-program/dag-purge --from opencode:<sid>
 [workflow]
 name = "dag-purge"
-dag_id = "dag-purge"          # legacy key spelling until ADR 0009 lands everywhere
+spur_id = "dag-purge"
 worker_kind = "opencode"
 slots = 2
 

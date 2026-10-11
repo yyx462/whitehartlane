@@ -90,19 +90,19 @@ test("a second Job does not see the first Job's progress", async () => {
   assert.equal(existsSync(join(second.job.dir, "units.jsonl")), false)
 })
 
-test("run books a lab Job from one dag file and stages it", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "agentic-os-dag-"))
+test("run books a lab Job from one spur file and stages it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-spur-"))
   writeFileSync(
-    join(dir, "dag.mjs"),
-    'export const dag = {\n  name: "tiny-lab",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "grade", does: "grade", after: ["students"] },\n    { id: "report", does: "report", after: ["grade"] },\n  ],\n}\n',
+    join(dir, "spur.mjs"),
+    'export const spur = {\n  name: "tiny-lab",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "grade", does: "grade", after: ["students"] },\n    { id: "report", does: "report", after: ["grade"] },\n  ],\n}\n',
   )
-  const booked = prepareRun(join(dir, "dag.mjs"))
+  const booked = prepareRun(join(dir, "spur.mjs"))
   assert.equal(booked.ok, true)
   if (!booked.ok) return
   assert.equal(booked.kind, "lab")
   assert.equal(booked.job.workflow, "lab")
   assert.equal(booked.job.task, "tiny-lab")
-  assert.equal(existsSync(join(booked.job.dir, "dag.mjs")), true)
+  assert.equal(existsSync(join(booked.job.dir, "spur.mjs")), true)
   const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
   assert.match(staged, /written by agentic-os/)
   assert.match(staged, /name = "tiny-lab"/)
@@ -111,19 +111,72 @@ test("run books a lab Job from one dag file and stages it", async () => {
   abortJob(booked.job, "test", 0, "cli")
 })
 
-test("run refuses a dag file that schedules or calls", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "agentic-os-dag-bad-"))
-  writeFileSync(join(dir, "dag.mjs"), 'export const dag = { name: "x", steps: [{ id: "a", does: "actor", after: go() }] }\n')
-  const refused = prepareRun(join(dir, "dag.mjs"))
+test("a legacy dag.mjs still admits, loudly (ADR 0009)", async () => {
+  // the file spelling is legacy; the export inside may be either —
+  // each legacy spelling pushes its own loud warning
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-legacy-"))
+  writeFileSync(
+    join(dir, "dag.mjs"),
+    'export const dag = {\n  name: "old-lab",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "report", does: "report", after: ["students"] },\n  ],\n}\n',
+  )
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  if (!booked.ok) return
+  assert.deepEqual(booked.warnings, [
+    "legacy dag.mjs — rename to spur.mjs",
+    "legacy export const dag — rename to export const spur",
+  ])
+  assert.equal(existsSync(join(booked.job.dir, "dag.mjs")), true)
+  const { abortJob } = await import("../src/store.ts")
+  abortJob(booked.job, "test", 0, "cli")
+  // a legacy file name with the new export inside: only the file warning
+  const dir2 = mkdtempSync(join(tmpdir(), "agentic-os-legacy2-"))
+  writeFileSync(
+    join(dir2, "dag.mjs"),
+    'export const spur = {\n  name: "old-file",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "report", does: "report", after: ["students"] },\n  ],\n}\n',
+  )
+  const booked2 = prepareRun(dir2)
+  assert.equal(booked2.ok, true)
+  if (!booked2.ok) return
+  assert.deepEqual(booked2.warnings, ["legacy dag.mjs — rename to spur.mjs"])
+  abortJob(booked2.job, "test", 0, "cli")
+})
+
+test("a folder holding both spur.mjs and dag.mjs is refused, not guessed (ADR 0009)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-ambiguous-"))
+  const body = 'export const spur = {\n  name: "x",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "report", does: "report", after: ["students"] },\n  ],\n}\n'
+  writeFileSync(join(dir, "spur.mjs"), body)
+  writeFileSync(join(dir, "dag.mjs"), body)
+  const refusedFolder = prepareRun(dir)
+  assert.equal(refusedFolder.ok, false)
+  if (!refusedFolder.ok) assert.match(refusedFolder.why, /ambiguous program: both spur\.mjs and dag\.mjs/)
+  // naming the legacy file while spur.mjs sits beside it: the same refusal
+  const refusedFile = prepareRun(join(dir, "dag.mjs"))
+  assert.equal(refusedFile.ok, false)
+  if (!refusedFile.ok) assert.match(refusedFile.why, /ambiguous program: both spur\.mjs and dag\.mjs/)
+  // naming spur.mjs directly is unambiguous — the explicit spur admits
+  const explicit = prepareRun(join(dir, "spur.mjs"))
+  assert.equal(explicit.ok, true)
+  if (!explicit.ok) return
+  assert.deepEqual(explicit.warnings, [])
+  const { abortJob } = await import("../src/store.ts")
+  abortJob(explicit.job, "test", 0, "cli")
+  assert.equal(listJobs().filter((job) => job.task === "x").length, 1)
+})
+
+test("run refuses a spur file that schedules or calls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-spur-bad-"))
+  writeFileSync(join(dir, "spur.mjs"), 'export const spur = { name: "x", steps: [{ id: "a", does: "actor", after: go() }] }\n')
+  const refused = prepareRun(join(dir, "spur.mjs"))
   assert.equal(refused.ok, false)
   if (!refused.ok) assert.match(refused.why, /does not call/)
 })
 
-test("run stages a program's roots.txt beside the dag", async () => {
+test("run stages a program's roots.txt beside the spur", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-roots-"))
   writeFileSync(
-    join(dir, "dag.mjs"),
-    'export const dag = { name: "rooted", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }] }\n',
+    join(dir, "spur.mjs"),
+    'export const spur = { name: "rooted", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }] }\n',
   )
   writeFileSync(join(dir, "roots.txt"), "/abs/target\n/abs/prototypes\n")
   const booked = prepareRun(dir)
@@ -137,8 +190,8 @@ test("run stages a program's roots.txt beside the dag", async () => {
 test("run refuses a gate step with no [gates] detector and books nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-gate-"))
   writeFileSync(
-    join(dir, "dag.mjs"),
-    'export const dag = {\n  name: "gated",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "await-review", does: "gate", after: ["students"] },\n    { id: "report", does: "report", after: ["await-review"] },\n  ],\n}\n',
+    join(dir, "spur.mjs"),
+    'export const spur = {\n  name: "gated",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "await-review", does: "gate", after: ["students"] },\n    { id: "report", does: "report", after: ["await-review"] },\n  ],\n}\n',
   )
   writeFileSync(
     join(dir, "workflow.toml"),

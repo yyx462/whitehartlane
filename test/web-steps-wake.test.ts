@@ -19,7 +19,7 @@ const CSID = "s-webt02c"
 // (a whole child program), then a trailing check wave
 const PARENT_TOML = `[workflow]
 name = "stepsdemo"
-dag_id = "stepsdemo"
+spur_id = "stepsdemo"
 
 [hooks]
 units = "true"
@@ -52,7 +52,7 @@ wave = "w3"
 // the child: a complete program with its own [[step]] table
 const CHILD_TOML = `[workflow]
 name = "child"
-dag_id = "child"
+spur_id = "child"
 
 [hooks]
 units = "true"
@@ -86,7 +86,7 @@ type JobFixture = {
 function writeJob(
   root: string,
   j: JobFixture,
-  opts: { toml?: string; dagSource?: string } = {},
+  opts: { toml?: string; spurSource?: string } = {},
 ) {
   const runDir = join(root, "sessions", j.sid, "jobs", j.jid, "run")
   mkdirSync(runDir, { recursive: true })
@@ -112,12 +112,12 @@ function writeJob(
         created: j.created,
         panes: [],
         receipt: { panesRemaining: 0, panesTotal: 0, unitsDone: 4, unitsFailed: 0, status: "done", finished: j.created },
-        dag: {
+        spur: {
           project: "p-webt2",
           project_name: "steps-webt",
-          dag_id: "stepsdemo",
+          spur_id: "stepsdemo",
           content_hash: "hash1",
-          source: opts.dagSource ?? "/nonexistent/gone-source",
+          source: opts.spurSource ?? "/nonexistent/gone-source",
         },
       },
       null,
@@ -165,7 +165,7 @@ function fixtureRoot(goneSource: string): string {
         panes: [],
         spawner: { tool: "rail", session_id: SID, since: "2026-10-03T00:00:05.000Z" },
         receipt: { panesRemaining: 0, panesTotal: 0, unitsDone: 3, unitsFailed: 0, status: "done", finished: "2026-10-03T00:00:09.000Z" },
-        dag: { project: "p-webt2", project_name: "steps-webt", dag_id: "child", content_hash: "hashc", source: goneSource },
+        spur: { project: "p-webt2", project_name: "steps-webt", spur_id: "child", content_hash: "hashc", source: goneSource },
       },
       null,
       2,
@@ -192,7 +192,7 @@ function fixtureRoot(goneSource: string): string {
       },
     },
     settled: { done: ["a", "b", "sub", "audit"], failed: [] },
-  }, { dagSource: goneSource })
+  }, { spurSource: goneSource })
 
   // the failed parent: b failed in w1 -> the wake is unreachable and
   // was never levied (no booking), the check cannot be asked
@@ -202,7 +202,7 @@ function fixtureRoot(goneSource: string): string {
     created: "2026-10-02T00:00:00.000Z",
     wakes: null,
     settled: { done: ["a"], failed: ["b"] },
-  }, { dagSource: goneSource })
+  }, { spurSource: goneSource })
 
   return root
 }
@@ -232,7 +232,8 @@ type ShapeNode = {
     state?: string
     status?: string
     outcome?: string | null
-    dag?: string | null
+    spur?: string | null
+    dag?: string | null // transition mirror of `spur` (one release)
     steps?: { id: string; finished_by: string }[]
     states?: { done: string[]; failed: string[] }
     reason?: string
@@ -292,7 +293,8 @@ test("steps shape carries chain edges, finish states, and the wake's child progr
   assert.equal(c.state, "retired")
   assert.equal(c.status, "success")
   assert.equal(c.outcome, "done")
-  assert.equal(c.dag, "p-webt2/child")
+  assert.equal(c.spur, "p-webt2/child")
+  assert.equal(c.dag, "p-webt2/child") // the mirror rides one release
   assert.deepEqual(
     (c.steps ?? []).map((s) => `${s.id}:${s.finished_by}`),
     ["x:end", "y:end", "z:check"],
@@ -314,7 +316,7 @@ test("steps shape carries chain edges, finish states, and the wake's child progr
   assert.match(sub2.child.reason ?? "", /unreachable/)
 })
 
-test("dag-definition fallback serves the staged steps with the wake child intact", async (t) => {
+test("definition fallback serves the staged steps with the wake child intact", async (t) => {
   const goneSource = join(tmpdir(), "aos-steps-gone2-" + Date.now())
   const root = fixtureRoot(goneSource)
   t.after(() => rmSync(root, { recursive: true, force: true }))

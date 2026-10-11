@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { order, parseDag, ready, tick, type Dag, type TickIn } from "../src/dag.ts"
+import { order, parseSpur, ready, tick, type Spur, type TickIn } from "../src/spur.ts"
 
-const program = readFileSync(join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "dag.mjs"), "utf8")
+const program = readFileSync(join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "spur.mjs"), "utf8")
 
-function dag(): Dag {
-  return parseDag(program)
+function spur(): Spur {
+  return parseSpur(program)
 }
 
 function state(over: Partial<TickIn> = {}): TickIn {
@@ -27,12 +27,12 @@ function state(over: Partial<TickIn> = {}): TickIn {
   }
 }
 
-test("a program is one small dag file and does not schedule", () => {
+test("a program is one small spur file and does not schedule", () => {
   assert.ok(program.split("\n").length < 20)
   assert.equal(program.includes("fan-out-orchestrator"), false)
   assert.equal(program.includes("while"), false)
-  assert.deepEqual(order(dag()), ["professor", "students", "grade", "report"])
-  const ran = spawnSync(process.execPath, [join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "dag.mjs")], {
+  assert.deepEqual(order(spur()), ["professor", "students", "grade", "report"])
+  const ran = spawnSync(process.execPath, [join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "spur.mjs")], {
     encoding: "utf8",
   })
   assert.equal(ran.status, 0)
@@ -41,28 +41,28 @@ test("a program is one small dag file and does not schedule", () => {
 })
 
 test("the file is not a second scheduler", () => {
-  assert.throws(() => parseDag(`${program}\nwhile (true) spawn("fan-out-orchestrator")\n`), /does not schedule/)
-  assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "actor", after: run() }] }\n'), /does not call/)
-  assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }, { id: "a", does: "grade" }] }\n'), /duplicate/)
-  assert.throws(() => parseDag('export const dag = { name: "x", steps: [{ id: "a", does: "wave", after: ["b"] }, { id: "b", does: "grade", after: ["a"] }] }\n'), /cyclic/)
+  assert.throws(() => parseSpur(`${program}\nwhile (true) spawn("fan-out-orchestrator")\n`), /does not schedule/)
+  assert.throws(() => parseSpur('export const spur = { name: "x", steps: [{ id: "a", does: "actor", after: run() }] }\n'), /does not call/)
+  assert.throws(() => parseSpur('export const spur = { name: "x", steps: [{ id: "a", does: "actor" }, { id: "b", does: "wave", after: ["a"] }, { id: "a", does: "grade" }] }\n'), /duplicate/)
+  assert.throws(() => parseSpur('export const spur = { name: "x", steps: [{ id: "a", does: "wave", after: ["b"] }, { id: "b", does: "grade", after: ["a"] }] }\n'), /cyclic/)
 })
 
 test("a program names one step per singleton verb; gates may be many", () => {
   assert.throws(
     () =>
-      parseDag(
-        'export const dag = { name: "x", steps: [{ id: "a", does: "wave" }, { id: "b", does: "wave", after: ["a"] }] }\n',
+      parseSpur(
+        'export const spur = { name: "x", steps: [{ id: "a", does: "wave" }, { id: "b", does: "wave", after: ["a"] }] }\n',
       ),
     /one wave step/,
   )
   assert.throws(
     () =>
-      parseDag(
-        'export const dag = { name: "x", steps: [{ id: "a", does: "report" }, { id: "b", does: "report", after: ["a"] }] }\n',
+      parseSpur(
+        'export const spur = { name: "x", steps: [{ id: "a", does: "report" }, { id: "b", does: "report", after: ["a"] }] }\n',
       ),
     /one report step/,
   )
-  const twoGates = parseDag(`export const dag = {
+  const twoGates = parseSpur(`export const spur = {
     name: "gates",
     steps: [
       { id: "a", does: "wave" },
@@ -74,11 +74,21 @@ test("a program names one step per singleton verb; gates may be many", () => {
   assert.equal(twoGates.steps.filter((step) => step.does === "gate").length, 2)
 })
 
+test("a legacy export const dag still parses, loudly (ADR 0009)", () => {
+  const warnings: string[] = []
+  const legacy = parseSpur('export const dag = { name: "x", steps: [{ id: "a", does: "actor" }] }\n', (m) => warnings.push(m))
+  assert.equal(legacy.name, "x")
+  assert.deepEqual(warnings, ["legacy export const dag — rename to export const spur"])
+  const silent = parseSpur('export const spur = { name: "x", steps: [{ id: "a", does: "actor" }] }\n', (m) => warnings.push(m))
+  assert.equal(silent.name, "x")
+  assert.equal(warnings.length, 1)
+})
+
 test("ready steps wait for the names in the file", () => {
-  const file = dag()
+  const file = spur()
   assert.deepEqual(ready(file, new Set()).map((step) => step.id), ["professor"])
   assert.deepEqual(ready(file, new Set(["professor"])).map((step) => step.id), ["students"])
-  const parallel = parseDag(`export const dag = {
+  const parallel = parseSpur(`export const spur = {
     name: "two",
     steps: [
       { id: "professor", does: "actor" },
@@ -90,7 +100,7 @@ test("ready steps wait for the names in the file", () => {
 })
 
 test("the os schedules the file: professor, then students, grade on end, report on stop", () => {
-  const file = dag()
+  const file = spur()
   assert.deepEqual(tick(file, state()), [{ do: "birth-actor" }])
   const open = tick(file, state({
     actorBorn: true,
@@ -128,7 +138,7 @@ test("the os schedules the file: professor, then students, grade on end, report 
 })
 
 test("a new protocol reopens students; the file does not loop", () => {
-  const file = dag()
+  const file = spur()
   const actions = tick(file, state({
     done: ["professor", "students", "grade"],
     actorBorn: true,
@@ -142,7 +152,7 @@ test("a new protocol reopens students; the file does not loop", () => {
   assert.deepEqual(actions, [{ do: "reopen", ids: ["students", "grade"] }])
 })
 
-const gateProgram = `export const dag = {
+const gateProgram = `export const spur = {
   name: "gate-run",
   steps: [
     { id: "professor", does: "actor" },
@@ -154,7 +164,7 @@ const gateProgram = `export const dag = {
 }\n`
 
 test("a gate holds the report until its detector says ready", () => {
-  const file = parseDag(gateProgram)
+  const file = parseSpur(gateProgram)
   assert.deepEqual(order(file), ["professor", "students", "grade", "await-review", "report"])
   const held = tick(file, state({
     done: ["professor", "students", "grade"],
@@ -179,7 +189,7 @@ test("a gate holds the report until its detector says ready", () => {
 })
 
 test("a gate with no after-edges waits only on its detector", () => {
-  const file = parseDag(`export const dag = {
+  const file = parseSpur(`export const spur = {
     name: "gate-only",
     steps: [
       { id: "await-review", does: "gate" },
@@ -193,7 +203,7 @@ test("a gate with no after-edges waits only on its detector", () => {
 })
 
 test("a reopen clears the gates downstream of the wave", () => {
-  const file = parseDag(gateProgram)
+  const file = parseSpur(gateProgram)
   const actions = tick(file, state({
     done: ["professor", "students", "grade", "await-review"],
     actorBorn: true,

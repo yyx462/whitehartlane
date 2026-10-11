@@ -537,7 +537,7 @@ function renderDags() {
     const dk = `${g.project}/${g.dag_id}`;
     const lr = g.latestRun;
     const params = new URLSearchParams({ dag: dk });
-    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
+    return `<tr class="row" data-href="#/spur-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(g.project_name || g.dag_id)}</span>
         <span class="cell-sub">${esc(g.dag_id)}</span>
@@ -638,7 +638,7 @@ function renderDagRunsList() {
     const jid = j.jid || j.id;
     const dk = `${j.dag.project}/${j.dag.dag_id}`;
     const params = new URLSearchParams({ dag: dk, run: `${j.sid}/${jid}` });
-    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
+    return `<tr class="row" data-href="#/spur-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(j.dag.project_name || j.dag.dag_id)}</span>
         <span class="cell-sub">${esc(j.dag.dag_id)}</span>

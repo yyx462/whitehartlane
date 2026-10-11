@@ -1,4 +1,4 @@
-export const dag = {
+export const spur = {
   name: "skill-rsi",
   steps: [
     { id: "professor", does: "actor" },

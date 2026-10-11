@@ -1,4 +1,4 @@
-export const dag = {
+export const spur = {
   name: "inbox-zero",
   steps: [
     { id: "tickets", does: "wave" },

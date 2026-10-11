@@ -4,7 +4,7 @@
 # run that costs two small agent turns.
 [workflow]
 name = "pause-fixture"
-dag_id = "pause-fixture"
+spur_id = "pause-fixture"
 kind = "coworker"
 worker_kind = "opencode"
 
