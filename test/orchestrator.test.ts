@@ -35,6 +35,7 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
       return fn ? fn(name, kind, briefPath, cwd) : true
     },
     paneAlive: (overrides.paneAlive as ShepPort["paneAlive"]) ?? (() => true),
+    agentWorking: (overrides.agentWorking as ShepPort["agentWorking"]) ?? (() => false),
     reprompt: (name, briefPath) => {
       reprompts.push(name)
       const fn = overrides.reprompt as ShepPort["reprompt"] | undefined
@@ -236,6 +237,31 @@ test("worktree churn defers the stall; the kill returns when the tree goes quiet
   done = cycle(base)
   assert.equal(done, true)
   assert.deepEqual(readState(dir).failed, ["france", "japan", "peru"])
+  assert.equal(wakes.length, 3)
+})
+
+test("a working agent outlives a quiet log and a quiet tree (j-964391)", async () => {
+  const dir = await copyExample("orch-agent-working-")
+  let clock = 0
+  let working = true
+  const { port, wakes } = fakeShep({ agentWorking: (name) => working && name === "w-france" })
+  const base = deps(dir, port, { stallMs: 1000, now: () => clock })
+  cycle(base)
+
+  // log quiet, tree quiet, agent mid-generation: france lives on
+  clock = 2500
+  let done = cycle(base)
+  assert.equal(done, false)
+  assert.ok(base.inFlight.has("france"))
+  assert.deepEqual(readState(dir).failed, ["japan", "peru"])
+  assert.equal(wakes.length, 2)
+
+  // the generation ends and the silence persists: the next window kills
+  working = false
+  clock = 6000
+  done = cycle(base)
+  assert.equal(done, true)
+  assert.deepEqual(readState(dir).failed, ["japan", "peru", "france"])
   assert.equal(wakes.length, 3)
 })
 

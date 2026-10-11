@@ -29,6 +29,10 @@ export type ShepPort = {
     cwd: string,
   ) => boolean
   paneAlive: (name: string) => boolean
+  // Heartbeat of last resort (j-964391): a worker mid-generation or a
+  // long bash call writes neither log lines nor file churn for minutes
+  // while being fully alive — herdr's agent_status is the only witness.
+  agentWorking?: (name: string) => boolean
   reprompt: (name: string, briefPath: string) => boolean
   retire: (name: string) => void
   retireAll: () => void
@@ -421,6 +425,11 @@ export function cycle(deps: CycleDeps): boolean {
           // the next silent window (quiet log AND quiet tree) re-arms.
           flight.lastChange = now()
           deps.emit?.("stall-deferred", { unit: id, reason: "worktree churn" })
+        } else if (deps.shep.agentWorking?.(`w-${id}`)) {
+          // j-964391: mid-generation or a long bash call — quiet log,
+          // quiet tree, live agent. The pane's own status is the word.
+          flight.lastChange = now()
+          deps.emit?.("stall-deferred", { unit: id, reason: "agent working" })
         } else {
           finish(id, false, { unit: id, result: "stalled", pass: false })
           deps.shep.retire(`w-${id}`)

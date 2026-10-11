@@ -591,6 +591,11 @@ export class Rail implements ShepPort {
     return this.herdr("agent", "get", this.scopedFn(name)).status === 0
   }
 
+  // Heartbeat of last resort (j-964391): herdr's own view of the pane.
+  agentWorking(name: string): boolean {
+    return this.agentState(name).includes('"agent_status":"working"')
+  }
+
   paneBlocked(name: string): boolean {
     return this.agentState(name).includes('"agent_status":"blocked"')
   }
