@@ -537,7 +537,7 @@ function renderDags() {
     const dk = `${g.project}/${g.dag_id}`;
     const lr = g.latestRun;
     const params = new URLSearchParams({ dag: dk });
-    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
+    return `<tr class="row" data-href="#/spur-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(g.project_name || g.dag_id)}</span>
         <span class="cell-sub">${esc(g.dag_id)}</span>
@@ -638,7 +638,7 @@ function renderDagRunsList() {
     const jid = j.jid || j.id;
     const dk = `${j.dag.project}/${j.dag.dag_id}`;
     const params = new URLSearchParams({ dag: dk, run: `${j.sid}/${jid}` });
-    return `<tr class="row" data-href="#/dag-status?${params.toString()}">
+    return `<tr class="row" data-href="#/spur-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(j.dag.project_name || j.dag.dag_id)}</span>
         <span class="cell-sub">${esc(j.dag.dag_id)}</span>
@@ -829,7 +829,7 @@ function renderLeft() {
   if (r.legacy) {
     left.innerHTML = `
       <div class="sp-head">
-        <div class="sp-title-row"><h2>Legacy runs</h2><span class="chip kind">no dag</span></div>
+        <div class="sp-title-row"><h2>Legacy runs</h2><span class="chip kind">no spur</span></div>
         <div class="sp-sub-row">Jobs from before spur identity — they live in /api/jobs only and are never rendered as spurs. Pick one to inspect on the right.</div>
       </div>
       <div class="sp-body"><div id="legacy-list" class="runsel-list">${paneEmpty("loading…")}</div></div>`;
@@ -1069,11 +1069,11 @@ function drawDiagram(body, defn, dk) {
     <div class="stale-bar" title="${esc(defn.stale.reason)}">
       <b>source folder gone</b> — showing the staged copy of run <span class="mono">${esc(defn.stale.fromRun)}</span>
       <span class="muted small">(sid ${esc(defn.stale.fromSid)} · ${esc(defn.stale.runDir)})</span>.
-      This dag cannot be triggered or edited until a live source folder is back: <span class="mono small">${esc(defn.stale.reason)}</span>
+      This spur cannot be triggered or edited until a live source folder is back: <span class="mono small">${esc(defn.stale.reason)}</span>
     </div>` : "";
   body.innerHTML = `
     ${staleBar}
-    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the dag source"} — drag to arrange (saved per dag) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}${defn.kind === "steps" ? " · edges chain wave to wave — dim = both ends finished, red = failed upstream" : ""}</div>
+    <div class="shape-meta">kind: ${esc(defn.kind)} · ${nodes.length} node${nodes.length === 1 ? "" : "s"} · ${edges.length} edge${edges.length === 1 ? "" : "s"} · ${defn.stale ? "staged copy (read-only)" : "live from the spur source"} — drag to arrange (saved per spur) · click a node for its full brief${state.split.route.run ? " · ×N badges = relayed messages of the selected run" : ""}${defn.kind === "steps" ? " · edges chain wave to wave — dim = both ends finished, red = failed upstream" : ""}</div>
     <div class="diagram-view">
       <div class="g-canvas" style="width:${W}px;height:${H}px" data-fp-w="${W}" data-fp-h="${H}" id="d-canvas">
         <svg class="d-svg" id="d-svg" width="${W}" height="${H}">
@@ -1106,7 +1106,7 @@ function drawDiagram(body, defn, dk) {
 // ----- live shape overlay (the diagram is a loop, not a one-shot) -----
 
 // message tallies of the selected run, keyed "from->to"; a run that
-// hasn't relayed yet (or a lab dag) yields an empty map harmlessly
+// hasn't relayed yet (or a lab spur) yields an empty map harmlessly
 function shapeTally() {
   const sp = state.split;
   const t = new Map();
@@ -1639,7 +1639,7 @@ async function cfgRunWithEdits() {
     showToast("refused: a file name is outside the editable whitelist", "err");
     return;
   }
-  if (!confirm(`Run once with ${changed.length} edited file${changed.length === 1 ? "" : "s"}?\n\nA one-time copy of the dag will run with your edits. Nothing is saved.`)) return;
+  if (!confirm(`Run once with ${changed.length} edited file${changed.length === 1 ? "" : "s"}?\n\nA one-time copy of the spur will run with your edits. Nothing is saved.`)) return;
   const btn = $("#cfg-rwe");
   btn.disabled = true;
   btn.textContent = "Running…";

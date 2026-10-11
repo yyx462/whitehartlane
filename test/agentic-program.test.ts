@@ -3,17 +3,17 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import type { Dag } from "../src/dag.ts"
+import type { Spur } from "../src/spur.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-toys-"))
 
 const { prepareRun } = await import("../src/run.ts")
-const { loadDagFile, tick } = await import("../src/dag.ts")
+const { loadSpurFile, tick } = await import("../src/spur.ts")
 const { loadManifest, runCounts, runGrade, runSignalDetector, runEndDetector, runGateDetector } = await import("../src/hooks.ts")
 const { readSignal, endOf } = await import("../src/live-run.ts")
 const { abortJob } = await import("../src/store.ts")
 
-const PROG = join(import.meta.dirname, "..", "examples", "agentic-program")
+const PROG = join(import.meta.dirname, "..", "examples", "lab-spurs")
 
 type Unit = { id: string; brief: string }
 type End = { id: string; end: string | null }
@@ -30,14 +30,14 @@ type World = {
 // staged detectors and hooks, and the real tick — the harness only
 // plays the world: the professor's pen, the students' keyboards, the
 // human's verdict files
-function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: { unit: string; result: string; pass: boolean }[]; beats: number } {
+function driveLife(name: string, world: World): { dir: string; spur: Spur; rows: { unit: string; result: string; pass: boolean }[]; beats: number } {
   const src = mkdtempSync(join(tmpdir(), `toy-${name}-`))
   cpSync(join(PROG, name), src, { recursive: true })
   const booked = prepareRun(src)
   assert.equal(booked.ok, true, booked.ok ? "" : booked.why)
   if (!booked.ok) throw new Error(booked.why)
   const dir = booked.job.dir
-  const dag = loadDagFile(join(dir, "dag.mjs"))
+  const spur = loadSpurFile(join(dir, "spur.mjs"))
   const manifest = loadManifest(dir)
   world.onStart?.(dir)
 
@@ -66,11 +66,11 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
     const waveClosed = ends.length > 0 && ends.every((row) => row.end !== null)
     world.onBeat?.(dir, beats, { waveClosed, graded: [...graded.keys()] })
     const gatesReady: string[] = []
-    for (const step of dag.steps.filter((s) => s.does === "gate")) {
+    for (const step of spur.steps.filter((s) => s.does === "gate")) {
       if (done.has(step.id) || !step.after.every((id) => done.has(id))) continue
       if (runGateDetector(dir, manifest, step.id)) gatesReady.push(step.id)
     }
-    const actions = tick(dag, {
+    const actions = tick(spur, {
       done: [...done],
       actorBorn,
       signal: signal.kind,
@@ -124,7 +124,7 @@ function driveLife(name: string, world: World): { dir: string; dag: Dag; rows: {
   }
   assert.equal(reported, true, `${name}: the run must reach its report`)
   abortJob(booked.job, "test", 0, "cli")
-  return { dir, dag, rows: finished, beats }
+  return { dir, spur, rows: finished, beats }
 }
 
 function writeProtocol(dir: string, units: Unit[]): void {
@@ -227,47 +227,59 @@ test("inbox-zero: a rejection requeues through the world and the report waits fo
   assert.deepEqual(counts, { tickets: 3, replied: 3, failed: 0 })
 })
 
-test("two-signoffs: the report waits for both independent gates", () => {
-  let secAt: number | null = null
-  const sections = readFileSync(join(PROG, "two-signoffs", "data", "sections.md"), "utf8").split(/\n---+\n/)
-  const life = driveLife("two-signoffs", {
-    onBirthActor(dir) {
-      const units: Unit[] = []
-      for (let s = 1; s <= 2; s++) {
-        for (const lang of ["de", "ja"]) {
-          units.push({
-            id: `s${s}-${lang}`,
-            brief: `Translate this timeline section to ${lang}. Preserve markdown headings and times.\n${sections[s - 1]}`,
-          })
-        }
+test("two-signoffs: the report waits for both independent checks (ADR 0007)", async () => {
+  const orch = await import("../src/orchestrator.ts")
+  const { copyExampleNamed } = await import("./util.ts")
+  const dir = await copyExampleNamed("fan-out-spurs/two-signoffs", "signoffs-wait-")
+  const spawned: string[] = []
+  const port: import("../src/orchestrator.ts").ShepPort = {
+    setLayout: () => {},
+    spawnWorker: (name, _kind, _briefPath, cwd) => {
+      spawned.push(name)
+      // the scripted packager: the deliverable lands in the run dir's
+      // data/signoffs/ (the brief's ../../data/signoffs/ from the unit dir)
+      const target = join(cwd, "..", "..", "data", "signoffs")
+      mkdirSync(target, { recursive: true })
+      for (const f of ["de-1", "de-2", "ja-1", "ja-2"]) {
+        writeFileSync(join(target, `${f}.md`), `(${f}) translated\n`)
       }
-      writeProtocol(dir, units)
+      appendFileSync(join(cwd, "log.txt"), `done ${name.slice(2)}\n`)
+      return true
     },
-    onWave(dir, units) {
-      for (const u of units) {
-        const home = join(dir, "units", u.id)
-        mkdirSync(home, { recursive: true })
-        writeFileSync(join(home, "draft.md"), `${u.brief}\n`)
-        appendFileSync(join(home, "log.txt"), `done ${u.id}\n`)
-      }
-    },
-    onPrompt(dir) {
-      writeFileSync(join(dir, "protocol.json"), JSON.stringify({ stop: true }))
-    },
-    onBeat(dir, beat, view) {
-      if (secAt === null && view.waveClosed) secAt = beat
-      if (secAt !== null && beat === secAt + 2) {
-        mkdirSync(join(dir, "signoffs"), { recursive: true })
-        writeFileSync(join(dir, "signoffs", "security.md"), "no internal hosts leaked\n")
-      }
-      if (secAt !== null && beat === secAt + 4) {
-        mkdirSync(join(dir, "signoffs"), { recursive: true })
-        writeFileSync(join(dir, "signoffs", "legal.md"), "no liability admitted\n")
-      }
-    },
+    paneAlive: () => true,
+    retire: () => {},
+    retireAll: () => {},
+    verify: () => "pane-reap: 0 remaining",
+    wake: () => {},
+    tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
+  }
+  const engine = orch.runOrchestrator({
+    taskDir: dir,
+    shep: port,
+    gateCheckMs: 100,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
   })
-  assert.equal(existsSync(join(life.dir, "signoffs", "security.md")), true)
-  assert.equal(existsSync(join(life.dir, "signoffs", "legal.md")), true)
-  const counts = runCounts(life.dir, loadManifest(life.dir), life.rows)
-  assert.deepEqual(counts, { sections: 4, delivered: 4 })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  // the draft settled, but no signoff has landed — one check is not a report
+  assert.deepEqual(spawned, ["w-draft"])
+  mkdirSync(join(dir, "signoffs"), { recursive: true })
+  writeFileSync(join(dir, "signoffs", "security.md"), "no internal hosts leaked\n")
+  const stillWaiting = await Promise.race([
+    engine.then(() => "reported" as const),
+    new Promise((resolve) => setTimeout(() => resolve("waiting" as const), 400)),
+  ])
+  assert.equal(stillWaiting, "waiting")
+  writeFileSync(join(dir, "signoffs", "legal.md"), "no liability admitted\n")
+  const report = await Promise.race([
+    engine,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("both signoffs never finished the run")), 4000)),
+  ])
+  assert.equal(report.status, "done")
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.equal(byUnit["signoff-legal"], "gate passed")
+  assert.equal(byUnit["signoff-security"], "gate passed")
+  assert.equal(existsSync(join(dir, "data", "signoffs", "ja-2.md")), true)
 })

@@ -1,13 +1,13 @@
 // The lab engine (moved out of bin/lab-orchestrator so tests can reach
 // it — the bin is only the door). A professor pane, then student panes.
-// A lab program is one dag file; when it is staged beside the run, the
+// A lab program is one spur file; when it is staged beside the run, the
 // file is the scheduler's input — read, never executed. The engine
 // drives the Rail: births panes, grades, relays wave closes to the
 // actor, answers permission dialogs, and writes the report.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
-import { loadDagFile, tick } from "./dag.ts"
+import { loadSpurFile, tick } from "./spur.ts"
 import { runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "./hooks.ts"
 import { emptyBoard } from "./lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
@@ -23,15 +23,20 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   const log = rail.log
   let jobText = ""
   try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
-  // A lab program is one dag file. When it is staged beside this run,
+  // A lab program is one spur file (ADR 0009; a staged legacy dag.mjs
+  // from an older run still reads). When it is staged beside this run,
   // the file is the scheduler's input: tick() decides every birth,
   // grade, prompt, and reopen. No second scheduler exists — the file
   // is read, never executed.
-  const dag = (() => {
+  const spur = (() => {
     try {
-      return loadDagFile(join(taskDir, "dag.mjs"))
+      return loadSpurFile(join(taskDir, "spur.mjs"))
     } catch {
-      return null
+      try {
+        return loadSpurFile(join(taskDir, "dag.mjs"))
+      } catch {
+        return null
+      }
     }
   })()
   // Detectors: the program's say in what a wave or an end is. Absent,
@@ -46,7 +51,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     }
   })()
   const detectors = manifestEarly?.detectors
-  const gateSteps = dag ? dag.steps.filter((s) => s.does === "gate") : []
+  const gateSteps = spur ? spur.steps.filter((s) => s.does === "gate") : []
   const gateMissed = gateSteps.filter((s) => !manifestEarly?.gates?.[s.id])
   if (gateMissed.length > 0) {
     throw new Error(`gate step ${gateMissed.map((s) => s.id).join(", ")} has no [gates] detector — refusing`)
@@ -159,13 +164,13 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     }
   }
 
-  // dag drives the actor's birth; a workflow.toml lab births it here
-  if (!dag) birthActor()
+  // spur drives the actor's birth; a workflow.toml lab births it here
+  if (!spur) birthActor()
 
   const done = new Set<string>()
-  let actorBorn = !!dag ? false : true
+  let actorBorn = !!spur ? false : true
   let openedWave = ""
-  let promptedDag = false
+  let promptedSpur = false
   const deadline = Date.now() + 2 * 60 * 60_000
   while (Date.now() < deadline) {
     const signal = detectors?.signal
@@ -194,9 +199,9 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     }
     let stopNow = false
     let reopened = false
-    if (dag) {
+    if (spur) {
       const waveKey = signal.kind === "wave" ? signal.wave.units.map((unit) => unit.id).join(",") : ""
-      const actions = tick(dag, {
+      const actions = tick(spur, {
         done: [...done],
         actorBorn,
         signal: signal.kind,
@@ -204,7 +209,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
         openedWave,
         ends,
         graded: [...graded.keys()],
-        prompted: promptedDag,
+        prompted: promptedSpur,
         gatesReady,
       })
       for (const action of actions) {
@@ -220,7 +225,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
           gradeUnit(action.id)
         } else if (action.do === "prompt-actor") {
           promptActor(ends)
-          promptedDag = true
+          promptedSpur = true
         } else if (action.do === "finish") {
           done.add(action.id)
         } else if (action.do === "reopen") {
@@ -229,7 +234,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
           mockPane.clear()
           closed.clear()
           graded.clear()
-          promptedDag = false
+          promptedSpur = false
           reopened = true
           rail.say("rail", `reopen ${action.ids.join(", ")}`)
         } else if (action.do === "report") {
@@ -275,7 +280,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       continue
     }
     for (const row of ends) {
-      if (!dag && gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
+      if (!spur && gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
       if (!closes(row.end) || closed.has(row.id)) continue
       const pane = mockPane.get(row.id)
       const name = paneName("mock", row.id)
@@ -292,7 +297,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       }
       rail.say("operator", `close ${name}`)
     }
-    if (!dag && waveClosed(ends)) {
+    if (!spur && waveClosed(ends)) {
       const mark = ends.map((row) => row.end).join(",")
       if (prompted !== mark) {
         prompted = mark
@@ -302,7 +307,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     await waitChange(taskDir, 5_000)
   }
   const finalEnds = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
-  const rows = dag
+  const rows = spur
     ? [...finished, ...finalEnds
         .filter((row) => !closes(row.end))
         .map((row) => ({ unit: row.id, result: row.end ?? "open", pass: row.end === "done" }))]

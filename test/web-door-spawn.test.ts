@@ -18,7 +18,7 @@ function fixtureRunningJob(root: string, jid: string, pid: number) {
   const jobDir = join(root, "sessions", SID, "jobs", jid)
   const runDir = join(jobDir, "run")
   mkdirSync(join(runDir, "members"), { recursive: true })
-  writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "door"\ndag_id = "door"\nkind = "coworker"\n')
+  writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "door"\nspur_id = "door"\nkind = "coworker"\n')
   writeFileSync(join(runDir, "members", "solo.md"), "You are solo.\n")
   writeFileSync(
     join(jobDir, "job.json"),
@@ -31,10 +31,10 @@ function fixtureRunningJob(root: string, jid: string, pid: number) {
       workflow: "coworker",
       panes: [],
       pid,
-      dag: {
+      spur: {
         project: "p-door",
         project_name: "door",
-        dag_id: "door",
+        spur_id: "door",
         content_hash: "x",
         source: join(tmpdir(), "aos-door-src-" + Date.now()),
         labels: {},

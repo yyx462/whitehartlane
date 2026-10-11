@@ -47,16 +47,36 @@ export type SeedPointer = {
   since: string
 }
 
-// Dag identity: the group a run belongs to. project is a minted pid
-// (project.json in the program folder); dag_id is unique inside it;
-// content_hash versions the staged program; branch/worktree are labels.
-export type DagIdentity = {
+// Spur identity (ADR 0009): the group a run belongs to. project is a
+// minted pid (project.json in the program folder); spur_id is unique
+// inside it; content_hash versions the staged program; branch/worktree
+// are labels.
+export type SpurIdentity = {
   project: string
   project_name: string
-  dag_id: string
+  spur_id: string
   content_hash: string
   source: string
   labels?: Record<string, string>
+}
+
+// ADR 0009: records on the OS disk written before the rename spell the
+// identity block `dag` with a `dag_id` key — read both spellings,
+// always answer the new one. Nothing old is rewritten; nothing new is
+// written in the old spelling.
+export function normalizeSpur(raw: unknown): SpurIdentity | null {
+  if (!raw || typeof raw !== "object") return null
+  const r = raw as Record<string, unknown>
+  const spurId = typeof r.spur_id === "string" && r.spur_id ? r.spur_id : typeof r.dag_id === "string" && r.dag_id ? r.dag_id : null
+  if (!spurId) return null
+  return {
+    project: String(r.project ?? ""),
+    project_name: String(r.project_name ?? ""),
+    spur_id: spurId,
+    content_hash: String(r.content_hash ?? ""),
+    source: String(r.source ?? ""),
+    ...(r.labels && typeof r.labels === "object" ? { labels: r.labels as Record<string, string> } : {}),
+  }
 }
 
 export type PaneRecord = {
@@ -90,7 +110,7 @@ export type JobRecord = {
   pid?: number
   repo?: string
   worktree?: string
-  dag?: DagIdentity
+  spur?: SpurIdentity
   state: JobState
   created: string
   finished?: string
@@ -263,7 +283,7 @@ export function createJob(input: {
   pid?: number
   repo?: string
   worktree?: string
-  dag?: DagIdentity
+  spur?: SpurIdentity
   spawner?: SpawnerPointer
 }): JobRecord {
   const id = shortId("j")
@@ -277,7 +297,7 @@ export function createJob(input: {
     pid: input.pid,
     repo: input.repo,
     worktree: input.worktree,
-    dag: input.dag,
+    spur: input.spur,
     spawner: input.spawner,
     state: "running",
     created: new Date().toISOString(),
@@ -289,7 +309,7 @@ export function createJob(input: {
     jid: job.id,
     dir: job.dir,
     task: job.task,
-    ...(job.dag ? { dag: job.dag } : {}),
+    ...(job.spur ? { spur: job.spur } : {}),
   })
   writeJson(join(jobDir(input.sid, job.id), "job.json"), job)
   return job
@@ -642,7 +662,7 @@ export function projectJob(sid: string, jid: string): JobRecord | null {
     workflow: "fan-out",
     task: String(born.task ?? ""),
     dir: String(born.dir ?? ""),
-    dag: born.dag as DagIdentity | undefined,
+    spur: normalizeSpur(born.spur ?? born.dag),
     state: "running",
     created: born.ts,
     panes: [],

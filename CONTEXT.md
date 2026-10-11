@@ -40,7 +40,7 @@ The namespace a spur id is unique in. A pid minted once, kept in `project.json` 
 _Avoid_: repo, worktree, folder path, git origin
 
 **Spur id**:
-The group runs gather under, unique inside its Project — a branch line off the main track: it stands up, runs to completion, and reports back while the main session carries on. Explicit `dag_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the spur identity: project, the id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify. The word is `spur` everywhere a human reads; `dag`/`dag_id` remain the historical key spelling on disk, in `workflow.toml`, and on the API — a format, never the word.
+The group runs gather under, unique inside its Project — a branch line off the main track: it stands up, runs to completion, and reports back while the main session carries on. Explicit `spur_id` in `workflow.toml`; else the workflow name; else a hashed id with a loud warning — it always exists. Each Job records the spur identity: project, the id, the source content hash (the version), the source path, and labels (branch, worktree) that display but never identify. The word AND the format are `spur` (`spur.mjs`, `spur_id`, ADR 0009); legacy `dag`/`dag_id` remain readable on disk and in old manifests — a format of the past, never written new.
 _Avoid_: workflow name collision, run id, Job id, tag, dag, loop
 
 **Workflow**:

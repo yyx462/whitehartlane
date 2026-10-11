@@ -3,7 +3,7 @@
 // Idle until a queue message: a log line, a pane wait, or the next
 // deadline. No poll. AGENTIC_OS_CHECK_MS is only the watch-failure backstop.
 // Thin door: the machinery lives in src/rail.ts (Rail), the engines in
-// src/lab.ts (runLab: dag/wave lab) and src/coworker-run.ts (runCoworker:
+// src/lab.ts (runLab: spur/wave lab) and src/coworker-run.ts (runCoworker:
 // zen 6 relay), the epilogue in Rail.run. Plain JS on purpose: this file
 // has no extension, so Node will not type-strip it. The modules it
 // imports are .ts and strip fine.
@@ -17,7 +17,7 @@ import { workflowKind } from "../src/workflow-kind.ts"
 
 const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 // A program names extra roots its workers may touch: roots.txt beside
-// the dag, one absolute path per line, staged by the run door. No env
+// the spur file, one absolute path per line, staged by the run door. No env
 // names — a program is data files, not shell plumbing; no tenant is
 // special to the rail.
 const programRoots = (() => {

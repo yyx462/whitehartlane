@@ -1,6 +1,6 @@
 // home trim, proved at the API: /api/home ships the KPI row, the
 // 14-day runs-per-day chart and the permission mix — and no
-// durationTrend (the per-dag trend panels are gone; the payload
+// durationTrend (the per-spur trend panels are gone; the payload
 // carries no dead weight). Fixture disk in the shape of src/store.ts,
 // server spawned like the other web tests.
 import assert from "node:assert/strict"
@@ -40,7 +40,7 @@ function fixtureRoot(jobs: FixtureJob[]): string {
     const jobDir = join(sdir, "jobs", j.jid)
     const runDir = join(jobDir, "run")
     mkdirSync(join(runDir, "members"), { recursive: true })
-    writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "home"\ndag_id = "home"\nkind = "coworker"\n')
+    writeFileSync(join(runDir, "workflow.toml"), '[workflow]\nname = "home"\nspur_id = "home"\nkind = "coworker"\n')
     writeFileSync(join(runDir, "members", "solo.md"), "You are solo.\n")
     writeFileSync(
       join(jobDir, "job.json"),
@@ -53,10 +53,10 @@ function fixtureRoot(jobs: FixtureJob[]): string {
         dir: runDir,
         workflow: "coworker",
         panes: [],
-        dag: {
+        spur: {
           project: "p-webhome",
           project_name: "home-fixture",
-          dag_id: "home",
+          spur_id: "home",
           content_hash: "hash1",
           source: join(tmpdir(), "aos-gone-source-" + Date.now()),
         },

@@ -1,10 +1,13 @@
 // v5.2 — the dangling-source read-only fallback, proved against a
-// fixture OS disk: a dag whose source folder is GONE still serves its
+// fixture OS disk: a spur whose source folder is GONE still serves its
 // definition from the newest run's staged copy (marked stale), Trigger
 // keeps refusing, and NOTHING on disk changes (the fallback is a
 // display, never a write — this is the safety net for the parked
 // "delete dangling runs" discussion; see
 // docs/research/dangling-source-pointers.md).
+// ADR 0009: the fixture records here are deliberately OLD-spelled
+// (`dag` block, `dag_id` key) — records written before the rename
+// must keep rendering (the server reads both spellings, always).
 import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -85,7 +88,7 @@ async function waitHealthy(port: number): Promise<void> {
   throw new Error("server did not come up")
 }
 
-test("dag-definition falls back read-only to the newest staged copy", async (t) => {
+test("a gone-source spur's definition falls back read-only to the newest staged copy (old dag_id records still render)", async (t) => {
   const goneSource = join(tmpdir(), "aos-definitely-gone-" + Date.now())
   const root = fixtureRoot(
     [
