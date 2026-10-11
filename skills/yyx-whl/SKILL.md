@@ -47,13 +47,54 @@ Runs; the events trace pane shows every booked fact.
    panes (fan-out: independent units; coworker: members that depend on
    each other). Interactive or one-answer work → do it yourself, STOP.
 2. **Scaffold the program folder** (in the project, committed):
-   `workflow.toml` — `[workflow] name`, dag_id (the spur id — set it
-   explicitly, or it is derived with a loud warning), `kind =
-   "fan-out" | "coworker"`, `slots`; `[hooks]` units/grade/counts
-   commands (coworker needs `members/*.md`, one brief per member — a
-   brief is a prompt, write it like one). Copy a shape from
-   `examples/agentic-program/` in this checkout
-   (`/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/examples/agentic-program/`).
+   `workflow.toml`, minimal template:
+
+   ```toml
+   [workflow]
+   name = "my-spur"
+   spur_id = "my-spur"   # set it explicitly, or it is derived with a
+                         # loud warning (spur_id after ADR 0009; legacy
+                         # dag_id still reads, also with a warning)
+   kind = "fan-out"      # or "coworker"
+   slots = 2
+
+   [hooks]
+   units = "true"                    # steps define the units (ADR 0007)
+   grade = "bash hooks/grade.sh"
+   counts = "bash hooks/counts.sh"
+
+   [[step]]
+   id = "g0"
+   finished_by = "end"               # a worker pane runs the step brief
+   wave = "w1"
+
+   [[step]]
+   id = "merged"
+   finished_by = "check"             # a command exits 0 — nothing works
+   check = "gh pr view g0-shared --json state | grep -q MERGED"
+   wave = "w2"
+
+   [[step]]
+   id = "child"
+   finished_by = "wake"              # a declared child program's receipt
+   folder = "./child-spur"
+   wave = "w3"
+   ```
+
+   Author's tie-breaker (ADR 0007): a deterministic sync check →
+   `check`; needs judgment → `end` (the brief says "verify and append
+   done/blocked"); a declared child program → `wake`. Waves are
+   grouping properties: a wave opens when every earlier wave finished,
+   and `end` steps within a wave run parallel under `slots`.
+   NO `dag.mjs`/`spur.mjs` in a fan-out/coworker spur folder — a
+   program file present makes it a LAB spur (a different rail).
+   Coworker needs `members/*.md`, one brief per member — a brief is a
+   prompt, write it like one. Copy a shape from this checkout:
+   `examples/fan-out-spurs/staged-waves` (waves + a check),
+   `examples/fan-out-spurs/nested-wakes` (wake steps),
+   `examples/coworker-spurs/steps-viz` (coworker),
+   `examples/lab-spurs/lab-program` (the lab rail). Read ADR 0007
+   (typed steps) and ADR 0009 (spur spelling) before inventing a shape.
 3. **Levy**: `whl run <folder> --from opencode:<your session id>` — never omit `--from`: the door refuses (a Job must wake somebody; `--unattended` is the explicit humanless exception, not the default).
    Your session id is in your own context (env/session metadata); if you
    genuinely cannot determine it, omit `--from` — the spur runs
@@ -83,7 +124,7 @@ Runs; the events trace pane shows every booked fact.
 ## Output contract
 
 The hand-back is exactly: the door's `job:`/`log:`/`trace:` lines, the
-spur id (`project/dag_id`), and the one-sentence hand-off. Later, when
+spur id (`project/spur_id`), and the one-sentence hand-off. Later, when
 the wake arrives, relay `wake.json`'s message + report path verbatim.
 If the wake (message or report) surfaces a defect in whl/agentic-os
 itself — a contract programs keep re-tripping (heartbeat path ambiguity,
