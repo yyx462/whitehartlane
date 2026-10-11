@@ -113,8 +113,11 @@ test("run books a lab Job from one spur file and stages it", async () => {
 
 test("a legacy dag.mjs still admits, loudly (ADR 0009)", async () => {
   // the file spelling is legacy; the export inside may be either —
-  // each legacy spelling pushes its own loud warning
+  // each legacy spelling pushes its own loud warning (project.json
+  // pre-written so the mint warning stays out of the exact list)
+  const proj = JSON.stringify({ project: "p-legacy", name: "old-lab" })
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-legacy-"))
+  writeFileSync(join(dir, "project.json"), proj)
   writeFileSync(
     join(dir, "dag.mjs"),
     'export const dag = {\n  name: "old-lab",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "report", does: "report", after: ["students"] },\n  ],\n}\n',
@@ -131,6 +134,7 @@ test("a legacy dag.mjs still admits, loudly (ADR 0009)", async () => {
   abortJob(booked.job, "test", 0, "cli")
   // a legacy file name with the new export inside: only the file warning
   const dir2 = mkdtempSync(join(tmpdir(), "agentic-os-legacy2-"))
+  writeFileSync(join(dir2, "project.json"), proj)
   writeFileSync(
     join(dir2, "dag.mjs"),
     'export const spur = {\n  name: "old-file",\n  steps: [\n    { id: "professor", does: "actor" },\n    { id: "students", does: "wave", after: ["professor"] },\n    { id: "report", does: "report", after: ["students"] },\n  ],\n}\n',
@@ -158,7 +162,10 @@ test("a folder holding both spur.mjs and dag.mjs is refused, not guessed (ADR 00
   const explicit = prepareRun(join(dir, "spur.mjs"))
   assert.equal(explicit.ok, true)
   if (!explicit.ok) return
-  assert.deepEqual(explicit.warnings, [])
+  assert.deepEqual(
+    explicit.warnings.filter((w) => !w.startsWith("no project.json")),
+    [],
+  )
   const { abortJob } = await import("../src/store.ts")
   abortJob(explicit.job, "test", 0, "cli")
   assert.equal(listJobs().filter((job) => job.task === "x").length, 1)
