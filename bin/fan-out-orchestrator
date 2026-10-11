@@ -9,6 +9,7 @@
 // Usage: bin/fan-out-orchestrator <taskDir>
 import { existsSync, readFileSync } from "node:fs"
 import { basename, isAbsolute, join, resolve } from "node:path"
+import { parse as parseToml } from "smol-toml"
 import { runOrchestrator, worktreeChurnedSince } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { liveSpawnerSessionIds } from "../src/store.ts"
@@ -66,12 +67,22 @@ const engine = () => {
   if (resumes.size > 0) {
     rail.log(`continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`)
   }
+  // deadline_ms on [workflow] is the run's hard ceiling (default 2h —
+  // runOrchestrator's). A program that must not outlive an hour says so
+  // in its manifest, not in shell plumbing.
+  let deadlineMs
+  try {
+    const wf = parseToml(readFileSync(join(rail.taskDir, "workflow.toml"), "utf8")).workflow
+    const dm = Number(wf?.deadline_ms ?? "")
+    if (dm > 0) deadlineMs = dm
+  } catch {}
   return runOrchestrator({
     taskDir: rail.taskDir,
     shep: rail,
     checkMs: Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined,
     slots: Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined,
     drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
+    deadlineMs,
     resumes,
     bookedWait,
     // ADR 0007 stage 3 — the rail as levy: wake steps spawn whole child
