@@ -1,0 +1,13 @@
+[workflow]
+name = "e2e-deadline"
+spur_id = "e2e-deadline"
+worker_kind = "opencode"
+deadline_ms = 90000
+
+[hooks]
+units = "bash hooks/units.sh"
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[report]
+where = "units/"

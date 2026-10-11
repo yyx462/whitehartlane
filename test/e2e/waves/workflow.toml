@@ -1,0 +1,24 @@
+# e2e-waves — one end step, then a check step that must NOT spawn a pane
+[workflow]
+name = "e2e-waves"
+spur_id = "e2e-waves"
+worker_kind = "opencode"
+
+[hooks]
+units = "true"
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[[step]]
+id = "writer"
+finished_by = "end"
+wave = "w1"
+
+[[step]]
+id = "gate"
+finished_by = "check"
+check = "test -f /tmp/e2e-battery/out/gate.txt"
+wave = "w2"
+
+[report]
+where = "units/"
