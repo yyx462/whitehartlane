@@ -41,6 +41,10 @@ const state = {
   split: null,
   opsBusy: {},
   toastTimer: null,
+  // Spur Runs select mode: pick runs, copy sid/jid + dir for an agent.
+  // Keyed by `sid/jid` — the tbody re-renders every poll, so selection
+  // must live here (DOM- or index-held state would be wiped mid-pick).
+  runSel: { mode: false, keys: new Set(), anchor: null },
 };
 
 function esc(s) {
@@ -570,6 +574,7 @@ function mountDagRunsList(seq) {
       <div class="panel-head">
         <h2>Spur Runs</h2>
         <span id="jrl-note" class="muted small"></span>
+        <span id="jrl-selbar"></span>
         <span class="grow"></span>
         <span id="jrl-sort" class="muted small"></span>
       </div>
@@ -628,17 +633,17 @@ function renderDagRunsList() {
       : "sort: created ↓ (default)";
   }
   const runs = dagJobs();
-  const note = $("#jrl-note");
-  if (note) note.textContent = `${runs.length} spur run${runs.length === 1 ? "" : "s"}`;
   if (!runs.length) {
     body.innerHTML = emptyRow(7, "no spur runs yet — trigger one from Spurs");
+    renderRunSelBar();
     return;
   }
   body.innerHTML = runs.map((j) => {
     const jid = j.jid || j.id;
     const dk = `${j.dag.project}/${j.dag.dag_id}`;
     const params = new URLSearchParams({ dag: dk, run: `${j.sid}/${jid}` });
-    return `<tr class="row" data-href="#/spur-status?${params.toString()}">
+    const selKey = `${j.sid}/${jid}`;
+    return `<tr class="row${state.runSel.keys.has(selKey) ? " sel" : ""}" data-runkey="${esc(selKey)}" data-href="#/spur-status?${params.toString()}">
       <td><div class="clamp">
         <span class="cell-name">${esc(j.dag.project_name || j.dag.dag_id)}</span>
         <span class="cell-sub">${esc(j.dag.dag_id)}</span>
@@ -651,6 +656,107 @@ function renderDagRunsList() {
       <td class="ctr ops">${opsButtonsHtml(stOf(j.status || j.state), j.sid, jid)}</td>
     </tr>`;
   }).join("");
+  renderRunSelBar();
+}
+
+// ----- Spur Runs select mode: whole row is the pick target, then Copy -----
+
+function runKeyOf(j) { return `${j.sid}/${j.jid || j.id}`; }
+
+function renderRunSelBar() {
+  const bar = $("#jrl-selbar");
+  const sel = state.runSel;
+  const runs = dagJobs();
+  // prune keys whose runs vanished (finished runs stay; GC'd dirs go)
+  const live = new Set(runs.map(runKeyOf));
+  for (const k of sel.keys) if (!live.has(k)) sel.keys.delete(k);
+  const n = sel.keys.size;
+  if (bar) {
+    bar.innerHTML = !sel.mode
+      ? `<button class="btn ghost" id="jrl-select" title="pick runs, then copy their ids + dirs">Select</button>`
+      : `<span class="muted small">${n} selected</span>` +
+        `<button class="btn primary" id="jrl-copy"${n ? "" : " disabled"}>Copy${n ? " " + n : ""}</button>` +
+        `<button class="btn ghost" id="jrl-done" title="Esc">Done</button>`;
+  }
+  const note = $("#jrl-note");
+  if (note) {
+    note.textContent = sel.mode
+      ? `select mode · ${runs.length} run${runs.length === 1 ? "" : "s"}`
+      : `${runs.length} spur run${runs.length === 1 ? "" : "s"}`;
+  }
+  const hint = $("#view .legacy-note");
+  if (hint) {
+    hint.textContent = sel.mode
+      ? "select mode — click rows to toggle · shift-click for a range · Copy writes one `sid/jid dir` line per run · Esc to leave"
+      : "every run of every spur, flat — click a row for its Spur Status · ops act on the run (see Spurs for a per-spur view)";
+  }
+}
+
+function paintRunSel() {
+  $$("#jrl-body tr[data-runkey]").forEach((tr) => {
+    tr.classList.toggle("sel", state.runSel.keys.has(tr.dataset.runkey));
+  });
+  renderRunSelBar();
+}
+
+function toggleRunSel(key, range) {
+  const sel = state.runSel;
+  if (range && sel.anchor) {
+    const keys = $$("#jrl-body tr[data-runkey]").map((tr) => tr.dataset.runkey);
+    const a = keys.indexOf(sel.anchor);
+    const b = keys.indexOf(key);
+    if (a >= 0 && b >= 0) {
+      // shift-click = exactly this range (anchor stays put, so a wrong
+      // pick is fixed by shift-clicking the right end, not by unwinding)
+      sel.keys = new Set(keys.slice(Math.min(a, b), Math.max(a, b) + 1));
+      paintRunSel();
+      return;
+    }
+  }
+  if (sel.keys.has(key)) sel.keys.delete(key);
+  else sel.keys.add(key);
+  sel.anchor = key;
+  paintRunSel();
+}
+
+function exitRunSel() {
+  const sel = state.runSel;
+  sel.mode = false;
+  sel.keys.clear();
+  sel.anchor = null;
+  paintRunSel();
+}
+
+async function copyRunSel() {
+  const sel = state.runSel;
+  if (!sel.keys.size) return;
+  const lines = dagJobs()
+    .filter((j) => sel.keys.has(runKeyOf(j)))
+    .map((j) => `${runKeyOf(j)} ${j.dir || ""}`.trimEnd());
+  if (!(await copyText(lines.join("\n")))) {
+    showToast("copy blocked by the browser — clipboard needs a click first", "err");
+    return;
+  }
+  showToast(`copied ${lines.length} run${lines.length === 1 ? "" : "s"} — sid/jid + dir per line`);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // tailnet http is not a secure context — execCommand still works there
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
 }
 
 function mountSplit(r, seq) {
@@ -2645,6 +2751,21 @@ async function runOps(verb, sid, jid) {
 }
 
 function bodyClick(e) {
+  // Spur Runs select-mode bar (checked first: its buttons sit inside
+  // rows-adjacent chrome, keep them out of the row/data-run branches)
+  if (e.target.closest("#jrl-select")) {
+    state.runSel.mode = true;
+    paintRunSel();
+    return;
+  }
+  if (e.target.closest("#jrl-done")) {
+    exitRunSel();
+    return;
+  }
+  if (e.target.closest("#jrl-copy")) {
+    copyRunSel();
+    return;
+  }
   const evEnt = e.target.closest("[data-ev-ent]");
   if (evEnt) {
     e.preventDefault();
@@ -2691,6 +2812,16 @@ function bodyClick(e) {
     $$(".runsel").forEach((b) => b.classList.toggle("active", b.dataset.run === key));
     if (state.split && state.split.route.run !== key) setHash(splitHref({ run: key }));
     return;
+  }
+  // Spur Runs select mode: bare row clicks toggle selection, navigation
+  // is suspended (ops buttons above still work — this guard skips them)
+  if (state.runSel.mode) {
+    const srow = e.target.closest("#jrl-body tr[data-runkey]");
+    if (srow && !e.target.closest("a, button, input, textarea, select")) {
+      e.preventDefault();
+      toggleRunSel(srow.dataset.runkey, e.shiftKey);
+      return;
+    }
   }
   const row = e.target.closest("[data-href]");
   if (row && !e.target.closest("a, button, input, textarea, select")) {
@@ -2746,7 +2877,10 @@ window.addEventListener("hashchange", onRoute);
 document.body.addEventListener("click", bodyClick);
 document.addEventListener("change", onDocChange);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeNodePopup();
+  if (e.key === "Escape") {
+    closeNodePopup();
+    if (state.runSel.mode) exitRunSel();
+  }
 });
 
 // ----- theme switch (Tottenham dark / light) -----
