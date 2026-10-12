@@ -13,7 +13,7 @@
 import { spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
@@ -144,6 +144,7 @@ export class Rail implements ShepPort {
   // fleet tab state (layout tab = "new")
   private layout: { tab: "same" | "new"; orchestrator: "left" | "right" } = { tab: "same", orchestrator: "left" }
   private fleetRoot: string | null = null
+  private fleetTab: string | null = null
   private viewerPane: string | null = null
   // Privilege sweep bookkeeping: every pane the rail holds (mine), the
   // panes born as ENGINE workers via spawnWorker (workers — engines
@@ -357,7 +358,9 @@ export class Rail implements ShepPort {
   }
 
   private openFleetTab(dir: string): void {
-    const label = `fan-out-${basename(dir)}`.slice(0, 40)
+    // dir is the run dir (<session>/jobs/<jid>/run) — label by the JOB, not
+    // basename(dir) ("run" told the user nothing on leftover tabs)
+    const label = `fan-out-${basename(dirname(dir))}`.slice(0, 40)
     const r = this.herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus")
     const root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
     if (!root) {
@@ -366,6 +369,7 @@ export class Rail implements ShepPort {
       return
     }
     this.fleetRoot = root
+    this.fleetTab = jsonAt(r.stdout, (d) => (d as { result?: { tab?: { tab_id?: string } } }).result?.tab?.tab_id ?? null)
     // The tab root is not a shell. Split a shell, close the root, then
     // split that shell 50-50. The lane and the worker column are both new panes.
     const shell = this.splitPane(root, "right", dir, 0.5)
@@ -636,6 +640,14 @@ export class Rail implements ShepPort {
     this.paneOf.clear()
     this.liveWorkerPanes.length = 0
     this.log("retired every pane this orchestrator spawned")
+    // close what we opened: the fleet tab (viewer + worker column) is this
+    // orchestrator's own chrome — leftover fan-out-* tabs told the user
+    // nothing about whose they were. Parked runs re-open it on continue.
+    if (this.fleetTab) {
+      this.herdr("tab", "close", this.fleetTab)
+      this.log(`fleet tab ${this.fleetTab} closed`)
+      this.fleetTab = null
+    }
   }
 
   verify(): string {
