@@ -1,0 +1,21 @@
+# publish — the tail of the chain: one real unit, no further
+# delegation. Its report is what wakes review's publish step, which
+# wakes hand-off's review step — the ripple that closes the chain.
+#   standalone:  whl run publish --from <tool>:<session-id>
+[workflow]
+name = "hand-off-publish"
+worker_kind = "opencode"
+slots = 1
+
+[hooks]
+units = "true"
+grade = "bash hooks/grade.sh"
+counts = "node -p \"JSON.stringify({units: 1})\""
+
+[[step]]
+id = "sign"
+finished_by = "end"            # a worker pane runs members/sign.md
+wave = "w1"
+
+[report]
+where = "units/"
