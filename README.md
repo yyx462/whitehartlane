@@ -1,11 +1,13 @@
 # agentic-os
 
-**Two agents, two folders, one task. You get one ping when it's done.**
+**Run the loop first. Tune it afterwards — from the trace, not from guesswork.**
 
-agentic-os runs a task with several coding agents at once — each in its own
-terminal, each allowed to see only its own folder — and brings you back one
-answer. The program that runs them never thinks. The agents do the work;
-plain, predictable rules do the management.
+agentic-os is a tool for running a task with coding agents — each in its own
+terminal, each allowed to see only its own folder — and keeping a full record
+of what they did. The program that runs them never thinks. The point is not
+that several agents are better than one. The point is that an untuned loop
+can run today, and the trace it leaves is what you build the cheap version
+from tomorrow.
 
 ---
 
@@ -19,21 +21,14 @@ Monday morning. The team chat lights up:
 
 Two people could answer this. **Alex** has the dashboard exports — every
 number, none of the story. **Sam** has the sales notes — every deal, every
-"they went quiet in August," none of the numbers. Neither should be reading
-the other's files: the exports are sensitive, the notes are private. And the
-truth is in the *conversation* between them, not in either pile alone.
+"they went quiet in August," none of the numbers. The exports are sensitive
+and the notes are private, so neither should be reading the other's files.
 
-So you do what everyone does. You open one chat, paste both folders in, and
-ask.
-
-It doesn't work. One agent with both piles doesn't *balance* them — it picks
-a side. It either worships the spreadsheet ("+12%, the notes are anecdotal")
-or trusts the gut ("flat, the dashboard must be double-counting"). You spend
-the evening rewriting the prompt to nudge it back toward the middle. It
-drifts again. The meeting is in an hour.
-
-Two chats is worse: now *you* are the messenger, copying findings back and
-forth, and the moment you close the laptop the investigation dies.
+You could get one agent to answer this. Probably, eventually. But not before
+the meeting: first you have to find the prompt, and the only way to find it
+is to run, read the answer, tweak, and run again. Every attempt is blind —
+you see the final answer, not which question actually cracked it. Two chats
+is no better: now you are the messenger, and nothing is written down.
 
 ---
 
@@ -76,40 +71,54 @@ Done.
 Then your chat gets exactly one message: the answer, the counts, and where
 to look. Every number in it came from a file one of them actually opened.
 
-That's the whole product:
+No prompt was tuned for that run. That's the whole product:
 
 - **Each agent sees only its own folder.** Alex never had the notes; Sam
-  never had the exports. Private stays private — by rule, not by prompt.
+  never had the exports. Private stays private — by rule, not by a line in a
+  prompt you hope the model respects.
 - **They talk only through the supervisor.** Messages cross; files don't.
 - **The supervisor never thinks.** It opens the terminals, carries the
   messages, answers "may I read this?" itself, and retries when the API says
-  slow down. No model in the loop means no drift, no surprises, no babysitting.
+  slow down. Nothing in the loop to babysit.
 - **You get one ping, not a stream.** Success is quiet. Trouble is a real
   message. Close the laptop — the job finishes, pauses cleanly, or waits for
   you. Nothing is lost.
+- **You get the trace.** Every exchange is on disk: who asked what, which
+  file settled it, where they went back and forth. The answer is half the
+  run. The trace is the half you reuse.
 - **It's a folder, not a software project.** The task above is the whole
   integration. Any language for the hooks; an agent can write them for you.
 
 ---
 
-## Why two agents, not one smart one?
+## Run first, tune from the trace
 
-Because *combining* the piles is the bug, not the shortcut.
+The expensive part of a new task is not the tokens. It is the evening you
+spend discovering the prompt — blind reruns where you see the answer but not
+what produced it.
 
-One agent with both folders has one objective and one mood — so whichever
-side is louder wins, and your only fix is prompt-tuning a balance that
-drifts the moment the task changes. Two agents with separate folders can't
-collapse: each one can only optimize *its own* pile, and the only thing they
-share is the messages. The balance isn't tuned. It's enforced.
+So don't tune first. Run the loop as it stands. The rules — separate
+folders, messages carried between agents, permission asks answered, retries
+when the API slows down — are what make an untuned loop safe to just run.
+You spend tokens instead of an evening, and you get an answer the same day.
 
-(Engineers: this is decomposition-coordination — the ADMM family — applied to
-agents. The full mapping, and where the analogy honestly breaks, is below.)
+Then read the trace and keep only what mattered. The exchanges that cracked
+the question fold into one prompt. Or drop the agents entirely and keep the
+steps as a fixed workflow — hooks and checks, no model in the loop at all.
+Either way the second version spends a fraction of the tokens, and it was
+shaped by what actually happened, not by guessing which line of the prompt
+mattered.
+
+One agent may well be the right end state. We don't claim otherwise, and we
+have no figures that say so. This is a tool for getting a loop running today
+and keeping the evidence to make it cheap tomorrow — not a method, and not a
+leaderboard.
 
 ---
 
 ## A second story: the contract
 
-The same shape solves a different pain. Two codebases need to agree on an
+The same tool runs a different kind of loop. Two codebases need to agree on an
 API change — the server team and the app team. Neither should be reading the
 other's repo. So each side gets an agent with access to only its own
 codebase, and they negotiate the change through messages: the server side
@@ -124,8 +133,10 @@ vibes. When they disagree, the disagreement is a file you can read.
 
 | You stop… | Because… |
 |---|---|
+| **Tuning prompts before you know anything** | Run the loop first. The trace shows what actually mattered; tune from that. |
+| **Paying full price on every repeat** | The second version is one prompt, or a fixed workflow with no model in it — shaped by the trace, spending a fraction of the tokens. |
+| **Guessing which line mattered** | Every exchange is on disk. You can see which question cracked it. |
 | **Leaking files between agents** | Each agent is confined to the folders you name. Secrets-shaped paths are refused outright. |
-| **Drowning one chat in two worlds** | Agents never see each other's context. Only short messages cross. |
 | **Babysitting** | One ping when it's done; silence means it's going fine. |
 | **Losing the evening** | It runs while you don't watch. Pause, resume, and "pick up where it died" are built in. |
 | **Trusting "it ran"** | Every birth, death, message, and verdict is appended to one log. Anything you can read is a summary of that log. |
@@ -145,7 +156,9 @@ vibes. When they disagree, the disagreement is a file you can read.
 > happen to be agents you can watch think, plus a **process supervisor**
 > (think systemd) that keeps the books. "OS" is a nickname for that
 > bookkeeping — it is not a kernel, and your normal chat keeps working beside
-> it.
+> it. It makes no claim that several agents beat one: one agent may be the
+> right end state. The tool's job is the loop today and the trace for
+> tomorrow.
 
 The one-line version: **agents do the work, rules do the management.**
 
@@ -154,57 +167,8 @@ The one-line version: **agents do the work, rules do the management.**
 ## The rest of this page is for the technical reader
 
 Everything above is the product. Everything below is the engineering: the
-decomposition argument in full, the definition against today's terminology,
-and why this isn't LangGraph, firstmate, tmux, or a fleet board.
-
----
-
-## Why two heads — the engineering version
-
-**Fusion** puts both worlds in one context window: one objective, one mode,
-and whichever gradient dominates takes over — data-worship or
-intuition-worship. The countermeasure is a balance coefficient in a prompt:
-continuous, unmeasurable, per-task, and painful to tune. You are hand-tuning
-what should be architecture.
-
-**Decomposition** — ADMM, alternating minimization, the whole family — keeps
-the pieces discrete: each block optimizes its *own* objective over its
-*private* variables, and the blocks coordinate only through a small
-**consensus quantity**, updated in alternation. Nobody's raw world ever
-merges; global behavior emerges from local solves plus a narrow interface.
-Mapped onto this system, almost embarrassingly exactly:
-
-| Optimization piece | agentic-os piece |
-|---|---|
-| Local block with private data | A member: its own context window, its own `roots`, its own brief |
-| Local objective — and local solver | The brief; each member may run a *different model* (fusion can't) |
-| Private data that never pools | `roots` — the notes never reach the exports, the exports never reach the notes |
-| Consensus variable: small, shared | **The typed message file** — the only thing that crosses |
-| The coordination step | The rail's relay: mail moved into the named member's prompt; a worker never writes another worker |
-| Alternation, not a shouting match | Turns — propose, question, tune; mail is never delivered mid-turn |
-| Stopping rule | The `grade` hook, retry caps, the run deadline |
-| Iteration log you can audit | The message files on the job dir — the negotiation is on disk |
-
-> Fusion tunes a prompt coefficient; decomposition enforces an interface.
-> The message file is the only gradient that crosses the wall.
-> You can't prompt your way to a balance the architecture already enforces.
-
-**Where the analogy honestly breaks:** ADMM comes with a convergence
-theorem; agents don't. Alternation can oscillate or settle on a
-plausible-but-wrong consensus — so the guards are external: the grade
-decides the color, caps bound the spend, and the report separates a worker's
-`done` claim from the graded verdict. And where ADMM's mathematician chooses
-the consensus variable, here the program author chooses the message schema —
-that choice (the x-split) is the real design skill: a narrow, checkable
-interface converges; a wide one just moves fusion somewhere else. We borrow
-the decomposition, the interface, and the audit trail — not the proof.
-
-The same alternation is a first-class workflow kind (`lab`): an Actor writes
-a protocol naming the next wave, the rail births it, the grade names the
-next. It is also how this repo tuned its own permission gate — prompt
-candidates scored against seeded cases, the measured winner landed
-automatically (`jev-tuner/`). Decomposition-coordination isn't the
-marketing; it's the method this repo already runs on.
+definition against today's terminology, and why this isn't LangGraph,
+firstmate, tmux, or a fleet board.
 
 ---
 
@@ -229,10 +193,10 @@ marketing; it's the method this repo already runs on.
 | **Process supervisor** — supervisord, systemd | **Yes, at pane granularity** | Booked birth, born/died ledger, orphan sweep, pause/abort/continue. herdr owns ttys and shep spawns — mechanisms, not owners. |
 | **Agent distro** — firstmate's coinage | **No** | firstmate is instructions that turn an agent into a supervisor. agentic-os is a program that supervises agents. Same ocean, opposite compass. |
 
-The one-line version: **agents at the edges, determinism in the middle.** Use
-an agent once, at compile time — a planner writes the hooks. Use the workflow
-many times, at run time — the rail executes it cheaply, observably,
-unattended.
+The one-line version: **agents at the edges, determinism in the middle.** A
+planner — human or agent — writes the hooks; the rail runs them cheaply,
+observably, unattended, and the trace of every run is what a later, cheaper
+version is built from.
 
 ---
 
