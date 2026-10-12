@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -398,4 +398,38 @@ test("a top-level temp allow grants the temp root itself, never the whole disk (
   assert.equal(ext["/tmp/**"], "allow")
   assert.ok(!("/​**" in ext), "the whole disk is never granted")
   assert.ok(!("" in ext), "no degenerate empty root lands in the config")
+})
+
+test("retireAll closes the fleet tab it opened (close what we opened)", () => {
+  const calls: { tool: string; args: string[] }[] = []
+  const herdrRunner = (args: string[]): RunnerResult => {
+    calls.push({ tool: "herdr", args })
+    const a = args.join(" ")
+    if (args[0] === "tab" && args[1] === "create") {
+      return {
+        status: 0,
+        stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }),
+      }
+    }
+    if (args[0] === "pane" && args[1] === "split") return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wX:s1" } } }) }
+    return { status: 0, stdout: "" }
+  }
+  const rail = new Rail({
+    argvDir: mkdtempSync(join(tmpdir(), "rail-fleet-")),
+    ledger: null,
+    log: () => {},
+    shepRunner: () => ({ status: 0, stdout: "" }) as RunnerResult,
+    herdrRunner,
+  })
+  rail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-fleet1/run")
+  const labelCall = calls.find((c) => c.args[0] === "tab" && c.args[1] === "create")
+  assert.ok(labelCall, "tab created")
+  assert.match(labelCall!.args[3], /fan-out-j-fleet1/, "label carries the job id, not 'run'")
+  rail.retireAll()
+  const close = calls.find((c) => c.args[0] === "tab" && c.args[1] === "close" && c.args[2] === "wX:t9")
+  assert.ok(close, "fleet tab closed at retireAll")
+  // idempotent: a second retireAll does not close again
+  calls.length = 0
+  rail.retireAll()
+  assert.ok(!calls.some((c) => c.args[0] === "tab" && c.args[1] === "close"), "close once")
 })
