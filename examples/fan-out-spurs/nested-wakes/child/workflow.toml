@@ -3,7 +3,7 @@
 # shows the nesting mechanics — levy, receipt, wake — without burning
 # agents. Put real units or [[step]] tables here and the parent's step
 # simply waits for the bigger fixture's full-time.
-#   standalone:  agentic-os run child
+#   standalone:  whl run child --from <tool>:<session-id>
 [workflow]
 name = "nested-child"
 worker_kind = "opencode"

@@ -51,8 +51,8 @@ worker implements this; precision matters):
   upgrade, and nothing new is written in the old spelling.
 - Old job dirs on the OS disk keep rendering: stored records with
   `dag_id` read as before.
-- The `agentic-program/dag-purge/` program that executed this cleanup
-  updates its own `dag_id` to `spur_id` as part of the sweep — the
-  last manifest to carry the old key by intent.
+- The dag-purge program that executed this cleanup was itself retired
+  once the sweep landed — one-off work programs are scaffolding, not
+  fixtures; chain-spurs/ and friends carry the patterns now.
 - A folder holding both spellings is refused, not guessed: ambiguity
   is an authoring error, named loudly.

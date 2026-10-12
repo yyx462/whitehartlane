@@ -1,2 +1,0 @@
-dag-purge
-Retire the "dag" spelling from agentic-os (file, key, identifiers, labels, docs, examples) and reorganize examples/ into lab-spurs/ fan-out-spurs/ coworker-spurs/. Read ADR 0007 and CONTEXT.md first; write ADR 0009 for the rename.
