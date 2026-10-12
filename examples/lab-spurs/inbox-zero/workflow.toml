@@ -1,6 +1,7 @@
 # inbox-zero — an auto-responder. No professor: the world is the wave
 # source, you are the veto.
-#   run it:     agentic-os run inbox-zero
+#   run it:     whl run inbox-zero --from <tool>:<session-id>
+#               (or --unattended when nobody waits for the wake)
 #   drop mail:  put *.ticket files into inbox/ (a data/inbox seed is
 #               staged for a first demo run)
 #   stop early: touch inbox/STOP

@@ -2,7 +2,8 @@
 # approved, twice, by independent authorities on their own clock.
 # ADR 0007's own named example, in the manifest grammar: one work wave,
 # then two check steps — the [gates] table deprecated into checks.
-#   run it:  agentic-os run two-signoffs
+#   run it:  whl run two-signoffs --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
 #   checks:  drop signoffs/security.md and signoffs/legal.md (any
 #            order, any time apart) — the report lands only when both
 #            exist. A scanner CI job may write one of them.
