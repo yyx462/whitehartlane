@@ -404,7 +404,7 @@ tr.row:hover .cell-name { color: var(--accent); }
    specificity beats the zebra stripe and row hover, both (0,2,2). */
 .data-table tbody tr.row.sel {
   background: color-mix(in srgb, var(--accent) 28%, var(--panel));
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
 }
 .data-table tbody tr.row.sel:hover {
   background: color-mix(in srgb, var(--accent) 36%, var(--panel));
@@ -417,6 +417,33 @@ tr.row:hover .cell-name { color: var(--accent); }
   gap: 8px;
   margin-left: 12px;
 }
+
+/* Select entry: a real box, tinted with the same steel-blue that
+   marks selected rows — the button previews what the mode does.
+   (.btn:hover's gold border still applies; this deepens the fill.) */
+#jrl-select.btn {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--text);
+}
+#jrl-select.btn:hover {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-color: var(--gold);
+  color: var(--text);
+}
+
+/* trailing count in mode: accent while runs are picked, muted at 0 */
+#jrl-selbar .selcount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+#jrl-selbar .selcount.zero { font-weight: 400; color: var(--muted); }
+
+/* Done exits the mode — keep it secondary to Copy's primary, but the
+   default muted text on the navy fill reads gray-on-gray (borderline
+   "disabled") in light mode; full text color keeps it invitingly clickable */
+#jrl-done.btn { color: var(--text); }
 
 .dur-cell { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 
