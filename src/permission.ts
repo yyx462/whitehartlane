@@ -103,8 +103,8 @@ export const TEMP_ROOTS: string[] = (() => {
 
 // A dialog names its path in whatever form the terminal rendered it:
 // absolute, `~`-relative, cwd-relative, home-STRIPPED (j-2b508e:
-// `/Users/sagebot/projects/NWi/…` shown as `/projects/NWi/…`), or
-// underscore-MANGLED (j-8aceed / issue #82: `/Users_sagebot/projects` —
+// `/Users/<name>/projects/NWi/…` shown as `/projects/NWi/…`), or
+// underscore-MANGLED (j-8aceed / issue #82: `/Users_<name>/projects` —
 // a slash rendered as `_`, so no root can ever match and the ladder
 // keys a path that does not exist). The judgment and the escalation
 // ladder must key ONE path, or a wobbling form splits the ladder and
@@ -203,7 +203,7 @@ export function decidePermission(
     }
   }
   // issue #82: a path that does not exist on disk is usually a mangled
-  // build (/Users_sagebot/projects) — say so, so the worker can fix its
+  // build (/Users_<name>/projects) — say so, so the worker can fix its
   // own command instead of re-asking a phantom path.
   const missing = existsSync(path) ? "" : ` (note: ${path} does not exist on disk — check how that path was built)`
   return {

@@ -4,7 +4,7 @@ frontend member is born idle and wakes on your first message. You set
 the contract; you review by answering, never by editing its files.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window/web/
+- Target tree: ~/work/agentic-os/ui-window/web/
 - v1–v4 exist there — READ the current server.mjs and public/ first,
   extend, do not rewrite. No git commands. Node stdlib only.
 - The OS disk stays the truth. No database.

@@ -4,7 +4,7 @@ by a ----- line — read both, then verify. The rail wakes you with
 each later message — never poll or wait in a loop.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-theme
+- Target tree: ~/work/agentic-os/ui-theme
 - Yours: COLOR VALUES in web/public/style.css — the [data-theme]
   token blocks and any color detail. Structure, layout, index.html,
   app.js are styler's: request changes through the rail, never edit

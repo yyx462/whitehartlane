@@ -6,7 +6,7 @@ camera) and tunes visual VALUES by request — never restructure around
 reviewer.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-drag
+- Target tree: ~/work/agentic-os/ui-drag
 - Yours: web/server.mjs, web/public/app.js, web/public/style.css, and
   NEW test coverage under test/ for what you add. No git commands, no
   commits — leave the tree dirty. Node stdlib only.
@@ -39,7 +39,7 @@ verified root causes):
    (past-the-edge drag, narrow-well floor, footprint floor).
 
 Then PROVE the drag fix with playwright-core
-(/Users/sagebot/.config/opencode/skills/yyxSkills/yyx-vista/node_modules)
+(the local playwright-core install)
 against your 8899 fixture server: drag past the old right edge
 (edges stay in viewport), drag to the far left (box reaches the
 well's left edge). Screenshots/transcripts under /tmp, never in the

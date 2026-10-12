@@ -4,7 +4,7 @@ by a ----- line — read both, then verify. The rail wakes you with
 each later message — never poll or wait in a loop.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-drag
+- Target tree: ~/work/agentic-os/ui-drag
 - Yours: visual VALUES in web/public/style.css. Structure, layout,
   server, app logic are styler's: request changes through the rail,
   never edit them.

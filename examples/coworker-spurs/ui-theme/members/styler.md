@@ -5,7 +5,7 @@ token contract; reviewer tunes color VALUES by editing them — never
 restructure around reviewer.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-theme
+- Target tree: ~/work/agentic-os/ui-theme
 - Yours: web/public/style.css, web/public/index.html, web/public/app.js.
   web/server.mjs is not yours — never touch it. No git commands, no
   commits — leave the tree dirty. Node stdlib only.
