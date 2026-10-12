@@ -729,6 +729,9 @@ export class Rail implements ShepPort {
       },
       this.judge ?? tunedPermissionJudge(),
     )
+    // Forensics first (issue #82): the ask itself belongs in the log —
+    // a verdict on a mangled path was undiagnosable without it.
+    this.log(`dialog ${label}: ${question.split("\n").slice(0, 3).join(" ⏎ ").slice(0, 200)}`)
     const key = `${label}|${raw.path ?? "?"}`
     const prior = this.pathAsks.get(key) ?? 0
     this.pathAsks.set(key, prior + 1)
@@ -747,6 +750,16 @@ export class Rail implements ShepPort {
       this.herdr("agent", "send-keys", label, "enter")
     } else {
       this.herdr("agent", "send-keys", label, "esc")
+      // Delivery verification (issue #82): a verdict the pane cannot
+      // consume strands the worker — the deny's "ask again" promise
+      // can never be kept and the stall clock eats a productive pane
+      // (j-8aceed). Re-check the dialog; if it survived the first esc,
+      // re-send and log loudly so the postmortem sees the strand.
+      const stillUp = this.herdr("agent", "read", label).stdout.lastIndexOf("Permission required") >= 0
+      if (stillUp) {
+        this.herdr("agent", "send-keys", label, "esc")
+        this.log(`permission ${label}: dialog SURVIVED esc — re-sent esc; pane may need manual attach`)
+      }
       const note = `[permission] ${verdict.message}`
       const rc = this.herdr("agent", "prompt", label, note)
       if (rc.status !== 0) this.pendingNote.set(label, note)

@@ -102,12 +102,17 @@ export const TEMP_ROOTS: string[] = (() => {
 })()
 
 // A dialog names its path in whatever form the terminal rendered it:
-// absolute, `~`-relative, cwd-relative, or home-STRIPPED (j-2b508e:
-// `/Users/sagebot/projects/NWi/…` shown as `/projects/NWi/…`). The
-// judgment and the escalation ladder must key ONE path, or a wobbling
-// form splits the ladder and flips the verdict's reason. Normalizing:
-// `~` and cwd-relative resolve by construction; a bare `/…` that does
-// not exist on disk while `home + path` does is the stripped form.
+// absolute, `~`-relative, cwd-relative, home-STRIPPED (j-2b508e:
+// `/Users/sagebot/projects/NWi/…` shown as `/projects/NWi/…`), or
+// underscore-MANGLED (j-8aceed / issue #82: `/Users_sagebot/projects` —
+// a slash rendered as `_`, so no root can ever match and the ladder
+// keys a path that does not exist). The judgment and the escalation
+// ladder must key ONE path, or a wobbling form splits the ladder and
+// flips the verdict's reason. Normalizing: `~` and cwd-relative resolve
+// by construction; a bare `/…` that does not exist on disk while
+// `home + path` does is the stripped form; a first segment like
+// `/Users_<name>/` whose slash-repaired form exists (or is the home
+// prefix) is the mangled form.
 export function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
   let p = raw
   if (p === "~" || p.startsWith("~/")) p = home.replace(/\/$/, "") + p.slice(1)
@@ -115,6 +120,14 @@ export function normalizeDialogPath(raw: string, home: string, cwd?: string): st
   const homePrefix = home.replace(/\/$/, "")
   if (!p.startsWith(homePrefix) && !existsSync(p) && existsSync(homePrefix + p)) {
     p = homePrefix + p
+  }
+  // underscore-mangled home prefix: `/Users_<name>/…` -> `/Users/<name>/…`
+  const mangled = p.match(/^\/(Users|home)_([A-Za-z0-9._-]+)(\/|$)/)
+  if (mangled) {
+    const repaired = p.replace(/^\/(Users|home)_([A-Za-z0-9._-]+)(\/|$)/, "/$1/$2/")
+    if (!existsSync(p) && (repaired.startsWith(homePrefix) || existsSync(repaired))) {
+      p = repaired
+    }
   }
   // a directory rendered with its trailing slash is the same path
   return p.replace(/\/+$/, "") || p
@@ -189,11 +202,15 @@ export function decidePermission(
       }
     }
   }
+  // issue #82: a path that does not exist on disk is usually a mangled
+  // build (/Users_sagebot/projects) — say so, so the worker can fix its
+  // own command instead of re-asking a phantom path.
+  const missing = existsSync(path) ? "" : ` (note: ${path} does not exist on disk — check how that path was built)`
   return {
     decision: "deny-unneeded",
     path,
     escalatable: true,
-    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, ask again — a repeated ask for the same path is granted.`,
+    message: `denied: I don't think you need ${path} for this job — stay in the target tree and the job dir. If you truly need it, ask again — a repeated ask for the same path is granted.${missing}`,
   }
 }
 
