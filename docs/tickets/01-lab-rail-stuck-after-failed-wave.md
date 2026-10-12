@@ -18,8 +18,8 @@ no-op, the third is the loud forever-loop that masks the silence.
 | jid | `j-ed6dbb` (state `running`, panes 5/7) |
 | session | `s-fd413f` |
 | workflow | lab, `p-62499c/skill-desc-rounds` v`b22ace6e80ab` |
-| program | `/Users/sagebot/yyxSkills/skill-desc-lab/labs/skill-desc-rounds` @ `a4efdde` (committed in the target worktree, as yyx-whl prescribes) |
-| target worktree | `/Users/sagebot/yyxSkills/skill-desc-lab` (branch `skill-desc-lab`, gwt) |
+| program | `~/work/skill-desc-lab/labs/skill-desc-rounds` @ `a4efdde` (committed in the target worktree, as yyx-whl prescribes) |
+| target worktree | `~/work/skill-desc-lab` (branch `skill-desc-lab`, gwt) |
 | run dir | `~/.local/share/agentic-os/sessions/s-fd413f/jobs/j-ed6dbb/run` |
 | trace | `~/.local/share/agentic-os/sessions/s-fd413f/events.jsonl` |
 
@@ -38,7 +38,7 @@ worktree the job itself edits**, so the mint leaves the branch
 permanently dirty:
 
 ```
-$ git -C /Users/sagebot/yyxSkills/skill-desc-lab status --porcelain
+$ git -C ~/work/skill-desc-lab status --porcelain
 ?? labs/skill-desc-rounds/project.json
 ```
 

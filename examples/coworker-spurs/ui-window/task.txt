@@ -1,4 +1,4 @@
 Build the agentic-os window: a webserver UI (Airflow-like) that lists sessions, Jobs, panes, and events from the OS disk and can call run.
-Target tree (everything lands in its web/ folder): /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window
-Run door binary: /Users/sagebot/projects/Agentic-Workspace/agentic-os/coworker/bin/agentic-os
+Target tree (everything lands in its web/ folder): ~/work/agentic-os/ui-window
+Run door binary: ~/work/agentic-os/coworker/bin/agentic-os
 Port: 8787. Node stdlib only, no npm installs. No git commands, no commits — leave the tree dirty.
