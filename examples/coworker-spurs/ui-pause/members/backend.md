@@ -4,12 +4,12 @@ frontend member is born idle and wakes on your first message. You set
 the contract; you review by answering, never by editing its files.
 
 The world (task.txt is the source of truth):
-- Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/web/
+- Target tree: ~/work/agentic-os/ui-pause/web/
 - v4.1 exists there — READ the current server.mjs and public/ first,
   extend, do not rewrite. No git commands.
 - The OS disk stays the truth; sorting/aggregation is in-memory. No
   database. The run door:
-  /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os
+  ~/work/agentic-os/ui-pause/bin/agentic-os
 - Serve on PORT 8788 (8787 may still serve the older window).
 
 v5 — the window learns to park a run (ADR 5: pause/abort/continue),

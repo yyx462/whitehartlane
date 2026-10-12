@@ -1,4 +1,4 @@
 The smallest coworker exchange — a pause/continue smoke fixture.
 Target tree: this program edits nothing; the exchange lives in messages/ on the job dir.
-Run door binary: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os
+Run door binary: ~/work/agentic-os/ui-pause/bin/agentic-os
 Port: none. No npm, no git.

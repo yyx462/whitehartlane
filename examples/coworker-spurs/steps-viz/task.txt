@@ -1,7 +1,7 @@
 Two window tweaks the human asked for by name — one trim, one bugfix.
 Both small, both yours end to end; leave no dead code behind.
 
-Target tree: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-drag
+Target tree: ~/work/agentic-os/ui-drag
   (files: web/public/app.js, web/public/style.css, web/server.mjs —
   tests under test/ must stay green AND grow. `npm test` in the tree;
   baseline is 262 passing, deps are already installed.)
@@ -12,8 +12,7 @@ Worktree server (for verification only):
   Port 8787 is the LIVE master window server — never touch it.
 
 No git commands, no commits — leave the tree dirty. Node stdlib only.
-playwright-core for the drag proof lives at
-  /Users/sagebot/.config/opencode/skills/yyxSkills/yyx-vista/node_modules
+playwright-core for the drag proof comes from the local install
   (a pre-granted root — drive your 8899 fixture with it, never 8787).
 vista CLI: ~/.local/bin/vista — that camera is reviewer's, not yours.
 

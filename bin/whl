@@ -6,10 +6,9 @@
 # and mean it — the levy (the calling main agent) commissions a spur,
 # walks away, and receives exactly one wake when the spur ends.
 #
-# Door resolution (first hit wins): the checkout this file lives in,
-# then the known master checkout — both only if their deps are present
-# (the door imports smol-toml); a bare checkout without node_modules
-# would die mid-run, so it is skipped, not suffered.
+# Door resolution: the checkout this file lives in, and only if its deps
+# are present (the door imports smol-toml). A bare checkout without
+# node_modules is skipped, not suffered.
 set -euo pipefail
 self="$(readlink -f "${BASH_SOURCE[0]}")"
 here="$(cd "$(dirname "$self")" && pwd)"
@@ -18,12 +17,9 @@ door_ok() {
   [[ -f "$1" && -d "$(dirname "$1")/../node_modules/smol-toml" ]]
 }
 door=""
-for cand in "$root/bin/agentic-os" \
-  "/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/bin/agentic-os"; do
-  if door_ok "$cand"; then door="$cand"; break; fi
-done
+if door_ok "$root/bin/agentic-os"; then door="$root/bin/agentic-os"; fi
 if [[ -z "$door" ]]; then
-  echo "whl: no agentic-os door with dependencies found (tried $root and master)" >&2
+  echo "whl: no agentic-os door with dependencies found in $root" >&2
   echo "whl: run npm ci in the agentic-os checkout first" >&2
   exit 1
 fi

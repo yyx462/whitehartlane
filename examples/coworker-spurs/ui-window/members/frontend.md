@@ -5,7 +5,7 @@ each later message — never poll or wait in a loop.
 
 The world (task.txt is the source of truth):
 - Your files, and only yours, under
-  /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-window/web/public/
+  ~/work/agentic-os/ui-window/web/public/
   (extend v4; server.mjs is backend's, never touch it; no git).
 - Server: http://localhost:8787 (backend restarted it — stream
   contract below the ----- line).
