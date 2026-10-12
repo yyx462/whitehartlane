@@ -22,15 +22,12 @@ const OS_ROOT = process.env.AGENTIC_OS_ROOT || process.env.AGENTIC_OS_HOME ||
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
-// the run door — resolved, never hard-wired to one worktree: a merged and
-// removed worktree must not leave the door dangling (ui-pause did exactly
-// that). Env override first, then this checkout, then known fallbacks.
+// the run door — env override, else this checkout's bin. No machine paths:
+// a clone resolves the door next to this file, or not at all.
 const RUN_DOOR =
   [
     process.env.AGENTIC_OS_DOOR,
     path.resolve(HERE, "..", "bin", "agentic-os"),
-    "/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/bin/agentic-os",
-    "/Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os",
   ].find((p) => p && fs.existsSync(p)) || null;
 
 // launchd runs this server on macOS's minimal PATH (no node, no

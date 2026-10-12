@@ -1,4 +1,4 @@
 Extend the agentic-os window: pause/abort/continue for runs, a flat Dag Runs list, and the detail view renamed Dag Status.
-Target tree (everything lands in its web/ folder): /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause
-Run door binary: /Users/sagebot/projects/Agentic-Workspace/agentic-os/ui-pause/bin/agentic-os
+Target tree (everything lands in its web/ folder): ~/work/agentic-os/ui-pause
+Run door binary: ~/work/agentic-os/ui-pause/bin/agentic-os
 Port: 8788 (8787 may still serve the older window). Node stdlib only, no npm installs. No git commands, no commits — leave the tree dirty.
