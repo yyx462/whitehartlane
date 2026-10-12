@@ -672,17 +672,18 @@ function renderRunSelBar() {
   for (const k of sel.keys) if (!live.has(k)) sel.keys.delete(k);
   const n = sel.keys.size;
   if (bar) {
+    // normal: [Select] — a tinted box, not ghost text, so it reads
+    // clickable. mode: [Copy] [Done] N selected — count trails the
+    // buttons, the "N spur runs" note never moves between modes.
     bar.innerHTML = !sel.mode
-      ? `<button class="btn ghost" id="jrl-select" title="pick runs, then copy their ids + dirs">Select</button>`
-      : `<span class="muted small">${n} selected</span>` +
-        `<button class="btn primary" id="jrl-copy"${n ? "" : " disabled"}>Copy${n ? " " + n : ""}</button>` +
-        `<button class="btn ghost" id="jrl-done" title="Esc">Done</button>`;
+      ? `<button class="btn" id="jrl-select" title="pick runs, then copy their ids + dirs">Select</button>`
+      : `<button class="btn primary" id="jrl-copy"${n ? "" : " disabled"}>Copy</button>` +
+        `<button class="btn" id="jrl-done" title="Esc">Done</button>` +
+        `<span class="selcount${n ? "" : " zero"}">${n} selected</span>`;
   }
   const note = $("#jrl-note");
   if (note) {
-    note.textContent = sel.mode
-      ? `select mode · ${runs.length} run${runs.length === 1 ? "" : "s"}`
-      : `${runs.length} spur run${runs.length === 1 ? "" : "s"}`;
+    note.textContent = `${runs.length} spur run${runs.length === 1 ? "" : "s"}`;
   }
   const hint = $("#view .legacy-note");
   if (hint) {
