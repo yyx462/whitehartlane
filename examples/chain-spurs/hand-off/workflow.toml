@@ -1,0 +1,32 @@
+# hand-off — a two-hop chain: the top spur drafts, delegates the
+# review to a whole child program, and that child delegates the
+# publishing one level further down. Each parent step finishes on its
+# child's wake (booked wait — no pane watches the child), so the chain
+# runs three rails deep and wakes ripple back up: publish wakes
+# review's step, review's report wakes hand-off's step. nested-wakes
+# (fan-out-spurs/) shows one hop; this is the chain.
+#   run it:  whl run hand-off --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
+[workflow]
+name = "hand-off"
+worker_kind = "opencode"
+slots = 1
+
+[hooks]
+units = "true"                 # steps define the units (ADR 0007)
+grade = "bash hooks/grade.sh"
+counts = "node -p \"JSON.stringify({units: 2})\""
+
+[[step]]
+id = "draft"
+finished_by = "end"            # a worker pane runs members/draft.md
+wave = "w1"
+
+[[step]]
+id = "review"
+finished_by = "wake"           # a child rail runs review/ — no pane
+folder = "./review"
+wave = "w2"
+
+[report]
+where = "units/"
