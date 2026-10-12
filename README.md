@@ -1,84 +1,171 @@
 # agentic-os
 
-**Two agents, two contexts, two sandboxes — one task, one wake.**
+**Two agents, two folders, one task. You get one ping when it's done.**
 
-agentic-os is a job supervisor for coding agents. You describe a task as a
-folder of data (a `workflow.toml` plus hooks); it opens one terminal pane per
-worker, gives each its own context, model, and file access, relays typed
-messages between them, answers permission asks itself, retries the provider
-when it pushes back, and wakes you exactly once — with a report. Then it
-retires the job with a clean receipt.
-
-The engine that does all of that contains no model. Agents do the work;
-deterministic rails do the management.
-
-Spark: instacloud's *"A Million Agents Is a Distributed Systems Problem."*
-Our addendum: two agents with different file access is already one.
+agentic-os runs a task with several coding agents at once — each in its own
+terminal, each allowed to see only its own folder — and brings you back one
+answer. The program that runs them never thinks. The agents do the work;
+plain, predictable rules do the management.
 
 ---
 
-## The task you already know: a whodunit
+## The story
 
-Monday, 9:58 a.m. Friday's deploy went out; this morning checkout p99 is
-**180ms → 900ms**. CI is green, the dashboard is red, and the question lands
-in chat:
+Monday morning. The team chat lights up:
 
-> "who killed the p99?"
+> "The numbers don't match. The dashboard says revenue is up 12%. The sales
+> notes say the quarter felt flat. Someone figure out who's right before the
+> meeting."
 
-The answer needs two heads that live in two different worlds:
+Two people could answer this. **Alex** has the dashboard exports — every
+number, none of the story. **Sam** has the sales notes — every deal, every
+"they went quiet in August," none of the numbers. Neither should be reading
+the other's files: the exports are sensitive, the notes are private. And the
+truth is in the *conversation* between them, not in either pile alone.
 
-- a **data head** — at home on the perf box: flamegraphs, allocation logs,
-  the bench harness. It can run numbers all day. It cannot read your source
-  tree, so every direction it finds ("the spike tracks a retry storm near
-  commit 6d0a") points at a suspect it has never seen.
-- a **code head** — at home in the repo: the diff, the blame, the suspects.
-  It forms a sharp theory in minutes. It cannot run the bench or see a
-  single trace, so every theory is cheap talk until numbers land.
+So you do what everyone does. You open one chat, paste both folders in, and
+ask.
 
-And the answer is a conversation between them — the code head names a
-suspect with a one-line instrumentation patch; the data head runs it and
-answers with a number; the theory tightens — not two reports you stitch
-together yourself at midnight.
+It doesn't work. One agent with both piles doesn't *balance* them — it picks
+a side. It either worships the spreadsheet ("+12%, the notes are anecdotal")
+or trusts the gut ("flat, the dashboard must be double-counting"). You spend
+the evening rewriting the prompt to nudge it back toward the middle. It
+drifts again. The meeting is in an hour.
 
-Now try to run that with what you have:
-
-**One chat, both folders.** One window, one objective, one mode — so the
-model collapses. Either it defends its reading of the diff ("6d0a looks
-innocent, must be noise") or it pattern-matches the first hot symbol in the
-flamegraph. Your only knob is prompt-tuning the balance between data and
-intuition — a continuous, unmeasurable coefficient. All evening. Every task.
-
-**Two chats and copy-paste.** Now *you* are the relay, the bench operator,
-the permission system, and the audit log. Every finding crosses desks
-through you. Close the laptop and the interrogation dies. Nothing records
-what either head did.
-
-**A framework.** LangChain, LangGraph, CrewAI: now it's a Python project.
-Agents become in-process calls instead of your real CLI agent with its real
-harness; you own the sandbox decision, the state plumbing, and the retry
-code. You wanted a suspect by Tuesday; by Thursday you're maintaining
-orchestration software.
-
-**A fleet board.** Vibe Kanban, Paneflow, Container-Use: great at running
-*independent* tasks in parallel lanes — but they are boards you watch. No
-typed channel between the agents, no per-agent file access, no admission, no
-receipt, no "wake me when it's done."
-
-What you wanted was boring: hand the interrogation to a supervisor and walk
-away.
+Two chats is worse: now *you* are the messenger, copying findings back and
+forth, and the moment you close the laptop the investigation dies.
 
 ---
 
-## Why two heads at all?
+## What you wanted
 
-The fair objection: *why not one agent with both folders?* Because fusion
-fails structurally, and optimization theory has known the fix for decades.
+You wanted to hand the question to both of them and walk away.
 
-**Fusion** puts both worlds in one window: one objective, one mode, and
-whichever gradient dominates takes over — data-worship or intuition-worship.
-The countermeasure is a balance coefficient in a prompt: continuous,
-unmeasurable, per-task, and painful to tune. You are hand-tuning what should
-be architecture.
+```toml
+# mismatch/workflow.toml — two agents, two folders, one conversation
+[workflow]
+name    = "mismatch"
+spur_id = "mismatch"
+kind    = "coworker"
+
+[members.alex]
+model     = "zai-coding-plan/glm-5.3"
+initiates = true                      # Alex starts
+roots     = ["~/data/dashboard-exports"]
+
+[members.sam]
+model = "zai-coding-plan/glm-5.3"
+roots = ["~/notes/sales"]
+
+[hooks]
+units  = "bash hooks/units.sh"        # what a unit of work is
+grade  = "bash hooks/grade.sh"        # when the answer counts as done
+counts = "node hooks/counts.mjs"      # what the report counts
+```
+
+```console
+$ agentic-os run mismatch
+```
+
+Two terminals open. Alex reads the exports and writes a finding: *"the +12%
+is three deals, all booked in the last week of the quarter."* Sam answers
+from the notes: *"two of those were pushed in from next quarter — the notes
+say so on Sept 28."* Alex checks: *"confirmed, strip them and it's +1%."*
+Done.
+
+Then your chat gets exactly one message: the answer, the counts, and where
+to look. Every number in it came from a file one of them actually opened.
+
+That's the whole product:
+
+- **Each agent sees only its own folder.** Alex never had the notes; Sam
+  never had the exports. Private stays private — by rule, not by prompt.
+- **They talk only through the supervisor.** Messages cross; files don't.
+- **The supervisor never thinks.** It opens the terminals, carries the
+  messages, answers "may I read this?" itself, and retries when the API says
+  slow down. No model in the loop means no drift, no surprises, no babysitting.
+- **You get one ping, not a stream.** Success is quiet. Trouble is a real
+  message. Close the laptop — the job finishes, pauses cleanly, or waits for
+  you. Nothing is lost.
+- **It's a folder, not a software project.** The task above is the whole
+  integration. Any language for the hooks; an agent can write them for you.
+
+---
+
+## Why two agents, not one smart one?
+
+Because *combining* the piles is the bug, not the shortcut.
+
+One agent with both folders has one objective and one mood — so whichever
+side is louder wins, and your only fix is prompt-tuning a balance that
+drifts the moment the task changes. Two agents with separate folders can't
+collapse: each one can only optimize *its own* pile, and the only thing they
+share is the messages. The balance isn't tuned. It's enforced.
+
+(Engineers: this is decomposition-coordination — the ADMM family — applied to
+agents. The full mapping, and where the analogy honestly breaks, is below.)
+
+---
+
+## A second story: the contract
+
+The same shape solves a different pain. Two codebases need to agree on an
+API change — the server team and the app team. Neither should be reading the
+other's repo. So each side gets an agent with access to only its own
+codebase, and they negotiate the change through messages: the server side
+proposes, the app side pushes back with the calls it actually makes, and
+they converge on a contract both can sign. The job isn't "done" until both
+codebases compile against the agreed contract — checked by a script, not by
+vibes. When they disagree, the disagreement is a file you can read.
+
+---
+
+## What this saves
+
+| You stop… | Because… |
+|---|---|
+| **Leaking files between agents** | Each agent is confined to the folders you name. Secrets-shaped paths are refused outright. |
+| **Drowning one chat in two worlds** | Agents never see each other's context. Only short messages cross. |
+| **Babysitting** | One ping when it's done; silence means it's going fine. |
+| **Losing the evening** | It runs while you don't watch. Pause, resume, and "pick up where it died" are built in. |
+| **Trusting "it ran"** | Every birth, death, message, and verdict is appended to one log. Anything you can read is a summary of that log. |
+| **Turning a task into a project** | The task is a folder of data. The rules never change per task; only the folder does. |
+
+---
+
+## What this is, in one paragraph
+
+> agentic-os is a **job supervisor for coding agents**: a small program on
+> your machine that runs tasks made of several agents, each in its own
+> terminal with its own files, and reports back once. It is **not an agent**
+> — it never thinks; your agents (opencode, pi) do. It is **not a harness** —
+> a harness is the app one agent runs inside; this supervises those apps. It
+> is **not a framework** — you don't import it into code; you hand it a
+> folder. It is closest to a **workflow engine** (think Airflow) whose workers
+> happen to be agents you can watch think, plus a **process supervisor**
+> (think systemd) that keeps the books. "OS" is a nickname for that
+> bookkeeping — it is not a kernel, and your normal chat keeps working beside
+> it.
+
+The one-line version: **agents do the work, rules do the management.**
+
+---
+
+## The rest of this page is for the technical reader
+
+Everything above is the product. Everything below is the engineering: the
+decomposition argument in full, the definition against today's terminology,
+and why this isn't LangGraph, firstmate, tmux, or a fleet board.
+
+---
+
+## Why two heads — the engineering version
+
+**Fusion** puts both worlds in one context window: one objective, one mode,
+and whichever gradient dominates takes over — data-worship or
+intuition-worship. The countermeasure is a balance coefficient in a prompt:
+continuous, unmeasurable, per-task, and painful to tune. You are hand-tuning
+what should be architecture.
 
 **Decomposition** — ADMM, alternating minimization, the whole family — keeps
 the pieces discrete: each block optimizes its *own* objective over its
@@ -91,7 +178,7 @@ Mapped onto this system, almost embarrassingly exactly:
 |---|---|
 | Local block with private data | A member: its own context window, its own `roots`, its own brief |
 | Local objective — and local solver | The brief; each member may run a *different model* (fusion can't) |
-| Private data that never pools | `roots` — the repo never leaks onto the perf box, traces never ship the warehouse |
+| Private data that never pools | `roots` — the notes never reach the exports, the exports never reach the notes |
 | Consensus variable: small, shared | **The typed message file** — the only thing that crosses |
 | The coordination step | The rail's relay: mail moved into the named member's prompt; a worker never writes another worker |
 | Alternation, not a shouting match | Turns — propose, question, tune; mail is never delivered mid-turn |
@@ -112,143 +199,12 @@ that choice (the x-split) is the real design skill: a narrow, checkable
 interface converges; a wide one just moves fusion somewhere else. We borrow
 the decomposition, the interface, and the audit trail — not the proof.
 
----
-
-## What it should have looked like
-
-A folder is the whole integration:
-
-```toml
-# p99-hunt/workflow.toml — two members, two worlds, one rail between them
-[workflow]
-name    = "p99-hunt"
-spur_id = "p99-hunt"
-kind    = "coworker"
-
-[members.source]
-model     = "zai-coding-plan/glm-5.3"
-initiates = true                        # this member gets the task first
-roots     = ["~/projects/shop"]         # the repo — nothing else
-
-[members.traces]
-model = "zai-coding-plan/glm-5.3-flash"
-roots = ["~/perf/checkout-week"]        # flamegraphs, alloc logs, the bench — nothing else
-
-[hooks]
-units  = "bash hooks/units.sh"          # what a unit of work is
-grade  = "bash hooks/grade.sh"          # e.g. culprit named AND bench back under threshold
-counts = "node hooks/counts.mjs"        # what the report counts
-```
-
-One command:
-
-```console
-$ agentic-os run p99-hunt
-job   j-7c31f
-log   ~/.local/share/agentic-os/s-…/jobs/j-7c31f/run/orchestrator.log
-trace ~/.local/share/agentic-os/s-…/events.jsonl
-```
-
-What happens next, with nobody watching:
-
-- **Two panes open in your terminal.** herdr owns the ttys; every worker is
-  an ordinary agent CLI (opencode or pi) you can watch think, live — but you
-  don't have to.
-- **Each member works inside its roots.** `traces` never had the repo;
-  `source` never had the perf box. Secrets-shaped paths are denied before
-  any judgment happens. A gray-zone ask is answered in milliseconds by a
-  typed decider that reads the member's brief — no dialog ever waits for
-  you. The discipline has teeth: six deny-family answers and that worker is
-  done (allows cost nothing).
-- **They talk only through the rail.** Typed message files on the job dir,
-  relayed into the named member's prompt — the interrogation record:
-  *"suspect: retry loop in 6d0a, patch attached, run path A"* → *"path A
-  flat; storm starts 40ms before your patch point; next suspect."*
-  Conclusions cross the wall; access never does.
-- **Nothing with a mind runs the loop.** Birth, relay, permissions, retries,
-  receipts — deterministic code. When a runtime judgment is genuinely
-  needed, it's a typed gate (a calibrated one-bit decision with a measured
-  prompt), never a freelance agent.
-- **Trouble is handled like an adult.** Provider refuses: backoff with
-  jitter, capped retries, a visible line per wait. You need the laptop:
-  `pause` drains to a clean boundary; `continue` rebirths every unfinished
-  worker from its booked session pointer. Orchestrator dies: the job parks
-  `orphaned` — announced, never auto-resurrected, never lost.
-- **Then exactly one wake.** A prompt into your live pane — or a durable
-  `wake.json` if you're gone — plus `report.json`: status, named counts
-  (suspects eliminated, bench runs, p99 before/after), where to check. The
-  receipt is `panes of this job remaining = 0`. And every number in that
-  report is the output of a command `traces` actually ran.
-
-A quiet success never interrupts you. That's a rail, not a setting.
-
----
-
-## The second shape: the contract summit
-
-Not every two-headed task is a hunt. The other classic: **two repos that
-must agree.** The API is changing. The server side owns the migrations and
-the private config; the client side owns the usage patterns and the release
-train. Neither delegation should read the other's capital — and neither
-needs to, because the only thing they must share is the contract.
-
-```toml
-# contract-summit/workflow.toml — two delegations, one treaty
-[workflow]
-name    = "contract-summit"
-spur_id = "contract-summit"
-kind    = "coworker"
-
-[members.server]
-model     = "zai-coding-plan/glm-5.3"
-initiates = true
-roots     = ["~/projects/shop-server"]
-
-[members.client]
-model = "zai-coding-plan/glm-5.3"
-roots = ["~/projects/shop-app"]
-
-[hooks]
-units  = "bash hooks/units.sh"
-grade  = "bash hooks/grade.sh"   # both sides compile + typecheck against the agreed schema
-counts = "node hooks/counts.mjs"
-```
-
-Here the consensus variable is literal: the schema diff. `server` proposes
-endpoints shaped by its data model; `client` pushes back with the calls it
-actually makes; alternation converges on a contract both can sign — then
-each delegation implements privately in its own tree. Verification is
-mechanical: the grade hook won't pass until both sides compile against the
-agreed schema. When they disagree, the disagreement is a file on disk, not a
-vibe in a window.
-
----
-
-## The cameo: this system manufactured its own best number
-
-The least-believed sentence in this README is a quiet one: a permission gate
-answering gray-zone asks at **98.3% measured accuracy**. It got there
-exactly the way this page argues — alternating discrete pieces: prompt
-candidates proposed, scored against fifty-plus seeded cases through the same
-adapter the rails use, the winner landed automatically when it beat the
-incumbent (`jev-tuner/`, `src/jev-prompts/`). The `lab` workflow — an Actor
-writes a protocol naming the next wave, the rail births it, the grade names
-the next — offers the same alternation as a first-class workflow kind.
-Decomposition-coordination isn't the marketing; it's the method this repo
-already runs on.
-
----
-
-## What this saves
-
-| It saves… | Because… |
-|---|---|
-| **Your secrets surface** | Per-member roots (`[members.<name>]`) plus program-wide `roots.txt`; secrets and credential-shaped paths are denied before judgment ever runs. Capability scoping, not one shared blob. |
-| **Your context windows** | Members never see each other's windows. Only typed mail crosses the wall — a pointer-sized summary instead of two full transcripts. |
-| **Your attention** | One wake per levy, a wake ladder with a once-guard, booked waits that read as explained silence instead of stalls. A quiet success is not an event. |
-| **Your evening** | `agentic-os run --unattended` finishes with no person in the loop. Pause, abort, continue are first-class verbs, not best-effort flags. |
-| **Your trust in "it ran"** | An append-only trace (`events.jsonl`) is the single source; `job.json`, `state.json`, `report.json` are projections. `audit` flags any live pane no job admits. Every birth is booked. |
-| **Your Tuesday** | The task is a data folder — hooks in any language, a planner (human or agent) may write hooks, never rails. An ad-hoc collaboration never becomes a software project. |
+The same alternation is a first-class workflow kind (`lab`): an Actor writes
+a protocol naming the next wave, the rail births it, the grade names the
+next. It is also how this repo tuned its own permission gate — prompt
+candidates scored against seeded cases, the measured winner landed
+automatically (`jev-tuner/`). Decomposition-coordination isn't the
+marketing; it's the method this repo already runs on.
 
 ---
 
@@ -368,9 +324,9 @@ $ agentic-os fork <jid>          # a booked wake, delivered into a reborn pane
 ```
 
 - **Workflows:** `fan-out` (independent units), `coworker` (members that
-  depend on each other — the whodunit and the contract summit), `direct`
-  (no rails; the open chat is the supervisor), `lab` (protocol-driven waves
-  for evals).
+  depend on each other — the mismatch and the contract), `direct` (no
+  rails; the open chat is the supervisor), `lab` (protocol-driven waves for
+  evals).
 - **Examples that run today:** `examples/coworker-spurs/` (`ui-pause`,
   `steps-viz`), `examples/fan-out-spurs/`, `examples/chain-spurs/` (two-hop
   hand-off), `examples/lab-spurs/` (`trivia-bench`, an eval harness).
