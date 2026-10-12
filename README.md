@@ -17,40 +17,46 @@ Our addendum: two agents with different file access is already one.
 
 ---
 
-## The task you already know
+## The task you already know: a whodunit
 
-Tuesday, 10:14 a.m. The question lands in chat:
+Monday, 9:58 a.m. Friday's deploy went out; this morning checkout p99 is
+**180ms → 900ms**. CI is green, the dashboard is red, and the question lands
+in chat:
 
-> "Why did EMEA dip in Q3? Which deals moved since the dashboard refreshed,
-> and what did the account notes say?"
+> "who killed the p99?"
 
-Answering it takes two heads that live in two different worlds:
+The answer needs two heads that live in two different worlds:
 
-- a **sales head** — at home in the deal notes and account folders. It should
-  *not* see warehouse credentials or raw exports.
-- a **data head** — at home in the warehouse exports and refresh logs. It has
-  no business reading private negotiation notes.
+- a **data head** — at home on the perf box: flamegraphs, allocation logs,
+  the bench harness. It can run numbers all day. It cannot read your source
+  tree, so every direction it finds ("the spike tracks a retry storm near
+  commit 6d0a") points at a suspect it has never seen.
+- a **code head** — at home in the repo: the diff, the blame, the suspects.
+  It forms a sharp theory in minutes. It cannot run the bench or see a
+  single trace, so every theory is cheap talk until numbers land.
 
-And the answer is a conversation between them — the data head finds the
-anomaly, the sales head explains it from the notes — not two reports you
-stitch together yourself at midnight.
+And the answer is a conversation between them — the code head names a
+suspect with a one-line instrumentation patch; the data head runs it and
+answers with a number; the theory tightens — not two reports you stitch
+together yourself at midnight.
 
 Now try to run that with what you have:
 
-**One chat.** Both worlds land in one context window, so either agent can see
-everything — there goes the separation. The permission envelope is one blob.
-By the third tool call the window is a swamp, and everything is serial
-because there is one queue.
+**One chat, both folders.** One window, one objective, one mode — so the
+model collapses. Either it defends its reading of the diff ("6d0a looks
+innocent, must be noise") or it pattern-matches the first hot symbol in the
+flamegraph. Your only knob is prompt-tuning the balance between data and
+intuition — a continuous, unmeasurable coefficient. All evening. Every task.
 
-**Two chats and copy-paste.** Now *you* are the router, the permission
-dialog, the retry policy, and the audit log. Every finding crosses desks
-through you. Close the laptop and the collaboration dies. Nothing records
-what either agent did.
+**Two chats and copy-paste.** Now *you* are the relay, the bench operator,
+the permission system, and the audit log. Every finding crosses desks
+through you. Close the laptop and the interrogation dies. Nothing records
+what either head did.
 
 **A framework.** LangChain, LangGraph, CrewAI: now it's a Python project.
 Agents become in-process calls instead of your real CLI agent with its real
 harness; you own the sandbox decision, the state plumbing, and the retry
-code. You wanted an answer by Tuesday; by Thursday you're maintaining
+code. You wanted a suspect by Tuesday; by Thursday you're maintaining
 orchestration software.
 
 **A fleet board.** Vibe Kanban, Paneflow, Container-Use: great at running
@@ -58,7 +64,53 @@ orchestration software.
 typed channel between the agents, no per-agent file access, no admission, no
 receipt, no "wake me when it's done."
 
-What you wanted was boring: hand the task to a supervisor and walk away.
+What you wanted was boring: hand the interrogation to a supervisor and walk
+away.
+
+---
+
+## Why two heads at all?
+
+The fair objection: *why not one agent with both folders?* Because fusion
+fails structurally, and optimization theory has known the fix for decades.
+
+**Fusion** puts both worlds in one window: one objective, one mode, and
+whichever gradient dominates takes over — data-worship or intuition-worship.
+The countermeasure is a balance coefficient in a prompt: continuous,
+unmeasurable, per-task, and painful to tune. You are hand-tuning what should
+be architecture.
+
+**Decomposition** — ADMM, alternating minimization, the whole family — keeps
+the pieces discrete: each block optimizes its *own* objective over its
+*private* variables, and the blocks coordinate only through a small
+**consensus quantity**, updated in alternation. Nobody's raw world ever
+merges; global behavior emerges from local solves plus a narrow interface.
+Mapped onto this system, almost embarrassingly exactly:
+
+| Optimization piece | agentic-os piece |
+|---|---|
+| Local block with private data | A member: its own context window, its own `roots`, its own brief |
+| Local objective — and local solver | The brief; each member may run a *different model* (fusion can't) |
+| Private data that never pools | `roots` — the repo never leaks onto the perf box, traces never ship the warehouse |
+| Consensus variable: small, shared | **The typed message file** — the only thing that crosses |
+| The coordination step | The rail's relay: mail moved into the named member's prompt; a worker never writes another worker |
+| Alternation, not a shouting match | Turns — propose, question, tune; mail is never delivered mid-turn |
+| Stopping rule | The `grade` hook, retry caps, the run deadline |
+| Iteration log you can audit | The message files on the job dir — the negotiation is on disk |
+
+> Fusion tunes a prompt coefficient; decomposition enforces an interface.
+> The message file is the only gradient that crosses the wall.
+> You can't prompt your way to a balance the architecture already enforces.
+
+**Where the analogy honestly breaks:** ADMM comes with a convergence
+theorem; agents don't. Alternation can oscillate or settle on a
+plausible-but-wrong consensus — so the guards are external: the grade
+decides the color, caps bound the spend, and the report separates a worker's
+`done` claim from the graded verdict. And where ADMM's mathematician chooses
+the consensus variable, here the program author chooses the message schema —
+that choice (the x-split) is the real design skill: a narrow, checkable
+interface converges; a wide one just moves fusion somewhere else. We borrow
+the decomposition, the interface, and the audit trail — not the proof.
 
 ---
 
@@ -67,31 +119,31 @@ What you wanted was boring: hand the task to a supervisor and walk away.
 A folder is the whole integration:
 
 ```toml
-# emea-dip/workflow.toml — two members, two worlds, one rail between them
+# p99-hunt/workflow.toml — two members, two worlds, one rail between them
 [workflow]
-name    = "emea-dip"
-spur_id = "emea-dip"
+name    = "p99-hunt"
+spur_id = "p99-hunt"
 kind    = "coworker"
 
-[members.sales]
-model      = "zai-coding-plan/glm-5.3"
-initiates  = true                          # this member gets the task first
-roots      = ["~/projects/notes/emea"]     # may read deal notes — nothing else
+[members.source]
+model     = "zai-coding-plan/glm-5.3"
+initiates = true                        # this member gets the task first
+roots     = ["~/projects/shop"]         # the repo — nothing else
 
-[members.data]
+[members.traces]
 model = "zai-coding-plan/glm-5.3-flash"
-roots = ["~/data/warehouse-exports"]       # may read exports — nothing else
+roots = ["~/perf/checkout-week"]        # flamegraphs, alloc logs, the bench — nothing else
 
 [hooks]
-units  = "bash hooks/units.sh"             # what a unit of work is
-grade  = "bash hooks/grade.sh"             # when a unit is done
-counts = "node hooks/counts.mjs"           # what the report counts
+units  = "bash hooks/units.sh"          # what a unit of work is
+grade  = "bash hooks/grade.sh"          # e.g. culprit named AND bench back under threshold
+counts = "node hooks/counts.mjs"        # what the report counts
 ```
 
 One command:
 
 ```console
-$ agentic-os run emea-dip
+$ agentic-os run p99-hunt
 job   j-7c31f
 log   ~/.local/share/agentic-os/s-…/jobs/j-7c31f/run/orchestrator.log
 trace ~/.local/share/agentic-os/s-…/events.jsonl
@@ -102,29 +154,88 @@ What happens next, with nobody watching:
 - **Two panes open in your terminal.** herdr owns the ttys; every worker is
   an ordinary agent CLI (opencode or pi) you can watch think, live — but you
   don't have to.
-- **Each member works inside its roots.** The sales agent's file access never
-  included the warehouse; the data agent's never included the notes.
-  Secrets-shaped paths are denied before any judgment happens. A gray-zone
-  ask is answered in milliseconds by a typed decider that reads the member's
-  brief — no dialog ever waits for you. The discipline has teeth: six
-  deny-family answers and that worker is done (allows cost nothing).
+- **Each member works inside its roots.** `traces` never had the repo;
+  `source` never had the perf box. Secrets-shaped paths are denied before
+  any judgment happens. A gray-zone ask is answered in milliseconds by a
+  typed decider that reads the member's brief — no dialog ever waits for
+  you. The discipline has teeth: six deny-family answers and that worker is
+  done (allows cost nothing).
 - **They talk only through the rail.** Typed message files on the job dir,
-  relayed into the named member's prompt. A worker never writes another
-  worker. Conclusions cross the wall; access never does.
+  relayed into the named member's prompt — the interrogation record:
+  *"suspect: retry loop in 6d0a, patch attached, run path A"* → *"path A
+  flat; storm starts 40ms before your patch point; next suspect."*
+  Conclusions cross the wall; access never does.
 - **Nothing with a mind runs the loop.** Birth, relay, permissions, retries,
-  receipts — deterministic code. When a runtime judgment is genuinely needed,
-  it's a typed gate (a calibrated one-bit decision with a measured prompt),
-  never a freelance agent.
+  receipts — deterministic code. When a runtime judgment is genuinely
+  needed, it's a typed gate (a calibrated one-bit decision with a measured
+  prompt), never a freelance agent.
 - **Trouble is handled like an adult.** Provider refuses: backoff with
   jitter, capped retries, a visible line per wait. You need the laptop:
   `pause` drains to a clean boundary; `continue` rebirths every unfinished
   worker from its booked session pointer. Orchestrator dies: the job parks
   `orphaned` — announced, never auto-resurrected, never lost.
 - **Then exactly one wake.** A prompt into your live pane — or a durable
-  `wake.json` if you're gone — plus `report.json`: status, named counts, a
-  table, where to check. The receipt is `panes of this job remaining = 0`.
+  `wake.json` if you're gone — plus `report.json`: status, named counts
+  (suspects eliminated, bench runs, p99 before/after), where to check. The
+  receipt is `panes of this job remaining = 0`. And every number in that
+  report is the output of a command `traces` actually ran.
 
 A quiet success never interrupts you. That's a rail, not a setting.
+
+---
+
+## The second shape: the contract summit
+
+Not every two-headed task is a hunt. The other classic: **two repos that
+must agree.** The API is changing. The server side owns the migrations and
+the private config; the client side owns the usage patterns and the release
+train. Neither delegation should read the other's capital — and neither
+needs to, because the only thing they must share is the contract.
+
+```toml
+# contract-summit/workflow.toml — two delegations, one treaty
+[workflow]
+name    = "contract-summit"
+spur_id = "contract-summit"
+kind    = "coworker"
+
+[members.server]
+model     = "zai-coding-plan/glm-5.3"
+initiates = true
+roots     = ["~/projects/shop-server"]
+
+[members.client]
+model = "zai-coding-plan/glm-5.3"
+roots = ["~/projects/shop-app"]
+
+[hooks]
+units  = "bash hooks/units.sh"
+grade  = "bash hooks/grade.sh"   # both sides compile + typecheck against the agreed schema
+counts = "node hooks/counts.mjs"
+```
+
+Here the consensus variable is literal: the schema diff. `server` proposes
+endpoints shaped by its data model; `client` pushes back with the calls it
+actually makes; alternation converges on a contract both can sign — then
+each delegation implements privately in its own tree. Verification is
+mechanical: the grade hook won't pass until both sides compile against the
+agreed schema. When they disagree, the disagreement is a file on disk, not a
+vibe in a window.
+
+---
+
+## The cameo: this system manufactured its own best number
+
+The least-believed sentence in this README is a quiet one: a permission gate
+answering gray-zone asks at **98.3% measured accuracy**. It got there
+exactly the way this page argues — alternating discrete pieces: prompt
+candidates proposed, scored against fifty-plus seeded cases through the same
+adapter the rails use, the winner landed automatically when it beat the
+incumbent (`jev-tuner/`, `src/jev-prompts/`). The `lab` workflow — an Actor
+writes a protocol naming the next wave, the rail births it, the grade names
+the next — offers the same alternation as a first-class workflow kind.
+Decomposition-coordination isn't the marketing; it's the method this repo
+already runs on.
 
 ---
 
@@ -257,8 +368,9 @@ $ agentic-os fork <jid>          # a booked wake, delivered into a reborn pane
 ```
 
 - **Workflows:** `fan-out` (independent units), `coworker` (members that
-  depend on each other — the sales/data story), `direct` (no rails; the open
-  chat is the supervisor), `lab` (protocol-driven waves for evals).
+  depend on each other — the whodunit and the contract summit), `direct`
+  (no rails; the open chat is the supervisor), `lab` (protocol-driven waves
+  for evals).
 - **Examples that run today:** `examples/coworker-spurs/` (`ui-pause`,
   `steps-viz`), `examples/fan-out-spurs/`, `examples/chain-spurs/` (two-hop
   hand-off), `examples/lab-spurs/` (`trivia-bench`, an eval harness).
