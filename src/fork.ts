@@ -3,6 +3,7 @@
 // prompt the reborn pane receives. The body (tab, pane, herdr) lives
 // in bin/agentic-os.
 import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
 import type { JobRecord, SeedPointer } from "./store.ts"
 import { appendEvent, findOrOpenSession } from "./store.ts"
 import { admitFork } from "./policy.ts"
@@ -32,6 +33,19 @@ export function forkPrompt(input: {
   ].join("\n")
 }
 
+// The fork is a COURIER (ADR 0008 rung 3): it exists to deliver the wake
+// into the levy session — the session lives on after; the pane is just a
+// TTY. So the pane closes itself when the reborn turn ends (agent idle),
+// the same second nobody needs to watch it anymore. Detached shell —
+// must survive this process.
+export function forkReaperCmd(label: string, pane: string, tab: string): string {
+  return [
+    `herdr agent wait ${label} --until idle >/dev/null 2>&1 || true`,
+    `herdr tab close ${tab}`,
+    `herdr pane close ${pane}`,
+  ].join("; ")
+}
+
 // The wake-time rebirth (ADR 0008 rung 3): an unregistered chat levy
 // is dead to the ladder by rule — the wake forks it into a fresh pane
 // instead of waiting for a conversation that never claimed to be
@@ -46,7 +60,7 @@ export type ForkOutcome =
 export function forkLevy(
   job: JobRecord,
   wake: { message: string },
-  opts: { herdrRun?: (args: string[]) => RunnerResult } = {},
+  opts: { herdrRun?: (args: string[]) => RunnerResult; detachedSpawn?: (cmd: string) => void } = {},
 ): ForkOutcome {
   if (!job.spawner) return { ok: false, why: "unattended — no levy to fork" }
   const run = opts.herdrRun ?? defaultRunner("herdr")
@@ -65,6 +79,7 @@ export function forkLevy(
   const cwd = session.cwd || job.dir
   const tab = run(["tab", "create", "--label", `whl-fork-${job.id}`.slice(0, 40), "--cwd", cwd, "--no-focus"])
   const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+  const forkTab = jsonAt(tab.stdout, (d) => d?.result?.tab?.tab_id ?? d?.result?.root_pane?.tab_id ?? null)
   if (!root) return { ok: false, why: `could not open a pane (herdr rc=${tab.status})` }
   const split = run(["pane", "split", "--pane", root, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
   const shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
@@ -91,6 +106,14 @@ export function forkLevy(
   if (prompt.status !== 0) {
     run(["pane", "close", shell])
     return { ok: false, why: `the wake prompt did not land (rc=${prompt.status})` }
+  }
+  // the courier closes its own tab when the reborn turn ends — idle fork
+  // panes (whl-fork-*) used to squat forever after delivery
+  if (forkTab) {
+    const reaper = opts.detachedSpawn ?? ((cmd: string) => {
+      spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref()
+    })
+    reaper(forkReaperCmd(label, shell, forkTab))
   }
   return { ok: true, label, pane: shell }
 }
