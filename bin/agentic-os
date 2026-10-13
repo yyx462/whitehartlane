@@ -509,12 +509,12 @@ async function main() {
     return
   }
 
-  // register — the levy pane (ADR 0008 rung 2): a chat that lives in
-  // a herdr pane volunteers the binding herdr cannot know on its own —
-  // which host session runs in which pane. Run from INSIDE the pane
-  // (HERDR_PANE_ID names it); herdr must already detect an agent there
-  // (it detects every supported kind, opencode and pi included). Any
-  // later door command run in that pane renews the registration.
+  // register — the levy pane registry (ADR 0008's retired wake rung):
+  // the wake ladder no longer consults this (2026-10-13 — spawn-time
+  // pane capture replaced it); the record survives as AUDIT
+  // bookkeeping, so a legitimately-live unbooked pane (your chat) is
+  // not flagged a stray. Run from INSIDE the pane (HERDR_PANE_ID
+  // names it); herdr must already detect an agent there.
   if (cmd === "register") {
     const args = process.argv.slice(3)
     const fromIdx = args.indexOf("--from")
@@ -554,7 +554,7 @@ async function main() {
     }
     registerLevyPane({ session_id, tool, pane, cwd: agent.cwd, at: new Date().toISOString() })
     console.log(`register: session ${tool}:${session_id} ↔ pane ${pane}`)
-    console.log(`register: wakes now prompt this pane in-band (rung 2) — live there and use the door to renew`)
+    console.log(`register: audit now exempts this pane as a levy chat — the wake ladder itself uses spawn-time pane capture (--from/--pane), not this registry`)
     return
   }
 

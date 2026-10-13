@@ -11,7 +11,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
-import { registerLevyPane } from "../src/levy-pane.ts"
 import { createJob, failJob, paneTitlesSession, pauseJob, readEvents, wakeFirstMate, type JobRecord } from "../src/store.ts"
 import { spoolDirOf } from "../src/wake-spool.ts"
 
@@ -87,20 +86,6 @@ test("the fork's why lands in the trace — a refused rebirth is never silent ag
   assert.match(rung(job, "fork")?.why ?? "", /seed does not resolve/)
 })
 
-test("a registered pane that is not alive says so by name", () => {
-  resetLadders()
-  registerLevyPane({ session_id: SPAWNER.session_id, tool: "opencode", pane: "wT:p1", at: new Date().toISOString() })
-  const job = levied("s-tr4")
-  const { port } = bells()
-  wakeFirstMate(job, "done", null, {
-    promptPane: () => false,
-    paneAlive: () => false,
-    forkLevy: () => ({ ok: false, why: "x" }),
-    ...port,
-  })
-  assert.match(rung(job, "registered-pane")?.why ?? "", /wT:p1 is not alive/)
-})
-
 test("every rung attempt lands in the session trail and the job's orchestrator.log", () => {
   resetLadders()
   const job = levied("s-tr5")
@@ -111,9 +96,9 @@ test("every rung attempt lands in the session trail and the job's orchestrator.l
     ...port,
   })
   const kinds = readEvents("s-tr5").filter((e) => e.kind === "wake.rung").map((e) => e.rung)
-  assert.deepEqual(kinds, ["worker-pane", "parent-pane", "registered-pane", "fork", "spool", "doorbell"])
+  assert.deepEqual(kinds, ["parent-pane", "fork", "spool", "doorbell"])
   const log = readFileSync(join(job.dir, "orchestrator.log"), "utf8")
-  assert.match(log, /wake rung worker-pane no — no live worker pane holds session ses_trace/)
+  assert.match(log, /wake rung parent-pane no — no parent pane booked at spawn/)
   assert.match(log, /wake rung fork no — fork refused: herdr down/)
   assert.match(log, /wake rung spool no — off by config/)
   assert.match(log, /wake rung doorbell/)

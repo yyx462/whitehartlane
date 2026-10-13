@@ -150,11 +150,17 @@ failing run.
 The levy's own design: hand over the spur and your address in one
 motion. `whl run --from <tool>:<sid>` now books the pane too
 (`HERDR_PANE_ID` inside herdr, or `--pane`), and the wake asks the
-parent pane before any registry: live and titled like the spawner
-session → prompt it in-band; dead or recycled → fall through to
-registration, fork, spool, doorbell. herdr cannot name the session a
-pane hosts, so the terminal title (the host tool syncs the session
-title into it, "OC | <title>") is the identity guard — a live pane
-that stopped matching is a recycled pane, never misdelivered to. The
-per-job binding cannot go stale the way the registry can; the registry
-rung stays for jobs spawned before capture or outside herdr.
+parent pane first: live and titled like the spawner session → prompt
+it in-band; dead or recycled → fork, spool, doorbell. herdr cannot
+name the session a pane hosts, so the terminal title (the host tool
+syncs the session title into it, "OC | <title>") is the identity
+guard — a live pane that stopped matching is a recycled pane, never
+misdelivered to.
+
+The simplification retires two rungs: the worker-pane scan (job
+bookings discovering the spawner's session) and the manual registry
+rung (`whl register`) — the spawn-time parent pane does their one job
+with a better source of truth, and a nested worker that levies a
+child carries its own `HERDR_PANE_ID` at spawn. The registry file
+survives solely as audit bookkeeping (exempting a live levy pane from
+stray-pane violations); the wake never reads it.
