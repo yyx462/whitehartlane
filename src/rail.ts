@@ -37,6 +37,7 @@ import {
   saveJob,
   setPaneSession,
   splitModel,
+  writeOpencodeModel,
   writePiSettings,
   writeWorkerPermissions,
   type JobRecord,
@@ -482,7 +483,11 @@ export class Rail implements ShepPort {
       const { provider, id } = splitModel(model)
       tail.push("--approve", "--provider", provider, "--model", id)
     } else if (model && kind === "opencode") {
-      tail.push("--model", model)
+      // the root command dropped --model in the 2026-10 upgrade — a
+      // passed flag crashes the TUI at birth (j-37bdc0: three start
+      // timeouts, run dead). The pin rides the sandbox opencode.json
+      // instead, symmetric with pi's settings write above.
+      writeOpencodeModel(cwd, model)
     }
     if (resumeSession) tail.push("--session", resumeSession)
     const startArgs = tail.length ? ["--", ...tail] : []
