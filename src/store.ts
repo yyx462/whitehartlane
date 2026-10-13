@@ -1005,6 +1005,25 @@ export function writePiSettings(dir: string, model: string): void {
   )
 }
 
+// opencode's CLI dropped --model from the root command (2026-10
+// upgrade), so a worker's model — workflow-level or the per-member
+// override — rides the config layer instead: the sandbox opencode.json
+// the worker discovers from its startup cwd. Read-modify-write:
+// writeWorkerPermissions has usually already shaped this file.
+export function writeOpencodeModel(dir: string, model: string): void {
+  try {
+    const cfgPath = join(dir, "opencode.json")
+    const cfg = existsSync(cfgPath)
+      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
+      : {}
+    cfg.$schema ??= "https://opencode.ai/config.json"
+    cfg.model = model
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+  } catch {
+    // model pinning is best-effort; the global default still applies
+  }
+}
+
 // Grant one more root to a live worker's permission file — durable for
 // the next session start; the current dialog is cleared by the rail.
 // A degenerate root ("/", "") is refused: one temp allow must never
