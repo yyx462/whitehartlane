@@ -54,6 +54,15 @@ function opencodeDb(): string {
   return process.env.OPENCODE_DB ?? join(homedir(), ".local", "share", "opencode", "opencode.db")
 }
 
+// opencode v2.0.x migrated its storage: `session_v2` is the live
+// table — everything created after the migration lives ONLY there,
+// while legacy `session` is frozen at the migration instant. The p10
+// incident (2026-10-12): the wake ladder's fork seed went blind
+// because these reads still queried legacy only — every wake for a
+// post-migration levy session fell to the doorbell. Ask v2 first,
+// then legacy, then the CLI list.
+const OPENCODE_SESSION_TABLES = ["session_v2", "session"]
+
 // Primary: the opencode SQLite db, queried precisely by (directory,
 // created >= since) — no CLI list window can miss it. Fallback: the
 // CLI's session list (last resort when the db is unreadable).
@@ -63,12 +72,18 @@ export function resolveOpencode(pointer: TranscriptPointer): { id: string } | nu
     try {
       const db = new DatabaseSync(opencodeDb(), { readOnly: true })
       try {
-        const row = db
-          .prepare(
-            "SELECT id FROM session WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 1",
-          )
-          .get(pointer.cwd, since) as { id?: string } | undefined
-        if (row?.id) return { id: row.id }
+        for (const table of OPENCODE_SESSION_TABLES) {
+          try {
+            const row = db
+              .prepare(
+                `SELECT id FROM ${table} WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 1`,
+              )
+              .get(pointer.cwd, since) as { id?: string } | undefined
+            if (row?.id) return { id: row.id }
+          } catch {
+            /* table absent on this opencode version — try the next */
+          }
+        }
         return null
       } finally {
         db.close()
@@ -161,7 +176,13 @@ export function opencodeSessionExists(id: string): boolean {
     try {
       const db = new DatabaseSync(opencodeDb(), { readOnly: true })
       try {
-        return db.prepare("SELECT 1 FROM session WHERE id = ? LIMIT 1").get(id) !== undefined
+        for (const table of OPENCODE_SESSION_TABLES) {
+          try {
+            if (db.prepare(`SELECT 1 FROM ${table} WHERE id = ? LIMIT 1`).get(id) !== undefined) return true
+          } catch {
+            /* table absent on this opencode version — try the next */
+          }
+        }
       } finally {
         db.close()
       }
