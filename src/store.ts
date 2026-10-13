@@ -122,7 +122,7 @@ export type JobRecord = {
   receipt?: Receipt
   abort?: { reason: string; panesRemaining: number; finished: string }
   spawner?: SpawnerPointer
-  woke?: { at: string; message: string; delivery?: WakeDelivery; to?: string }
+  woke?: { at: string; message: string; delivery?: WakeDelivery; to?: string; rungs?: WakeRung[] }
   promoted?: { at: string; note: string }
   // ADR 0006 §3 — a fork delivered the booked wake into a reborn levy
   // pane; the wake is consumed, not re-delivered.
@@ -374,6 +374,13 @@ export function killPane(job: JobRecord, label: string): JobRecord {
 // No spawner -> no wake (the Job is unattended, nothing to tell).
 export type WakeDelivery = "pane" | "fork" | "inband" | "doorbell" | "queued"
 
+// One rung attempt, recorded however it went — taken, refused, or
+// skipped and why. A doorbell wake must never again be a mystery: the
+// 2026-10-12 p10 batch fell to rung 5 with no record of why rungs 1-4
+// refused (the missing registration, the fork's why, the absent
+// heartbeat were all invisible after the fact).
+export type WakeRung = { rung: string; ok: boolean; why?: string }
+
 export type WakePort = {
   // prompt a live pane (herdr agent prompt <label>); false = not live
   promptPane?: (label: string, message: string) => boolean
@@ -390,6 +397,15 @@ export type WakePort = {
 // explicit escape hatch for herdr-less hosts
 function forkArmed(): boolean {
   return process.env.AGENTIC_OS_FORK_WAKE !== "0" && !process.env.NODE_TEST_CONTEXT
+}
+
+// The spool rung is config-OFF by default (the 2026-10-13 call): the
+// reader is an opt-in plugin and was never installed on this machine,
+// so the ladder must not pretend the channel exists. Arm it with
+// AGENTIC_OS_SPOOL_WAKE=1 once `whl plugin install` has run and
+// opencode has restarted; until then the trace says why it is skipped.
+function spoolArmed(): boolean {
+  return process.env.AGENTIC_OS_SPOOL_WAKE === "1"
 }
 
 export function wakeFirstMate(
@@ -421,6 +437,20 @@ export function wakeFirstMate(
   // no pane holds it and no doorbell serves it. The durable wake.json
   // IS the receipt the parent rail polls; delivery stays "queued".
   const railSpawner = job.spawner.tool === "rail"
+  // the rung trace: every attempt — taken, refused, skipped — lands on
+  // the woke record, the session trail, and the job's orchestrator.log,
+  // so a doorbell wake explains itself after the fact
+  const rungs: WakeRung[] = []
+  const step = (rung: string, ok: boolean, why?: string) => {
+    rungs.push({ rung, ok, ...(why ? { why } : {}) })
+    appendEvent(job.sid, { actor: "rail", kind: "wake.rung", jid: job.id, rung, ok, ...(why ? { why } : {}) })
+    try {
+      mkdirSync(job.dir, { recursive: true })
+      appendFileSync(join(job.dir, "orchestrator.log"), `${new Date().toISOString()} wake rung ${rung} ${ok ? "ok" : "no"}${why ? ` — ${why}` : ""}\n`)
+    } catch {
+      /* the trace event above still books the step */
+    }
+  }
   // delivery 1: in-band — a live pane of a running Job holds the
   // spawner's host session (spurs may nest; the wake goes to the
   // pointer regardless)
@@ -437,13 +467,21 @@ export function wakeFirstMate(
         return false
       }
     })
-  const holder = findLivePaneForSpawner(job.spawner.session_id, job.id)
-  if (holder && promptPane(holder.label, `[wake] ${message}`)) {
+  const prompt = (label: string): boolean => (promptPane ? promptPane(label, `[wake] ${message}`) : false)
+  const holder = railSpawner ? null : findLivePaneForSpawner(job.spawner.session_id, job.id)
+  if (railSpawner) {
+    step("worker-pane", false, "rail spawner — in-band rungs skipped; wake.json is the receipt")
+  } else if (!holder) {
+    step("worker-pane", false, `no live worker pane holds session ${job.spawner.session_id}`)
+  } else if (prompt(holder.label)) {
     delivery = "pane"
     to = holder.label
+    step("worker-pane", true, `prompted holder pane ${holder.label} (booked by job ${holder.jid})`)
+  } else {
+    step("worker-pane", false, `holder pane ${holder.label} (booked by job ${holder.jid}) did not take the prompt`)
   }
   // rungs 2-4 live in one chain: registration, rebirth, spool
-  else if (!railSpawner) {
+  if (delivery === "queued" && !railSpawner) {
     // rung 2 — the registered levy pane: the levy's own chat, running
     // inside a herdr pane it volunteered (whl register). Registration
     // is the ONLY aliveness claim that outranks the fork; herdr's
@@ -458,9 +496,18 @@ export function wakeFirstMate(
           return false
         }
       })
-    if (reg && paneAlive(reg.pane) && promptPane(reg.pane, `[wake] ${message}`)) {
+    let paneTook = false
+    if (!reg) {
+      step("registered-pane", false, `no registered levy pane for session ${job.spawner.session_id} — whl register from inside the pane binds it`)
+    } else if (!paneAlive(reg.pane)) {
+      step("registered-pane", false, `registered pane ${reg.pane} is not alive (herdr agent get refused)`)
+    } else if (prompt(reg.pane)) {
       delivery = "pane"
       to = reg.pane
+      paneTook = true
+      step("registered-pane", true, `prompted registered pane ${reg.pane}`)
+    } else {
+      step("registered-pane", false, `registered pane ${reg.pane} is alive but did not take the prompt`)
     }
     // rung 3 — the fork: an unregistered chat is dead to the ladder by
     // rule (ADR 0008). The wake rebirths the levy into a fresh pane —
@@ -468,11 +515,12 @@ export function wakeFirstMate(
     // An injected port always runs (tests); the default is armed in
     // production only — disarmed under node:test and by
     // AGENTIC_OS_FORK_WAKE=0 (herdr-less hosts).
-    else if (port.forkLevy ?? forkArmed()) {
+    if (!paneTook && (port.forkLevy ?? forkArmed())) {
       const forked = (port.forkLevy ?? ((j, w) => forkLevy(j, w)))(job, { message })
       if (forked.ok) {
         delivery = "fork"
         to = forked.label
+        step("fork", true, `rebirthed the levy at pane ${forked.pane ?? "?"} (${forked.label})`)
         job.consumed = { at: new Date().toISOString(), via: "fork", label: forked.label, pane: forked.pane }
         appendEvent(job.sid, {
           actor: "rail",
@@ -481,17 +529,37 @@ export function wakeFirstMate(
           via: "fork",
           label: forked.label,
         })
+      } else {
+        step("fork", false, `fork refused: ${forked.why}`)
       }
+    } else if (!paneTook) {
+      step(
+        "fork",
+        false,
+        process.env.AGENTIC_OS_FORK_WAKE === "0"
+          ? "disarmed by AGENTIC_OS_FORK_WAKE=0"
+          : "disarmed (test context — NODE_TEST_CONTEXT is set)",
+      )
     }
-    // rung 4 — the spool: opt-in plugin territory (the levy installed
-    // the agentic-wake reader itself). Only reached when the fork
-    // could not take the wake — a fresh heartbeat never outranks it.
-    if (delivery === "queued" &&
-      job.spawner.tool === "opencode" &&
-      spoolAlive(job.spawner.session_id) &&
-      appendSpoolWake({ at, to: job.spawner.session_id, jid: job.id, text: message })) {
-      delivery = "inband"
-      to = job.spawner.session_id
+    // rung 4 — the spool: config-gated plugin territory (the levy
+    // installed the agentic-wake reader itself), then heartbeat-gated.
+    // Only reached when the fork could not take the wake — a fresh
+    // heartbeat never outranks it. Off by default: the reader is not
+    // installed on this machine.
+    if (delivery === "queued") {
+      if (!spoolArmed()) {
+        step("spool", false, "off by config — AGENTIC_OS_SPOOL_WAKE=1 arms it (after whl plugin install)")
+      } else if (job.spawner.tool !== "opencode") {
+        step("spool", false, `opencode-only rung; this spawner is ${job.spawner.tool}`)
+      } else if (!spoolAlive(job.spawner.session_id)) {
+        step("spool", false, `no fresh heartbeat for session ${job.spawner.session_id} (alive.json stale or absent)`)
+      } else if (appendSpoolWake({ at, to: job.spawner.session_id, jid: job.id, text: message })) {
+        delivery = "inband"
+        to = job.spawner.session_id
+        step("spool", true, "row queued in-band; the plugin drains it into the conversation")
+      } else {
+        step("spool", false, "queue append failed (fs error)")
+      }
     }
   }
   // rung 5 — the doorbell: the levy is a chat a person holds, or no
@@ -516,8 +584,15 @@ export function wakeFirstMate(
       port.notify !== undefined ||
       (process.env.AGENTIC_OS_NOTIFY !== "0" && existsSync(join(homedir(), ".local", "bin", "notify")))
     if (!rang) delivery = "queued"
+    step(
+      "doorbell",
+      rang,
+      rang
+        ? "notify CLI rang (best effort — the human's phone, not the levy)"
+        : "no notify CLI on this host (or AGENTIC_OS_NOTIFY=0) — the durable wake.json waits as queued",
+    )
   }
-  job.woke = { at, message, delivery, ...(to ? { to } : {}) }
+  job.woke = { at, message, delivery, rungs, ...(to ? { to } : {}) }
   saveJob(job)
   appendEvent(job.sid, {
     actor: "rail",
@@ -585,6 +660,52 @@ export function abortJob(
   saveJob(job)
   appendEvent(job.sid, { actor, kind: "job.aborted", jid: job.id, reason, panesRemaining })
   wakeFirstMate(job, `aborted (${reason})`, null)
+  return job
+}
+
+// The fail button (test entry): mark a Job failed on demand and fire
+// the wake ladder — a deterministic repro for the wake path that needs
+// no real failing run. Never touches a running Job (abort owns live
+// jobs); an already-woke Job re-fires only with again (the once-guard
+// otherwise holds). A real report.json is never clobbered — one is
+// minted only when none exists.
+export function failJob(
+  job: JobRecord,
+  reason: string,
+  opts: { again?: boolean; port?: WakePort } = {},
+): JobRecord | null {
+  if (job.state === "running") return null
+  if (job.woke && !opts.again) return null
+  const at = new Date().toISOString()
+  job.state = "retired"
+  job.finished = at
+  let report = job.receipt?.report ?? join(job.dir, "report.json")
+  if (!existsSync(report)) {
+    report = join(job.dir, "report.json")
+    try {
+      mkdirSync(job.dir, { recursive: true })
+      writeFileSync(
+        report,
+        JSON.stringify({ kind: "report", status: "failed", table: [{ unit: "fail-button", result: reason }], where: job.dir }, null, 2) + "\n",
+      )
+    } catch {
+      /* the wake still fires; the outcome text carries the reason */
+    }
+  }
+  const live = job.panes.filter((p) => p.died === undefined).length
+  job.receipt = {
+    panesRemaining: live,
+    panesTotal: job.panes.length,
+    unitsDone: Number.NaN,
+    unitsFailed: Number.NaN,
+    status: "failed",
+    report,
+    finished: at,
+  }
+  if (opts.again) job.woke = undefined
+  saveJob(job)
+  appendEvent(job.sid, { actor: "levy", kind: "job.fail-button", jid: job.id, reason, again: Boolean(opts.again) })
+  wakeFirstMate(job, `failed (fail-button: ${reason})`, report, opts.port)
   return job
 }
 
