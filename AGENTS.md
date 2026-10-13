@@ -11,3 +11,10 @@ Shapes: see yyxSkills `docs/agents/repo-layout.md`.
      `launchctl kickstart -k gui/$(id -u)/local.agentic-os.window`
      (details: autojobs show agentic-os-window) before concluding a
      server-side fix "didn't land". -->
+
+<!-- gwt worktrees: a spawned worktree is a fresh checkout with no
+     node_modules — run `npm install` INSIDE the worktree before
+     npm test (symptom: the whole suite dies with ERR_MODULE_NOT_FOUND
+     smol-toml). Never at the project root: a stray root
+     package-lock.json/node_modules breaks `gwt verify`
+     ("root entry 'package-lock.json' is not a registered worktree"). -->
