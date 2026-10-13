@@ -1,9 +1,8 @@
-// v9 — ADR 0008 ladder, full order: worker pane → registered levy
-// pane → fork → spool → doorbell → queued. Registration is the only
-// aliveness claim that outranks the fork (a fresh spool heartbeat
-// does NOT); an unregistered chat is dead to the ladder by rule and
-// is rebirthed into a pane; the spool is opt-in plugin territory,
-// reached only when the fork could not take the wake.
+// v10 — ADR 0008 ladder, simplified (2026-10-13): parent pane → fork →
+// spool (config-off) → doorbell → queued. The worker-pane scan and the
+// manual registry rungs are RETIRED — the spawn-time parent pane does
+// their one job; the registry survives only as audit bookkeeping, and
+// these tests pin that the wake truly no longer consults it.
 import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -37,21 +36,19 @@ test("the registry: register, look up by session, look up by pane", () => {
   rmSync(join(HOME, "levy-panes"), { recursive: true, force: true })
 })
 
-test("rung 2 — a registered live levy pane takes the wake in-band, tool-independent", () => {
+test("the registry is retired as a wake rung — a registered live pane is never prompted", () => {
   registerLevyPane({ session_id: SPAWNER.session_id, tool: "opencode", pane: "wL:p9", at: new Date().toISOString() })
   const job = levied("s-lad2")
   const prompts: string[] = []
   const forked: string[] = []
   wakeFirstMate(job, "done", null, {
     promptPane: (_label, text) => { prompts.push(text); return true },
-    paneAlive: () => true,
-    forkLevy: () => { forked.push("must not run"); return { ok: true, label: "no" } },
+    forkLevy: () => { forked.push("takes it"); return { ok: true, label: "fork-x", pane: "wF:p1" } },
   })
-  assert.equal(job.woke?.delivery, "pane")
-  assert.equal(job.woke?.to, "wL:p9", "the registered pane is the address")
-  assert.equal(prompts.length, 1)
-  assert.match(prompts[0], /\[wake\] spur for task "ladder probe" done/)
-  assert.equal(forked.length, 0, "registration outranks the fork")
+  assert.deepEqual(prompts, [], "a registry entry is not a wake address anymore")
+  assert.equal(job.woke?.delivery, "fork")
+  assert.equal(forked.length, 1, "the fork takes what the registry used to")
+  assert.ok(levyPaneOf(SPAWNER.session_id) !== null, "the registry record itself survives (audit bookkeeping)")
 })
 
 test("a registered pane that died no longer claims — the fork takes it", () => {
@@ -59,7 +56,6 @@ test("a registered pane that died no longer claims — the fork takes it", () =>
   const forked: string[] = []
   wakeFirstMate(job, "done", null, {
     promptPane: () => false,
-    paneAlive: () => false,
     forkLevy: (j) => { forked.push(j.id); return { ok: true, label: `fork-${j.id}`, pane: "wF:p1" } },
   })
   assert.equal(job.woke?.delivery, "fork")
@@ -68,17 +64,16 @@ test("a registered pane that died no longer claims — the fork takes it", () =>
   assert.ok(readEvents("s-lad3").some((e) => e.kind === "wake.consumed" && e.via === "fork"))
 })
 
-test("an unregistered chat is dead to the ladder — the fork rebirths it (the rule)", () => {
+test("a levy without a booked pane is forked — the rule", () => {
   rmSync(join(HOME, "levy-panes", `${SPAWNER.session_id}.json`), { force: true })
   const job = levied("s-lad4")
-  let spoolQuestioned = false
+  const prompts: string[] = []
   wakeFirstMate(job, "done", null, {
-    promptPane: () => false,
-    paneAlive: () => { spoolQuestioned = true; return false },
+    promptPane: (label) => { prompts.push(label); return false },
     forkLevy: () => ({ ok: true, label: "fork-reborn", pane: "wF:p2" }),
   })
   assert.equal(job.woke?.delivery, "fork")
-  assert.equal(spoolQuestioned, false, "no registration on file — the pane oracle is not even consulted")
+  assert.deepEqual(prompts, [], "nothing to prompt — no pane was booked at spawn")
 })
 
 test("when the fork cannot take it, a fresh spool heartbeat still can (config-armed plugin)", () => {

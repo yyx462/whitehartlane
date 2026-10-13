@@ -192,3 +192,32 @@ export function opencodeSessionExists(id: string): boolean {
   }
   return listOpencodeSessions(1000).some((s) => s.id === id)
 }
+
+// The spawner session's current title — the identity half of the wake
+// ladder's parent-pane guard (the host tool syncs the session title
+// into the pane's terminal title, "OC | <title>"). Self-contained on
+// purpose: session_v2 is the live table post-migration, legacy session
+// froze at the migration; ask v2 first, then legacy. Unknown session
+// or no title is a state, not an error: null, and the guard stands
+// down.
+export function opencodeSessionTitle(id: string): string | null {
+  if (!existsSync(opencodeDb())) return null
+  try {
+    const db = new DatabaseSync(opencodeDb(), { readOnly: true })
+    try {
+      for (const table of ["session_v2", "session"]) {
+        try {
+          const row = db.prepare(`SELECT title FROM ${table} WHERE id = ? LIMIT 1`).get(id) as { title?: string } | undefined
+          if (typeof row?.title === "string" && row.title) return row.title
+        } catch {
+          /* table absent or has no title column — try the next */
+        }
+      }
+    } finally {
+      db.close()
+    }
+  } catch {
+    /* unreadable db — no title */
+  }
+  return null
+}

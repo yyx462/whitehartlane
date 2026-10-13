@@ -151,6 +151,26 @@ test("resolveTranscript reads pi bytes directly and exports opencode bytes", asy
   assert.ok(oc!.read().includes("transcript of ses_x"))
 })
 
+test("opencodeSessionTitle reads the live session_v2 title (the parent-pane guard's identity half)", async () => {
+  const { DatabaseSync } = await import("node:sqlite")
+  const dbPath = join(root, "oc-title.db")
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT)")
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY)")
+  db.prepare("INSERT INTO session_v2 (id, title) VALUES (?, ?)").run("ses_t", "the p10 pipeline plan")
+  db.close()
+  const prev = process.env.OPENCODE_DB
+  process.env.OPENCODE_DB = dbPath
+  const { opencodeSessionTitle } = await import("../src/transcripts.ts")
+  try {
+    assert.equal(opencodeSessionTitle("ses_t"), "the p10 pipeline plan")
+    assert.equal(opencodeSessionTitle("ses_unknown"), null, "unknown session — no title, the guard stands down")
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_DB
+    else process.env.OPENCODE_DB = prev
+  }
+})
+
 test.after(() => {
   rmSync(root, { recursive: true, force: true })
 })

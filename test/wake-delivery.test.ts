@@ -1,8 +1,10 @@
 // ADR 0006 — wake delivery, proved on a fixture OS disk: the wake
-// lands in-band when a live pane of a running Job holds the spawner's
-// host session (a pane levy); the doorbell is the fallback when no
-// pane takes it; the durable record waits (queued) when nothing can
-// ring. Booked wait: the sessions running Jobs name as spawner.
+// lands in-band when the PARENT PANE (booked on the spawner record at
+// spawn) is live and titled like the session; job-booking discovery
+// and the manual registry are retired (2026-10-13) — the pane booked
+// at handover is the one address. The doorbell is the fallback when
+// nothing takes it; the durable record waits (queued) when nothing
+// can ring. Booked wait: the sessions running Jobs name as spawner.
 import assert from "node:assert/strict"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -42,7 +44,7 @@ function parentWithPane(sessionId: string, label: string) {
   return job
 }
 
-test("a wake lands in-band when a live pane holds the spawner session", () => {
+test("job-booking discovery is retired — a booked worker pane no longer takes the wake", () => {
   parentWithPane("ses_01abc", "w-hold")
   const child = createJob({
     sid: "s-child1",
@@ -63,15 +65,14 @@ test("a wake lands in-band when a live pane holds the spawner session", () => {
     notify: (message) => notifications.push(message),
   })
 
-  assert.equal(prompts.length, 1)
-  assert.equal(prompts[0]!.label, "w-hold")
-  assert.match(prompts[0]!.text, /^\[wake\] spur for task "child work" done/)
-  assert.deepEqual(notifications, [], "the doorbell is fallback-only")
-  assert.equal(child.woke!.delivery, "pane")
-  assert.equal(child.woke!.to, "w-hold")
+  // the pane booked on the parent Job is not the spawner's booked pane:
+  // the ladder never consults job bookings anymore — the spawn-time
+  // parent pane is the one address (see wake-rung-trace.test.ts)
+  assert.deepEqual(prompts, [], "no prompt left for a merely-booked pane")
+  assert.equal(child.woke!.delivery, "doorbell")
+  assert.equal(notifications.length, 1)
   const woke = readEvents("s-child1").filter((e) => e.kind === "job.woke")
-  assert.equal(woke[0]!.delivery, "pane")
-  assert.equal(woke[0]!.to, "w-hold")
+  assert.equal(woke[0]!.delivery, "doorbell")
 })
 
 test("no live pane: the doorbell rings as the fallback", () => {

@@ -20,7 +20,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { prepareRun } from "../src/run.ts"
+import { prepareRun, spawnerFromArgs } from "../src/run.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkPrompt, forkSeedOf } from "../src/fork.ts"
@@ -148,18 +148,11 @@ async function main() {
     const args = process.argv.slice(3)
     const verbose = args.includes("--verbose")
     // ADR 0006: --from <tool>:<session-id> books the spawning levy
-    // as the checkpoint — the Job will wake it once at the end.
+    // as the checkpoint — the Job will wake it once at the end. Inside
+    // herdr the pane rides along (HERDR_PANE_ID or --pane): the wake's
+    // parent-pane rung prompts it in-band when the Job finishes.
     const fromIdx = args.indexOf("--from")
-    const fromVal = fromIdx !== -1 ? args[fromIdx + 1] : undefined
-    const spawner = (() => {
-      if (!fromVal || !/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(fromVal)) return null
-      const i = fromVal.indexOf(":")
-      return {
-        tool: fromVal.slice(0, i),
-        session_id: fromVal.slice(i + 1),
-        since: new Date().toISOString(),
-      }
-    })()
+    const spawner = spawnerFromArgs(args)
     if (fromIdx !== -1 && !spawner) {
       console.error("run: --from wants <tool>:<session-id>, e.g. --from opencode:ses_01abc")
       process.exitCode = 2
@@ -176,9 +169,15 @@ async function main() {
       process.exitCode = 2
       return
     }
-    const folder = args.find((arg, i) => !arg.startsWith("-") && !(fromIdx !== -1 && i === fromIdx + 1))
+    const paneIdx = args.indexOf("--pane")
+    const folder = args.find(
+      (arg, i) =>
+        !arg.startsWith("-") &&
+        !(fromIdx !== -1 && i === fromIdx + 1) &&
+        !(paneIdx !== -1 && i === paneIdx + 1),
+    )
     if (!folder) {
-      console.error("usage: agentic-os run <folder> [--from <tool>:<session-id>] [--verbose]")
+      console.error("usage: agentic-os run <folder> [--from <tool>:<session-id>] [--pane <pane-id>] [--verbose]")
       process.exitCode = 2
       return
     }
@@ -510,12 +509,12 @@ async function main() {
     return
   }
 
-  // register — the levy pane (ADR 0008 rung 2): a chat that lives in
-  // a herdr pane volunteers the binding herdr cannot know on its own —
-  // which host session runs in which pane. Run from INSIDE the pane
-  // (HERDR_PANE_ID names it); herdr must already detect an agent there
-  // (it detects every supported kind, opencode and pi included). Any
-  // later door command run in that pane renews the registration.
+  // register — the levy pane registry (ADR 0008's retired wake rung):
+  // the wake ladder no longer consults this (2026-10-13 — spawn-time
+  // pane capture replaced it); the record survives as AUDIT
+  // bookkeeping, so a legitimately-live unbooked pane (your chat) is
+  // not flagged a stray. Run from INSIDE the pane (HERDR_PANE_ID
+  // names it); herdr must already detect an agent there.
   if (cmd === "register") {
     const args = process.argv.slice(3)
     const fromIdx = args.indexOf("--from")
@@ -555,7 +554,7 @@ async function main() {
     }
     registerLevyPane({ session_id, tool, pane, cwd: agent.cwd, at: new Date().toISOString() })
     console.log(`register: session ${tool}:${session_id} ↔ pane ${pane}`)
-    console.log(`register: wakes now prompt this pane in-band (rung 2) — live there and use the door to renew`)
+    console.log(`register: audit now exempts this pane as a levy chat — the wake ladder itself uses spawn-time pane capture (--from/--pane), not this registry`)
     return
   }
 
