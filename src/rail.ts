@@ -14,6 +14,7 @@ import { spawn } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
+import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
@@ -454,6 +455,17 @@ export class Rail implements ShepPort {
   ): boolean {
     const since = new Date().toISOString()
     const name = this.scopedName(rawName)
+    // the brownout guard's first half (ADR 0010): births stagger — a
+    // random pause before the pane is touched, so a batch of spurs
+    // asking for panes in the same second arrives as a queue instead
+    // of a stampede (the 2026-10-12 09:51 storm). AGENTIC_OS_BIRTH_
+    // JITTER_MS bounds it; 0 disarms.
+    const staggerBound = jitterBound("AGENTIC_OS_BIRTH_JITTER_MS", 1_500)
+    const stagger = drawJitter(staggerBound)
+    if (stagger > 0) {
+      this.log(`birth stagger: ${name} waits ${stagger}ms (bound ${staggerBound}ms)`)
+      sleepSync(stagger)
+    }
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
     const rec = this.shep("record", pane, name)
@@ -474,11 +486,27 @@ export class Rail implements ShepPort {
     }
     if (resumeSession) tail.push("--session", resumeSession)
     const startArgs = tail.length ? ["--", ...tail] : []
-    const start = this.herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
+    // the brownout guard's second half (ADR 0010): a refused start is
+    // not death — knock again with growing pauses. The storm's spawns
+    // failed once and the members died with zero retry; brownouts last
+    // seconds. AGENTIC_OS_START_TRIES / _BACKOFF_MS tune it.
+    const tries = retries("AGENTIC_OS_START_TRIES", 3)
+    const backoffStartBase = backoffBase("AGENTIC_OS_START_BACKOFF_MS", 5_000)
+    let start: ReturnType<Rail["herdr"]> | null = null
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      start = this.herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
+      if (start.status === 0) break
+      this.log(`agent start failed for ${name} (rc=${start.status}, attempt ${attempt}/${tries})`)
+      if (attempt < tries) {
+        const pause = backoffMs(backoffStartBase, attempt)
+        this.log(`agent start retry for ${name} in ${pause}ms (herdr brownout guard)`)
+        sleepSync(pause)
+      }
+    }
     if (start.status !== 0) {
       this.shep("retire", name)
       this.ledger?.emit("reject", { label: name, why: "agent start failed" })
-      this.log(`agent start failed for ${name} (rc=${start.status}) — ghost cleared`)
+      this.log(`agent start failed for ${name} (rc=${start.status}) after ${tries} attempt(s) — ghost cleared`)
       return false
     }
     if (!hold) {
