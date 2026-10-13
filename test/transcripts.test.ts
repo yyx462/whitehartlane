@@ -94,6 +94,51 @@ test("opencode prefers the sqlite db and no CLI window can hide a session", asyn
   process.env.OPENCODE_DB = join(root, "no-such-db.sqlite") // restore fallback for later tests
 })
 
+test("opencode session_v2 is the live table — a post-migration session resolves (the p10 wake regression)", async () => {
+  const { DatabaseSync } = await import("node:sqlite")
+  const dbPath = join(root, "oc-v2-fixture.db")
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)")
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)")
+  const ins = (table: string, id: string, directory: string, ts: number) =>
+    db.prepare(`INSERT INTO ${table} (id, directory, time_created) VALUES (?, ?, ?)`).run(id, directory, ts)
+  ins("session", "ses_legacy", "/tmp/units/v2", Date.parse("2026-10-11T00:00:00.000Z"))
+  // post-migration: the levy session lives ONLY in session_v2 — legacy
+  // froze at the migration instant, exactly like the real 2026-10-12 db
+  ins("session_v2", "ses_v2_levy", "/tmp/units/v2", Date.parse("2026-10-12T09:50:00.000Z"))
+  db.close()
+  process.env.OPENCODE_DB = dbPath
+
+  const hit = resolveOpencode({ tool: "opencode", cwd: "/tmp/units/v2", since: "2026-10-12T00:00:00.000Z" })
+  assert.equal(hit?.id, "ses_v2_levy", "the newest session lives only in session_v2")
+  assert.equal(resolveOpencode({ tool: "opencode", cwd: "/tmp/units/v2", since: "2026-10-13T00:00:00.000Z" }), null)
+
+  const { opencodeSessionExists, seedSessionFile } = await import("../src/transcripts.ts")
+  assert.equal(opencodeSessionExists("ses_v2_levy"), true, "the fork seed check sees v2 rows")
+  assert.equal(opencodeSessionExists("ses_legacy"), true, "legacy rows stay visible")
+  assert.equal(opencodeSessionExists("ses_missing"), false)
+  assert.equal(seedSessionFile({ tool: "opencode", session_id: "ses_v2_levy" }), dbPath, "the fork seed resolves")
+
+  process.env.OPENCODE_DB = join(root, "no-such-db.sqlite") // restore fallback for later tests
+})
+
+test("an install without session_v2 still resolves through legacy session", async () => {
+  const { DatabaseSync } = await import("node:sqlite")
+  const dbPath = join(root, "oc-legacy-only.db")
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run(
+    "ses_old_install", "/tmp/units/old", Date.parse("2026-09-30T06:00:00.000Z"),
+  )
+  db.close()
+  process.env.OPENCODE_DB = dbPath
+  const hit = resolveOpencode({ tool: "opencode", cwd: "/tmp/units/old", since: "2026-09-30T05:00:00.000Z" })
+  assert.equal(hit?.id, "ses_old_install")
+  const { opencodeSessionExists } = await import("../src/transcripts.ts")
+  assert.equal(opencodeSessionExists("ses_old_install"), true)
+  process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
+})
+
 test("resolveTranscript reads pi bytes directly and exports opencode bytes", async () => {
   piSession("/tmp/units/europe", "uuid-read", "2026-09-30T06:10:00.000Z", "the actual work")
   const pi = resolveTranscript({ tool: "pi", cwd: "/tmp/units/europe", since: "2026-09-30T05:00:00.000Z" })
