@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -176,4 +176,86 @@ test("a deny pattern ends the exchange with its reason in the report", async () 
   const wake = ledger.events.find((e) => e.kind === "wake")
   assert.ok(wake, "the death woke the ledger")
   assert.match(String(wake!.payload.why), /deny cap/)
+})
+
+test("a refused message is quoted in the nudges and the death reason — the member is told why (wave-2)", async () => {
+  const dir = await coworkerDir("coworker-refused-")
+  // alpha already "sent" its mail — a seq-0 file the relay must
+  // refuse — and idles, certain it is done. Pre-seeded so the very
+  // first beat records the refusal before any stall fires.
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  writeFileSync(
+    join(dir, "messages", "0-alpha.json"),
+    JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }),
+  )
+  const herdr = fakeHerdr()
+  const ledger = fakeLedger()
+  const rail = fakeRail(dir, herdr, ledger as never)
+  const nudges: string[] = []
+  herdr.onPrompt = (name, text) => {
+    if (name.startsWith("alpha") && text.includes("waits on you")) nudges.push(text)
+    // alpha idles through every nudge — it believes it already sent
+  }
+  const report = await runCoworker(rail, { stallMs: 30, beatMs: 10 })
+
+  // both nudges quote the refusal at its sender, with the fix spelled out
+  assert.equal(nudges.length, 2)
+  for (const n of nudges) {
+    assert.match(n, /REFUSED your message file/)
+    assert.match(n, /'0-alpha\.json': seq is not a positive integer: 0/)
+    assert.match(n, /messages\/<seq>-<your-name>\.json/)
+  }
+  // the death record and the ledger wake carry the diagnosis, not just "stalled"
+  assert.equal(report?.status, "failed")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /stalled past the nudge cap — 1 message file\(s\) refused by the relay: '0-alpha\.json'/)
+  const wake = ledger.events.find((e) => e.kind === "wake")
+  assert.match(String(wake!.payload.why), /refused by the relay/)
+  // the report row: a levy reading report.json sees the refusals without opening the log
+  const relayRow = report?.table.find((row) => row.unit === "relay")
+  assert.match(relayRow!.result, /1 message file\(s\) refused by the relay — '0-alpha\.json': seq is not a positive integer: 0/)
+  // and the durable relay ledger keeps the why + sender for a resumed run
+  const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as {
+    refused: string[]
+    refusedDetail: { file: string; why: string; from?: string }[]
+  }
+  assert.deepEqual(relayLedger.refused, ["0-alpha.json"])
+  assert.equal(relayLedger.refusedDetail[0]!.from, "alpha")
+  assert.match(relayLedger.refusedDetail[0]!.why, /seq/)
+})
+
+test("a member that heeds the quoted refusal self-heals — the exchange finishes done", async () => {
+  const dir = await coworkerDir("coworker-healed-")
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  writeFileSync(
+    join(dir, "messages", "0-alpha.json"),
+    JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }),
+  )
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let alphaPrompts = 0
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("alpha")) {
+      alphaPrompts += 1
+      if (alphaPrompts === 2) {
+        // the nudge landed with the quote — alpha fixes its mistake:
+        // delete the refused file, resend with a proper seq
+        later(() => {
+          writeFileSync(join(dir, "messages", "1-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }))
+          rmSync(join(dir, "messages", "0-alpha.json"))
+        })
+      }
+      return
+    }
+    // beta: first mail means the goal is reached — stop
+    later(() => {
+      writeFileSync(join(dir, "messages", "2-beta.json"), JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }))
+    })
+  }
+  const report = await runCoworker(rail, { stallMs: 100, beatMs: 10 })
+
+  assert.equal(report?.status, "done", "the healed file relayed and the stop ended the exchange")
+  assert.equal(report?.table.find((row) => row.unit === "relay"), undefined, "no unresolved refusals ride the report")
+  const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as { delivered: string[] }
+  assert.ok(relayLedger.delivered.includes("1-alpha.json"), "the fixed file was delivered")
 })
