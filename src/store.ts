@@ -10,7 +10,6 @@ import { loadManifest } from "./hooks.ts"
 import { TEMP_ROOTS } from "./permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
-import { levyPaneOf } from "./levy-pane.ts"
 import { opencodeSessionTitle } from "./transcripts.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -367,17 +366,19 @@ export function killPane(job: JobRecord, label: string): JobRecord {
 // levy that stood the Job up ("spur for task X done — report at …").
 // Layered delivery: wake.json on the job dir (durable), one job.woke
 // trace event, `woke` on the record as the once-guard, then the
-// ladder, best-first: (1) a live WORKER pane holds the spawner's host
-// session (spurs may nest); (2) a REGISTERED levy pane — the levy's
-// own chat, running inside herdr and self-registered via `whl
-// register` (registration is the only aliveness claim that outranks
-// the fork); (3) the FORK — an unregistered chat is dead to the
-// ladder by rule, so the wake rebirths it into a fresh pane
-// (AGENTIC_OS_FORK_WAKE=0 disarms); (4) the spool — opt-in plugin
-// territory, only reached when the fork could not; (5) the machine's
-// notify CLI doorbell (best-effort; AGENTIC_OS_NOTIFY=0 or absence
-// disables); the durable record waits ("queued") for `whl fork`.
-// No spawner -> no wake (the Job is unattended, nothing to tell).
+// ladder, best-first: (1) the PARENT PANE — the pane booked on the
+// spawner record at handover (HERDR_PANE_ID at spawn, or --pane),
+// prompted in-band when live and titled like the session; (2) the
+// FORK — the parent is dead, so the wake rebirths the session into a
+// fresh pane (AGENTIC_OS_FORK_WAKE=0 disarms); (3) the spool —
+// config-off plugin territory (AGENTIC_OS_SPOOL_WAKE=1 arms), reached
+// only when the fork could not; (4) the machine's notify CLI doorbell
+// (best-effort; AGENTIC_OS_NOTIFY=0 or absence disables); the durable
+// record waits ("queued") for `whl fork`. No spawner -> no wake (the
+// Job is unattended, nothing to tell). The 2026-10-13 simplification
+// removed the worker-pane scan and the manual registry rungs — the
+// spawn-time parent pane does their one job with a better source of
+// truth; the registry survives only as audit bookkeeping.
 export type WakeDelivery = "pane" | "fork" | "inband" | "doorbell" | "queued"
 
 // One rung attempt, recorded however it went — taken, refused, or
@@ -390,12 +391,10 @@ export type WakeRung = { rung: string; ok: boolean; why?: string }
 export type WakePort = {
   // prompt a live pane (herdr agent prompt <label>); false = not live
   promptPane?: (label: string, message: string) => boolean
-  // is a registered levy pane still a live detected agent? (herdr agent get)
-  paneAlive?: (pane: string) => boolean
   // what lives in a pane right now (herdr agent list): alive, and the
   // terminal title — the identity guard for the spawn-time parent pane
   paneInfo?: (pane: string) => { alive: boolean; title?: string } | null
-  // the wake-time rebirth (rung 3) — armed by the caller or the default
+  // the wake-time rebirth (rung 2) — armed by the caller or the default
   forkLevy?: (job: JobRecord, wake: { message: string }) => { ok: boolean; label?: string; pane?: string; why?: string }
   // the doorbell fallback (notify CLI)
   notify?: (message: string) => void
@@ -495,22 +494,17 @@ export function wakeFirstMate(
       }
     })
   const prompt = (label: string): boolean => (promptPane ? promptPane(label, `[wake] ${message}`) : false)
-  const holder = railSpawner ? null : findLivePaneForSpawner(job.spawner.session_id, job.id)
   if (railSpawner) {
-    step("worker-pane", false, "rail spawner — in-band rungs skipped; wake.json is the receipt")
-  } else if (!holder) {
-    step("worker-pane", false, `no live worker pane holds session ${job.spawner.session_id}`)
-  } else if (prompt(holder.label)) {
-    delivery = "pane"
-    to = holder.label
-    step("worker-pane", true, `prompted holder pane ${holder.label} (booked by job ${holder.jid})`)
-  } else {
-    step("worker-pane", false, `holder pane ${holder.label} (booked by job ${holder.jid}) did not take the prompt`)
+    step("in-band", false, "rail spawner — in-band rungs skipped; wake.json is the receipt")
   }
-  // rungs 2-5 live in one chain: parent pane, registration, rebirth, spool
+  // rungs 1-4 live in one chain: parent pane, rebirth, spool, doorbell.
+  // (2026-10-13 simplification: the worker-pane scan and the manual
+  // registry rungs are gone — the spawn-time parent pane does their one
+  // job with a better source of truth, and the registry survives only
+  // as audit bookkeeping for legitimately-live unbooked panes.)
   if (delivery === "queued" && !railSpawner) {
     let paneTook = false
-    // rung 2 — the parent pane (booked at spawn): the levy handed the
+    // rung 1 — the parent pane (booked at spawn): the levy handed the
     // spur over from INSIDE a herdr pane, and the door booked that pane
     // on the spawner record (--pane or HERDR_PANE_ID) — the strongest
     // address the wake holds, no registry involved. herdr cannot name
@@ -553,39 +547,11 @@ export function wakeFirstMate(
         step("parent-pane", false, `parent pane ${parentPane} is alive but did not take the prompt`)
       }
     }
-    // rung 3 — the registered levy pane: the levy's own chat, running
-    // inside a herdr pane it volunteered (whl register). Registration
-    // is the ONLY aliveness claim that outranks the fork; herdr's
-    // agent get is the oracle (a detected agent in that pane, still
-    // there). The wake prompts the pane directly — tool-independent.
-    if (!paneTook) {
-      const reg = levyPaneOf(job.spawner.session_id)
-      const paneAlive = port.paneAlive ??
-        ((pane) => {
-          try {
-            return spawnSync("herdr", ["agent", "get", pane], { timeout: 10_000 }).status === 0
-          } catch {
-            return false
-          }
-        })
-      if (!reg) {
-        step("registered-pane", false, `no registered levy pane for session ${job.spawner.session_id} — whl register from inside the pane binds it`)
-      } else if (!paneAlive(reg.pane)) {
-        step("registered-pane", false, `registered pane ${reg.pane} is not alive (herdr agent get refused)`)
-      } else if (prompt(reg.pane)) {
-        delivery = "pane"
-        to = reg.pane
-        paneTook = true
-        step("registered-pane", true, `prompted registered pane ${reg.pane}`)
-      } else {
-        step("registered-pane", false, `registered pane ${reg.pane} is alive but did not take the prompt`)
-      }
-    }
-    // rung 4 — the fork: an unregistered chat is dead to the ladder by
-    // rule (ADR 0008). The wake rebirths the levy into a fresh pane —
-    // session resumed from the checkpoint, wake as the first prompt.
-    // An injected port always runs (tests); the default is armed in
-    // production only — disarmed under node:test and by
+    // rung 2 — the fork: the parent pane is dead, not booked, or
+    // recycled (ADR 0008). The wake rebirths the levy into a fresh
+    // pane — session resumed from the checkpoint, wake as the first
+    // prompt. An injected port always runs (tests); the default is
+    // armed in production only — disarmed under node:test and by
     // AGENTIC_OS_FORK_WAKE=0 (herdr-less hosts).
     if (!paneTook && (port.forkLevy ?? forkArmed())) {
       const forked = (port.forkLevy ?? ((j, w) => forkLevy(j, w)))(job, { message })
@@ -613,7 +579,7 @@ export function wakeFirstMate(
           : "disarmed (test context — NODE_TEST_CONTEXT is set)",
       )
     }
-    // rung 5 — the spool: config-gated plugin territory (the levy
+    // rung 3 — the spool: config-gated plugin territory (the levy
     // installed the agentic-wake reader itself), then heartbeat-gated.
     // Only reached when the fork could not take the wake — a fresh
     // heartbeat never outranks it. Off by default: the reader is not
@@ -634,7 +600,7 @@ export function wakeFirstMate(
       }
     }
   }
-  // rung 6 — the doorbell: the levy is a chat a person holds, or no
+  // rung 4 — the doorbell: the levy is a chat a person holds, or no
   // rung above could take the wake. A rail spawner skips it: machines
   // are not doorbelled.
   if (delivery !== "pane" && delivery !== "fork" && delivery !== "inband" && !railSpawner) {
