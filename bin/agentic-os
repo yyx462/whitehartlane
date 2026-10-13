@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
-// continue | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
+// fail | continue | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
 // starts that workflow's engine. The rest read and finish the OS disk
 // (~/.local/share/agentic-os). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
@@ -32,6 +32,7 @@ import {
   appendEvent,
   continueJob,
   eventsPath,
+  failJob,
   findOrOpenSession,
   homeRoot,
   killPane,
@@ -607,6 +608,51 @@ async function main() {
     }
     console.error("usage: agentic-os plugin install|status")
     process.exitCode = 2
+    return
+  }
+
+  // fail — the test button: mark a finished Job failed on demand and
+  // fire the wake ladder, so the delivery path can be exercised and
+  // debugged without staging a real failing run. The printed rung
+  // trace is the ladder's own debug log (also stamped into
+  // job.woke.rungs, the session trail, and the job's orchestrator.log).
+  if (cmd === "fail") {
+    const args = process.argv.slice(3)
+    const jid = process.argv[3]
+    const rIdx = args.indexOf("--reason")
+    const reason = rIdx !== -1 && args[rIdx + 1] !== undefined ? args[rIdx + 1] : "fail-button pressed"
+    const again = args.includes("--again")
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || jid.startsWith("--") || !job) {
+      console.error(`fail: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      process.exitCode = 2
+      return
+    }
+    if (job.state === "running") {
+      console.error(`fail: ${job.id} is running — abort or pause it first (abort owns live jobs)`)
+      process.exitCode = 2
+      return
+    }
+    if (job.woke && !again) {
+      console.error(`fail: ${job.id} already woke at ${job.woke.at} (delivery ${job.woke.delivery ?? "?"}) — pass --again to re-fire the ladder for testing`)
+      process.exitCode = 2
+      return
+    }
+    const failed = failJob(job, reason, { again })
+    if (!failed) {
+      console.error(`fail: ${job.id} declined — run: agentic-os events ${job.sid}`)
+      process.exitCode = 1
+      return
+    }
+    console.log(`fail: ${failed.id} marked failed (fail-button: ${reason}) — report at ${failed.receipt?.report}`)
+    if (!failed.woke) {
+      console.log(`fail: no spawner on record — nothing to wake`)
+      return
+    }
+    console.log(`fail: wake delivery=${failed.woke.delivery ?? "?"}${failed.woke.to ? ` to ${failed.woke.to}` : ""}`)
+    for (const r of failed.woke.rungs ?? []) {
+      console.log(`  rung ${r.rung}: ${r.ok ? "ok" : "no"}${r.why ? ` — ${r.why}` : ""}`)
+    }
     return
   }
 
