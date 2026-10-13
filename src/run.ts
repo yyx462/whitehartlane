@@ -13,7 +13,29 @@ import {
   findOrOpenSession,
   listJobs,
   type JobRecord,
+  type SpawnerPointer,
 } from "./store.ts"
+
+// ADR 0006: --from <tool>:<session-id> books the spawning levy as the
+// checkpoint — the Job will wake it exactly once at the end. Run from
+// inside a herdr pane (or with --pane <id>), the pane is booked too:
+// the wake's strongest address, captured at the one moment session and
+// pane are both known. No pane (outside herdr) is a state, not an
+// error — the ladder falls to registration/fork as before.
+export function spawnerFromArgs(args: string[], env: NodeJS.ProcessEnv = process.env): SpawnerPointer | null {
+  const fromIdx = args.indexOf("--from")
+  const fromVal = fromIdx !== -1 ? args[fromIdx + 1] : undefined
+  if (!fromVal || !/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(fromVal)) return null
+  const i = fromVal.indexOf(":")
+  const paneIdx = args.indexOf("--pane")
+  const pane = paneIdx !== -1 ? args[paneIdx + 1] : env.HERDR_PANE_ID
+  return {
+    tool: fromVal.slice(0, i),
+    session_id: fromVal.slice(i + 1),
+    since: new Date().toISOString(),
+    ...(pane ? { pane } : {}),
+  }
+}
 
 export type RunReady = {
   ok: true

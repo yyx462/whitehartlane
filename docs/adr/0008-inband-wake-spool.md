@@ -144,3 +144,17 @@ The fail button (`whl fail <jid> [--reason ..] [--again]`) complements
 the trace: it marks a finished Job failed and fires the ladder on
 demand, so the delivery path is testable without staging a real
 failing run.
+
+## Amendment (2026-10-13): the parent pane — registration at handover
+
+The levy's own design: hand over the spur and your address in one
+motion. `whl run --from <tool>:<sid>` now books the pane too
+(`HERDR_PANE_ID` inside herdr, or `--pane`), and the wake asks the
+parent pane before any registry: live and titled like the spawner
+session → prompt it in-band; dead or recycled → fall through to
+registration, fork, spool, doorbell. herdr cannot name the session a
+pane hosts, so the terminal title (the host tool syncs the session
+title into it, "OC | <title>") is the identity guard — a live pane
+that stopped matching is a recycled pane, never misdelivered to. The
+per-job binding cannot go stale the way the registry can; the registry
+rung stays for jobs spawned before capture or outside herdr.
