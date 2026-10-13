@@ -38,7 +38,13 @@ export async function runCoworker(
   const relayLedger = readRelayLedger(taskDir)
   const delivered = [...relayLedger.delivered]
   const refused = [...relayLedger.refused]
-  const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused })
+  // why each refusal happened, and its attributable sender — the nudge
+  // ladder quotes these AT the sender (the 2026-10-12 wave-2 lesson:
+  // a member whose mail is refused must be told why, or it idles to
+  // death certain it already sent). A file that later parses good (or
+  // is deleted) heals out of this map.
+  const refusedDetail = new Map((relayLedger.refusedDetail ?? []).map((d) => [d.file, d]))
+  const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused, refusedDetail: [...refusedDetail.values()] })
   // A parked member continues its own booked session (write-ahead at
   // birth); a member without one is born fresh, held idle until mail.
   const resumeOf = new Map<string, string>()
@@ -149,6 +155,25 @@ export async function runCoworker(
     const sid = panes[panes.length - 1]?.transcript?.session_id
     return sid ? spawnerSessions().has(sid) : false
   }
+  // refusal feedback: the quoted reasons a member's mail was refused,
+  // for its nudges and — if it still stalls — its death record
+  const refusalsOf = (member: string) => [...refusedDetail.values()].filter((d) => d.from === member)
+  const refusalList = (member: string): string => {
+    const mine = refusalsOf(member)
+    const head = mine.slice(0, 3).map((d) => `'${d.file}': ${d.why}`).join("; ")
+    return mine.length > 3 ? `${head} (+${mine.length - 3} more)` : head
+  }
+  const refusalQuote = (member: string): string => {
+    if (refusalsOf(member).length === 0) return ""
+    return (
+      ` The relay REFUSED your message file(s) — nothing you sent was delivered: ${refusalList(member)}.` +
+      ` Fix the file and write it again: messages/<seq>-<your-name>.json holding {"from","to","type":"note"|"stop","body"} with seq a positive integer.`
+    )
+  }
+  const refusalSuffix = (member: string): string => {
+    const n = refusalsOf(member).length
+    return n > 0 ? ` — ${n} message file(s) refused by the relay: ${refusalList(member)}` : ""
+  }
   const stoodDown = new Set<string>()
   let ended: "stop" | "cap" | "deadline" | "dead" | "paused" | null = null
   let draining = false
@@ -184,12 +209,26 @@ export async function runCoworker(
     // readMessages follows it on the same beat
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
     for (const b of bad) {
+      // the detail (why + sender) is refreshed every beat — a refusal
+      // loaded from an old ledger without detail backfills here
+      const sender = b.from && names.includes(b.from) ? b.from : undefined
+      refusedDetail.set(b.file, { file: b.file, why: b.why, from: sender })
       if (refused.includes(b.file)) continue
       refused.push(b.file)
       commitRelay()
       ledger?.emit("reject", { why: `message ${b.file}: ${b.why}` })
       log(`refused message ${b.file}: ${b.why}`)
       rail.say("watcher", `refuse ${b.file}`)
+    }
+    // healed: a refused file that no longer parses bad (fixed in place
+    // or deleted) stops being quoted — the sender acted on the feedback
+    const stillBad = new Set(bad.map((b) => b.file))
+    for (const [file, detail] of refusedDetail) {
+      if (!stillBad.has(file)) {
+        refusedDetail.delete(file)
+        commitRelay()
+        log(`refusal healed: ${file} no longer refuses (${detail.why})`)
+      }
     }
     const plan = relayPlan(messages, delivered, CAP)
     for (const r of plan.relays) {
@@ -262,9 +301,9 @@ export async function runCoworker(
           nudged.set(ballOn.name, used + 1)
           rail.promptAgent(
             ballOn.name,
-            used === 0
+            (used === 0
               ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
-              : `Second and final nudge, ${ballOn.name}: the exchange waits on you. Act now or the job ends unresolved.`,
+              : `Second and final nudge, ${ballOn.name}: the exchange waits on you. Act now or the job ends unresolved.`) + refusalQuote(ballOn.name),
           )
           ballOn.since = Date.now()
           log(`nudge ${ballOn.name} (${used + 1}/2)`)
@@ -281,10 +320,11 @@ export async function runCoworker(
           log(`member ${ballOn.name} at the nudge cap — guidance still queued, deferring one beat`)
           ledger?.emit("reprompt", { member: ballOn.name, deferred: true })
         } else {
+          const reason = `${ballOn.name} stalled past the nudge cap${refusalSuffix(ballOn.name)}`
           dead.push(ballOn.name)
-          deadWhy.set(ballOn.name, `${ballOn.name} stalled past the nudge cap`)
-          ledger?.emit("wake", { why: `member ${ballOn.name} stalled past the nudge cap` })
-          log(`member ${ballOn.name} stalled past the nudge cap — ending`)
+          deadWhy.set(ballOn.name, reason)
+          ledger?.emit("wake", { why: `member ${reason}` })
+          log(`member ${reason} — ending`)
         }
       }
     }
@@ -326,13 +366,25 @@ export async function runCoworker(
     const why = [...deadWhy.values()].join("; ")
     rows.push({ unit: "exchange", result: `ended by ${ended}${why ? ` — ${why}` : ""}`, pass: false })
   }
-  log(`exchange ended (${ended}) — ${messages.length} messages, ${delivered.length} relayed`)
+  // unresolved refused mail is a failure in its own right even on a
+  // clean stop — a levy looks at the report first, so the refusals
+  // ride it (the wave-2 lesson: they lived only in orchestrator.log)
+  const unresolved = [...refusedDetail.values()]
+  if (unresolved.length > 0) {
+    const list = unresolved.slice(0, 3).map((d) => `'${d.file}': ${d.why}`).join("; ")
+    rows.push({
+      unit: "relay",
+      result: `${unresolved.length} message file(s) refused by the relay — ${list}${unresolved.length > 3 ? ` (+${unresolved.length - 3} more)` : ""}`,
+      pass: false,
+    })
+  }
+  log(`exchange ended (${ended}) — ${messages.length} messages, ${delivered.length} relayed${unresolved.length > 0 ? `, ${unresolved.length} refused` : ""}`)
   const report = writeReport(
     taskDir,
     taskDir,
     rows,
     (table) => runCounts(taskDir, rail.manifest(), table),
-    ended === "stop" && dead.length === 0 ? "done" : undefined,
+    ended === "stop" && dead.length === 0 && unresolved.length === 0 ? "done" : undefined,
   )
   rail.retireAll()
   rail.closeVerbose()

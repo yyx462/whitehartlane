@@ -93,31 +93,38 @@ export type Message = {
   body: string
 }
 
-export type BadMessage = { file: string; why: string }
+// A refusal carries its sender when attributable — the payload's from
+// when the JSON parsed, else the filename's sender slot. The nudge
+// ladder quotes refusals AT their sender (the 2026-10-12 wave-2 fix:
+// members died at the nudge cap without ever being told why their
+// mail was refused). A best guess that names a stranger is filtered
+// at the use site.
+export type BadMessage = { file: string; why: string; from?: string }
 
 // One message file: <seq>-<from>.json holding {from, to, type, body}.
 // from must match the filename; to must be a member — a message to a
 // stranger is refused, never relayed.
 export function parseMessage(file: string, raw: string, members: string[]): Message | BadMessage {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return { file, why: "not JSON" }
-  }
-  const m = parsed as { from?: unknown; to?: unknown; type?: unknown; body?: unknown }
   const base = file.replace(/^.*\//, "")
   const name = base.replace(/\.json$/, "")
   const seq = Number(name.split("-")[0])
   const from = base.split("-").slice(1).join("-").replace(/\.json$/, "") || undefined
-  if (typeof m.from !== "string" || typeof m.to !== "string") return { file, why: "from and to must be strings" }
-  if (from !== m.from) return { file, why: `filename sender ${from ?? "(none)"} does not match from ${m.from}` }
-  if (!Number.isInteger(seq) || seq < 1) return { file, why: `seq is not a positive integer: ${name.split("-")[0]}` }
-  if (!members.includes(m.from)) return { file, why: `from is not a member: ${m.from}` }
-  if (!members.includes(m.to)) return { file, why: `to is not a member: ${m.to}` }
-  if (m.from === m.to) return { file, why: `a message to itself: ${m.from}` }
-  if (m.type !== "note" && m.type !== "stop") return { file, why: `type must be note or stop: ${String(m.type)}` }
-  if (typeof m.body !== "string" || m.body.trim() === "") return { file, why: "body is empty" }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { file, why: "not JSON", from }
+  }
+  const m = parsed as { from?: unknown; to?: unknown; type?: unknown; body?: unknown }
+  if (typeof m.from !== "string" || typeof m.to !== "string")
+    return { file, why: "from and to must be strings", from: typeof m.from === "string" ? m.from : from }
+  if (from !== m.from) return { file, why: `filename sender ${from ?? "(none)"} does not match from ${m.from}`, from: m.from }
+  if (!Number.isInteger(seq) || seq < 1) return { file, why: `seq is not a positive integer: ${name.split("-")[0]}`, from: m.from }
+  if (!members.includes(m.from)) return { file, why: `from is not a member: ${m.from}`, from: m.from }
+  if (!members.includes(m.to)) return { file, why: `to is not a member: ${m.to}`, from: m.from }
+  if (m.from === m.to) return { file, why: `a message to itself: ${m.from}`, from: m.from }
+  if (m.type !== "note" && m.type !== "stop") return { file, why: `type must be note or stop: ${String(m.type)}`, from: m.from }
+  if (typeof m.body !== "string" || m.body.trim() === "") return { file, why: "body is empty", from: m.from }
   return { file, seq, from: m.from, to: m.to, type: m.type, body: m.body }
 }
 
@@ -170,14 +177,23 @@ export function relayPlan(messages: Message[], delivered: string[], cap: number)
 // relay — which message files have already been injected into panes,
 // and which were refused. Committed after each delivery, so a crash
 // re-delivers at worst (a duplicate prompt), never loses mail.
-export type RelayLedger = { delivered: string[]; refused: string[] }
+// RefusedDetail rides the ledger so a resumed run (ADR 5 continue)
+// still knows WHY each file was refused — the nudge quotes survive
+// the park. Additive: old relay.json files load without it.
+export type RefusedDetail = { file: string; why: string; from?: string }
+
+export type RelayLedger = { delivered: string[]; refused: string[]; refusedDetail?: RefusedDetail[] }
 
 export function readRelayLedger(taskDir: string): RelayLedger {
   try {
     const parsed = JSON.parse(readFileSync(join(taskDir, "relay.json"), "utf8")) as Partial<RelayLedger>
-    return { delivered: parsed.delivered ?? [], refused: parsed.refused ?? [] }
+    return {
+      delivered: parsed.delivered ?? [],
+      refused: parsed.refused ?? [],
+      refusedDetail: Array.isArray(parsed.refusedDetail) ? parsed.refusedDetail : [],
+    }
   } catch {
-    return { delivered: [], refused: [] }
+    return { delivered: [], refused: [], refusedDetail: [] }
   }
 }
 
