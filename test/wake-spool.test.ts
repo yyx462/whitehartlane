@@ -19,6 +19,9 @@ import { createJob, readEvents, wakeFirstMate } from "../src/store.ts"
 const HOME = mkdtempSync(join(tmpdir(), "aos-spool-"))
 process.env.AGENTIC_OS_HOME = HOME
 process.env.AGENTIC_OS_NOTIFY = "0"
+// the spool rung is config-off by default (AGENTIC_OS_SPOOL_WAKE);
+// this file tests the channel itself, so it arms the rung
+process.env.AGENTIC_OS_SPOOL_WAKE = "1"
 
 test.after(() => rmSync(HOME, { recursive: true, force: true }))
 

@@ -81,17 +81,24 @@ test("an unregistered chat is dead to the ladder — the fork rebirths it (the r
   assert.equal(spoolQuestioned, false, "no registration on file — the pane oracle is not even consulted")
 })
 
-test("when the fork cannot take it, a fresh spool heartbeat still can (opt-in plugin)", () => {
-  const job = levied("s-lad5")
-  mkdirSync(join(HOME, "wake-spool", SPAWNER.session_id), { recursive: true })
-  writeFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "alive.json"), JSON.stringify({ pid: 1, at: Date.now() }))
-  wakeFirstMate(job, "done", null, {
-    promptPane: () => false,
-    forkLevy: () => ({ ok: false, why: "herdr down" }),
-  })
-  assert.equal(job.woke?.delivery, "inband")
-  const q = readFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "queue.jsonl"), "utf8")
-  assert.match(q, /ladder probe/)
+test("when the fork cannot take it, a fresh spool heartbeat still can (config-armed plugin)", () => {
+  const prev = process.env.AGENTIC_OS_SPOOL_WAKE
+  process.env.AGENTIC_OS_SPOOL_WAKE = "1"
+  try {
+    const job = levied("s-lad5")
+    mkdirSync(join(HOME, "wake-spool", SPAWNER.session_id), { recursive: true })
+    writeFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "alive.json"), JSON.stringify({ pid: 1, at: Date.now() }))
+    wakeFirstMate(job, "done", null, {
+      promptPane: () => false,
+      forkLevy: () => ({ ok: false, why: "herdr down" }),
+    })
+    assert.equal(job.woke?.delivery, "inband")
+    const q = readFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "queue.jsonl"), "utf8")
+    assert.match(q, /ladder probe/)
+  } finally {
+    if (prev === undefined) delete process.env.AGENTIC_OS_SPOOL_WAKE
+    else process.env.AGENTIC_OS_SPOOL_WAKE = prev
+  }
 })
 
 test("fork down and no listener: the doorbell, as ever", () => {
