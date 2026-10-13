@@ -59,6 +59,27 @@ test("a message must come from a member, name a member, and match its filename",
   for (const [file, raw, why] of cases) assert.match((parseMessage(file, raw, ["backend", "frontend"]) as { why: string }).why, why)
 })
 
+test("a refusal carries its sender when attributable — the 2026-10-12 wave-2 matrix", () => {
+  const members = ["backend", "frontend"]
+  // KR's bug: valid filename, broken JSON (a trailing }) — the
+  // filename names the sender
+  const kr = parseMessage("0005-backend.json", '{"from":"backend","to":"frontend"} }', members) as { why: string; from?: string }
+  assert.match(kr.why, /not JSON/)
+  assert.equal(kr.from, "backend")
+  // JP's bug: a topic where the sender belongs — the payload names him
+  const jp = parseMessage("0003-pipeline-topic.json", JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "x" }), members) as { why: string; from?: string }
+  assert.match(jp.why, /filename sender/)
+  assert.equal(jp.from, "backend")
+  // TW's bug: seq starts at 0 — sender from the payload
+  const tw = parseMessage("0-backend.json", JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "x" }), members) as { why: string; from?: string }
+  assert.match(tw.why, /seq/)
+  assert.equal(tw.from, "backend")
+  // unattributable: broken JSON behind a stranger's filename — the raw
+  // filename guess survives for the log; the nudge site filters it
+  const anon = parseMessage("0007-stranger.json", "{not json", members) as { why: string; from?: string }
+  assert.equal(anon.from, "stranger")
+})
+
 test("readMessages sorts by seq and separates the refused", () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-msgs-"))
   writeFileSync(join(dir, "0002-frontend.json"), JSON.stringify({ from: "frontend", to: "backend", type: "note", body: "styling done" }))

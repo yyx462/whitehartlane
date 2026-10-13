@@ -210,12 +210,19 @@ test("continueBriefFor restates the finish protocol for both resume shapes", () 
 test("the relay ledger round-trips deliveries and refusals", async () => {
   const { interruptedMember, readRelayLedger, writeRelayLedger } = await import("../src/coworker.ts")
   const dir = mkdtempSync(join(tmpdir(), "pause-relay-"))
-  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [] })
-  writeRelayLedger(dir, { delivered: ["3-alice.json"], refused: ["2-bad.json"] })
-  assert.deepEqual(readRelayLedger(dir), { delivered: ["3-alice.json"], refused: ["2-bad.json"] })
+  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [], refusedDetail: [] })
+  writeRelayLedger(dir, { delivered: ["3-alice.json"], refused: ["2-bad.json"], refusedDetail: [{ file: "2-bad.json", why: "not JSON", from: "alice" }] })
+  assert.deepEqual(readRelayLedger(dir), {
+    delivered: ["3-alice.json"],
+    refused: ["2-bad.json"],
+    refusedDetail: [{ file: "2-bad.json", why: "not JSON", from: "alice" }],
+  })
+  // an old ledger without detail (pre-2026-10-13) loads with it empty
+  writeFileSync(join(dir, "relay.json"), JSON.stringify({ delivered: ["3-alice.json"], refused: [] }))
+  assert.deepEqual(readRelayLedger(dir), { delivered: ["3-alice.json"], refused: [], refusedDetail: [] })
   // a corrupt ledger degrades to empty — mail re-delivers, never lost
   writeFileSync(join(dir, "relay.json"), "{oops")
-  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [] })
+  assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [], refusedDetail: [] })
 })
 
 test("interruptedMember derives the mid-turn member from disk alone", async () => {
