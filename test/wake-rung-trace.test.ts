@@ -9,9 +9,10 @@ import assert from "node:assert/strict"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 import { registerLevyPane } from "../src/levy-pane.ts"
-import { createJob, failJob, pauseJob, readEvents, wakeFirstMate, type JobRecord } from "../src/store.ts"
+import { createJob, failJob, paneTitlesSession, pauseJob, readEvents, wakeFirstMate, type JobRecord } from "../src/store.ts"
 import { spoolDirOf } from "../src/wake-spool.ts"
 
 const HOME = mkdtempSync(join(tmpdir(), "aos-rungtrace-"))
@@ -110,7 +111,7 @@ test("every rung attempt lands in the session trail and the job's orchestrator.l
     ...port,
   })
   const kinds = readEvents("s-tr5").filter((e) => e.kind === "wake.rung").map((e) => e.rung)
-  assert.deepEqual(kinds, ["worker-pane", "registered-pane", "fork", "spool", "doorbell"])
+  assert.deepEqual(kinds, ["worker-pane", "parent-pane", "registered-pane", "fork", "spool", "doorbell"])
   const log = readFileSync(join(job.dir, "orchestrator.log"), "utf8")
   assert.match(log, /wake rung worker-pane no — no live worker pane holds session ses_trace/)
   assert.match(log, /wake rung fork no — fork refused: herdr down/)
@@ -167,4 +168,112 @@ test("the fail button never clobbers a real report", () => {
   const failed = failJob(job, "button", { port })
   assert.equal(failed?.receipt?.report, real)
   assert.match(readFileSync(real, "utf8"), /real run/, "the real report survives")
+})
+
+// ---- the parent pane (booked at spawn): the user's step-3 design ----
+// live pane → relay the message; dead or recycled pane → fall through.
+
+let titleDbN = 0
+function titleDb(id: string, title: string | null): string {
+  const dbPath = join(HOME, `oc-title-${id}-${++titleDbN}.db`)
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT)")
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY)")
+  if (title !== null) db.prepare("INSERT INTO session_v2 (id, title) VALUES (?, ?)").run(id, title)
+  db.close()
+  return dbPath
+}
+
+test("paneTitlesSession: exact, truncated, mismatched, unknown", () => {
+  assert.equal(paneTitlesSession("OC | trace probe", "trace probe"), true)
+  assert.equal(paneTitlesSession("OC | trace pro…", "trace probe"), true, "a terminal-truncated title still matches its prefix")
+  assert.equal(paneTitlesSession("OC | trace pro...", "trace probe"), true)
+  assert.equal(paneTitlesSession("OC | another chat entirely", "trace probe"), false)
+  assert.equal(paneTitlesSession(undefined, "trace probe"), null, "no pane title — cannot judge")
+  assert.equal(paneTitlesSession("OC | trace probe", null), null, "no session title — cannot judge")
+})
+
+test("a live parent pane with a matching title takes the wake in-band", () => {
+  resetLadders()
+  const prev = process.env.OPENCODE_DB
+  process.env.OPENCODE_DB = titleDb(SPAWNER.session_id, "trace probe")
+  try {
+    const job = levied("s-tr10")
+    job.spawner = { ...SPAWNER, pane: "wP:p1" }
+    const { notifications, port } = bells()
+    const prompts: string[] = []
+    wakeFirstMate(job, "failed", null, {
+      promptPane: (label, text) => { prompts.push(label); return true },
+      paneInfo: (pane) => (pane === "wP:p1" ? { alive: true, title: "OC | trace probe" } : { alive: false }),
+      ...port,
+    })
+    assert.equal(job.woke?.delivery, "pane")
+    assert.equal(job.woke?.to, "wP:p1")
+    assert.match(rung(job, "parent-pane")?.why ?? "", /terminal title matches/)
+    assert.deepEqual(prompts, ["wP:p1"])
+    assert.equal(notifications.length, 0, "in-band took it — no doorbell")
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_DB
+    else process.env.OPENCODE_DB = prev
+  }
+})
+
+test("a recycled parent pane — alive but hosting another session — is refused, never misdelivered", () => {
+  resetLadders()
+  const prev = process.env.OPENCODE_DB
+  process.env.OPENCODE_DB = titleDb(SPAWNER.session_id, "trace probe")
+  try {
+    const job = levied("s-tr11")
+    job.spawner = { ...SPAWNER, pane: "wP:p2" }
+    const { port } = bells()
+    const prompts: string[] = []
+    wakeFirstMate(job, "failed", null, {
+      promptPane: (label) => { prompts.push(label); return true },
+      paneInfo: (pane) => (pane === "wP:p2" ? { alive: true, title: "OC | someone else entirely" } : { alive: false }),
+      forkLevy: () => ({ ok: false, why: "herdr down" }),
+      ...port,
+    })
+    assert.equal(job.woke?.delivery, "doorbell", "the guard refused the pane; the ladder fell through honestly")
+    assert.match(rung(job, "parent-pane")?.why ?? "", /recycled pane/)
+    assert.deepEqual(prompts, [], "no prompt left the rail — a stranger's chat was never touched")
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_DB
+    else process.env.OPENCODE_DB = prev
+  }
+})
+
+test("a dead parent pane falls through honestly", () => {
+  resetLadders()
+  const job = levied("s-tr12")
+  job.spawner = { ...SPAWNER, pane: "wP:p3" }
+  const { port } = bells()
+  wakeFirstMate(job, "done", null, {
+    promptPane: () => true,
+    paneInfo: () => ({ alive: false }),
+    forkLevy: () => ({ ok: false, why: "herdr down" }),
+    ...port,
+  })
+  assert.equal(job.woke?.delivery, "doorbell")
+  assert.match(rung(job, "parent-pane")?.why ?? "", /wP:p3.*not alive/)
+})
+
+test("no session title on record — the guard stands down and the prompt is the oracle", () => {
+  resetLadders()
+  const prev = process.env.OPENCODE_DB
+  process.env.OPENCODE_DB = titleDb(SPAWNER.session_id, null)
+  try {
+    const job = levied("s-tr13")
+    job.spawner = { ...SPAWNER, pane: "wP:p4" }
+    const { port } = bells()
+    wakeFirstMate(job, "done", null, {
+      promptPane: () => true,
+      paneInfo: () => ({ alive: true, title: "OC | untitled" }),
+      ...port,
+    })
+    assert.equal(job.woke?.delivery, "pane")
+    assert.match(rung(job, "parent-pane")?.why ?? "", /booked at spawn/)
+  } finally {
+    if (prev === undefined) delete process.env.OPENCODE_DB
+    else process.env.OPENCODE_DB = prev
+  }
 })

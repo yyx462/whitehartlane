@@ -11,6 +11,7 @@ import { TEMP_ROOTS } from "./permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
 import { levyPaneOf } from "./levy-pane.ts"
+import { opencodeSessionTitle } from "./transcripts.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
@@ -131,11 +132,16 @@ export type JobRecord = {
 
 // ADR 0006: the levy — the main agent that stood the Job up, booked at spawn.
 // `since` is the checkpoint — a point in the FM's own transcript, never
-// a copy. A whl fork reborn points back here and nowhere else.
+// a copy. A whl fork reborn points back here and nowhere else. `pane`
+// is the spawn-time pane binding (HERDR_PANE_ID when the door runs
+// inside herdr): the one delivery address the wake can check without
+// any registry — booked at the exact moment session and pane are both
+// known, immutable for this Job's life.
 export type SpawnerPointer = {
   tool: string
   session_id: string
   since: string
+  pane?: string
 }
 
 export type SessionRecord = {
@@ -386,10 +392,31 @@ export type WakePort = {
   promptPane?: (label: string, message: string) => boolean
   // is a registered levy pane still a live detected agent? (herdr agent get)
   paneAlive?: (pane: string) => boolean
+  // what lives in a pane right now (herdr agent list): alive, and the
+  // terminal title — the identity guard for the spawn-time parent pane
+  paneInfo?: (pane: string) => { alive: boolean; title?: string } | null
   // the wake-time rebirth (rung 3) — armed by the caller or the default
   forkLevy?: (job: JobRecord, wake: { message: string }) => { ok: boolean; label?: string; pane?: string; why?: string }
   // the doorbell fallback (notify CLI)
   notify?: (message: string) => void
+}
+
+// The parent pane's identity guard (the spawn-time rung): herdr cannot
+// name the session a pane hosts, but the host tool syncs the session's
+// title into the pane's terminal title (opencode: "OC | <title>"). A
+// live pane whose title still matches the spawner session's current
+// title is the same conversation; a mismatch is a recycled pane —
+// prompt it and the wake lands in a stranger's chat. null = cannot
+// judge (either title unknown): the prompt itself is then the oracle.
+// Terminal titles truncate with a trailing ellipsis — a truncated
+// prefix is still a match.
+export function paneTitlesSession(paneTitle: string | undefined, sessionTitle: string | null): boolean | null {
+  if (!paneTitle || !sessionTitle) return null
+  const stripped = paneTitle.replace(/^[^|]+\|\s*/, "")
+  if (stripped.endsWith("…") || stripped.endsWith("...")) {
+    return sessionTitle.startsWith(stripped.replace(/(\u2026|\.\.\.)$/, ""))
+  }
+  return stripped === sessionTitle
 }
 
 // the fork rung is armed in production, disarmed under node:test
@@ -480,36 +507,81 @@ export function wakeFirstMate(
   } else {
     step("worker-pane", false, `holder pane ${holder.label} (booked by job ${holder.jid}) did not take the prompt`)
   }
-  // rungs 2-4 live in one chain: registration, rebirth, spool
+  // rungs 2-5 live in one chain: parent pane, registration, rebirth, spool
   if (delivery === "queued" && !railSpawner) {
-    // rung 2 — the registered levy pane: the levy's own chat, running
+    let paneTook = false
+    // rung 2 — the parent pane (booked at spawn): the levy handed the
+    // spur over from INSIDE a herdr pane, and the door booked that pane
+    // on the spawner record (--pane or HERDR_PANE_ID) — the strongest
+    // address the wake holds, no registry involved. herdr cannot name
+    // the session a pane hosts, so the terminal title is the identity
+    // guard: the host tool syncs the session's title into the pane's
+    // terminal ("OC | <title>"); a live pane that stopped matching is a
+    // recycled pane, not the levy — fall through, never misdeliver.
+    const paneInfo = port.paneInfo ??
+      ((pane) => {
+        try {
+          const out = spawnSync("herdr", ["agent", "list"], { timeout: 10_000, encoding: "utf8" })
+          const agents = (JSON.parse(out.stdout)?.result?.agents ?? []) as { pane_id?: string; terminal_title?: string }[]
+          const hit = agents.find((a) => a.pane_id === pane)
+          return hit ? { alive: true, title: hit.terminal_title } : { alive: false }
+        } catch {
+          return null // herdr unreachable — the prompt itself is the oracle
+        }
+      })
+    const parentPane = job.spawner.pane
+    if (!parentPane) {
+      step("parent-pane", false, "no parent pane booked at spawn — whl run ran outside herdr, or pre-dates pane capture")
+    } else {
+      const info = paneInfo(parentPane)
+      const sessionTitle = job.spawner.tool === "opencode" ? opencodeSessionTitle(job.spawner.session_id) : null
+      const titled = paneTitlesSession(info?.title, sessionTitle)
+      if (info && !info.alive) {
+        step("parent-pane", false, `parent pane ${parentPane} (booked at spawn) is not alive`)
+      } else if (titled === false) {
+        step(
+          "parent-pane",
+          false,
+          `parent pane ${parentPane} is alive but no longer hosts this session (terminal ${JSON.stringify(info?.title)} vs session ${JSON.stringify(sessionTitle)}) — a recycled pane, not the levy`,
+        )
+      } else if (prompt(parentPane)) {
+        delivery = "pane"
+        to = parentPane
+        paneTook = true
+        step("parent-pane", true, `prompted parent pane ${parentPane} (booked at spawn)${titled === true ? " — terminal title matches the session" : ""}`)
+      } else {
+        step("parent-pane", false, `parent pane ${parentPane} is alive but did not take the prompt`)
+      }
+    }
+    // rung 3 — the registered levy pane: the levy's own chat, running
     // inside a herdr pane it volunteered (whl register). Registration
     // is the ONLY aliveness claim that outranks the fork; herdr's
     // agent get is the oracle (a detected agent in that pane, still
     // there). The wake prompts the pane directly — tool-independent.
-    const reg = levyPaneOf(job.spawner.session_id)
-    const paneAlive = port.paneAlive ??
-      ((pane) => {
-        try {
-          return spawnSync("herdr", ["agent", "get", pane], { timeout: 10_000 }).status === 0
-        } catch {
-          return false
-        }
-      })
-    let paneTook = false
-    if (!reg) {
-      step("registered-pane", false, `no registered levy pane for session ${job.spawner.session_id} — whl register from inside the pane binds it`)
-    } else if (!paneAlive(reg.pane)) {
-      step("registered-pane", false, `registered pane ${reg.pane} is not alive (herdr agent get refused)`)
-    } else if (prompt(reg.pane)) {
-      delivery = "pane"
-      to = reg.pane
-      paneTook = true
-      step("registered-pane", true, `prompted registered pane ${reg.pane}`)
-    } else {
-      step("registered-pane", false, `registered pane ${reg.pane} is alive but did not take the prompt`)
+    if (!paneTook) {
+      const reg = levyPaneOf(job.spawner.session_id)
+      const paneAlive = port.paneAlive ??
+        ((pane) => {
+          try {
+            return spawnSync("herdr", ["agent", "get", pane], { timeout: 10_000 }).status === 0
+          } catch {
+            return false
+          }
+        })
+      if (!reg) {
+        step("registered-pane", false, `no registered levy pane for session ${job.spawner.session_id} — whl register from inside the pane binds it`)
+      } else if (!paneAlive(reg.pane)) {
+        step("registered-pane", false, `registered pane ${reg.pane} is not alive (herdr agent get refused)`)
+      } else if (prompt(reg.pane)) {
+        delivery = "pane"
+        to = reg.pane
+        paneTook = true
+        step("registered-pane", true, `prompted registered pane ${reg.pane}`)
+      } else {
+        step("registered-pane", false, `registered pane ${reg.pane} is alive but did not take the prompt`)
+      }
     }
-    // rung 3 — the fork: an unregistered chat is dead to the ladder by
+    // rung 4 — the fork: an unregistered chat is dead to the ladder by
     // rule (ADR 0008). The wake rebirths the levy into a fresh pane —
     // session resumed from the checkpoint, wake as the first prompt.
     // An injected port always runs (tests); the default is armed in
@@ -541,7 +613,7 @@ export function wakeFirstMate(
           : "disarmed (test context — NODE_TEST_CONTEXT is set)",
       )
     }
-    // rung 4 — the spool: config-gated plugin territory (the levy
+    // rung 5 — the spool: config-gated plugin territory (the levy
     // installed the agentic-wake reader itself), then heartbeat-gated.
     // Only reached when the fork could not take the wake — a fresh
     // heartbeat never outranks it. Off by default: the reader is not
@@ -562,7 +634,7 @@ export function wakeFirstMate(
       }
     }
   }
-  // rung 5 — the doorbell: the levy is a chat a person holds, or no
+  // rung 6 — the doorbell: the levy is a chat a person holds, or no
   // rung above could take the wake. A rail spawner skips it: machines
   // are not doorbelled.
   if (delivery !== "pane" && delivery !== "fork" && delivery !== "inband" && !railSpawner) {
