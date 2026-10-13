@@ -42,6 +42,7 @@ import {
   readAllEvents,
   readEvents,
   saveJob,
+  wakeAudit,
 } from "../src/store.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
 
@@ -265,8 +266,20 @@ async function main() {
     for (const job of stalled) {
       console.log(`STALLED ${job.id} — orchestrator pid ${job.pid} is gone; run: agentic-os sweep`)
     }
-    console.log(bastards.length === 0 && stalled.length === 0 ? "audit: clean" : `audit: ${bastards.length} unadmitted, ${stalled.length} stalled`)
-    process.exitCode = bastards.length === 0 && stalled.length === 0 ? 0 : 1
+    // ADR 0010 — the doorbell is a last resort, never a silent one:
+    // every wake that fell out of band (and was never consumed) is
+    // named here, with the fork rung's diagnosis and the drain verb
+    const outOfBand = wakeAudit(jobs)
+    for (const row of outOfBand.slice(0, 10)) {
+      console.log(`OUT-OF-BAND wake ${row.jid} (${row.task}) — ${row.delivery} at ${row.at}: ${row.why}; drain it: agentic-os fork ${row.jid}`)
+    }
+    const dirty = bastards.length + stalled.length + outOfBand.length
+    console.log(
+      dirty === 0
+        ? "audit: clean"
+        : `audit: ${bastards.length} unadmitted, ${stalled.length} stalled, ${outOfBand.length} out-of-band wake(s)`,
+    )
+    process.exitCode = dirty === 0 ? 0 : 1
     return
   }
 

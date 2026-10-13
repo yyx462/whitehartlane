@@ -10,6 +10,7 @@ import { loadManifest } from "./hooks.ts"
 import { TEMP_ROOTS } from "./permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
+import { backoffBase, backoffMs, retries, sleepSync } from "./backoff.ts"
 import { opencodeSessionTitle } from "./transcripts.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -554,7 +555,21 @@ export function wakeFirstMate(
     // armed in production only — disarmed under node:test and by
     // AGENTIC_OS_FORK_WAKE=0 (herdr-less hosts).
     if (!paneTook && (port.forkLevy ?? forkArmed())) {
-      const forked = (port.forkLevy ?? ((j, w) => forkLevy(j, w)))(job, { message })
+      // the brownout guard's wake half (ADR 0010): a refused fork is
+      // not final — herdr may be brown at exactly this moment. Knock
+      // again with growing pauses; every retry lands in the rung
+      // trace. AGENTIC_OS_FORK_TRIES / _BACKOFF_MS tune it (tests
+      // inject their own scale; a single attempt never pauses).
+      const forkFn = port.forkLevy ?? ((j: JobRecord, w: { message: string }) => forkLevy(j, w))
+      const tries = retries("AGENTIC_OS_FORK_TRIES", 3)
+      const baseMs = backoffBase("AGENTIC_OS_FORK_BACKOFF_MS", 5_000)
+      let forked = forkFn(job, { message })
+      for (let attempt = 1; attempt < tries && !forked.ok; attempt++) {
+        const pause = backoffMs(baseMs, attempt)
+        step("fork", false, `refused: ${forked.why ?? "no reason"} — brownout retry ${attempt}/${tries - 1} in ${pause}ms`)
+        sleepSync(pause)
+        forked = forkFn(job, { message })
+      }
       if (forked.ok) {
         delivery = "fork"
         to = forked.label
@@ -910,6 +925,32 @@ export function listJobs(sid?: string): JobRecord[] {
     }
   }
   return jobs.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id))
+}
+
+// ADR 0010 — the doorbell is a last resort, never a silent one: the
+// wake audit names every job whose wake fell out of band (doorbell or
+// queued, never consumed), so a brownout's leftovers surface on the
+// next `whl audit` instead of rotting in job.json. The fork rung's
+// why is the diagnosis (it is the rung that was supposed to work).
+export type WakeAuditRow = { jid: string; task: string; at: string; delivery: string; why: string }
+
+export function wakeAudit(jobs: JobRecord[]): WakeAuditRow[] {
+  return jobs
+    .filter(
+      (j): j is JobRecord & { woke: NonNullable<JobRecord["woke"]> } =>
+        Boolean(j.woke) && !j.consumed && (j.woke.delivery === "doorbell" || j.woke.delivery === "queued"),
+    )
+    .sort((a, b) => b.woke.at.localeCompare(a.woke.at))
+    .map((j) => ({
+      jid: j.id,
+      task: j.task,
+      at: j.woke.at,
+      delivery: j.woke.delivery,
+      why:
+        j.woke.rungs?.filter((r) => r.rung === "fork").at(-1)?.why ??
+        j.woke.rungs?.filter((r) => !r.ok).at(-1)?.why ??
+        j.woke.message,
+    }))
 }
 
 export function findJobByDir(dir: string): JobRecord | null {
