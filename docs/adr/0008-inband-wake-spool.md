@@ -123,3 +123,24 @@ nothing, the pane relay already covers any tool running in a pane.
 - `wake-spool/` joins the OS disk layout; sessions without levies
   write nothing there (heartbeat only for door-touching sessions).
 - The shep wake queue is NOT wired into the rail and can retire.
+
+## Amendment (2026-10-13): the spool rung is config-off by default
+
+The 2026-10-12 p10 incident review: the reader plugin was never
+installed on the machine, so rung 4 was structurally dead — and the
+ladder fell to the doorbell on all seven wakes with no record of why
+rungs 1-4 refused. Two consequences, both deliberate:
+
+- `AGENTIC_OS_SPOOL_WAKE=1` now arms rung 4 (default off). The channel
+  is opt-in twice over: config first, heartbeat second. The trace says
+  "off by config" when skipped, so the state is legible, not silent.
+- Every rung attempt — taken, refused, skipped — is now traced as
+  `job.woke.rungs`, one `wake.rung` event per attempt in the session
+  trail, and a line in the job's orchestrator.log. A doorbell wake
+  explains itself after the fact; the fork's `why` (the one that
+  mattered on 10-12) is never dropped again.
+
+The fail button (`whl fail <jid> [--reason ..] [--again]`) complements
+the trace: it marks a finished Job failed and fires the ladder on
+demand, so the delivery path is testable without staging a real
+failing run.
