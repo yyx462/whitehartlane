@@ -150,11 +150,11 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
 
 ## Done criteria
 
-- [ ] Phase 0 audit table written into this ticket
-- [ ] Folder renamed; `git worktree list` ×3 clean; `gwt` audit green
-- [ ] `agentic-os-window` serving :8787 from the new path (`autojobs check` clean)
-- [ ] herdr panes open into the new path
-- [ ] Zero live references to the old folder path under `~/.config` and `~/Library/LaunchAgents`
+- [x] Phase 0 audit table written into this ticket
+- [x] Folder renamed; `git worktree list` ×2 clean (spur-selbar-ui / wake-rung-debug reaped pre-rename — see audit delta); `gwt` audit green (REMOVE=0 DIRTY=0 DRIFT=0)
+- [x] `agentic-os-window` serving :8787 from the new path (PID 94940; `autojobs check` → all consistent)
+- [ ] herdr panes open into the new path — PENDING: quit herdr (incl. remote mosh client; the agent session dies with it), then run `~/projects/Agentic-Workspace/whl-herdr-fix.sh` in a plain Terminal, restart herdr
+- [ ] Zero live references to the old folder path under `~/.config` and `~/Library/LaunchAgents` — PENDING: only the 3 herdr session.json lines remain; cleared by the same wizard
 - [ ] Phase 2 PR merged with tests green; Phase 3 checklist either done or ticketed forward
 
 <!-- PHASE 0 AUDIT — verified 2026-10-13 by opencode session, run from ~/projects/Agentic-Workspace (outside the folder)
@@ -182,4 +182,56 @@ NEW findings since recon (affect Phase 1 execution):
 4. `herdr-brownout` worktree: clean at b118a3e — safe through the rename.
 
 Fix mapping (1:1): plist+registry path swap (`autojobs edit`) → 0.1; `autojobs run` restart → 0.2; herdr session.json rewrite while down → 0.3; `git worktree repair` ×2 → 0.4; nothing to do for 0.5; `remote set-url` deferred to Phase C per ticket.
+-->
+
+<!-- PHASE 1 EXECUTION LOG — agent half (steps 1,3–7) done 2026-10-13, same session, from ~/projects/Agentic-Workspace
+
+Landed, in order:
+1. Ticket + audit committed to master BEFORE the mv (c2ebc39, pushed) — was untracked.
+2. `autojobs off agentic-os-window` → :8787 freed. NOTE for future bounce procedures: after `off`,
+   revive with `autojobs on` — `autojobs run` REFUSES for KeepAlive daemons ("restart via its own
+   tooling"). Ticket step 7 assumed `run`; wrong for this job kind.
+3. `mv agentic-os whitehartlane` — zero holder kills needed (all cwd/read-FD only, vnodes followed).
+4. Worktree repair DELTA: `git worktree repair` from INSIDE a moved worktree cannot even bootstrap
+   (`fatal: not a git repository: …/agentic-os/.bear/worktrees/master` — the .git file points at the
+   old path). What worked — from the BARE side, naming each worktree:
+     git --git-dir=<new>/.bear worktree repair <new>/master <new>/herdr-brownout
+   → both gitdir files reported incorrect and fixed; `worktree list` shows 2 worktrees at new paths.
+5. `gwt audit` green: count 2, REMOVE=0 DIRTY=0 UNTRACKED=0 UNIQUE=1 (herdr-brownout) DRIFT=0, master PINNED.
+6. Path swap via surgical sed `Agentic-Workspace/agentic-os/` → `Agentic-Workspace/whitehartlane/`
+   (trailing slash — left the registry's prose "agentic-os gwt master worktree" untouched) on BOTH
+   plist:10 and registry.json:124. Backups: $TMPDIR/opencode/{plist,registry.json}.bak-20261013-*.
+   Pre-edit check: NO AGENTIC_OS_* env vars exist in the plist — recon's "may include AGENTIC_OS_DOOR"
+   was wrong (door logic lives in server.mjs fallbacks, not launchd env). Narrows the Phase 2 env-var
+   decision to in-repo env only.
+7. `autojobs on agentic-os-window` → node PID 94940 serving :8787 from the NEW path
+   (`ps` + `curl localhost:8787` HTML 200). `autojobs check` → "all consistent".
+8. Agent session re-rooted to the new folder via opencode session_move — this session survived.
+
+Job NAME deliberately kept `agentic-os-window` (+ label + plist filename + log name): a real rename
+means new plist file + label + registry entry, not seddable — Phase B, as the ticket's primary
+instruction already said.
+
+REMAINING (human tail, steps 2+8): wizard script at ~/projects/Agentic-Workspace/whl-herdr-fix.sh —
+quit herdr (incl. remote mosh client; this agent session dies with it), run the wizard in a plain
+Terminal (backs up session.json, rewrites the 3 cwds, final sweep), restart herdr, open a pane.
+
+The wizard (embedded so it survives the scratch file):
+
+    #!/usr/bin/env bash
+    # whl-herdr-fix.sh — ticket 02 Phase 1 steps 2+8 (herdr tail). Run AFTER the
+    # agent session inside herdr has ended, in a plain Terminal. Idempotent.
+    set -euo pipefail
+    OLD="Agentic-Workspace/agentic-os"; NEW="Agentic-Workspace/whitehartlane"
+    SJ="$HOME/.config/herdr/session.json"
+    [ -d "$HOME/projects/$NEW" ] || { echo "folder $NEW missing — was the rename done?"; exit 1; }
+    LEFT=$(pgrep -fl herdr | grep -v -e mcp-server -e whl-herdr-fix || true)
+    [ -z "$LEFT" ] || { echo "herdr still running — quit it (incl. remote client; pkill -f remote-client-bridge for lingering bridges), then re-run:"; echo "$LEFT"; exit 1; }
+    BAK="$SJ.bak-$(date +%Y%m%d-%H%M%S)"; cp "$SJ" "$BAK"; echo "backup: $BAK"
+    sed -i '' "s|$OLD|$NEW|g" "$SJ"
+    echo "remaining old refs (expect 0): $(grep -c "$OLD" "$SJ" || true)"
+    grep -n "$NEW" "$SJ"
+    SWEEP=$(grep -rn "$OLD" ~/.config ~/Library/LaunchAgents 2>/dev/null | grep -v "\.log\|Cache" || true)
+    [ -n "$SWEEP" ] && { echo "STILL REFERENCED:"; echo "$SWEEP"; } || echo "sweep clean"
+    echo "Done. Start herdr, open a pane, confirm cwd resolves under $NEW."
 -->
