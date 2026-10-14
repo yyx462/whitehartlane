@@ -80,6 +80,17 @@ Arm-E honesty note: the levy writes (or fills) its own program folder —
 if a template is pre-written, record that choice, or E's decomposition
 is secretly ours again.
 
+The straw, precisely: the agent never enters the container. Its
+process, model calls, and native tools (read/edit/bash) run on the
+host — and the native file tools CANNOT see `/app/repo` (a different
+filesystem). Every task-touching action is one `docker exec <ctr>
+<cmd>` round trip: the command executes inside the container's Linux
+env and prints back to the pane. A named later optimization is the
+bind-mount bridge (`-v hostdir:/app`) so native file tools work on
+task bytes directly — same image, same verifier, both arms identically
+wired; adopt only after checking macOS bind-mount permission/perf
+quirks against filesystem-sensitive tasks (git-leak-recovery is one).
+
 ## T-1 · Preparation (zero API spend)
 
 1. **Freeze the program.** `prep/tasks.json` (task id list, seed
