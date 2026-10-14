@@ -1,0 +1,31 @@
+# negotiation-room — THE FAILURE TAKE. Identical room, one poisoned
+# desk: negotiator-savio runs glm-5.3 behind the opencode-go gate,
+# which refuses every call with a real API error ("An active OpenCode
+# Go subscription is required to use Go models"). Swap this in with:
+#   cp workflow.broken.toml workflow.toml
+# then run the room standalone. The abort/continue take fixes the
+# RUN-DIR copy of this manifest (whl continue re-reads the staged
+# workflow.toml in <session>/jobs/<jid>/run, not this folder).
+[workflow]
+name = "negotiation-room"
+spur_id = "negotiation-room"
+kind = "coworker"
+worker_kind = "opencode"
+
+[members.negotiator-ndiaye]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[members.negotiator-savio]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[members.negotiator-gakpo]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[members.professor]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+initiates = true
+
+[hooks]
+units = "true"
+grade = "true"
+counts = "node hooks/counts.mjs"

@@ -1,0 +1,27 @@
+# transfer-window — the summer-2026 demo spur: a chairman (the levy,
+# elsewhere) commissions a three-member coworker exchange that re-enacts
+# the real window. Coach decides the profile, scout names three real
+# targets, finance levies the negotiation-room child spur and closes.
+# Reality check: Spurs signed Savio from Man City on 2026-08-25 for
+# £75m + £10m add-ons, after City beat them to Ndiaye (£65m, deadline
+# day) and Gakpo's wages priced him out. The briefs carry those numbers.
+[workflow]
+name = "transfer-window"
+spur_id = "transfer-window"
+kind = "coworker"
+worker_kind = "opencode"
+
+[members.coach]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+initiates = true
+
+[members.scout]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[members.finance]
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[hooks]
+units = "true"
+grade = "true"
+counts = "node hooks/counts.mjs"
