@@ -70,6 +70,11 @@ If a result can't be traced back to this invariant, it's not a result.
 2. **Smoke the harness without a model.** Run tb's oracle agent on 2
    frozen tasks. Both must pass. This proves container + verifier work
    before any model is paid for. Record outputs in `ledger/prep/`.
+   **Fresh container per attempt, always** — tasks mutate their own
+   state (git-leak-recovery rewrites history); a reused container is a
+   spoiled measurement. `open.sh` starts from the pinned image every
+   time; per-task policies (e.g. `allow_internet`) come from task.toml
+   and are recorded, never overridden.
 3. **Bake the instruction files — ONE prompt source.**
    `prep/task-instructions/<id>.md` = the task's instruction +
    a standard environment preamble (how to start the env, how to work
