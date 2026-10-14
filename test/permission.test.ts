@@ -197,16 +197,16 @@ test("a judge miss is still covered: the judge's deny-unneeded escalates on repe
 })
 
 // j-2b508e: the same ask arrived in two forms —
-// `/Users/sagebot/projects/NWi/…` and (home-stripped) `/projects/NWi/…`
+// `/Users/dev/projects/acme/…` and (home-stripped) `/projects/acme/…`
 // — and wobbled both the verdict's reason and the escalation ladder.
 // Normalization keys one path.
 
 test("a home-stripped path form resolves to the real path, not an outside-home deny", () => {
   const home = mkdtempSync(join(tmpdir(), "aos-home-"))
-  const real = join(home, "projects", "NWi", "whl", "lazada-ozon-port", "units", "g0-shared")
+  const real = join(home, "projects", "acme", "whl", "marketplace-port", "units", "g0-shared")
   mkdirSync(real, { recursive: true })
   const v = decidePermission({
-    question: `Permission required\n\nthe agent wants to read /projects/NWi/whl/lazada-ozon-port/units/g0-shared/`,
+    question: `Permission required\n\nthe agent wants to read /projects/acme/whl/marketplace-port/units/g0-shared/`,
     allowedRoots: [],
     home,
   })
@@ -237,10 +237,10 @@ test("a tilde-form path resolves against home", () => {
 
 test("stripped and full forms of one path key identically for escalation", () => {
   const home = mkdtempSync(join(tmpdir(), "aos-home-"))
-  const full = join(home, "projects", "NWi", "units")
+  const full = join(home, "projects", "acme", "units")
   mkdirSync(full, { recursive: true })
   const stripped = decidePermission({
-    question: "Access /projects/NWi/units",
+    question: "Access /projects/acme/units",
     allowedRoots: [],
     home,
   })

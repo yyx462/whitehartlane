@@ -351,7 +351,7 @@ test("mixed path forms of one ask share a ladder (j-2b508e)", async () => {
   const briefPath = join(taskDir, "brief.md")
   await import("node:fs/promises").then((fs) =>
     fs.writeFile(briefPath, "work in the g0-shared worktree; never touch master/", "utf8"))
-  const full = join(home, "projects", "NWi", "whl", "lazada-ozon-port", "units")
+  const full = join(home, "projects", "acme", "whl", "marketplace-port", "units")
   mkdirSync(full, { recursive: true })
   let form = 0
   const one = makeRail({
@@ -362,7 +362,7 @@ test("mixed path forms of one ask share a ladder (j-2b508e)", async () => {
     // wobbled in j-2b508e
     term: () =>
       `Permission required\n\nthe agent wants to read ${
-        ++form === 1 ? `${full}/` : "/projects/NWi/whl/lazada-ozon-port/units/"
+        ++form === 1 ? `${full}/` : "/projects/acme/whl/marketplace-port/units/"
       }`,
     judge: () => 0,
   })

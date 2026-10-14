@@ -103,7 +103,7 @@ export const TEMP_ROOTS: string[] = (() => {
 
 // A dialog names its path in whatever form the terminal rendered it:
 // absolute, `~`-relative, cwd-relative, home-STRIPPED (j-2b508e:
-// `/Users/<name>/projects/NWi/…` shown as `/projects/NWi/…`), or
+// `/Users/<name>/projects/acme/…` shown as `/projects/acme/…`), or
 // underscore-MANGLED (j-8aceed / issue #82: `/Users_<name>/projects` —
 // a slash rendered as `_`, so no root can ever match and the ladder
 // keys a path that does not exist). The judgment and the escalation

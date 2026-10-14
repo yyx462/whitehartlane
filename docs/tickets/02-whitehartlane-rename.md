@@ -34,7 +34,7 @@ Recon 2026-10-13 found these breakage surfaces. Re-verify each:
 - Registry: `~/.config/autojobs/registry.json` `jobs[7]`, name `agentic-os-window`,
   label `local.agentic-os.window`.
 - Plist `~/Library/LaunchAgents/local.agentic-os.window.plist` hardcodes:
-  `ProgramArguments = node /Users/sagebot/projects/Agentic-Workspace/agentic-os/master/web/server.mjs`
+  `ProgramArguments = node /Users/<user>/projects/Agentic-Workspace/agentic-os/master/web/server.mjs`
   Log: `~/Library/Logs/agentic-os-window.launchd.log`. Env vars may include `AGENTIC_OS_DOOR`.
 - Verify:
   ```bash
@@ -110,7 +110,7 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
    Expect 3 worktrees, all reachable. `git status` clean in each.
 6. Run the `gwt` health/audit for this repo — branch==folder invariant intact.
 7. Update the launchd path: `autojobs edit` the registry/plist script path to
-   `/Users/sagebot/projects/Agentic-Workspace/whitehartlane/master/web/server.mjs`
+   `/Users/<user>/projects/Agentic-Workspace/whitehartlane/master/web/server.mjs`
    (keep job name `agentic-os-window` for now — renaming the job itself is Phase B
    follow-up, do it in the same edit if trivial). Then:
    `autojobs run agentic-os-window` → `curl -s localhost:8787/ | head` health check.
@@ -142,7 +142,7 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
 
 1. Rename repo `yyx462/agentic-os` → `yyx462/whitehartlane`; `git remote set-url`.
 2. Scrub BEFORE flipping visibility: secrets scan (API keys/tokens, e.g. gitleaks),
-   company traces (NWi, 任拓, web01, client names), personal path leaks.
+   company traces (company identifiers, client project names), personal path leaks.
 3. Repo description + topics: `llm-agents`, `multi-agent`, `orchestration`,
    `coding-agents`, `opencode`, `cli`.
 4. Flip to public, pin on profile. Update `~/projects/job-seeking/profile.md`
@@ -161,7 +161,7 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
 
 | # | Surface | Ticket claim | Verified at execution | Verdict |
 |---|---------|-------------|----------------------|---------|
-| 0.1 | launchd `agentic-os-window` | plist hardcodes abs path | plist:10 → `/Users/sagebot/projects/Agentic-Workspace/agentic-os/master/web/server.mjs`; ALSO `~/.config/autojobs/registry.json:124` `script` field carries the same path — `autojobs edit` must fix BOTH | HIT — breaks |
+| 0.1 | launchd `agentic-os-window` | plist hardcodes abs path | plist:10 → `/Users/<user>/projects/Agentic-Workspace/agentic-os/master/web/server.mjs`; ALSO `~/.config/autojobs/registry.json:124` `script` field carries the same path — `autojobs edit` must fix BOTH | HIT — breaks |
 | 0.2 | :8787 server process | node serves from master/web/server.mjs | PID 85618, `*:8787 LISTEN`, started Mon 10AM from old path — stale after rename until job restart | HIT — restart via job |
 | 0.3 | herdr session.json | identity_cwd + ≥3 pane cwds | 3 matches (lines 7 `identity_cwd`, 36 + 39 pane `cwd`). herdr IS RUNNING (PID 13030) **with a remote mosh client attached** (`herdr --session default`, PIDs 73929/73930) — the quit must include the remote client | HIT — fix only while herdr fully down |
 | 0.4 | .bear worktree pointers | 3 worktrees, abs gitdirs both directions | **DELTA: 2 worktrees, not 3** — `master` (a19723f) + `herdr-brownout` (b118a3e, clean); `spur-selbar-ui` / `wake-rung-debug` reaped since recon. `master/.git` → `gitdir: …/agentic-os/.bear/worktrees/master` (absolute) — breaks both directions; `git worktree repair` fixes | HIT — 2 worktrees to repair |

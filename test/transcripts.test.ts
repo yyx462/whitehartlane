@@ -24,8 +24,8 @@ process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
 const { piEncodeCwd, resolvePi, resolveOpencode, resolveTranscript } = await import("../src/transcripts.ts")
 
 test("pi cwd encoding matches pi's real directory names (no leading dash)", () => {
-  assert.equal(piEncodeCwd("/Users/sagebot/x"), "Users-sagebot-x")
-  assert.equal(`--${piEncodeCwd("/Users/sagebot/x")}--`, "--Users-sagebot-x--")
+  assert.equal(piEncodeCwd("/Users/dev/x"), "Users-dev-x")
+  assert.equal(`--${piEncodeCwd("/Users/dev/x")}--`, "--Users-dev-x--")
 })
 
 function piSession(cwd: string, id: string, ts: string, body = "hello") {

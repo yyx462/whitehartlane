@@ -2,7 +2,7 @@
 // launchd on macOS's minimal PATH — no node, no ~/.local/bin — so
 // spawning the door script hit its `#!/usr/bin/env node` shebang and
 // died with "env: node: No such file or directory" (a UI abort of the
-// lazada-ozon-port spur). Proved end to end: the server runs on a
+// marketplace-port spur). Proved end to end: the server runs on a
 // stripped PATH, and a UI abort still reaches the door, kills the
 // orchestrator pid, and books the abort on the fixture OS disk.
 import assert from "node:assert/strict"

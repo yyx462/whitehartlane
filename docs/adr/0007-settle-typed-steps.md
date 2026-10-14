@@ -7,7 +7,7 @@ Refs: #39 (nesting), #40 (hooks on components), ADR 0003 (detectors and gates)
 ## Context
 
 A fan-out manifest is flat: units arrive from the units hook, all parallel,
-and `[gates]` hold only the report. Pipelines that sequence (lazada-ozon-port:
+and `[gates]` hold only the report. Pipelines that sequence (marketplace-port:
 G0 serial → PR merge → G1–G4 parallel) are hand-rolled — phase files the levy
 flips, relaunches, two jobs — and the window cannot draw the chain, because
 the manifest never said it. Issue #39 asks for nesting (`L{a,b} -> gate ->
