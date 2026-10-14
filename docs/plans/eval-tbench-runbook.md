@@ -56,6 +56,30 @@ The ONLY difference is who runs the loop:
 
 If a result can't be traced back to this invariant, it's not a result.
 
+## Where things run (decided for pass one)
+
+**Nothing of ours is installed in the container.** The container is
+only the task world + the official verifier; everything else is host
+side:
+
+```
+HOST                                       CONTAINER (fresh per attempt)
+├── herdr (panes; not needed for arm A)    └── the task world (/app/repo)
+├── opencode/pi workers in panes ──docker exec──> pytest verifier
+├── agentic-os (session disk, rails)           (grade.sh wraps test.sh)
+├── yyx-whl skill (host skills dir, pinned)
+└── arm E's levy chat, in a herdr pane
+```
+
+Why: the solver experience must be identical across arms (iso-harness,
+§2). A host-side agent driving the container via `docker exec` is
+slower at file ops than an in-container agent — both arms share that
+equally, so paired differences stay honest. The leaderboard's
+agent-in-container pattern is a named later variant, not pass one.
+Arm-E honesty note: the levy writes (or fills) its own program folder —
+if a template is pre-written, record that choice, or E's decomposition
+is secretly ours again.
+
 ## T-1 · Preparation (zero API spend)
 
 1. **Freeze the program.** `prep/tasks.json` (task id list, seed
