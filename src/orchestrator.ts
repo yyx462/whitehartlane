@@ -112,6 +112,10 @@ export type CycleDeps = {
 const DEFAULT_SLOTS = 2
 const DEFAULT_STALL_MS = 10 * 60_000
 const DEFAULT_BRIEF_GRACE_MS = 90_000
+// Grace recheck cadence once the window has passed but the pane is
+// working (the heartbeat defers the reprompt): cheap periodic looks, not
+// a tight loop.
+const GRACE_RECHECK_MS = 30_000
 const DEFAULT_CHECK_MS = 10 * 60_000
 // j-ba18b7: fs.watch (FSEvents) dropped a worker's done-append and the
 // rail sat blind until a 10-minute stall timer fired on an already-done
@@ -400,10 +404,18 @@ export function cycle(deps: CycleDeps): boolean {
       } else if (
         !existsSync(flight.logPath) &&
         !flight.reprompted &&
-        now() - flight.spawnedAt > briefGraceMs
+        now() - flight.spawnedAt > briefGraceMs &&
+        !deps.shep.agentWorking?.(`w-${id}`)
       ) {
         // The agent started but the brief never landed (a startup race shep
         // cannot see). Submit it once more; the stall timer is the backstop.
+        // A MISSING log alone is not evidence: the worker protocol writes
+        // nothing to the log until its single done line, so every healthy
+        // unit past the grace window used to be re-briefed mid-work
+        // (j-78ca43: 3 of 4 units grace-reprompted at exactly 90s). The
+        // heartbeat is the discriminator — a working agent proves its
+        // brief landed, so the reprompt waits for an idle pane. Ports
+        // without the heartbeat (agentWorking absent) keep the old rule.
         flight.reprompted = true
         const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
         if (ok) {
@@ -951,7 +963,12 @@ export async function runOrchestrator(input: {
     if (draining && drainUntil !== null) waits.push(drainUntil - now())
     for (const flight of inFlight.values()) {
       if (!existsSync(flight.logPath) && !flight.reprompted) {
-        waits.push(flight.spawnedAt + briefGraceMs - now())
+        const graceWait = flight.spawnedAt + briefGraceMs - now()
+        // Past grace but not reprompted means the pane was working at the
+        // check (the grace ladder defers to the heartbeat) — never push a
+        // negative wait (a 1ms hot loop); re-arm a short recheck so the
+        // reprompt still fires when the pane goes idle.
+        waits.push(graceWait > 0 ? graceWait : GRACE_RECHECK_MS)
       }
       waits.push(flight.lastChange + stallMs - now())
     }

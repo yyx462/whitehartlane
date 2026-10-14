@@ -72,7 +72,7 @@ function stepsFromRaw(raw: unknown): Step[] | undefined {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean }
   hooks: { units: string; grade: string; counts: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
@@ -123,7 +123,19 @@ function note(note: HookRunNote): void {
   }
 }
 
-const HOOK_TIMEOUT_MS = 120_000
+// A grade hook that runs an official verifier can take minutes under
+// load — the tb2 rehearsal (2026-10-14) measured ~45s solo and ~2min
+// with two verifiers in parallel under Rosetta, exactly on the old hard
+// 120s ceiling: a killed grade hook throws mid-cycle and takes the
+// whole run with it. AGENTIC_OS_HOOK_TIMEOUT_MS overrides (min 1s, max
+// 1h); the default keeps a real guardrail above the measured worst
+// case.
+const DEFAULT_HOOK_TIMEOUT_MS = 300_000
+function hookTimeoutMs(): number {
+  const raw = Number(process.env.AGENTIC_OS_HOOK_TIMEOUT_MS ?? "")
+  if (Number.isFinite(raw) && raw >= 1_000) return Math.min(raw, 3_600_000)
+  return DEFAULT_HOOK_TIMEOUT_MS
+}
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
 export function loadManifest(taskDir: string, warn?: (message: string) => void): Manifest {
@@ -169,6 +181,17 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       throw new HookError(`workflow.drain_timeout_ms must be an integer 1000-3600000 (ms): ${workflow.drain_timeout_ms}`)
     }
   }
+  // The fan-out canary is program policy, not an env accident: a bench
+  // where a failed task is a measured outcome declares canary = false
+  // (no solo first unit, no run stop on its first fail) beside its
+  // slots; the door still lets AGENTIC_OS_CANARY override either way.
+  let canary: boolean | undefined
+  if (workflow.canary !== undefined) {
+    if (typeof workflow.canary !== "boolean") {
+      throw new HookError(`workflow.canary must be true or false: ${String(workflow.canary)}`)
+    }
+    canary = workflow.canary
+  }
   let model: string | undefined
   if (workflow.model !== undefined) {
     model = str(workflow.model, "workflow.model")
@@ -211,7 +234,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   }
   const steps = stepsFromRaw(m.step)
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(canary !== undefined ? { canary } : {}) },
     hooks: {
       units: str(hooks.units, "hooks.units"),
       grade: str(hooks.grade, "hooks.grade"),
@@ -244,13 +267,13 @@ function runHook(
     const stdout = execSync(cmd, {
       cwd: taskDir,
       encoding: "utf8",
-      timeout: HOOK_TIMEOUT_MS,
+      timeout: hookTimeoutMs(),
       stdio: ["ignore", "pipe", "pipe"],
     })
     return { stdout: stdout ?? "", status: 0, stderr: "", ms: Date.now() - startedAt }
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; status?: number; killed?: boolean }
-    if (e.killed) throw new HookError(`hook timed out after ${HOOK_TIMEOUT_MS}ms: ${cmd}`)
+    if (e.killed) throw new HookError(`hook timed out after ${hookTimeoutMs()}ms: ${cmd}`)
     if (typeof e.status !== "number") throw err
     return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "", ms: Date.now() - startedAt }
   }

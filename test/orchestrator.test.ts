@@ -336,6 +336,28 @@ test("a worker whose log never appears gets exactly one reprompt after the grace
   assert.equal(spawned.length, 3)
 })
 
+test("a working worker is not grace-reprompted — the heartbeat defers until idle (j-78ca43)", async () => {
+  const dir = await copyExample("orch-grace-working-")
+  let clock = 0
+  let working = true
+  const { port, reprompts } = fakeShep({ agentWorking: () => working })
+  const base = deps(dir, port, { briefGraceMs: 60_000, now: () => clock })
+
+  cycle(base)
+  clock = 90_000
+  cycle(base) // past grace, but every pane reports working → no re-brief
+  assert.deepEqual(reprompts, [])
+
+  working = false
+  clock = 150_000
+  cycle(base) // idle now — the missing log means something again
+  assert.deepEqual(reprompts, ["w-france", "w-japan", "w-peru"])
+
+  clock = 210_000
+  cycle(base) // exactly one, ever
+  assert.deepEqual(reprompts, ["w-france", "w-japan", "w-peru"])
+})
+
 test("acquireUnits retries a provider refusal with backpressure events, then succeeds", async () => {
   const dir = await copyExample("agentic-os-acq-")
   process.env.AGENTIC_OS_BACKOFF_MS = "1" // no real sleeping in tests

@@ -60,6 +60,21 @@ test("pi ignores files whose first line is not a session header", () => {
   assert.equal(resolvePi({ tool: "pi", cwd, since: "2026-09-30T05:00:00.000Z" })?.id, "uuid-asia")
 })
 
+test("pi expect breaks the tie when siblings share a cwd (j-78ca43 swap)", () => {
+  const cwd = "/tmp/units/shared"
+  // two workers born seconds apart in one worktree; newest-wins alone
+  // cross-books them — the brief marker says which pane owns which
+  piSession(cwd, "uuid-france", "2026-10-14T08:51:14.000Z", "brief for /tmp/units/shared/france")
+  piSession(cwd, "uuid-peru", "2026-10-14T08:51:18.000Z", "brief for /tmp/units/shared/peru")
+
+  const since = "2026-10-14T08:51:10.000Z"
+  assert.equal(resolvePi({ tool: "pi", cwd, since })?.id, "uuid-peru", "no marker — newest-wins, as before")
+  assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/shared/france")?.id, "uuid-france")
+  assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/shared/peru")?.id, "uuid-peru")
+  // a marker no candidate carries falls back to newest-wins
+  assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/elsewhere")?.id, "uuid-peru")
+})
+
 test("opencode resolves by directory and creation time via the CLI fallback", () => {
   writeFileSync(
     ocFixture,
@@ -92,6 +107,39 @@ test("opencode prefers the sqlite db and no CLI window can hide a session", asyn
   assert.equal(resolveOpencode({ tool: "opencode", cwd: "/tmp/units/europe", since: "2026-09-30T06:30:00.000Z" }), null)
 
   process.env.OPENCODE_DB = join(root, "no-such-db.sqlite") // restore fallback for later tests
+})
+
+test("opencode expect picks the pane whose first user message carries the brief marker (j-78ca43 swap)", async () => {
+  const { DatabaseSync } = await import("node:sqlite")
+  const dbPath = join(root, "oc-shared-cwd.db")
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)")
+  db.exec(
+    "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)",
+  )
+  const ins = (id: string, ts: number) =>
+    db.prepare("INSERT INTO session_v2 (id, directory, time_created) VALUES (?, ?, ?)").run(id, "/tmp/units/shared", ts)
+  const msg = (id: string, seq: number, type: string, data: string) =>
+    db
+      .prepare(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, 0, 0, ?)",
+      )
+      .run(`${id}-${seq}`, id, type, seq, data)
+  ins("ses_gl", Date.parse("2026-10-14T08:51:14.609Z"))
+  msg("ses_gl", 4, "user", JSON.stringify({ text: "Work dir: /tmp/units/shared/git-leak … done git-leak-recovery" }))
+  ins("ses_pw", Date.parse("2026-10-14T08:51:18.778Z"))
+  msg("ses_pw", 4, "user", JSON.stringify({ text: "Work dir: /tmp/units/shared/password … done password-recovery" }))
+  db.close()
+  process.env.OPENCODE_DB = dbPath
+
+  const since = "2026-10-14T08:51:10.000Z"
+  const pointer = { tool: "opencode" as const, cwd: "/tmp/units/shared", since }
+  assert.equal(resolveOpencode(pointer)?.id, "ses_pw", "no marker — newest-wins, as before")
+  assert.equal(resolveOpencode(pointer, "/tmp/units/shared/git-leak")?.id, "ses_gl")
+  assert.equal(resolveOpencode(pointer, "/tmp/units/shared/password")?.id, "ses_pw")
+  assert.equal(resolveOpencode(pointer, "/tmp/units/elsewhere")?.id, "ses_pw", "no candidate carries it — newest-wins")
+
+  process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
 })
 
 test("opencode session_v2 is the live table — a post-migration session resolves (the p10 wake regression)", async () => {
