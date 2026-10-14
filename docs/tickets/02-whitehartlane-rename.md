@@ -155,7 +155,10 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
 - [x] `agentic-os-window` serving :8787 from the new path (PID 94940; `autojobs check` → all consistent)
 - [x] herdr panes open into the new path — SELF-HEALED 2026-10-14: herdr re-persisted live state; identity_cwd + all pane cwds now `…/whitehartlane` (session.json:7,28,56); `herdr status`: server running, restart_needed no
 - [x] Zero live references to the old folder path under `~/.config` and `~/Library/LaunchAgents` — full sweep clean 2026-10-14
-- [ ] Phase 2 PR merged with tests green; Phase 3 checklist either done or ticketed forward
+- [x] Phase 2 PR merged with tests green (PR #111); Phase 3 done 2026-10-14: repo renamed →
+      github.com/yyx462/whitehartlane, remote re-pointed (fetch+push), gitleaks clean (157
+      commits), identifiers scrubbed (d3ef240), description + 6 topics set, **PUBLIC**. Manual
+      leftover: pin on profile (web UI only — no API).
 
 <!-- PHASE 0 AUDIT — verified 2026-10-13 by opencode session, run from ~/projects/Agentic-Workspace (outside the folder)
 
