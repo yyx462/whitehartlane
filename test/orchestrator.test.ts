@@ -103,6 +103,32 @@ test("canary runs one unit, stops the job on a fail, and scales on a pass", asyn
   assert.deepEqual(goShep.spawned, ["w-france", "w-japan", "w-peru"])
 })
 
+test("a grade that throws fails its unit, not the run (j-5701b2)", async () => {
+  const dir = await copyExample("orch-grade-throw-")
+  const { port, wakes } = fakeShep()
+  const base = deps(dir, port, { slots: 3 })
+  const realGrade = base.hooks.grade
+  base.hooks = {
+    ...base.hooks,
+    grade: (unit) => {
+      if (unit.id === "france") throw new HookError("hook timed out after 300000ms: bash hooks/grade.sh france")
+      return realGrade(unit)
+    },
+  }
+  cycle(base) // spawn all three
+  for (const id of ["france", "japan", "peru"]) {
+    mkdirSync(join(dir, "units", id), { recursive: true })
+    writeFileSync(join(dir, "units", id, "result.md"), "capital\n")
+    appendFileSync(join(dir, "units", id, "log.txt"), `done ${id}\n`)
+  }
+  const complete = cycle(base)
+  assert.equal(complete, true, "the run finishes despite one grade exploding")
+  const state = readState(dir)
+  assert.deepEqual(state.done, ["japan", "peru"])
+  assert.deepEqual(state.failed, ["france"])
+  assert.ok(wakes.some((w) => w.label === "france" && w.detail.startsWith("grade error:")), "the wake carries the story")
+})
+
 test("cycle spawns one worker per unfinished unit, up to the slots", async () => {
   const dir = await copyExample("orch-spawn-")
   const { port, spawned } = fakeShep()

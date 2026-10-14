@@ -354,7 +354,23 @@ export function cycle(deps: CycleDeps): boolean {
       if (deps.canary?.enabled && !deps.canary.released) {
         writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
       }
-      const grade = deps.hooks.grade(flight.unit)
+      // A grade that throws (timeout, dead hook) fails THIS unit —
+      // never the run. j-5701b2: a 300s verifier timeout surfaced as a
+      // raw ETIMEDOUT and aborted a whole pass one second before the
+      // verifier passed. The row says grade error; the wake carries it;
+      // the siblings keep their chance.
+      let grade: { pass: boolean; row: string }
+      try {
+        grade = deps.hooks.grade(flight.unit)
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err)
+        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false })
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+        deps.shep.wake(id, "blocked", `grade error: ${why.split("\n")[0]}`)
+        continue
+      }
       finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)

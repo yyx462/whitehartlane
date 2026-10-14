@@ -115,6 +115,20 @@ test("grade passes when the worker artifact exists and fails when it does not", 
   })
 })
 
+test("a hook that outlives the ceiling dies as a HookError, whatever shape Node kills it in (j-5701b2)", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  // the unit id is appended to the command — comment it out so sleep runs
+  writeFileSync(toml, readFileSync(toml, "utf8").replace(/grade = "[^"]*"/, 'grade = "sleep 5 #"'))
+  const manifest = loadManifest(dir)
+  process.env.AGENTIC_OS_HOOK_TIMEOUT_MS = "1000"
+  try {
+    assert.throws(() => runGrade(dir, manifest, { id: "france", brief: "" }), /timed out after 1000ms/)
+  } finally {
+    delete process.env.AGENTIC_OS_HOOK_TIMEOUT_MS
+  }
+})
+
 test("counts summarizes the finished table", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
