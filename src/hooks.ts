@@ -272,8 +272,14 @@ function runHook(
     })
     return { stdout: stdout ?? "", status: 0, stderr: "", ms: Date.now() - startedAt }
   } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; status?: number; killed?: boolean }
-    if (e.killed) throw new HookError(`hook timed out after ${hookTimeoutMs()}ms: ${cmd}`)
+    const e = err as { stdout?: string; stderr?: string; status?: number; killed?: boolean; signal?: string; code?: string }
+    // Node surfaces a timed-out spawnSync as error ETIMEDOUT with killed
+    // NOT always set (j-5701b2: "fatal: spawnSync /bin/sh ETIMEDOUT" —
+    // the raw error escaped and aborted a whole run whose verifier was
+    // a second from passing). Any kill shape is a hook timeout.
+    if (e.killed || e.signal || e.code === "ETIMEDOUT") {
+      throw new HookError(`hook timed out after ${hookTimeoutMs()}ms: ${cmd}`)
+    }
     if (typeof e.status !== "number") throw err
     return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "", ms: Date.now() - startedAt }
   }
