@@ -6,6 +6,35 @@ is Terminal-Bench 2.0 (arXiv:2601.11868; 89 tasks; Docker harness
 built to drive external terminal agents — survey in
 `docs/research/eval-landscape.md`).
 
+## What a TB2 task actually is (worked example)
+
+Every task is a folder: `task.toml` (metadata + caps), `instruction.md`
+(the whole prompt), `environment/` (Docker setup), `solution/` (a
+human-written oracle proving solvability), `tests/` (a pytest verifier
+with canary GUID anti-training markers). Real example, `git-leak-recovery`
+(medium, software-engineering):
+
+- **instruction.md**: "A secret was accidentally committed to this
+  repository in /app and then removed by rewriting history. 1. recover
+  the secret and write it to /app/secret.txt. 2. clean up the secret…
+  3. make sure irrelevant files and commit messages remain untouched."
+- **task.toml**: estimated_duration 45 s (oracle); expert 30 min /
+  junior 60 min; agent + verifier timeouts 900 s; 1 CPU, 2 GB RAM,
+  10 GB disk; `allow_internet = true` (per-task policy); pinned image.
+- **tests/test_outputs.py**: pytest asserts the flag file content
+  exactly, `git log --all -S 'secret['` finds nothing, and legitimate
+  commits survive — binary reward 0/1 from final container state.
+
+The harness lifecycle: pull image → container up → the agent (installed
+in-container, `BaseInstalledAgent`-style — claude-code and terminus-2
+are the reference patterns) reads the instruction and works the
+terminal → timeout → verifier runs in the same container → 0/1.
+Leaderboard entries are **harness × model**: the same model (GLM-5.1)
+scores 63.5 under terminus vs 69 under claude-code on the official
+board — harness variation at fixed model, visible, several points wide.
+That is precisely the variation our arms isolate. With n=89, a
+resolution-rate CI runs roughly ±10 pts — the plan's small-n rule.
+
 ## The invariant: one solver, two loops
 
 This runbook covers arms A/B/C — the rails pass (T1). The levy seat
