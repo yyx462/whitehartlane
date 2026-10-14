@@ -19,17 +19,18 @@ Shapes: see yyxSkills `docs/agents/repo-layout.md`.
      package-lock.json/node_modules breaks `gwt verify`
      ("root entry 'package-lock.json' is not a registered worktree"). -->
 
-<!-- commit identity: history carries exactly TWO authors — the human
-     (yyx <52618739+yyx462@users.noreply.github.com>) and the agent
-     (agent <agent@local>). Never invent a third; never inherit the
-     machine's global git identity.
-     - On the origin machine, .bear/config already defaults worktrees to
-       agent <agent@local> — agents just commit normally there.
+<!-- commit identity: history carries exactly TWO authors, both under the
+     owner's GitHub noreply email — attribution is email-only on GitHub,
+     and the plus-tag form does NOT attribute (probe-tested 2026-10-14):
+       human:  yyx         <52618739+yyx462@users.noreply.github.com>
+       agent:  yyx462-agent <52618739+yyx462@users.noreply.github.com>
+     Never invent a third; never inherit a machine's global git identity.
+     - On the origin machine, .bear/config defaults worktrees to the agent
+       identity — agents just commit normally there. A human hand-committing
+       here overrides with:
+         git -c user.name=yyx -c user.email=52618739+yyx462@users.noreply.github.com commit ...
      - Anywhere else (fresh clone, CI, another machine): set it first —
-         git config user.name agent && git config user.email agent@local
-       — or pass it per commit:
-         git -c user.name=agent -c user.email=agent@local commit ...
-     - The human commits as yyx <52618739+yyx462@users.noreply.github.com>
-       (web merges do this automatically). A pre-commit hook in .bear
-       rejects any other identity on the origin machine; keep that hook
-       in place when the bare repo is rebuilt. -->
+         git config user.name yyx462-agent
+         git config user.email 52618739+yyx462@users.noreply.github.com
+     - A pre-commit hook in .bear enforces the email allowlist on the
+       origin machine; keep it in place when the bare repo is rebuilt. -->
