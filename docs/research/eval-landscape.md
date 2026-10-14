@@ -1,7 +1,7 @@
 # The eval landscape — which famous benchmarks can measure this OS
 
 Survey for the eval plan (`docs/plans/eval-vs-single-agent.md`). What
-agentic-os varies is not the model but the supervision — so the
+WhiteHartLane varies is not the model but the supervision — so the
 instrument must accept an arbitrary terminal CLI as the worker, hold
 the model fixed, and score outcomes the rails could plausibly move:
 success, reliability across repeats, unattended completion, human

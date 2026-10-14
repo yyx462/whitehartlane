@@ -1,4 +1,4 @@
-# Eval plan — agentic-os vs the single agent
+# Eval plan — WhiteHartLane vs the single agent
 
 One-shot plan page: what we will measure, how, and what would falsify the
 README's stance. Regenerated per program phase; never a status board.
@@ -7,12 +7,14 @@ bets' literature trail is `docs/research/papers.md`. Read those first.
 
 ## 0. The instrument problem, stated once
 
-agentic-os is not an agent. Evaluating it model-vs-model is a category
+WhiteHartLane is not an agent. Evaluating it model-vs-model is a category
 error: the model is the same in both arms, the harness (opencode or pi)
 is the same in both arms. What differs is **who runs the loop** — one
 agent in its normal chat, or a deterministic supervisor that books
 panes, relays typed messages, retries refusals, answers permission
-asks, and wakes you once. So the eval measures the *supervision*, along
+asks, and wakes you once. So the eval varies the supervision and measures
+its costs and outcomes — success rate, token usage, dollar cost,
+wall-clock time, person interventions, reliability — along
 four topologies:
 
 - **T1 — fleet over instances (fan-out).** N benchmark instances, one
@@ -33,7 +35,7 @@ four topologies:
   count against the same budget; one wake returns; it assembles.
   The seat exists three ways today (the `units` planner hook, the lab
   actor writing protocol.json, a whl levy commissioning a spur) — pick
-  one chassis per pass, A/B the seats later. agentic-os alone is a
+  one chassis per pass, A/B the seats later. WhiteHartLane alone is a
   supervisor; the treatment here is the SYSTEM: model + skill + rails.
 - **T3 — rails around one agent.** The same single-agent task run bare,
   and run under a slots=1 job (retry cap, backpressure, typed

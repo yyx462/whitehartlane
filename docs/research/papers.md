@@ -32,7 +32,7 @@ The orchestrator is a deterministic engine; judgment lives at the edges
 - **Anthropic, "Building Effective Agents" (engineering blog, Dec
   2024).** The workflow-vs-agent taxonomy this README borrows: composed
   pieces for predictable work, agent loops when flexibility dominates.
-  Places agentic-os wholly on the workflow side with agents as workers.
+  Places WhiteHartLane wholly on the workflow side with agents as workers.
   **Supports** (a taxonomy, not an experiment).
 - **Kim, Gu, Park, et al. "Towards a Science of Scaling Agent
   Systems." arXiv:2512.08296** (Dec 2025; Google Research blog "Towards
@@ -175,7 +175,7 @@ the right end state" and the eval must be able to confirm that.
 
 - **Packer, Wooders, Lin, et al. "MemGPT: Towards LLMs as Operating
   Systems." 2023, arXiv:2310.08560.** The OS metaphor applied to *the
-  context window* (memory hierarchy, paging). agentic-os applies it to
+  context window* (memory hierarchy, paging). WhiteHartLane applies it to
   *processes* — birth, accounting, isolation of real OS processes.
   Same nickname, different resource. **Namesake.**
 - **Mei, Zhu, Xu, et al. "AIOS: LLM Agent Operating System." COLM

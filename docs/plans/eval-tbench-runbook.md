@@ -48,7 +48,7 @@ The ONLY difference is who runs the loop:
 
 - **Arm A (bare):** a person's shell runs `solve-one.sh` N times,
   sequentially, watched.
-- **Arm C (fleet):** `agentic-os run tbench-fleet` — same tasks as
+- **Arm C (fleet):** `whl run tbench-fleet` — same tasks as
   units, workers in panes, slots=2, unattended.
 - **Arm B (rail):** arm C's program with `slots = 1` — the rail effect
   with the parallelism variable removed. Run it on the rehearsal set
@@ -66,7 +66,7 @@ side:
 HOST                                       CONTAINER (fresh per attempt)
 ├── herdr (panes; not needed for arm A)    └── the task world (/app/repo)
 ├── opencode/pi workers in panes ──docker exec──> pytest verifier
-├── agentic-os (session disk, rails)           (grade.sh wraps test.sh)
+├── whitehartlane (session disk, rails)           (grade.sh wraps test.sh)
 ├── yyx-whl skill (host skills dir, pinned)
 └── arm E's levy chat, in a herdr pane
 ```
@@ -182,7 +182,7 @@ numbers — badly, cheaply.
 3. **Arm B, one task:** `slots = 1`, single unit — proves the program
    folder runs end to end under the rail (grade green, report row
    lands, receipt fires, one wake arrives).
-4. **Arm C, 3 units:** `agentic-os run tbench-fleet` (units cut to the
+4. **Arm C, 3 units:** `whl run tbench-fleet` (units cut to the
    rehearsal 3). Walk away. On the wake: `collect.sh arm-c`.
 5. **Check the invariant:** diff each arm's prompt bytes against
    `task-instructions/<id>.md`; diff container images; confirm
@@ -206,7 +206,7 @@ rehearsal — the scored pass inherits nothing from a broken rehearsal.
    failure (plan §2.3), never excluded.
 2. **Between arms:** `docker system prune -f`; same machine, no other
    jobs (one-Job rule); note ambient in the ledger (time, load).
-3. **Arm C:** full units list, `agentic-os run`, laptop closes. One
+3. **Arm C:** full units list, `whl run`, laptop closes. One
    wake expected. `collect.sh arm-c`.
 4. **Failure re-runs (k=3)**: only tasks that failed in either arm,
    same seeds/pins, both arms re-run on the same subset (pairs stay
