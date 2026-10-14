@@ -56,6 +56,41 @@ The ONLY difference is who runs the loop:
 
 If a result can't be traced back to this invariant, it's not a result.
 
+## Where things run (decided for pass one)
+
+**Nothing of ours is installed in the container.** The container is
+only the task world + the official verifier; everything else is host
+side:
+
+```
+HOST                                       CONTAINER (fresh per attempt)
+├── herdr (panes; not needed for arm A)    └── the task world (/app/repo)
+├── opencode/pi workers in panes ──docker exec──> pytest verifier
+├── agentic-os (session disk, rails)           (grade.sh wraps test.sh)
+├── yyx-whl skill (host skills dir, pinned)
+└── arm E's levy chat, in a herdr pane
+```
+
+Why: the solver experience must be identical across arms (iso-harness,
+§2). A host-side agent driving the container via `docker exec` is
+slower at file ops than an in-container agent — both arms share that
+equally, so paired differences stay honest. The leaderboard's
+agent-in-container pattern is a named later variant, not pass one.
+Arm-E honesty note: the levy writes (or fills) its own program folder —
+if a template is pre-written, record that choice, or E's decomposition
+is secretly ours again.
+
+The straw, precisely: the agent never enters the container. Its
+process, model calls, and native tools (read/edit/bash) run on the
+host — and the native file tools CANNOT see `/app/repo` (a different
+filesystem). Every task-touching action is one `docker exec <ctr>
+<cmd>` round trip: the command executes inside the container's Linux
+env and prints back to the pane. A named later optimization is the
+bind-mount bridge (`-v hostdir:/app`) so native file tools work on
+task bytes directly — same image, same verifier, both arms identically
+wired; adopt only after checking macOS bind-mount permission/perf
+quirks against filesystem-sensitive tasks (git-leak-recovery is one).
+
 ## T-1 · Preparation (zero API spend)
 
 1. **Freeze the program.** `prep/tasks.json` (task id list, seed
