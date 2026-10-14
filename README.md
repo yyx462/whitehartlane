@@ -68,7 +68,7 @@ counts = "node hooks/counts.mjs"      # what the report counts
 ```
 
 ```console
-$ whitehartlane run mismatch
+$ whl run mismatch
 ```
 
 Two terminals open. Alex reads the exports and writes a finding: *"the +12%
@@ -195,7 +195,7 @@ firstmate, tmux, or a fleet board.
 |---|---|---|
 | **Agent** — an LLM running tools in a loop, directing its own process | **No** | The loop has no model in it. Agents are the *workers* — external CLIs in panes. "The Orchestrator … never a pane and never an agent." |
 | **Harness** — the runtime hosting one agent (Claude Code, OpenCode, pi) | **No** | It hosts zero agents. pi/opencode are the harnesses; WhiteHartLane supervises harnesses. |
-| **Framework / library** — LangChain, LangGraph, CrewAI | **No** | You don't embed it and it embeds nothing. It's a standalone door (`whitehartlane run`); programs are data folders outside the repo. |
+| **Framework / library** — LangChain, LangGraph, CrewAI | **No** | You don't embed it and it embeds nothing. It's a standalone door (`whl run`); programs are data folders outside the repo. |
 | **Orchestrator-agent** — an LLM planning and dispatching | **No, on purpose** | A model may *propose*; "its proposal is an input to booking, never the booking." Runtime judgment is compressed into typed gates with measured prompts. |
 | **"Agent OS"** — a kernel everything runs through | **Nickname only** | Zen 1 rejected the kernel claim: your chat talks and edits freely before any rail. "OS" means process birth, accounting, isolation — a shell + supervisor. |
 | **Workflow engine** — Airflow, Temporal lineage | **Yes — the truest single label** | Typed steps (`end` / `check` / `wake`), retries with caps, backpressure, receipts, run identity by project pid + spur id + content hash. One inversion: the atoms are terminals a human can watch. |
@@ -286,15 +286,19 @@ not adversaries*: capability scoping, not microVMs.
 ## The 60-second tour
 
 ```console
-$ whitehartlane run <folder>        # the process door: books the job, starts the engine
+$ whl run <folder>               # the process door: books the job, starts the engine
 $ whl run --from <tool>:<sid>    # the agent door: a levy commissions a spur, walks away
-$ whitehartlane jobs                # every job, its state, its receipt
-$ whitehartlane events              # the trace, raw
-$ whitehartlane audit               # any live pane no job admits is a finding
-$ whitehartlane sweep               # dead orchestrator? parked orphaned, ask-first
-$ whitehartlane pause | abort | continue   # the park and rebirth verbs
-$ whitehartlane fork <jid>          # a booked wake, delivered into a reborn pane
+$ whl jobs                       # every job, its state, its receipt
+$ whl events                     # the trace, raw
+$ whl audit                      # any live pane no job admits is a finding
+$ whl sweep                      # dead orchestrator? parked orphaned, ask-first
+$ whl pause | abort | continue   # the park and rebirth verbs
+$ whl fork <jid>                 # a booked wake, delivered into a reborn pane
 ```
+
+`whl` is the short door. `bin/whitehartlane` is the same door spelled out —
+every verb passes through unchanged (ADR 0006); the window server and the
+docs use the long name, you'll type the short one.
 
 - **Workflows:** `fan-out` (independent units), `coworker` (members that
   depend on each other — the mismatch and the contract), `direct` (no
