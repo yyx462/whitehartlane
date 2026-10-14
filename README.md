@@ -326,7 +326,17 @@ One word per concept, enforced — the full dictionary is
   [`GOAL.decision.md`](GOAL.decision.md) — every dated branch from them.
 - [`docs/RAILS.md`](docs/RAILS.md) — the rails/hooks inventory, written from
   use.
-- [`docs/adr/`](docs/adr/) — nine accepted decisions, argued.
+- [`docs/adr/`](docs/adr/) — eleven accepted decisions, argued.
+- [`docs/plans/eval-vs-single-agent.md`](docs/plans/eval-vs-single-agent.md)
+  — how this OS gets evaluated against a single agent: paired arms,
+  pre-registered hypotheses, attention and isolation instruments built
+  on the trace.
+- [`docs/research/eval-landscape.md`](docs/research/eval-landscape.md) —
+  which famous benchmarks can measure a supervisor (and which are the
+  wrong instrument), every citation verified.
+- [`docs/research/papers.md`](docs/research/papers.md) — the design
+  bets mapped to the literature: what supports them, what complicates
+  them.
 - [`docs/zen/`](docs/zen/) — the founding verbatim: what was tried, what was
   rejected, what is law.
 

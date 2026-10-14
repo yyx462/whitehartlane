@@ -1,5 +1,5 @@
-<!-- yyx:repo-layout v1 -->
-- Tickets live in `docs/tickets/` (to-tickets + wayfinder shapes).
+<!-- yyx:repo-layout v2 -->
+- Tickets live on this repo's git tracker (GitHub/Gitea issues) when it has one; `docs/tickets/` files (`NN-slug.md`) only as the no-tracker fallback. One home per ticket — never both.
 - Plan pages live in `docs/plans/` — one-shot, regenerated, never status.
 - ADRs in `docs/adr/`; glossary in root `CONTEXT.md`.
 Shapes: see yyxSkills `docs/agents/repo-layout.md`.
