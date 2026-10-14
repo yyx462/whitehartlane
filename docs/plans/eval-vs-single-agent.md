@@ -83,12 +83,13 @@ Pairing rules — any violation voids the pair:
 
 ## 3. Benchmarks per phase
 
-(Verified citations, sizes, and fit arguments: `docs/research/eval-landscape.md`.)
+(Verified citations, sizes, and fit arguments: `docs/research/eval-landscape.md`.
+Phase 1a's step-by-step pass: `docs/plans/eval-tbench-runbook.md`.)
 
 | Phase | Benchmark | Topology | Scale | What it settles |
 |---|---|---|---|---|
 | 0 | `trivia-bench` (in-repo) + existing traces | smoke | ~free | harness works; extractor correct |
-| 1a | Terminal-Bench | T1 + A/B arms | full set, k=1 then k=3 on failures | H1, H3, H4 on terminal-native tasks |
+| 1a | Terminal-Bench | T1 + A/B arms | full set, k=1 then k=3 on failures | H1, H3, H4 on terminal-native tasks — runbook: `docs/plans/eval-tbench-runbook.md` |
 | 1b | SWE-bench Verified (random-50, seed fixed) | T1 | 50 × k arms | H1 on the coding gold standard |
 | 2a | SWE-bench Verified (random-25 of the 50) | T2 (implementer + tester) | 25 × k=3 | H1/H5: does decomposition hurt |
 | 2b | TheAgentCompany (subset) or MultiAgentBench metrics | T2 | subset | H5 on genuinely partitioned worlds |
