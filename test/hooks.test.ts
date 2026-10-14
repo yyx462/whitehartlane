@@ -45,6 +45,19 @@ test("workflow.model is provider/model or absent", async () => {
   assert.throws(() => loadManifest(dir), /provider\/model/)
 })
 
+test("workflow.canary is program policy — boolean, absent means the door default", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('slots = 2\n', 'slots = 2\ncanary = false\n'))
+  assert.equal(loadManifest(dir).workflow.canary, false)
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('canary = false\n', 'canary = true\n'))
+  assert.equal(loadManifest(dir).workflow.canary, true)
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('canary = true\n', ''))
+  assert.equal(loadManifest(dir).workflow.canary, undefined)
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('slots = 2\n', 'slots = 2\ncanary = "no"\n'))
+  assert.throws(() => loadManifest(dir), /workflow.canary must be true or false/)
+})
+
 test("a task directory without workflow.toml is a clean error", async () => {
   const empty = await mkdtemp(join(tmpdir(), "agentic-os-empty-"))
   assert.throws(() => loadManifest(empty), HookError)

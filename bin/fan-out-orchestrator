@@ -75,13 +75,21 @@ const engine = () => {
   }
   // deadline_ms on [workflow] is the run's hard ceiling (default 2h —
   // runOrchestrator's). A program that must not outlive an hour says so
-  // in its manifest, not in shell plumbing.
+  // in its manifest, not in shell plumbing. canary rides the same
+  // manifest: env (0/1) wins for a run, then [workflow] canary, then on
+  // — a bench whose failed tasks are measured outcomes says false.
   let deadlineMs
+  let wf
   try {
-    const wf = parseToml(readFileSync(join(rail.taskDir, "workflow.toml"), "utf8")).workflow
+    wf = parseToml(readFileSync(join(rail.taskDir, "workflow.toml"), "utf8")).workflow
     const dm = Number(wf?.deadline_ms ?? "")
     if (dm > 0) deadlineMs = dm
   } catch {}
+  const canary = (() => {
+    if (process.env.AGENTIC_OS_CANARY === "0") return false
+    if (process.env.AGENTIC_OS_CANARY === "1") return true
+    return wf?.canary !== false
+  })()
   return runOrchestrator({
     taskDir: rail.taskDir,
     shep: rail,
@@ -125,7 +133,7 @@ const engine = () => {
       return undefined
     })(),
     churnSince: worktreeChurnedSince,
-    canary: process.env.AGENTIC_OS_CANARY !== "0",
+    canary,
   })
 }
 // a lab-kind run belongs to bin/lab-orchestrator — refuse before any

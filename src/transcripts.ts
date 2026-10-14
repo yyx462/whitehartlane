@@ -33,11 +33,11 @@ function readPiHeader(path: string): PiHeader | null {
   }
 }
 
-export function resolvePi(pointer: TranscriptPointer): { id: string; path: string } | null {
+export function resolvePi(pointer: TranscriptPointer, expect?: string): { id: string; path: string } | null {
   const dir = join(piSessionsRoot(), `--${piEncodeCwd(pointer.cwd)}--`)
   if (!existsSync(dir)) return null
   const since = Date.parse(pointer.since)
-  let best: { id: string; path: string; ts: number } | null = null
+  const candidates: { id: string; path: string; ts: number }[] = []
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".jsonl")) continue
     const path = join(dir, name)
@@ -45,8 +45,23 @@ export function resolvePi(pointer: TranscriptPointer): { id: string; path: strin
     if (!header?.id || !header.timestamp) continue
     const ts = Date.parse(header.timestamp)
     if (Number.isNaN(ts) || ts < since) continue
-    if (!best || ts > best.ts) best = { id: header.id, path, ts }
+    candidates.push({ id: header.id, path, ts })
   }
+  candidates.sort((a, b) => b.ts - a.ts)
+  // expect disambiguates a shared cwd (j-78ca43: two workers born seconds
+  // apart in one worktree cross-booked each other's sessions under
+  // newest-wins). The pane's own session is the one whose bytes contain
+  // its brief's marker; no match falls back to newest-wins.
+  if (expect) {
+    for (const cand of candidates) {
+      try {
+        if (readFileSync(cand.path, "utf8").includes(expect)) return { id: cand.id, path: cand.path }
+      } catch {
+        /* unreadable candidate — try the next */
+      }
+    }
+  }
+  const best = candidates[0]
   return best ? { id: best.id, path: best.path } : null
 }
 
@@ -63,10 +78,32 @@ function opencodeDb(): string {
 // then legacy, then the CLI list.
 const OPENCODE_SESSION_TABLES = ["session_v2", "session"]
 
+// True when the session's FIRST user message contains the marker: that
+// message is the brief a pane was born with, so the marker (the unit
+// dir) identifies which pane owns the session even when siblings share
+// the cwd. Schemas drift across opencode versions — any doubt is false,
+// and the caller falls back to newest-wins.
+function opencodeFirstUserHas(db: DatabaseSync, id: string, expect: string): boolean {
+  for (const sql of [
+    "SELECT data FROM session_message WHERE session_id = ? AND type = 'user' ORDER BY seq LIMIT 1",
+    "SELECT data FROM message WHERE session_id = ? AND json_extract(data, '$.role') = 'user' ORDER BY time_created, id LIMIT 1",
+  ] as const) {
+    try {
+      const row = db.prepare(sql).get(id) as { data?: string } | undefined
+      if (typeof row?.data === "string" && row.data.includes(expect)) return true
+    } catch {
+      /* table absent on this opencode version — try the next */
+    }
+  }
+  return false
+}
+
 // Primary: the opencode SQLite db, queried precisely by (directory,
 // created >= since) — no CLI list window can miss it. Fallback: the
-// CLI's session list (last resort when the db is unreadable).
-export function resolveOpencode(pointer: TranscriptPointer): { id: string } | null {
+// CLI's session list (last resort when the db is unreadable). expect
+// (a brief marker, e.g. the unit dir) breaks newest-wins ties between
+// siblings born into one shared cwd.
+export function resolveOpencode(pointer: TranscriptPointer, expect?: string): { id: string } | null {
   const since = Date.parse(pointer.since)
   if (existsSync(opencodeDb())) {
     try {
@@ -74,12 +111,20 @@ export function resolveOpencode(pointer: TranscriptPointer): { id: string } | nu
       try {
         for (const table of OPENCODE_SESSION_TABLES) {
           try {
-            const row = db
+            const rows = db
               .prepare(
-                `SELECT id FROM ${table} WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 1`,
+                `SELECT id FROM ${table} WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 50`,
               )
-              .get(pointer.cwd, since) as { id?: string } | undefined
-            if (row?.id) return { id: row.id }
+              .all(pointer.cwd, since) as { id?: string }[]
+            const ids = rows.filter((r) => typeof r.id === "string").map((r) => r.id as string)
+            if (ids.length === 0) continue
+            if (expect) {
+              for (const id of ids) {
+                if (opencodeFirstUserHas(db, id, expect)) return { id }
+              }
+              // no candidate carries the marker — newest-wins, as before
+            }
+            return { id: ids[0]! }
           } catch {
             /* table absent on this opencode version — try the next */
           }

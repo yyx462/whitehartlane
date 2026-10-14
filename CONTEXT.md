@@ -128,6 +128,10 @@ _Avoid_: extending the metaphor into the machinery
 The workflow for independent units. Workers do not depend on each other. The orchestrator starts them and finishes results.
 _Avoid_: fleet, hierarchy, swarm
 
+**Canary**:
+Fan-out's cost guard: the first unit runs alone; its grade passing releases the fleet to full slots, its failing stops the run honestly ("canary-stopped") instead of burning every unit on a broken pipe. Program policy, declared as `canary` in `[workflow]` (default on); `AGENTIC_OS_CANARY=0|1` overrides for one run. A program whose first-unit failure is a measured outcome, not a pipe break — a bench — declares it off.
+_Avoid_: warm-up, smoke unit, serial prefix (a symptom, not the thing), gate (that is Jev or a check step)
+
 **Coworker**:
 The workflow for panes that depend on each other. Named members exchange typed message files on the Job dir; the Rail is the relay — it moves a message to the named pane's prompt. A worker never writes another worker. `kind = "coworker"` in `workflow.toml`. It must produce a report.
 _Avoid_: social group, chat room, swarm, orchestrator-with-friends
@@ -139,6 +143,10 @@ _Avoid_: single agent, dummy workflow, fallback, hidden retry script
 **Rail**:
 Machinery every workflow uses and none may rewrite: pane ledger, fail recovery, backpressure, the retry cap, and privilege control (the permission sweep). One implementation: the `Rail` in `src/rail.ts` — the bins are thin entries. Not the orchestrator's method. Not the layout.
 _Avoid_: watcher, operator, script
+
+**Brief grace**:
+The rail's one rescue for a brief that never landed in a live pane: past the grace window, a pane with no log line AND an idle agent gets its brief re-submitted once; a working agent is evidence the brief landed and defers the rescue. A missing log alone proves nothing — the worker protocol writes nothing to the log until its single `done` line (j-78ca43: every unit past 90s was re-briefed mid-work before the heartbeat became the discriminator).
+_Avoid_: stall (a different ladder — silence past the stall timeout), nudge, resend loop
 
 **Hook**:
 The task-specific part a project fills in: what one unit of work is, the worker brief, how to grade, where artifacts go, which counts the report shows, and — as detectors — what a wave, an end, or a gate looks like in the world. Each is a command string in `workflow.toml`. Any language. A `hooks/` folder beside the toml is a copy convention, not the contract.

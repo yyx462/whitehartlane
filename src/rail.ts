@@ -426,10 +426,12 @@ export class Rail implements ShepPort {
   // The host session id, booked write-ahead (ADR 5) so a later continue
   // can resume this pane's conversation. herdr itself reports no session
   // id (verified live 2026-10-08) — the tools' own stores do: pi's jsonl
-  // headers, the opencode db / CLI. (cwd, since) → newest in window.
-  private resolveLiveSession(kind: string, cwd: string, since: string): string | null {
+  // headers, the opencode db / CLI. (cwd, since) → newest in window,
+  // disambiguated by the brief's marker when siblings share the cwd
+  // (j-78ca43: two workers in one worktree cross-booked each other).
+  private resolveLiveSession(kind: string, cwd: string, since: string, expect?: string): string | null {
     try {
-      const hit = kind === "pi" ? resolvePi({ tool: kind, cwd, since }) : resolveOpencode({ tool: kind, cwd, since })
+      const hit = kind === "pi" ? resolvePi({ tool: kind, cwd, since }, expect) : resolveOpencode({ tool: kind, cwd, since }, expect)
       return hit?.id ?? null
     } catch {
       return null
@@ -524,7 +526,11 @@ export class Rail implements ShepPort {
     this.mine.add(name)
     this.workers.add(name)
     this.paneOf.set(name, pane)
-    const sessionId = resumeSession ?? this.resolveLiveSession(kind, cwd, since)
+    // the unit dir appears in every brief variant (Work dir / Unit dir /
+    // the deliverable path) and never in a sibling's brief — the marker
+    // that keeps shared-cwd bookings straight
+    const marker = dirname(briefPath)
+    const sessionId = resumeSession ?? this.resolveLiveSession(kind, cwd, since, marker)
     this.ledger?.attach(
       name,
       pane,
@@ -537,7 +543,7 @@ export class Rail implements ShepPort {
     // carries the id a Continue resumes
     if (!sessionId) {
       setTimeout(() => {
-        const late = this.resolveLiveSession(kind, cwd, since)
+        const late = this.resolveLiveSession(kind, cwd, since, marker)
         if (late) this.ledger?.setSession(name, late)
       }, 5_000).unref()
     }
@@ -896,7 +902,8 @@ export class Rail implements ShepPort {
   // shortly (ADR 5), so a continue resumes its conversation.
   bookSessionLate(name: string, kind: string, cwd: string, since: string): void {
     setTimeout(() => {
-      const sid = this.resolveLiveSession(kind, cwd, since)
+      const briefPath = this.briefOf.get(this.scopedName(name)) ?? this.briefOf.get(name)
+      const sid = this.resolveLiveSession(kind, cwd, since, briefPath ? dirname(briefPath) : undefined)
       if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
     }, 5_000).unref()
   }
