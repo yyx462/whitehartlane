@@ -8,6 +8,11 @@ built to drive external terminal agents — survey in
 
 ## The invariant: one solver, two loops
 
+This runbook covers arms A/B/C — the rails pass (T1). The levy seat
+(arm E, T2′: an entry agent with the skill deciding how to split) is a
+SEPARATE pass (plan §0 T2′, its own issue) — do not bolt it onto this
+one; it would break the invariant below.
+
 Every byte the model sees is identical across arms — same instruction
 file, same container, same verifier, same model pin, same CLI version.
 The ONLY difference is who runs the loop:
