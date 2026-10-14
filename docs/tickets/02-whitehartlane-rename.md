@@ -236,6 +236,40 @@ The wizard (embedded so it survives the scratch file):
     echo "Done. Start herdr, open a pane, confirm cwd resolves under $NEW."
 -->
 
+<!-- PHASE 2 EXECUTION LOG — 2026-10-14, branch whl-branding
+
+In-repo branding rename executed on the whl-branding worktree (gwt lane):
+
+- bin/agentic-os → bin/whitehartlane (git mv); bin/whl shim + web/server.mjs
+  resolve the new door; window UI title/wordmark/theme-key rebranded.
+- OS disk default → ~/.local/share/whitehartlane with legacy agentic-os disk
+  honored while it is the only one (store.ts, project.ts, server.mjs — the ADR
+  0009 read-both-write-new pattern). Global manifest: .config/whitehartlane
+  preferred, .config/agentic-os still honored (hooks.ts + both covered by tests).
+- README: H1 per ticket, "formerly agentic-os" note, prose WhiteHartLane /
+  commands whitehartlane. Living docs renamed (CONTEXT, GOAL, RAILS, PRDs,
+  research incl. agent-glossary.html, yyx-whl skill). History frozen: ADRs,
+  zen, tickets, examples untouched. AGENTS.md untouched (its mentions are the
+  still-live launchd label).
+- package.json name → whitehartlane; SHEP_SCOPE label → whl-test; lock
+  regenerated. 322/322 tests green.
+- DEFERRED to ticket 03 (see ADR 0011): AGENTIC_OS_* env prefix (36 vars, some
+  dynamically constructed), customType tags, launchd job rename (machine-local).
+
+Machine-local follow-ups AFTER this PR merges:
+1. `ln -sf ~/projects/Agentic-Workspace/whitehartlane/master/bin/whitehartlane ~/.local/bin/whitehartlane`
+   (the old ~/.local/bin/agentic-os symlink has been DANGLING since the Phase 1
+   folder rename — remove it; ~/.local/bin/whl already points correctly).
+2. Bounce the window server (server.mjs changed): `autojobs on agentic-os-window`
+   (or `launchctl kickstart -k gui/$(id -u)/local.agentic-os.window`), then
+   curl localhost:8787 — expect the whitehartlane wordmark + existing sessions
+   still listed (legacy disk fallback).
+3. Optional later: launchd job rename (new plist + label + registry entry), and
+   `mv ~/.local/share/agentic-os ~/.local/share/whitehartlane` when convenient
+   (fallback makes it safe either way).
+-->
+
+
 <!-- PHASE 1 CLOSURE — 2026-10-14: herdr tail SELF-HEALED, wizard obsolete
 
 Overnight herdr rewrote session.json from its LIVE state, and the live state was already correct:

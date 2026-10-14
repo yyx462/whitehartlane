@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// agentic-os window — backend server. Node stdlib only, no npm.
+// whitehartlane window — backend server. Node stdlib only, no npm.
 // Serves web/public/ statically and a JSON API over the OS disk
-// (~/.local/share/agentic-os): sessions, Jobs, panes, events, reports.
+// (~/.local/share/whitehartlane; a legacy agentic-os disk is honored — ADR 0011):
+// sessions, Jobs, panes, events, reports.
 // The write actions are POST /api/run (spawns the run door detached and
 // returns its first stdout lines), the rail verbs (pause|abort|continue
 // via the door), and POST delete (removes a job dir outright).
@@ -18,7 +19,13 @@ const HOST = process.env.HOST || "0.0.0.0";
 // the OS disk root: AGENTIC_OS_ROOT (window's own override) or
 // AGENTIC_OS_HOME (the store's name for the same root, src/store.ts)
 const OS_ROOT = process.env.AGENTIC_OS_ROOT || process.env.AGENTIC_OS_HOME ||
-  path.join(process.env.HOME, ".local/share/agentic-os");
+  (() => {
+    // ADR 0011: default disk is whitehartlane; a legacy agentic-os disk
+    // still wins while it is the only one that exists (read both, write new)
+    const next = path.join(process.env.HOME, ".local/share/whitehartlane");
+    const old = path.join(process.env.HOME, ".local/share/agentic-os");
+    return fs.existsSync(old) && !fs.existsSync(next) ? old : next;
+  })();
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
@@ -27,7 +34,7 @@ const PUBLIC_DIR = path.join(HERE, "public");
 const RUN_DOOR =
   [
     process.env.AGENTIC_OS_DOOR,
-    path.resolve(HERE, "..", "bin", "agentic-os"),
+    path.resolve(HERE, "..", "bin", "whitehartlane"),
   ].find((p) => p && fs.existsSync(p)) || null;
 
 // launchd runs this server on macOS's minimal PATH (no node, no
@@ -2204,7 +2211,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   log(
-    "agentic-os window server up:",
+    "whitehartlane window server up:",
     "http://" + HOST + ":" + PORT,
     "| public:",
     PUBLIC_DIR,

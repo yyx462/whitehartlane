@@ -9,7 +9,7 @@ Any main agent that levies a spur — plans the work, chooses the workflow, call
 _Avoid_: front door, orchestrator, scheduler, kernel, first mate (the old entry-only word; `first_mate` survives only as a legacy wire value)
 
 **Session**:
-The OS record on disk at `sessions/<sid>/`: events, jobs, pane records, and a binding. One per key. A levy chat is keyed by `(tool, host session id)`. A CLI start is keyed by `(agentic-os, folder path)`. May have no Job.
+The OS record on disk at `sessions/<sid>/`: events, jobs, pane records, and a binding. One per key. A levy chat is keyed by `(tool, host session id)`. A CLI start is keyed by `(whitehartlane, folder path)`. May have no Job.
 Example: `s-a1b2` holds `events.jsonl` and `jobs/`.
 _Avoid_: host session, pi chat, opencode `ses_…`, task, chat history, folder
 
@@ -23,15 +23,15 @@ The session's record of repo and worktree path. Project bytes live in the target
 _Avoid_: snapshot, copy
 
 **Job**:
-The managed group of panes on a session, with state and policy. Created by the first admitted spawn; `retired` is a state, not deletion. No Job, no panes. A Job started by `agentic-os run` can finish with no person in the loop. A quiet success is not a wake. A dead orchestrator waits for a person. Promote is never part of the Job.
+The managed group of panes on a session, with state and policy. Created by the first admitted spawn; `retired` is a state, not deletion. No Job, no panes. A Job started by `whitehartlane run` can finish with no person in the loop. A quiet success is not a wake. A dead orchestrator waits for a person. Promote is never part of the Job.
 _Avoid_: fleet, run, campaign, host session, program
 
 **Unattended**:
-A Job path with no person in the loop. `agentic-os run --unattended` is that path — explicit on the door, because a Job nobody hears finishing is an information gap; the default books a levy and wakes it once. Direct is not that path. A dead orchestrator and promote still wait for a person, and neither is the happy path.
+A Job path with no person in the loop. `whitehartlane run --unattended` is that path — explicit on the door, because a Job nobody hears finishing is an information gap; the default books a levy and wakes it once. Direct is not that path. A dead orchestrator and promote still wait for a person, and neither is the happy path.
 _Avoid_: direct, grill, promote
 
 **Program**:
-Code outside this repo. It stands a Job up. The rails make that Job manageable. The program does not rewrite them. This repo does not import it. The typed command is `agentic-os run`.
+Code outside this repo. It stands a Job up. The rails make that Job manageable. The program does not rewrite them. This repo does not import it. The typed command is `whitehartlane run`.
 Example: skill-rsi.
 _Avoid_: workflow, Job, scheduler, pipeline, project
 

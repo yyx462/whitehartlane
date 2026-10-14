@@ -1,8 +1,8 @@
 #!/usr/bin/env -S node --experimental-strip-types
-// agentic-os run <folder> | jobs | events | audit | sweep | pause | abort |
+// whitehartlane run <folder> | jobs | events | audit | sweep | pause | abort |
 // fail | continue | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
 // starts that workflow's engine. The rest read and finish the OS disk
-// (~/.local/share/agentic-os). jobs lists every Job record with its state
+// (~/.local/share/whitehartlane). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
 // pane is born booked — a live pane no Job admits is a violation); sweep
 // parks running Jobs whose orchestrator died without a graceful stop in
@@ -178,7 +178,7 @@ async function main() {
         !(paneIdx !== -1 && i === paneIdx + 1),
     )
     if (!folder) {
-      console.error("usage: agentic-os run <folder> [--from <tool>:<session-id>] [--pane <pane-id>] [--verbose]")
+      console.error("usage: whitehartlane run <folder> [--from <tool>:<session-id>] [--pane <pane-id>] [--verbose]")
       process.exitCode = 2
       return
     }
@@ -264,14 +264,14 @@ async function main() {
       console.log(`UNADMITTED ${pane.label} (${pane.pane}) — no booked birth; retire it: shep retire ${pane.label}`)
     }
     for (const job of stalled) {
-      console.log(`STALLED ${job.id} — orchestrator pid ${job.pid} is gone; run: agentic-os sweep`)
+      console.log(`STALLED ${job.id} — orchestrator pid ${job.pid} is gone; run: whitehartlane sweep`)
     }
     // ADR 0010 — the doorbell is a last resort, never a silent one:
     // every wake that fell out of band (and was never consumed) is
     // named here, with the fork rung's diagnosis and the drain verb
     const outOfBand = wakeAudit(jobs)
     for (const row of outOfBand.slice(0, 10)) {
-      console.log(`OUT-OF-BAND wake ${row.jid} (${row.task}) — ${row.delivery} at ${row.at}: ${row.why}; drain it: agentic-os fork ${row.jid}`)
+      console.log(`OUT-OF-BAND wake ${row.jid} (${row.task}) — ${row.delivery} at ${row.at}: ${row.why}; drain it: whitehartlane fork ${row.jid}`)
     }
     const dirty = bastards.length + stalled.length + outOfBand.length
     console.log(
@@ -296,7 +296,7 @@ async function main() {
       orphanJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
       swept += 1
       console.log(`${job.id} orphaned (parked, ask-first) — ${job.dir}`)
-      console.log(`  continue: agentic-os continue ${job.id} | decline: agentic-os abort ${job.id}`)
+      console.log(`  continue: whitehartlane continue ${job.id} | decline: whitehartlane abort ${job.id}`)
       if (orphans.length > 0) {
         console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
@@ -328,7 +328,7 @@ async function main() {
       job.task,
       "",
       `Job ${job.id} retired ${job.receipt?.status}. Panes remaining ${job.receipt?.panesRemaining}.`,
-      "Opened by agentic-os promote. Not merged.",
+      "Opened by whitehartlane promote. Not merged.",
     ].join("\n")
     let note = ""
     try {
@@ -350,7 +350,7 @@ async function main() {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
     if (!jid || !job) {
-      console.error(`pause: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`pause: no such Job '${jid ?? ""}' — run: whitehartlane jobs`)
       process.exitCode = 2
       return
     }
@@ -390,7 +390,7 @@ async function main() {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
     if (!jid || !job) {
-      console.error(`continue: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`continue: no such Job '${jid ?? ""}' — run: whitehartlane jobs`)
       process.exitCode = 2
       return
     }
@@ -427,7 +427,7 @@ async function main() {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
     if (!jid || !job) {
-      console.error(`fork: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`fork: no such Job '${jid ?? ""}' — run: whitehartlane jobs`)
       process.exitCode = 2
       return
     }
@@ -618,7 +618,7 @@ async function main() {
       }
       return
     }
-    console.error("usage: agentic-os plugin install|status")
+    console.error("usage: whitehartlane plugin install|status")
     process.exitCode = 2
     return
   }
@@ -636,7 +636,7 @@ async function main() {
     const again = args.includes("--again")
     const job = jobs.find((j) => j.id === jid)
     if (!jid || jid.startsWith("--") || !job) {
-      console.error(`fail: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`fail: no such Job '${jid ?? ""}' — run: whitehartlane jobs`)
       process.exitCode = 2
       return
     }
@@ -652,7 +652,7 @@ async function main() {
     }
     const failed = failJob(job, reason, { again })
     if (!failed) {
-      console.error(`fail: ${job.id} declined — run: agentic-os events ${job.sid}`)
+      console.error(`fail: ${job.id} declined — run: whitehartlane events ${job.sid}`)
       process.exitCode = 1
       return
     }
@@ -672,7 +672,7 @@ async function main() {
     const jid = process.argv[3]
     const job = jobs.find((j) => j.id === jid)
     if (!jid || !job) {
-      console.error(`abort: no such Job '${jid ?? ""}' — run: agentic-os jobs`)
+      console.error(`abort: no such Job '${jid ?? ""}' — run: whitehartlane jobs`)
       process.exitCode = 2
       return
     }
@@ -708,7 +708,7 @@ async function main() {
     return
   }
 
-  console.error("usage: agentic-os run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | fork <jid> | register --from <tool>:<sid> | plugin install|uninstall|status | promote <jid>")
+  console.error("usage: whitehartlane run <folder> | jobs | events [sid] | audit | sweep | pause <jid> [--wait 2m] | abort <jid> | continue <jid> | fork <jid> | register --from <tool>:<sid> | plugin install|uninstall|status | promote <jid>")
   process.exitCode = 2
 }
 

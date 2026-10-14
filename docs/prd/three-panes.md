@@ -4,12 +4,12 @@ The OS half. The job half lives in the program. skill-rsi's is `agentic-program/
 
 `docs/prd/live-orchestrator.md` and `docs/prd/skill-rsi.md` folded the Actor into the Orchestrator. Do not follow them.
 
-`agentic-os run` is the only entry. The Rail births panes, names them, stores results, and wakes. A workflow with no Actor still finishes when the Wave ends. That is today's fan-out.
+`whitehartlane run` is the only entry. The Rail births panes, names them, stores results, and wakes. A workflow with no Actor still finishes when the Wave ends. That is today's fan-out.
 
 ## Picture
 
 ```text
-agentic-os run
+whitehartlane run
   Rail births the named panes. It never replaces a live pane.
 
 orchestrator
@@ -59,7 +59,7 @@ What the Actor looks at, and what a Mock runs, are the job. The OS does not know
 - The Rail does not know the grader. Jev is not in the Rail.
 - The Rail does not render HTML. A program may.
 - Prototypes are not an OS folder. The Job dir may hold a pointer. The Rail does not own the asset.
-- Verbose is a display of the Rail, not a fourth worker. `verbose = true` in the workflow, or `agentic-os run <folder> --verbose`, opens one more tab that tails a short log. A line names who moved what: `rail`, `watcher`, or `operator`. The same state again writes nothing. A spin is not a line.
+- Verbose is a display of the Rail, not a fourth worker. `verbose = true` in the workflow, or `whitehartlane run <folder> --verbose`, opens one more tab that tails a short log. A line names who moved what: `rail`, `watcher`, or `operator`. The same state again writes nothing. A spin is not a line.
 - The operator closes a Mock pane when that pane's End is done. A blocked pane stays, so the dialog remains visible. Ten waves do not leave nine finished panes.
 
 ## Stages

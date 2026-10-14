@@ -22,7 +22,7 @@ drifts from the doc.
 - **2026-10-08/09 — research session** (`jd-research` lane, PR #23, fca00fa →
   b6ac1ab): market scan (§1), glossary in five axes + system shape +
   production + infra words + ecosystem (§2), tradeoff tables (§3),
-  concept→agentic-os map (§4), study page deployed to ht-ml.app, ADR 0004.
+  concept→WhiteHartLane map (§4), study page deployed to ht-ml.app, ADR 0004.
 - **2026-10-10 — QA session**: verified the deployed URL still matches the
   local html; audited §4's file pointers against master. One drifted (below);
   everything else resolved. Core framing (axes, taxonomy, tradeoffs, the

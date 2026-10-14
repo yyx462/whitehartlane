@@ -32,7 +32,13 @@ export type ProjectRegistry = {
 }
 
 function homeRoot(): string {
-  return process.env.AGENTIC_OS_HOME ?? join(homedir(), ".local", "share", "agentic-os")
+  if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
+  // ADR 0011: the disk default is ~/.local/share/whitehartlane; a legacy
+  // agentic-os disk still wins while it is the only one that exists
+  // (read both, write the new spelling — the ADR 0009 pattern).
+  const next = join(homedir(), ".local", "share", "whitehartlane")
+  const old = join(homedir(), ".local", "share", "agentic-os")
+  return existsSync(old) && !existsSync(next) ? old : next
 }
 
 function shortPid(): string {

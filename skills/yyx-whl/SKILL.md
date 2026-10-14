@@ -4,10 +4,10 @@ description: >-
   Use when a task fits multiple agents and the caller wants to walk
   away: independent units (fan-out) or role-playing members with their
   own briefs, models, and isolated contexts (coworker), run on the
-  agentic-os rail — pre-defined workflow kinds, customizable hooks and
+  WhiteHartLane rail — pre-defined workflow kinds, customizable hooks and
   members, one report and one wake at the end. Triggers: "spawn a
   workflow/spur", "run this as a coworker job", "let agents do it while
-  we continue", whl / agentic-os / levy / spur, or status on a running
+  we continue", whl / WhiteHartLane / levy / spur, or status on a running
   spur (jobs / abort / continue).
 ---
 
@@ -23,7 +23,7 @@ it, you do not coach it. Refuses: babysitting (`yyx-notify` is the
 doorbell, not you), session copying, and doing the work yourself that a
 spur should do.
 
-## Commands (the door: `whl` = agentic-os)
+## Commands (the door: `whl` = WhiteHartLane)
 
 ```
 whl run <folder> --from <tool>:<session-id>   # levy; prints job:, log:, trace: — then STOP
@@ -126,13 +126,13 @@ Runs; the events trace pane shows every booked fact.
 The hand-back is exactly: the door's `job:`/`log:`/`trace:` lines, the
 spur id (`project/spur_id`), and the one-sentence hand-off. Later, when
 the wake arrives, relay `wake.json`'s message + report path verbatim.
-If the wake (message or report) surfaces a defect in whl/agentic-os
+If the wake (message or report) surfaces a defect in whl/WhiteHartLane
 itself — a contract programs keep re-tripping (heartbeat path ambiguity,
 hook stdout purity, run-dir vs source-dir) — file one issue per defect
-on yyx462/agentic-os (symptom / root cause / job id / run-dir pointer)
+on yyx462/whitehartlane (symptom / root cause / job id / run-dir pointer)
 and say so. Run-scoped workarounds (program-folder briefs, hooks) are
 the spur's to make; an OS fix is a ticket, never a mid-run edit of
-agentic-os or this skill.
+WhiteHartLane or this skill.
 
 ## Stop
 

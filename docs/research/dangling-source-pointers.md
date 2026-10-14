@@ -17,7 +17,7 @@ an absolute path into the worktree the program ran from:
   "project": "p-fd72b2",
   "dag_id": "ui-window",
   "content_hash": "1e952af1af92",
-  "source": "/Users/…/agentic-os/coworker/examples/agentic-program/ui-window"
+  "source": "/Users/…/WhiteHartLane/coworker/examples/agentic-program/ui-window"
 }
 ```
 

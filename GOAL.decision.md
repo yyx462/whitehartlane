@@ -28,7 +28,7 @@ on is a deliberate, visible break). Telegram-first delivery and
 "idleness means done" both rejected: the wake goes to the pointer
 regardless, and a booked wait is explained silence, not a stall.
 Serves 2, 3, 4. Trail: src/store.ts, src/fork.ts, src/transcripts.ts,
-src/orchestrator.ts, bin/agentic-os, bin/fan-out-orchestrator,
+src/orchestrator.ts, bin/whitehartlane, bin/fan-out-orchestrator,
 bin/lab-orchestrator, docs/adr/0006-whl-wake-and-fork.md, CONTEXT.md
 (Wake, Booked wait, Fork), test/wake-delivery.test.ts,
 test/fork-verb.test.ts, test/orchestrator.test.ts.
@@ -153,7 +153,7 @@ part. Serves 3, 6. Trail: docs/adr/0003-detectors-and-gates.md,
 examples/agentic-program/ (trivia-bench, inbox-zero, two-signoffs).
 
 2026-10-03 — One start door, and unattended is a first-class path.
-`agentic-os run <folder>` reads `workflow.toml`, books a fan-out Job,
+`whitehartlane run <folder>` reads `workflow.toml`, books a fan-out Job,
 and starts the engine. No grill. No question. A second running Job on
 that session is refused. The chat still stands a Job up itself; it must
 call `run` (not built). A window may list folders and Jobs, and its
@@ -162,7 +162,7 @@ not draw a graph: that would be a second scheduler. LangChain is a
 library. LangGraph is the wheel we are not rebuilding. A program lives
 outside this repo. It stands a Job up. The rails make that Job
 manageable. The program does not rewrite them. This repo does not
-import it. The typed command is `agentic-os run`. The
+import it. The typed command is `whitehartlane run`. The
 manifest stays toml, not a Python file. A Job on this path can finish
 with no person in the loop. A dead orchestrator still waits. Promote
 is never part of the Job. Serves 1, 3, 4, 5.
@@ -170,7 +170,7 @@ is never part of the Job. Serves 1, 3, 4, 5.
 2026-10-01 — Prep reads the compacted view. The planner gets
 context.md: the latest compaction summary plus what was kept, and
 failed units from the trace. Text the summary replaced is not handed
-over. Promote is a gate, not a push: `agentic-os promote <jid>` prints
+over. Promote is a gate, not a push: `whitehartlane promote <jid>` prints
 findings and stops, or calls `gwt submit-pr` and records job.promoted.
 It never merges. A clean receipt is not permission; the human runs the
 command. Serves 2, 3, 5.
@@ -228,7 +228,7 @@ the collision incident stranded fleets. Serves 5. Rejected: global
 names, manual cleanup.
 
 2026-09-30 — Phase B: one home, one trace. The OS disk moved to
-~/.local/share/agentic-os (data, not state — traces are for training,
+~/.local/share/whitehartlane (data, not state — traces are for training,
 not for disposal). Sessions bind to the host conversation keyed on
 (tool, host session id) — find-or-create, so a resumed chat never
 mints a duplicate; jobs reference the sid only (one hop to the host
@@ -238,7 +238,7 @@ job.retired/aborted, wake.consumed. job.json, report.json, state.json
 are projections. Runs live at sessions/<sid>/jobs/<jid>/run/ with
 per-unit dirs (brief/log/result) that double as worker cwds — which
 makes both pi and opencode transcripts resolvable newest-for-cwd; the
-resolver layer reads them (pi file; opencode export). <cwd>/.agentic-os
+resolver layer reads them (pi file; opencode export). <cwd>/.whitehartlane
 is dead; fresh start, nothing migrated. rows.jsonl died (grade rows
 live in events). Zen 3 note: the event schema is the first rail
 admitted from use. Serves 2, 3, 4, 5.
@@ -249,8 +249,8 @@ any pane is born (policy.ts), and an admitted fan-out creates the Job
 before the orchestrator spawns — the first admitted spawn makes the
 Job. The orchestrator books every pane (born/died) and retires the Job
 with a receipt: panes remaining 0. A bare orchestrator run self-opens
-a standalone Job, so killed runs are sweepable: `agentic-os sweep`
-marks dead-pid Jobs aborted; `agentic-os audit` flags live panes no
+a standalone Job, so killed runs are sweepable: `whitehartlane sweep`
+marks dead-pid Jobs aborted; `whitehartlane audit` flags live panes no
 Job admits (the only door is JEV). Records are never deleted; the
 tree stays bound, not copied. Enforced in shell, not in policy: a
 determined shell can still call shep spawn — audit makes bastards
