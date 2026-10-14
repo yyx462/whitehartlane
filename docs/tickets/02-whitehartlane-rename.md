@@ -269,6 +269,24 @@ Machine-local follow-ups AFTER this PR merges:
    (fallback makes it safe either way).
 -->
 
+<!-- PHASE 2 MACHINE TAIL — done 2026-10-14, after PR #111 merged (master e202939)
+
+- Reaped merged worktrees (whl-branding, eval-research): project = PINNED master
+  only, all gwt tallies zero.
+- CLI naming decision: `whl` is THE command (`~/.local/bin/whl` — already
+  pointed at master/bin/whl, verified end-to-end: `whl jobs` lists every
+  historical job from the legacy agentic-os disk via the ADR 0011 fallback).
+  The long `~/.local/bin/whitehartlane` symlink was NOT created — canonical
+  door stays bin/whitehartlane (what the window server spawns); dangling
+  ~/.local/bin/agentic-os removed. Follow-up idea: README could lead its
+  examples with `whl run` instead of `whitehartlane run`.
+- Window server bounced (autojobs off→on): PID 28558, wordmark whitehartlane,
+  log line "whitehartlane window server up" with os disk resolving to the
+  legacy ~/.local/share/agentic-os — all sessions intact.
+- master clean (no server.log churn at commit time).
+-->
+
+
 
 <!-- PHASE 1 CLOSURE — 2026-10-14: herdr tail SELF-HEALED, wizard obsolete
 
