@@ -71,8 +71,10 @@ test("pi expect breaks the tie when siblings share a cwd (j-78ca43 swap)", () =>
   assert.equal(resolvePi({ tool: "pi", cwd, since })?.id, "uuid-peru", "no marker — newest-wins, as before")
   assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/shared/france")?.id, "uuid-france")
   assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/shared/peru")?.id, "uuid-peru")
-  // a marker no candidate carries falls back to newest-wins
-  assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/elsewhere")?.id, "uuid-peru")
+  // a marker no candidate carries books NOTHING — newest-wins here is
+  // exactly the cross-booking the marker exists to prevent; the caller's
+  // late probe retries, then may book without a marker
+  assert.equal(resolvePi({ tool: "pi", cwd, since }, "/tmp/units/elsewhere"), null)
 })
 
 test("opencode resolves by directory and creation time via the CLI fallback", () => {
@@ -137,7 +139,9 @@ test("opencode expect picks the pane whose first user message carries the brief 
   assert.equal(resolveOpencode(pointer)?.id, "ses_pw", "no marker — newest-wins, as before")
   assert.equal(resolveOpencode(pointer, "/tmp/units/shared/git-leak")?.id, "ses_gl")
   assert.equal(resolveOpencode(pointer, "/tmp/units/shared/password")?.id, "ses_pw")
-  assert.equal(resolveOpencode(pointer, "/tmp/units/elsewhere")?.id, "ses_pw", "no candidate carries it — newest-wins")
+  // marker miss = the pane's own brief is not committed yet (j-eafc83
+  // race): book NOTHING rather than a sibling, newest or not
+  assert.equal(resolveOpencode(pointer, "/tmp/units/elsewhere"), null)
 
   process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
 })

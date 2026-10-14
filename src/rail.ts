@@ -540,10 +540,13 @@ export class Rail implements ShepPort {
     )
     // The session mints on the first message and may land in the tool's
     // store a beat later — probe again shortly so the booked pointer
-    // carries the id a Continue resumes
+    // carries the id a Continue resumes. Marker first (a marker miss at
+    // birth means the brief was not committed yet, not that the newest
+    // sibling is ours); plain newest-wins only as the last resort, the
+    // old behavior, so a session always books eventually.
     if (!sessionId) {
       setTimeout(() => {
-        const late = this.resolveLiveSession(kind, cwd, since, marker)
+        const late = this.resolveLiveSession(kind, cwd, since, marker) ?? this.resolveLiveSession(kind, cwd, since)
         if (late) this.ledger?.setSession(name, late)
       }, 5_000).unref()
     }
@@ -899,11 +902,15 @@ export class Rail implements ShepPort {
   }
 
   // A held member mints its session on its first prompt — book it
-  // shortly (ADR 5), so a continue resumes its conversation.
+  // shortly (ADR 5), so a continue resumes its conversation. Marker
+  // first, newest-wins as the last resort (a session always books).
   bookSessionLate(name: string, kind: string, cwd: string, since: string): void {
     setTimeout(() => {
       const briefPath = this.briefOf.get(this.scopedName(name)) ?? this.briefOf.get(name)
-      const sid = this.resolveLiveSession(kind, cwd, since, briefPath ? dirname(briefPath) : undefined)
+      const marker = briefPath ? dirname(briefPath) : undefined
+      const sid =
+        (marker ? this.resolveLiveSession(kind, cwd, since, marker) : null) ??
+        this.resolveLiveSession(kind, cwd, since)
       if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
     }, 5_000).unref()
   }

@@ -51,7 +51,10 @@ export function resolvePi(pointer: TranscriptPointer, expect?: string): { id: st
   // expect disambiguates a shared cwd (j-78ca43: two workers born seconds
   // apart in one worktree cross-booked each other's sessions under
   // newest-wins). The pane's own session is the one whose bytes contain
-  // its brief's marker; no match falls back to newest-wins.
+  // its brief's marker. With a marker there is NO fallback: a miss means
+  // the brief is not committed yet (or never will be), and newest-wins
+  // here is exactly the cross-booking the marker exists to prevent —
+  // the caller's late probe retries, then may book without a marker.
   if (expect) {
     for (const cand of candidates) {
       try {
@@ -60,6 +63,7 @@ export function resolvePi(pointer: TranscriptPointer, expect?: string): { id: st
         /* unreadable candidate — try the next */
       }
     }
+    return null
   }
   const best = candidates[0]
   return best ? { id: best.id, path: best.path } : null
@@ -122,7 +126,12 @@ export function resolveOpencode(pointer: TranscriptPointer, expect?: string): { 
               for (const id of ids) {
                 if (opencodeFirstUserHas(db, id, expect)) return { id }
               }
-              // no candidate carries the marker — newest-wins, as before
+              // no candidate carries the marker: the pane's own first
+              // user message is not committed yet (j-eafc83: siblings
+              // born seconds apart race message persistence) — booking
+              // newest-wins here IS the cross-booking. No id; the
+              // caller's late probe retries.
+              return null
             }
             return { id: ids[0]! }
           } catch {
