@@ -2885,7 +2885,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ----- theme switch (Tottenham dark / light) -----
-const THEME_KEY = "agentic-os-theme";
+const THEME_KEY = "whl-theme";
 const themeToggleEl = $("#theme-toggle");
 
 function currentTheme() {

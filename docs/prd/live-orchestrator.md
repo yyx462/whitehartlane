@@ -2,14 +2,14 @@
 
 Superseded by `docs/prd/skill-rsi.md`. Do not follow this picture. The Orchestrator does not write the Protocol.
 
-`agentic-os run` is the only entry. The Rail births panes, names Ends, stores results, and prompts. A workflow that must remember names one live Orchestrator. A workflow that does not still finishes when the Wave ends. That is today's fan-out. skill-rsi is the first workflow that uses the live pane.
+`whitehartlane run` is the only entry. The Rail births panes, names Ends, stores results, and prompts. A workflow that must remember names one live Orchestrator. A workflow that does not still finishes when the Wave ends. That is today's fan-out. skill-rsi is the first workflow that uses the live pane.
 
 The words Operator and Watcher are not nouns. The glossary already lists them under Rail, to avoid. Splitting them into products is how the system diverges.
 
 ## Picture
 
 ```text
-agentic-os run
+whitehartlane run
   Rail births the Orchestrator pane once. It never replaces it.
 
 Orchestrator (one live pane, holds the Host session)
@@ -68,5 +68,5 @@ Each stage is done only when its test is green. Do not start the next stage on a
 5. **No live Orchestrator still finishes.** A workflow that names no Orchestrator writes the report when the Wave ends. Fan-out's existing tests stay green.
    Test: the current `runOrchestrator` report tests, unchanged in meaning.
 
-6. **skill-rsi stands a Job up and stops.** The program calls `agentic-os run`. It does not spawn, retire, or edit the skill. The workflow names the live Orchestrator.
+6. **skill-rsi stands a Job up and stops.** The program calls `whitehartlane run`. It does not spawn, retire, or edit the skill. The workflow names the live Orchestrator.
    Test: `skill-rsi` `pass` test — spawn count is zero in the program. The Job dir holds the Protocol path the Rail will read.

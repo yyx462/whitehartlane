@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
 
-const door = join(import.meta.dirname, "..", "bin", "agentic-os")
+const door = join(import.meta.dirname, "..", "bin", "whitehartlane")
 
 function program(): string {
   const dir = mkdtempSync(join(tmpdir(), "levy-req-"))

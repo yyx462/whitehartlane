@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Dev JD Glossary — study companion for agentic-os</title>
+<title>Agent Dev JD Glossary — study companion for WhiteHartLane</title>
 <style>
   :root {
     --bg: #0d1117; --bg2: #161b22; --card: #161b22; --border: #2d333b;
@@ -127,7 +127,7 @@
 
 <header>
   <h1>Agent Dev JD Glossary</h1>
-  <p class="sub">The vocabulary 2026 Agent Dev job descriptions test — each concept grounded in <b>agentic-os</b>, where it already runs. Full prose in <code>docs/research/agent-jd-glossary.md</code>; feature decision in <code>docs/adr/0004</code>. Press <b>/</b> to search.</p>
+  <p class="sub">The vocabulary 2026 Agent Dev job descriptions test — each concept grounded in <b>WhiteHartLane</b>, where it already runs. Full prose in <code>docs/research/agent-jd-glossary.md</code>; feature decision in <code>docs/adr/0004</code>. Press <b>/</b> to search.</p>
 </header>
 
 <div class="toolbar">
@@ -195,10 +195,10 @@
 </section>
 
 <section id="map">
-  <h2><span class="n">3 —</span> Concept → agentic-os map</h2>
+  <h2><span class="n">3 —</span> Concept → WhiteHartLane map</h2>
   <p class="lede">Every row: "concept, definition, and here's my implementation of it."</p>
   <div class="tblwrap"><table>
-    <tr><th>JD concept</th><th>agentic-os embodiment</th><th>Where</th></tr>
+    <tr><th>JD concept</th><th>WhiteHartLane embodiment</th><th>Where</th></tr>
     <tr><td>Workflow</td><td><code>dag.mjs</code> parsed, never executed — "a program names steps; it does not call"; <code>tick()</code> is the only scheduler</td><td><code>src/dag.ts</code></td></tr>
     <tr><td>Agent</td><td>the Actor: reads <code>actor.md</code>, writes <code>protocol.json</code> waves, decides stop</td><td><code>src/protocol.ts</code> · <code>src/roles.ts</code></td></tr>
     <tr><td>Orchestrator-workers</td><td>Fan-out: <code>units</code> hook decomposes, wave panes execute, report settles</td><td><code>src/wave.ts</code> · <code>global/hooks/units.sh</code></td></tr>
@@ -286,7 +286,7 @@ const TERMS = [
   {t:"OpenAI Agents SDK", c:"eco", d:"Minimal agents + handoffs + guardrails (Swarm lineage). Vendor-native minimalism."},
   {t:"Claude Agent SDK", c:"eco", d:"Anthropic's managed agent loop — the 'managed agents' direction of travel."},
   {t:"smolagents", c:"eco", d:"HF's minimal CodeAct-first library — the 'code is the action' bet."},
-  {t:"Airflow", c:"eco", d:"The DAG scheduler everyone knows — and the contrast case: deterministic scheduler, human-authored DAGs. The gap this OS fills: agent-planned DAGs.", os:"agentic-os is 'Airflow on agents' where the DAG can be written by an agent (ADR 0004)"},
+  {t:"Airflow", c:"eco", d:"The DAG scheduler everyone knows — and the contrast case: deterministic scheduler, human-authored DAGs. The gap this OS fills: agent-planned DAGs.", os:"WhiteHartLane is 'Airflow on agents' where the DAG can be written by an agent (ADR 0004)"},
 ];
 
 const CL = {call:"one call", plan:"control flow", search:"search", learn:"learning", act:"actions", shape:"system shape", prod:"production", infra:"infra & ops", eco:"ecosystem"};

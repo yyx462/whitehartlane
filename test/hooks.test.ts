@@ -140,12 +140,20 @@ test("the manifest resolution chain prefers local, then env, then user, then bui
   const emptyHome = mkdtempSync(join(tmpdir(), "resolve-home-"))
   assert.equal(resolveManifestPath(cwd, { HOME: emptyHome })?.origin, "builtin")
 
-  // user-global beats builtin
+  // user-global beats builtin (ADR 0011: the global manifest lives in
+  // ~/.config/whitehartlane/)
   const userHome = mkdtempSync(join(tmpdir(), "resolve-userhome-"))
-  mkdirSync(join(userHome, ".config", "agentic-os"), { recursive: true })
-  const userToml = join(userHome, ".config", "agentic-os", "workflow.toml")
+  mkdirSync(join(userHome, ".config", "whitehartlane"), { recursive: true })
+  const userToml = join(userHome, ".config", "whitehartlane", "workflow.toml")
   writeFileSync(userToml, "# user override\n")
   assert.equal(resolveManifestPath(cwd, { HOME: userHome })?.path, userToml)
+
+  // a legacy ~/.config/agentic-os/workflow.toml is still honored (ADR 0011)
+  const legacyHome = mkdtempSync(join(tmpdir(), "resolve-legacy-"))
+  mkdirSync(join(legacyHome, ".config", "agentic-os"), { recursive: true })
+  const legacyToml = join(legacyHome, ".config", "agentic-os", "workflow.toml")
+  writeFileSync(legacyToml, "# legacy override\n")
+  assert.equal(resolveManifestPath(cwd, { HOME: legacyHome })?.path, legacyToml)
 
   // env beats user-global
   const envToml = join(mkdtempSync(join(tmpdir(), "resolve-env-")), "workflow.toml")

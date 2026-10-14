@@ -1,4 +1,5 @@
-// The OS disk (zen 2): ~/.local/share/agentic-os (AGENTIC_OS_HOME).
+// The OS disk (zen 2): ~/.local/share/whitehartlane (AGENTIC_OS_HOME;
+// a legacy ~/.local/share/agentic-os disk is honored — ADR 0011).
 // sessions/<sid>/ holds the session record (with its host binding — a
 // pointer, never a copy), events.jsonl (THE trace: append-only, one
 // line per fact), and jobs/<jid>/{job.json,run/}. job.json is a
@@ -162,7 +163,13 @@ export type OsEvent = {
 } & Record<string, unknown>
 
 export function homeRoot(): string {
-  return process.env.AGENTIC_OS_HOME ?? join(homedir(), ".local", "share", "agentic-os")
+  if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
+  // ADR 0011: the disk default is ~/.local/share/whitehartlane; a legacy
+  // agentic-os disk still wins while it is the only one that exists
+  // (read both, write the new spelling — the ADR 0009 pattern).
+  const next = join(homedir(), ".local", "share", "whitehartlane")
+  const old = join(homedir(), ".local", "share", "agentic-os")
+  return existsSync(old) && !existsSync(next) ? old : next
 }
 
 export function shortId(prefix: string): string {
