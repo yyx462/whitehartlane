@@ -10,7 +10,7 @@ project — live context instead of a stale doc.
 ## Picture
 
 ```text
-agentic-os run <folder>            kind = "coworker"
+whitehartlane run <folder>            kind = "coworker"
   Rail births the named members. A member may be born forked:
   host session seeded from seed -> {tool, session_id, since}.
   Bytes never copied; the original session never written.

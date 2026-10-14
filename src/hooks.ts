@@ -403,6 +403,10 @@ export function resolveManifestPath(
     return { path: resolve(env.AGENTIC_OS_WORKFLOW), origin: "env" }
   }
   if (env.AGENTIC_OS_GLOBAL === "0") return null
+  // ADR 0011: the global manifest lives in ~/.config/whitehartlane/;
+  // a legacy ~/.config/agentic-os/workflow.toml is still honored.
+  const nextGlobal = join(env.HOME ?? "", ".config", "whitehartlane", "workflow.toml")
+  if (existsSync(nextGlobal)) return { path: nextGlobal, origin: "user-global" }
   const userGlobal = join(env.HOME ?? "", ".config", "agentic-os", "workflow.toml")
   if (existsSync(userGlobal)) return { path: userGlobal, origin: "user-global" }
   const builtin = join(REPO_DIR, "global", "workflow.toml")

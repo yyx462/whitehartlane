@@ -1,7 +1,7 @@
 // ADR 0006 §3 — whl fork: deliver a booked wake into a reborn levy
 // pane. The pure half: the seed the fork points back to, and the first
 // prompt the reborn pane receives. The body (tab, pane, herdr) lives
-// in bin/agentic-os.
+// in bin/whitehartlane.
 import { existsSync } from "node:fs"
 import { spawn } from "node:child_process"
 import type { JobRecord, SeedPointer } from "./store.ts"

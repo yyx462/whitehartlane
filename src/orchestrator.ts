@@ -136,7 +136,7 @@ const SHEP_LABEL_MAX = 32
 // a live worker is the worse failure; the next window retries.
 export function worktreeChurnedSince(worktree: string, sinceMs: number): boolean {
   if (!existsSync(worktree)) return false
-  const ref = join(tmpdir(), `agentic-os-churn-${process.pid}`)
+  const ref = join(tmpdir(), `whitehartlane-churn-${process.pid}`)
   try {
     writeFileSync(ref, "")
     utimesSync(ref, new Date(sinceMs), new Date(sinceMs))

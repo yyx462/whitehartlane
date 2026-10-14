@@ -138,7 +138,7 @@ function defaultManifest(spur: Spur): string {
   const name = spur.name.replaceAll('"', "")
   const counts = "node -p \"(r=>JSON.stringify({units:r.length,passed:r.filter(x=>x.pass).length,failed:r.filter(x=>!x.pass).length}))(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')))\""
   return [
-    "# written by agentic-os: a spur-only program names steps; the OS supplies the hooks",
+    "# written by whitehartlane: a spur-only program names steps; the OS supplies the hooks",
     "[workflow]",
     `name = "${name}"`,
     'worker_kind = "opencode"',
@@ -170,7 +170,7 @@ function book(
   }
   const { session } = findOrOpenSession({
     cwd: dir,
-    host: { tool: "agentic-os", session_id: dir },
+    host: { tool: "whitehartlane", session_id: dir },
   })
   const running = listJobs(session.id).filter((job) => job.state === "running").length
   const another = admitAnotherJob(running)

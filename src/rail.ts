@@ -1045,7 +1045,7 @@ export class Rail implements ShepPort {
         // parked (ADR 5): the rail drained to its boundary and retired
         // its panes — book the pause; a typed continue brings the Job back.
         this.ledger?.pause("drained", this.ledger.job.panes.filter((p) => p.died === undefined).length)
-        this.log(`parked: paused — continue with: agentic-os continue ${this.ledger?.job.id ?? "<jid>"}`)
+        this.log(`parked: paused — continue with: whitehartlane continue ${this.ledger?.job.id ?? "<jid>"}`)
         return 0
       }
       this.log(`done: ${report.status}`)
