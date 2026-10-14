@@ -153,8 +153,8 @@ comment block — the Phase 1 fixes map 1:1 to these findings.
 - [x] Phase 0 audit table written into this ticket
 - [x] Folder renamed; `git worktree list` ×2 clean (spur-selbar-ui / wake-rung-debug reaped pre-rename — see audit delta); `gwt` audit green (REMOVE=0 DIRTY=0 DRIFT=0)
 - [x] `agentic-os-window` serving :8787 from the new path (PID 94940; `autojobs check` → all consistent)
-- [ ] herdr panes open into the new path — PENDING: quit herdr (incl. remote mosh client; the agent session dies with it), then run `~/projects/Agentic-Workspace/whl-herdr-fix.sh` in a plain Terminal, restart herdr
-- [ ] Zero live references to the old folder path under `~/.config` and `~/Library/LaunchAgents` — PENDING: only the 3 herdr session.json lines remain; cleared by the same wizard
+- [x] herdr panes open into the new path — SELF-HEALED 2026-10-14: herdr re-persisted live state; identity_cwd + all pane cwds now `…/whitehartlane` (session.json:7,28,56); `herdr status`: server running, restart_needed no
+- [x] Zero live references to the old folder path under `~/.config` and `~/Library/LaunchAgents` — full sweep clean 2026-10-14
 - [ ] Phase 2 PR merged with tests green; Phase 3 checklist either done or ticketed forward
 
 <!-- PHASE 0 AUDIT — verified 2026-10-13 by opencode session, run from ~/projects/Agentic-Workspace (outside the folder)
@@ -235,3 +235,24 @@ The wizard (embedded so it survives the scratch file):
     [ -n "$SWEEP" ] && { echo "STILL REFERENCED:"; echo "$SWEEP"; } || echo "sweep clean"
     echo "Done. Start herdr, open a pane, confirm cwd resolves under $NEW."
 -->
+
+<!-- PHASE 1 CLOSURE — 2026-10-14: herdr tail SELF-HEALED, wizard obsolete
+
+Overnight herdr rewrote session.json from its LIVE state, and the live state was already correct:
+pane-shell cwds are vnode-backed and followed the folder rename (macOS getcwd() returns the new
+path), so the rewrite-from-memory behavior — the enemy in yesterday's plan — wrote the NEW paths
+for us (session.json:7 identity_cwd, :28/:56 pane cwds; the ~/.config/nvim pane was never
+path-coupled to this repo). Full ~/.config + ~/Library/LaunchAgents sweep: zero live old-path
+references. `herdr status`: server running v0.9.1, restart_needed no.
+
+The quit-herdr + whl-herdr-fix.sh wizard is therefore OBSOLETE — script left at
+~/projects/Agentic-Workspace/whl-herdr-fix.sh, safe to delete (content preserved above).
+For the record, the clean shutdown path would have been `herdr server stop` (official API-socket
+stop), not pkill.
+
+Design note (ADR-worthy, inverts yesterday's lesson): herdr's memory-is-truth design only bites
+when its in-memory state is stale. Here the kernel's inode-stable cwds kept the memory fresh, so
+the dump self-corrected. The failure mode yesterday's plan guarded against (stale rewrite
+clobbering a fix) never fires when the live state is right — the fix and the memory converged.
+-->
+
