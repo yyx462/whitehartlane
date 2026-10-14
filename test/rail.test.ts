@@ -433,3 +433,89 @@ test("retireAll closes the fleet tab it opened (close what we opened)", () => {
   rail.retireAll()
   assert.ok(!calls.some((c) => c.args[0] === "tab" && c.args[1] === "close"), "close once")
 })
+
+test("the fleet tab opens beside its levy — the spawner pane names the workspace (j-5701b2)", () => {
+  const mk = (spawnerPane: string | undefined) => {
+    const calls: { tool: string; args: string[] }[] = []
+    const herdrRunner = (args: string[]): RunnerResult => {
+      calls.push({ tool: "herdr", args })
+      if (args[0] === "tab" && args[1] === "create") {
+        return { status: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }) }
+      }
+      if (args[0] === "pane" && args[1] === "split") return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wX:s1" } } }) }
+      return { status: 0, stdout: "" }
+    }
+    const ledger = fakeLedger()
+    if (spawnerPane) ledger.job.spawner = { tool: "opencode", session_id: "ses_levy", since: new Date().toISOString(), pane: spawnerPane }
+    const rail = new Rail({
+      argvDir: mkdtempSync(join(tmpdir(), "rail-fleet-")),
+      ledger,
+      log: () => {},
+      shepRunner: () => ({ status: 0, stdout: "" }) as RunnerResult,
+      herdrRunner,
+    })
+    return { rail, calls }
+  }
+
+  // levy pane booked → the tab is scoped to ITS workspace, not herdr's current one
+  const beside = mk("wK:pGT")
+  beside.rail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-beside/run")
+  const scoped = beside.calls.find((c) => c.args[0] === "tab" && c.args[1] === "create")!
+  assert.deepEqual(scoped.args.slice(-2), ["--workspace", "wK"], "tab created in the levy's workspace")
+
+  // no spawner pane (rail spawner / --unattended) → unscoped, the old behavior
+  const orphan = mk(undefined)
+  orphan.rail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-orphan/run")
+  const unscoped = orphan.calls.find((c) => c.args[0] === "tab" && c.args[1] === "create")!
+  assert.ok(!unscoped.args.includes("--workspace"), "no spawner pane — no workspace pin")
+
+  // a stale workspace id must not cost the layout: scoped fails → retried unscoped
+  const staleCalls: { tool: string; args: string[] }[] = []
+  let createCount = 0
+  const staleRail = new Rail({
+    argvDir: mkdtempSync(join(tmpdir(), "rail-fleet-")),
+    ledger: (() => { const l = fakeLedger(); l.job.spawner = { tool: "opencode", session_id: "ses_levy", since: new Date().toISOString(), pane: "wZ:p1" }; return l })(),
+    log: () => {},
+    shepRunner: () => ({ status: 0, stdout: "" }) as RunnerResult,
+    herdrRunner: (args: string[]): RunnerResult => {
+      staleCalls.push({ tool: "herdr", args })
+      if (args[0] === "tab" && args[1] === "create") {
+        createCount += 1
+        if (createCount === 1) return { status: 1, stdout: "" } // the scoped create bounces
+        return { status: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }) }
+      }
+      if (args[0] === "pane" && args[1] === "split") return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wX:s1" } } }) }
+      return { status: 0, stdout: "" }
+    },
+  })
+  staleRail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-stale/run")
+  const creates = staleCalls.filter((c) => c.args[0] === "tab" && c.args[1] === "create")
+  assert.equal(creates.length, 2, "scoped create failed once, retried")
+  assert.ok(creates[1] && !creates[1].args.includes("--workspace"), "the retry is unscoped")
+})
+
+test("a fatal engine closes the fleet tab on the way down (j-5701b2)", async () => {
+  const calls: { tool: string; args: string[] }[] = []
+  const herdrRunner = (args: string[]): RunnerResult => {
+    calls.push({ tool: "herdr", args })
+    if (args[0] === "tab" && args[1] === "create") {
+      return { status: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }) }
+    }
+    if (args[0] === "pane" && args[1] === "split") return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wX:s1" } } }) }
+    return { status: 0, stdout: "" }
+  }
+  const rail = new Rail({
+    argvDir: mkdtempSync(join(tmpdir(), "rail-fleet-")),
+    ledger: null,
+    log: () => {},
+    shepRunner: () => ({ status: 0, stdout: "" }) as RunnerResult,
+    herdrRunner,
+  })
+  rail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-fatal/run")
+  const rc = await rail.run(() => {
+    throw new Error("spawnSync /bin/sh ETIMEDOUT")
+  })
+  assert.equal(rc, 1, "the fatal still exits 1")
+  const close = calls.find((c) => c.args[0] === "tab" && c.args[1] === "close" && c.args[2] === "wX:t9")
+  assert.ok(close, "close what we opened — even on a fatal")
+})

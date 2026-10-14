@@ -363,8 +363,22 @@ export class Rail implements ShepPort {
     // dir is the run dir (<session>/jobs/<jid>/run) — label by the JOB, not
     // basename(dir) ("run" told the user nothing on leftover tabs)
     const label = `fan-out-${basename(dirname(dir))}`.slice(0, 40)
-    const r = this.herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus")
-    const root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
+    // The fleet belongs beside its levy: the spawner pane (booked at
+    // `whl run` from HERDR_PANE_ID) names the workspace — "wK:pGT" → wK.
+    // Unscoped create lands in herdr's CURRENT workspace, which drifts
+    // (j-5701b2: levy in wK, fleet tab opened in wJ where nobody looked).
+    const spawnerPane = this.ledger?.job.spawner?.pane
+    const ws = spawnerPane?.includes(":") ? spawnerPane.split(":")[0] : null
+    const create = (scoped: boolean) =>
+      this.herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus", ...(scoped && ws ? ["--workspace", ws] : []))
+    let r = create(true)
+    let root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
+    if (!root && ws) {
+      // a stale/unknown workspace id must not cost the layout — retry unscoped
+      this.log(`fleet tab in workspace ${ws} unavailable (rc=${r.status}) — retrying unscoped`)
+      r = create(false)
+      root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
+    }
     if (!root) {
       this.log(`fleet tab unavailable (rc=${r.status}) — falling back to same-tab layout`)
       this.layout = { ...this.layout, tab: "same" }
@@ -1083,6 +1097,15 @@ export class Rail implements ShepPort {
       this.log(`fatal: ${why}`)
       this.ledger?.emit("fatal", { why: String(why) })
       this.ledger?.abort(`fatal: ${why}`, this.mine.size)
+      // Close what we opened even on the way down (j-5701b2: the fatal
+      // left fan-out-<jid> chrome AND a live worker pane behind, in a
+      // workspace the levy never looked at). Best-effort on purpose —
+      // a fatal caused by herdr itself must not mask the original story.
+      try {
+        this.retireAll()
+      } catch {
+        this.log(`post-fatal cleanup incomplete — fleet tab ${this.fleetTab ?? "(none)"} may linger`)
+      }
       this.wake("fan-out", "blocked", `orchestrator died: ${this.taskDir}/orchestrator.log`)
       return 1
     }
