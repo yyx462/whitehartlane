@@ -18,3 +18,18 @@ Shapes: see yyxSkills `docs/agents/repo-layout.md`.
      smol-toml). Never at the project root: a stray root
      package-lock.json/node_modules breaks `gwt verify`
      ("root entry 'package-lock.json' is not a registered worktree"). -->
+
+<!-- commit identity: history carries exactly TWO authors — the human
+     (yyx <52618739+yyx462@users.noreply.github.com>) and the agent
+     (agent <agent@local>). Never invent a third; never inherit the
+     machine's global git identity.
+     - On the origin machine, .bear/config already defaults worktrees to
+       agent <agent@local> — agents just commit normally there.
+     - Anywhere else (fresh clone, CI, another machine): set it first —
+         git config user.name agent && git config user.email agent@local
+       — or pass it per commit:
+         git -c user.name=agent -c user.email=agent@local commit ...
+     - The human commits as yyx <52618739+yyx462@users.noreply.github.com>
+       (web merges do this automatically). A pre-commit hook in .bear
+       rejects any other identity on the origin machine; keep that hook
+       in place when the bare repo is rebuilt. -->
