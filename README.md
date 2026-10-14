@@ -1,8 +1,8 @@
-# agentic-os
+# WhiteHartLane — deterministic supervisor for coding agents
 
 **Run the loop first. Tune it afterwards — from the trace, not from guesswork.**
 
-agentic-os is a tool for running a task with coding agents — each in its own
+WhiteHartLane is a tool for running a task with coding agents — each in its own
 terminal, each allowed to see only its own folder — and keeping a full record
 of what they did. The program that runs them never thinks. The point is not
 that several agents are better than one. The point is that an untuned loop
@@ -13,6 +13,10 @@ from tomorrow.
 needs [herdr](https://herdr.dev), a coding-agent CLI (opencode or pi), and
 your own model. The examples are the author's runs, with paths rewritten
 to placeholders — not a tutorial yet.
+
+Formerly **agentic-os** — renamed October 2026. Same tool, same trace: the
+OS disk, sessions, and wakes carry over (a legacy `agentic-os` disk is still
+honored; see ADR 0011).
 
 ---
 
@@ -64,7 +68,7 @@ counts = "node hooks/counts.mjs"      # what the report counts
 ```
 
 ```console
-$ agentic-os run mismatch
+$ whitehartlane run mismatch
 ```
 
 Two terminals open. Alex reads the exports and writes a finding: *"the +12%
@@ -151,7 +155,7 @@ vibes. When they disagree, the disagreement is a file you can read.
 
 ## What this is, in one paragraph
 
-> agentic-os is a **job supervisor for coding agents**: a small program on
+> WhiteHartLane is a **job supervisor for coding agents**: a small program on
 > your machine that runs tasks made of several agents, each in its own
 > terminal with its own files, and reports back once. It is **not an agent**
 > — it never thinks; your agents (opencode, pi) do. It is **not a harness** —
@@ -179,24 +183,24 @@ firstmate, tmux, or a fleet board.
 
 ## What this is — the definition, in today's words
 
-> **agentic-os is a single-user, single-machine, terminal-native job
+> **WhiteHartLane is a single-user, single-machine, terminal-native job
 > supervisor and deterministic workflow engine for external coding-agent
-> CLIs.** It hosts no agents — pi and opencode are the harnesses; agentic-os
+> CLIs.** It hosts no agents — pi and opencode are the harnesses; WhiteHartLane
 > is the thing that books, feeds, watches, retires, and wakes them. Its loop
 > contains zero model calls. In Anthropic's taxonomy it sits wholly on the
 > *workflow* side (predefined, deterministic paths) — while every unit of
 > work it schedules is an *agent*.
 
-| Today's word | Is agentic-os that? | Where that word actually lands here |
+| Today's word | Is WhiteHartLane that? | Where that word actually lands here |
 |---|---|---|
 | **Agent** — an LLM running tools in a loop, directing its own process | **No** | The loop has no model in it. Agents are the *workers* — external CLIs in panes. "The Orchestrator … never a pane and never an agent." |
-| **Harness** — the runtime hosting one agent (Claude Code, OpenCode, pi) | **No** | It hosts zero agents. pi/opencode are the harnesses; agentic-os supervises harnesses. |
-| **Framework / library** — LangChain, LangGraph, CrewAI | **No** | You don't embed it and it embeds nothing. It's a standalone door (`agentic-os run`); programs are data folders outside the repo. |
+| **Harness** — the runtime hosting one agent (Claude Code, OpenCode, pi) | **No** | It hosts zero agents. pi/opencode are the harnesses; WhiteHartLane supervises harnesses. |
+| **Framework / library** — LangChain, LangGraph, CrewAI | **No** | You don't embed it and it embeds nothing. It's a standalone door (`whitehartlane run`); programs are data folders outside the repo. |
 | **Orchestrator-agent** — an LLM planning and dispatching | **No, on purpose** | A model may *propose*; "its proposal is an input to booking, never the booking." Runtime judgment is compressed into typed gates with measured prompts. |
 | **"Agent OS"** — a kernel everything runs through | **Nickname only** | Zen 1 rejected the kernel claim: your chat talks and edits freely before any rail. "OS" means process birth, accounting, isolation — a shell + supervisor. |
 | **Workflow engine** — Airflow, Temporal lineage | **Yes — the truest single label** | Typed steps (`end` / `check` / `wake`), retries with caps, backpressure, receipts, run identity by project pid + spur id + content hash. One inversion: the atoms are terminals a human can watch. |
 | **Process supervisor** — supervisord, systemd | **Yes, at pane granularity** | Booked birth, born/died ledger, orphan sweep, pause/abort/continue. herdr owns ttys and shep spawns — mechanisms, not owners. |
-| **Agent distro** — firstmate's coinage | **No** | firstmate is instructions that turn an agent into a supervisor. agentic-os is a program that supervises agents. Same ocean, opposite compass. |
+| **Agent distro** — firstmate's coinage | **No** | firstmate is instructions that turn an agent into a supervisor. WhiteHartLane is a program that supervises agents. Same ocean, opposite compass. |
 
 The one-line version: **agents at the edges, determinism in the middle.** A
 planner — human or agent — writes the hooks; the rail runs them cheaply,
@@ -246,7 +250,7 @@ collaboration.
 visible sessions, worktree isolation, quiet supervision. And the opposite
 mechanism: firstmate is an *agent distro* — the supervisor is an LLM you
 instruct, the captain is a human, state is conventions the mate reconciles.
-agentic-os is the inverse bet: the supervisor is a program, judgment lives in
+WhiteHartLane is the inverse bet: the supervisor is a program, judgment lives in
 typed gates, and the commissioner can itself be an agent (`whl`) — spurs
 nest, wakes go to the pointer.
 
@@ -258,7 +262,7 @@ Here every atom is a terminal a human can open, and the program folder is
 data an agent may author.
 
 **…ralph / gnhf / AutoGPT-style loops** — a model driving itself toward a
-stop condition. agentic-os is the negation: deterministic loop, model at the
+stop condition. WhiteHartLane is the negation: deterministic loop, model at the
 edges. (A ralph run is what *one booked pane* does.)
 
 **…OpenClaw** — an always-on personal assistant gateway: one immortal agent
@@ -266,12 +270,12 @@ on your messaging channels. Opposite topology — disposable, booked panes born
 from a door, dying with their job.
 
 **…Devin / Jules / Morph** — the same insight ("give agents a machine and
-supervise them") as a cloud product: opaque, managed, remote. agentic-os is
+supervise them") as a cloud product: opaque, managed, remote. WhiteHartLane is
 the other bet: one machine, one user, every worker visible in a pane you can
 read.
 
 **Honest fits in the other direction:** a single-shot task needs only your
-open chat (agentic-os's own `direct` workflow says exactly that — the open
+open chat (WhiteHartLane's own `direct` workflow says exactly that — the open
 chat is the supervisor, no retry rail). A product-grade workflow you'll run
 daily in production belongs to LangGraph Platform or Temporal. Adversarial,
 must-not-escape sandboxing needs VMs — our standing threat model is *mistakes,
@@ -282,14 +286,14 @@ not adversaries*: capability scoping, not microVMs.
 ## The 60-second tour
 
 ```console
-$ agentic-os run <folder>        # the process door: books the job, starts the engine
+$ whitehartlane run <folder>        # the process door: books the job, starts the engine
 $ whl run --from <tool>:<sid>    # the agent door: a levy commissions a spur, walks away
-$ agentic-os jobs                # every job, its state, its receipt
-$ agentic-os events              # the trace, raw
-$ agentic-os audit               # any live pane no job admits is a finding
-$ agentic-os sweep               # dead orchestrator? parked orphaned, ask-first
-$ agentic-os pause | abort | continue   # the park and rebirth verbs
-$ agentic-os fork <jid>          # a booked wake, delivered into a reborn pane
+$ whitehartlane jobs                # every job, its state, its receipt
+$ whitehartlane events              # the trace, raw
+$ whitehartlane audit               # any live pane no job admits is a finding
+$ whitehartlane sweep               # dead orchestrator? parked orphaned, ask-first
+$ whitehartlane pause | abort | continue   # the park and rebirth verbs
+$ whitehartlane fork <jid>          # a booked wake, delivered into a reborn pane
 ```
 
 - **Workflows:** `fan-out` (independent units), `coworker` (members that

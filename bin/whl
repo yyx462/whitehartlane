@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# whl — the white hart lane door to agentic-os (see ADR 0006).
-# A thin, honest shim: every verb passes through to the agentic-os door
+# whl — the white hart lane door to whitehartlane (see ADR 0006).
+# A thin, honest shim: every verb passes through to the whitehartlane door
 # unchanged. The name exists so every project folder can say
 #   whl run <folder> --from <tool>:<session-id>
 # and mean it — the levy (the calling main agent) commissions a spur,
@@ -17,10 +17,10 @@ door_ok() {
   [[ -f "$1" && -d "$(dirname "$1")/../node_modules/smol-toml" ]]
 }
 door=""
-if door_ok "$root/bin/agentic-os"; then door="$root/bin/agentic-os"; fi
+if door_ok "$root/bin/whitehartlane"; then door="$root/bin/whitehartlane"; fi
 if [[ -z "$door" ]]; then
-  echo "whl: no agentic-os door with dependencies found in $root" >&2
-  echo "whl: run npm ci in the agentic-os checkout first" >&2
+  echo "whl: no whitehartlane door with dependencies found in $root" >&2
+  echo "whl: run npm ci in the whitehartlane checkout first" >&2
   exit 1
 fi
 exec node --experimental-strip-types "$door" "$@"

@@ -9,9 +9,9 @@ rewrite rails.
 
 ## Start
 
-`agentic-os run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(agentic-os, folder path)`. `whl` is the same door for any agent: a thin shim that calls `run` and walks away (ADR 0006).
+`whitehartlane run <folder>` is the process door. It reads `workflow.toml`, books a fan-out Job, starts the engine, and prints `job`, `log`, and `trace`. No grill. No question. A second running Job on that session is refused, and no pane is born. The session key is `(whitehartlane, folder path)`. `whl` is the same door for any agent: a thin shim that calls `run` and walks away (ADR 0006).
 
-The chat extension is passive now (the stand_up tool, /standup, and --route routing are retired): it binds the conversation's OS session, delivers wakes into the chat, announces orphans, lists Jobs, and caps error-turn retries. Standing up belongs to the doors — `agentic-os run` and `whl` — never to the chat itself.
+The chat extension is passive now (the stand_up tool, /standup, and --route routing are retired): it binds the conversation's OS session, delivers wakes into the chat, announces orphans, lists Jobs, and caps error-turn retries. Standing up belongs to the doors — `whitehartlane run` and `whl` — never to the chat itself.
 
 `run` reads the folder you pass and writes the Job under the session disk. The source is code and config. A run does not write it. Hook commands in the Job dir are absolute paths back to that source. The chat's materialize still copies a hooks folder.
 
@@ -106,9 +106,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   that a cap exists and is honored. Every retry surface in the system
   is capped the same way: spawn attempts (3), grace reprompt (once),
   provider refusals (3).
-- **The session disk and bindings.** `~/.local/share/agentic-os`
+- **The session disk and bindings.** `~/.local/share/whitehartlane`
   (AGENTIC_OS_HOME). A First Mate chat is keyed on the host session.
-  A CLI start is keyed on `(agentic-os, folder path)`. A host session
+  A CLI start is keyed on `(whitehartlane, folder path)`. A host session
   is the agent's own conversation; the Session stores a pointer, never
   the bytes. Project bindings are confirmed once per session. A live
   worktree is never double-bound.

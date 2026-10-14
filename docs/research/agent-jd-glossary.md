@@ -1,4 +1,4 @@
-# Agent Dev JD Glossary — and where agentic-os already lives it
+# Agent Dev JD Glossary — and where WhiteHartLane already lives it
 
 Three uses for one document:
 
@@ -116,7 +116,7 @@ Named workflow patterns (same source):
 | **OpenAI Agents SDK** (Swarm lineage) | Minimal agents + **handoffs** + guardrails | The vendor-native minimalism play |
 | **Claude Agent SDK** | Anthropic's managed agent loop | The "managed agents" direction |
 | **smolagents** | HF's minimal **CodeAct**-first library | The "code is the action" bet |
-| **Airflow** | The DAG scheduler everyone's heard of | This repo's contrast case: deterministic scheduler, **human-authored** DAGs — the gap agentic-os fills |
+| **Airflow** | The DAG scheduler everyone's heard of | This repo's contrast case: deterministic scheduler, **human-authored** DAGs — the gap WhiteHartLane fills |
 
 ### 2.5 Infra & ops words — the quiet bullets at the bottom of JDs
 
@@ -191,7 +191,7 @@ Which rung of the ladder you picked: allow-list → syscall filter → container
 
 Anthropic's rule: workflows for predictability on well-defined tasks; agents for flexibility at scale; complexity only when measured to help. The unresolved tension in the field: agents are flexible but expensive and hard to trust; workflows are trustworthy but handwritten.
 
-**agentic-os's answer — the line to memorize:**
+**WhiteHartLane's answer — the line to memorize:**
 
 > Use the agent once, at compile time: it plans the task into a reviewable program (`dag.mjs` + `workflow.toml`). Use the workflow many times, at run time: the Rail executes it deterministically, cheaply, observably.
 
@@ -199,11 +199,11 @@ Airflow DAGs are handwritten by humans. Here, **the DAG is the agent's output ar
 
 ---
 
-## 4. Concept → agentic-os map
+## 4. Concept → WhiteHartLane map
 
 Every row is an interview answer: "concept, definition, and here's my implementation of it."
 
-| JD concept | agentic-os embodiment | Where |
+| JD concept | WhiteHartLane embodiment | Where |
 |---|---|---|
 | Workflow (predefined code paths) | `dag.mjs` parsed, never executed — "a program names steps; it does not call"; `tick()` is the only scheduler | `src/dag.ts` |
 | Agent (LLM-directed) | the **Actor**: reads `actor.md`, writes `protocol.json` waves, decides stop | `src/protocol.ts`, `src/roles.ts` |
@@ -228,7 +228,7 @@ Every row is an interview answer: "concept, definition, and here's my implementa
 
 ## 5. The differentiator: agent-planned workflows (ADR 0004 in one paragraph)
 
-A new meta-program — working name **Composer** — whose own DAG is `actor → gate → run-door`: the Actor takes a task ("cold" text or a project-context task with `roots.txt`), studies the example programs and rails contract, and **writes a new `agentic-program/<name>/` folder** (dag.mjs, workflow.toml, hooks/, actor.md); a gate holds for human approval (RAILS line 7: "a planner may write hooks; it may never rewrite rails"); the run door then books it like any program. Milestones: M1 CLI (`agentic-os run` on the Composer program — zero new surface code), M2 `POST /api/plan` in the web UI, M3 a chat entry in the window. Full text: `docs/adr/0004-main-agent-planner.md`.
+A new meta-program — working name **Composer** — whose own DAG is `actor → gate → run-door`: the Actor takes a task ("cold" text or a project-context task with `roots.txt`), studies the example programs and rails contract, and **writes a new `agentic-program/<name>/` folder** (dag.mjs, workflow.toml, hooks/, actor.md); a gate holds for human approval (RAILS line 7: "a planner may write hooks; it may never rewrite rails"); the run door then books it like any program. Milestones: M1 CLI (`whitehartlane run` on the Composer program — zero new surface code), M2 `POST /api/plan` in the web UI, M3 a chat entry in the window. Full text: `docs/adr/0004-main-agent-planner.md`.
 
 Base-branch note (was open when this lane started): coworker and ui-window have merged (PRs #10, #9) — the Composer lane can spawn straight off master.
 

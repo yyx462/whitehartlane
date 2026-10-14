@@ -11,7 +11,7 @@ process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-run-"))
 const { prepareRun } = await import("../src/run.ts")
 const { listJobs } = await import("../src/store.ts")
 
-const bin = join(import.meta.dirname, "..", "bin", "agentic-os")
+const bin = join(import.meta.dirname, "..", "bin", "whitehartlane")
 const stub = join(process.env.AGENTIC_OS_HOME, "engine-stub.mjs")
 writeFileSync(stub, "import { writeFileSync } from 'node:fs'\nimport { join } from 'node:path'\nwriteFileSync(join(process.argv[2], 'engine-started'), 'ok\\n')\n")
 
@@ -104,7 +104,7 @@ test("run books a lab Job from one spur file and stages it", async () => {
   assert.equal(booked.job.task, "tiny-lab")
   assert.equal(existsSync(join(booked.job.dir, "spur.mjs")), true)
   const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
-  assert.match(staged, /written by agentic-os/)
+  assert.match(staged, /written by whitehartlane/)
   assert.match(staged, /name = "tiny-lab"/)
   assert.equal(existsSync(join(dir, "workflow.toml")), false)
   const { abortJob } = await import("../src/store.ts")
