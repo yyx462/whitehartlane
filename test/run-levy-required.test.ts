@@ -20,11 +20,6 @@ function program(): string {
       'name = "t"',
       'worker_kind = "opencode"',
       "",
-      "[hooks]",
-      'units = "true"',
-      'grade = "echo pass"',
-      'counts = "printf \'{}\'"',
-      "",
     ].join("\n"),
   )
   return dir
