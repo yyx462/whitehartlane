@@ -1945,6 +1945,10 @@ function receiptBodyHtml() {
     outcome += `
       <dt>spawned by</dt><dd>${esc(job.spawner.tool)}:${esc(job.spawner.session_id)} <span class="muted small">· since ${esc(fmtTs(job.spawner.since))} (the fork checkpoint)</span></dd>`;
   }
+  if (job.door?.rev) {
+    const behind = job.doorNow && job.doorNow !== job.door.rev;
+    outcome += `<dt>door</dt><dd>started on <code>${esc(job.door.rev)}</code>${behind ? ` · door is now <code>${esc(job.doorNow)}</code>` : " · door matches"} <span class="muted small">— Refresh restarts the orchestrator; it never happens on its own</span></dd>`;
+  }
   if (job.continues) {
     outcome += `<dt>continued</dt><dd><span class="cont-badge" title="times this run was continued back">x${esc(job.continues)}</span></dd>`;
   }
@@ -2638,8 +2642,9 @@ function opsButtonsHtml(st, sid, jid) {
   const dLabel = busy === "delete" ? "Deleting…" : "Delete";
   const pBtn = `<button class="btn ops" data-ops="${slot[0]}" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(pTitle)}">${pLabel}</button>`;
   const aBtn = `<button class="btn ops danger" data-ops="abort" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.abort)}">${busy ? "Aborting…" : "Abort"}</button>`;
+  const rBtn = `<button class="btn ops" data-ops="refresh" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="restart the orchestrator on the current door; sessions resume from where they parked">${busy === "refresh" ? "Refreshing…" : "Refresh"}</button>`;
   const dBtn = `<button class="btn ops danger" data-ops="delete" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.delete)}">${dLabel}</button>`;
-  const buttons = running ? pBtn + aBtn
+  const buttons = running ? pBtn + aBtn + rBtn
     : retired ? dBtn
     : pBtn + dBtn;
   return `<span class="ops-pair">${buttons}</span>`;
@@ -2711,6 +2716,11 @@ const OPS_CONFIRMS = {
     body: `Continue run ${jid}? It resumes from booked sessions.`,
     confirmLabel: "Continue",
   }),
+  refresh: (jid) => ({
+    title: "Refresh run",
+    body: `Refresh run ${jid}? It drains to a boundary, then restarts the orchestrator on the current door. Sessions resume. Nothing does this unless you press it.`,
+    confirmLabel: "Refresh",
+  }),
   delete: (jid) => ({
     title: "Delete spur",
     body: `Delete spur ${jid}? Its files leave the disk — the job record, the staged program, the report, the booked sessions.`,
@@ -2736,6 +2746,7 @@ async function runOps(verb, sid, jid) {
     const head = verb === "pause" ? "pause signalled — it drains to a boundary, then the row flips to paused"
       : verb === "abort" ? "abort signalled"
       : verb === "continue" ? "continue signalled"
+      : verb === "refresh" ? "refresh: drained, then restarted on the current door"
       : "deleted — the spur's files are gone";
     const lines = res.lines || (verb === "delete" ? res.removed : []);
     showToast([head, ...lines].filter(Boolean).join("\n"), "ok");

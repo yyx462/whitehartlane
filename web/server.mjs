@@ -7,7 +7,7 @@
 // returns its first stdout lines), the rail verbs (pause|abort|continue
 // via the door), and POST delete (removes a job dir outright).
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -302,8 +302,22 @@ function flattenJob(job) {
       ? { ...job.pause, actor: verbActorOf(job, "job.paused") } // v5: {reason,panesRemaining,at,actor}
       : null,
     continues: job.continues ?? null, // v5: soft continued ×N counter (no cap)
+    door: job.door || null, // {rev, started} — the code the process was born with
+    doorNow: doorNowRev(),
     hasReport: job.dir ? fs.existsSync(reportPath) : false,
   };
+}
+
+function doorNowRev() {
+  try {
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), ".."),
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
+  } catch {
+    return null;
+  }
 }
 
 function listAllJobs() {
@@ -1796,7 +1810,7 @@ async function handleApi(req, res, url) {
   // sessions survive), continue rebirths a paused|aborted|orphaned run.
   // The CLI is the truth: server-side we only check the Job exists, the
   // CLI's own refusal line rides back verbatim as an honest 4xx.
-  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/(pause|abort|continue)$/);
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/(pause|abort|continue|refresh)$/);
   if (req.method === "POST" && m) {
     const [, sid, jid, verb] = m;
     if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
@@ -1818,7 +1832,7 @@ async function handleApi(req, res, url) {
       }
       extraArgs.push("--wait", body.wait.trim());
     }
-    const r = await spawnVerb(verb, jid, extraArgs);
+    const r = await spawnVerb(verb, jid, extraArgs, verb === "refresh" ? 11 * 60_000 : 120_000);
     if (r.reason === "error") {
       return sendJson(res, 500, {
         ok: false,

@@ -10,7 +10,7 @@
 // shep/herdr invocation funnels through the runner seam (src/runners.ts)
 // injected below. If panes become remote machines tomorrow, the swap
 // happens there, in one file; engines and bins do not change.
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
@@ -76,6 +76,19 @@ export type RailLedger = {
   // Issue #123 — renew the job lease on the engine beat (one write per
   // beat; a lease record must never break the run it observes)
   renew: () => void
+}
+
+function doorRev(): string {
+  try {
+    const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: join(import.meta.dirname, ".."),
+      encoding: "utf8",
+      timeout: 5_000,
+    })
+    return r.stdout?.trim() || "unknown"
+  } catch {
+    return "unknown"
+  }
 }
 
 export type RailOpts = {
@@ -218,6 +231,7 @@ export class Rail implements ShepPort {
         this.log(`job ${job.id} self-opened on session ${job.sid} (no AGENTIC_OS_SID/JID passed)`)
       }
       job.pid = process.pid
+      job.door = { rev: doorRev(), started: new Date().toISOString() }
       saveJob(job)
       // Issue #123 — the orchestrator claims the lease at open: a
       // written, expiring record of WHO leads this job. Renewed on the
