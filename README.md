@@ -16,13 +16,46 @@ to placeholders — not a tutorial yet.
 
 ## Install
 
+macOS, Node ≥ 22.
+
 ```console
 $ npm install -g whitehartlane
 ```
 
-Zero-install trial: `npx whitehartlane` prints the verb list. Requires
-Node ≥ 22 on macOS; actual runs additionally need
-[herdr](https://herdr.dev) and a coding-agent CLI (opencode or pi).
+Zero-install trial — prints the verb list:
+
+```console
+$ npx whitehartlane
+```
+
+A run additionally needs [herdr](https://herdr.dev), a coding-agent CLI
+(opencode or pi), and your own model — see Status above.
+
+**Update.** There is no `whl upgrade`: updates belong to the installer
+that placed the binary.
+
+```console
+$ npm install -g whitehartlane@latest
+```
+
+**Uninstall.** Remove the wake plugin first, then the package:
+
+```console
+$ whl plugin uninstall
+$ npm uninstall -g whitehartlane
+```
+
+**From source** (development — raw TypeScript, no build step):
+
+```console
+$ git clone https://github.com/yyx462/whitehartlane
+$ cd whitehartlane && npm ci && npm test
+$ ln -s "$PWD/bin/whl" ~/.local/bin/whl
+```
+
+The checkout's `bin/whl` shim resolves the checkout it lives in, so the
+symlink can point anywhere on PATH — and it refuses to run until you
+`npm ci`, saying so honestly.
 
 Formerly **agentic-os** — renamed October 2026. Same tool, same trace: the
 OS disk, sessions, and wakes carry over (a legacy `agentic-os` disk is still
