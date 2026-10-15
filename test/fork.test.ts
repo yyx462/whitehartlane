@@ -47,11 +47,27 @@ test("fork admission: the seed must resolve — known tool, readable session", (
   )
 })
 
-test("fork courier: the reaper command closes tab + pane once the agent idles", () => {
-  const cmd = forkReaperCmd("fork-j-abc", "wF:p2", "wF:t4")
-  assert.match(cmd, /agent wait fork-j-abc --until idle/)
+test("fork courier: the reaper waits for a working turn BEFORE idle, and writes its receipt (issue #124)", () => {
+  const receipt = join(mkdtempSync(join(tmpdir(), "aos-receipt-")), "courier.json")
+  const cmd = forkReaperCmd("fork-j-abc", "wF:p2", "wF:t4", receipt)
+  // working-wait comes first, bounded
+  const workingAt = cmd.indexOf("--until working --timeout")
+  const idleAt = cmd.indexOf("--until idle --timeout")
+  assert.ok(workingAt !== -1, "reaper waits for working")
+  assert.ok(idleAt !== -1, "reaper waits for idle")
+  assert.ok(workingAt < idleAt, "working is awaited before idle — idle is ambiguous before first work")
   assert.match(cmd, /tab close wF:t4/)
   assert.match(cmd, /pane close wF:p2/)
+  // the receipt records both outcomes
+  assert.match(cmd, /echo '\{"worked":true\}' >/)
+  assert.match(cmd, /echo '\{"worked":false\}' >/)
+  assert.ok(cmd.includes(receipt), "receipt lands at the given path")
+})
+
+test("fork courier: without a receipt path the reaper keeps the ordering but writes nothing", () => {
+  const cmd = forkReaperCmd("fork-j-abc", "wF:p2", "wF:t4")
+  assert.ok(cmd.indexOf("--until working") < cmd.indexOf("--until idle"))
+  assert.doesNotMatch(cmd, /worked/)
 })
 
 test("fork courier: delivery arms the self-close reaper", () => {

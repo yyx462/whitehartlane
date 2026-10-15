@@ -939,14 +939,22 @@ export function listJobs(sid?: string): JobRecord[] {
 // queued, never consumed), so a brownout's leftovers surface on the
 // next `whl audit` instead of rotting in job.json. The fork rung's
 // why is the diagnosis (it is the rung that was supposed to work).
+//
+// Issue #124 — a fork-booked wake was invisible here: consumed was
+// booked on courier birth, so a wake whose prompt never reached a live
+// turn (the reaper race: "idle" before first work) audited as
+// delivered. The courier now writes a receipt — worked:true/false —
+// and the audit surfaces a never-worked courier for a re-drain.
 export type WakeAuditRow = { jid: string; task: string; at: string; delivery: string; why: string }
 
 export function wakeAudit(jobs: JobRecord[]): WakeAuditRow[] {
   return jobs
-    .filter(
-      (j): j is JobRecord & { woke: NonNullable<JobRecord["woke"]> } =>
-        Boolean(j.woke) && !j.consumed && (j.woke.delivery === "doorbell" || j.woke.delivery === "queued"),
-    )
+    .filter((j): j is JobRecord & { woke: NonNullable<JobRecord["woke"]> } => {
+      if (!j.woke) return false
+      if (!j.consumed && (j.woke.delivery === "doorbell" || j.woke.delivery === "queued")) return true
+      if (j.woke.delivery === "fork" && courierNeverWorked(j)) return true
+      return false
+    })
     .sort((a, b) => b.woke.at.localeCompare(a.woke.at))
     .map((j) => ({
       jid: j.id,
@@ -954,10 +962,25 @@ export function wakeAudit(jobs: JobRecord[]): WakeAuditRow[] {
       at: j.woke.at,
       delivery: j.woke.delivery,
       why:
-        j.woke.rungs?.filter((r) => r.rung === "fork").at(-1)?.why ??
-        j.woke.rungs?.filter((r) => !r.ok).at(-1)?.why ??
-        j.woke.message,
+        j.woke.delivery === "fork"
+          ? "courier pane closed without ever working — the wake prompt never reached a live turn; drain it again"
+          : j.woke.rungs?.filter((r) => r.rung === "fork").at(-1)?.why ??
+            j.woke.rungs?.filter((r) => !r.ok).at(-1)?.why ??
+            j.woke.message,
     }))
+}
+
+// The courier receipt (issue #124): forkLevy's reaper writes
+// courier.json {worked: boolean} beside the job. Absent (pre-fix runs
+// or no fork) means unknown, not failed — the audit never guesses.
+function courierNeverWorked(job: JobRecord): boolean {
+  if (!job.dir) return false
+  try {
+    const receipt = JSON.parse(readFileSync(join(job.dir, "courier.json"), "utf8")) as { worked?: unknown }
+    return receipt?.worked === false
+  } catch {
+    return false
+  }
 }
 
 export function findJobByDir(dir: string): JobRecord | null {

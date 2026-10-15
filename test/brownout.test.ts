@@ -172,3 +172,36 @@ test("an exhausted fork falls to the doorbell with its diagnosis — and the aud
     delete process.env.AGENTIC_OS_FORK_BACKOFF_MS
   }
 })
+
+test("a fork-delivered wake whose courier never worked is audited for a re-drain (issue #124)", () => {
+  const silent = levied("s-brown5", "courier never worked")
+  wakeFirstMate(silent, "aborted", null, {
+    promptPane: () => false,
+    forkLevy: () => ({ ok: true, label: "fork-silent", pane: "wF:p9" }),
+    notify: () => {},
+  })
+  assert.equal(silent.woke?.delivery, "fork")
+  assert.ok(silent.consumed, "consumed was booked on courier birth — the false ack j-64e035 lived with")
+  // the reaper's honest receipt: the pane closed before any live turn
+  writeFileSync(join(silent.dir, "courier.json"), '{"worked":false}')
+
+  const delivered = levied("s-brown6", "courier worked")
+  wakeFirstMate(delivered, "done", null, {
+    promptPane: () => false,
+    forkLevy: () => ({ ok: true, label: "fork-live", pane: "wF:p8" }),
+    notify: () => {},
+  })
+  writeFileSync(join(delivered.dir, "courier.json"), '{"worked":true}')
+
+  const noReceipt = levied("s-brown7", "pre-fix run, no receipt")
+  wakeFirstMate(noReceipt, "done", null, {
+    promptPane: () => false,
+    forkLevy: () => ({ ok: true, label: "fork-old", pane: "wF:p7" }),
+    notify: () => {},
+  })
+
+  const listed = wakeAudit([silent, delivered, noReceipt])
+  assert.deepEqual(listed.map((r) => r.jid), [silent.id], "only the never-worked courier is listed")
+  assert.equal(listed[0]!.delivery, "fork")
+  assert.match(listed[0]!.why, /never reached a live turn/)
+})
