@@ -136,17 +136,17 @@ export function spurFileOf(input: string): SpurFile | null {
 
 function defaultManifest(spur: Spur): string {
   const name = spur.name.replaceAll('"', "")
-  const counts = "node -p \"(r=>JSON.stringify({units:r.length,passed:r.filter(x=>x.pass).length,failed:r.filter(x=>!x.pass).length}))(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')))\""
   return [
     "# written by whitehartlane: a spur-only program names steps; the OS supplies the hooks",
     "[workflow]",
     `name = "${name}"`,
     'worker_kind = "opencode"',
     "",
-    "[hooks]",
-    'units = "true"',
-    'grade = "true"',
-    `counts = "${counts}"`,
+    "# hooks are optional (issue #120): omitted counts uses the built-in",
+    '# counter — add counts = "default" to say it out loud. Never write',
+    '# counts = "true": it prints nothing and aborts the run at report',
+    "# time (j-64e035). A units hook is only needed by fan-out programs",
+    "# without steps.",
     "",
   ].join("\n")
 }

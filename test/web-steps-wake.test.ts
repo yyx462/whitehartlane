@@ -21,11 +21,6 @@ const PARENT_TOML = `[workflow]
 name = "stepsdemo"
 spur_id = "stepsdemo"
 
-[hooks]
-units = "true"
-grade = "true"
-counts = "true"
-
 [[step]]
 id = "a"
 finished_by = "end"

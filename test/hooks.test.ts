@@ -133,31 +133,78 @@ test("counts summarizes the finished table", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
   const counts = runCounts(dir, manifest, [
-    { unit: "france", result: "found" },
-    { unit: "japan", result: "missing" },
+    { unit: "france", result: "found", pass: true },
+    { unit: "japan", result: "missing", pass: false },
   ])
   assert.deepEqual(counts, { lookups: 2, failed: 1 })
-})
-
-test("hooksFromDir binds the manifest into the Hooks shape", async () => {
-  const dir = await copyExample()
-    const { hooks, manifest } = hooksFromDir(dir)
-  assert.equal(hooks.workerKind, "opencode")
-  assert.equal(manifest.workflow.name, "three-lookups")
-  assert.equal(hooks.units().length, 3)
-  assert.equal(hooks.grade({ id: "france", brief: "" }).pass, false)
-  assert.deepEqual(hooks.counts([{ unit: "france", result: "found" }]), {
-    lookups: 1,
-    failed: 0,
-  })
 })
 
 test("the finished table lands in table.json for the counts hook", async () => {
   const dir = await copyExample()
   const manifest = loadManifest(dir)
-  runCounts(dir, manifest, [{ unit: "france", result: "found" }])
+  runCounts(dir, manifest, [{ unit: "france", result: "found", pass: true }])
   const table = JSON.parse(readFileSync(join(dir, "table.json"), "utf8"))
-  assert.deepEqual(table, [{ unit: "france", result: "found" }])
+  assert.deepEqual(table, [{ unit: "france", result: "found", pass: true }])
+})
+
+test("hooks are optional — omitted counts uses the built-in counter, omitted grade always passes (issue #120)", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  // strip the whole [hooks] table
+  writeFileSync(toml, readFileSync(toml, "utf8").replace(/\[hooks\][\s\S]*?(?=\n\[|$)/, ""))
+  const manifest = loadManifest(dir)
+  assert.equal(manifest.hooks.counts, undefined)
+  assert.equal(manifest.hooks.grade, undefined)
+  assert.equal(manifest.hooks.units, undefined)
+  assert.deepEqual(
+    runCounts(dir, manifest, [
+      { unit: "france", result: "found", pass: true },
+      { unit: "japan", result: "missing", pass: false },
+    ]),
+    { units: 2, passed: 1, failed: 1 },
+  )
+  assert.deepEqual(runGrade(dir, manifest, { id: "france", brief: "" }), { pass: true, row: "ok" })
+  assert.throws(() => runUnits(dir, manifest), /no units hook and no steps/)
+})
+
+test("hooksFromDir binds the manifest into the Hooks shape", async () => {
+  const dir = await copyExample()
+  const { hooks, manifest } = hooksFromDir(dir)
+  assert.equal(hooks.workerKind, "opencode")
+  assert.equal(manifest.workflow.name, "three-lookups")
+  assert.equal(hooks.units().length, 3)
+  assert.equal(hooks.grade({ id: "france", brief: "" }).pass, false)
+  assert.deepEqual(hooks.counts([{ unit: "france", result: "found", pass: true }]), {
+    lookups: 1,
+    failed: 0,
+  })
+})
+
+test("counts = \"default\" is the explicit spelling of the built-in counter (issue #120)", async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace(/counts = "[^"]*"/, 'counts = "default"'))
+  const manifest = loadManifest(dir)
+  assert.equal(manifest.hooks.counts, "default")
+  assert.deepEqual(runCounts(dir, manifest, [{ unit: "france", result: "found", pass: true }]), {
+    units: 1,
+    passed: 1,
+    failed: 0,
+  })
+})
+
+test('counts = "true" is refused at load — it prints nothing and aborts the run at report time (j-64e035, issue #120)', async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace(/counts = "[^"]*"/, 'counts = "true"'))
+  assert.throws(() => loadManifest(dir), /counts = "true" prints nothing.*issue #120, j-64e035/s)
+})
+
+test('units = "default" is refused — units has no built-in (issue #120)', async () => {
+  const dir = await copyExample()
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace(/units = "[^"]*"/, 'units = "default"'))
+  assert.throws(() => loadManifest(dir), /units has no built-in default/)
 })
 
 test("the manifest resolution chain prefers local, then env, then user, then builtin", async () => {

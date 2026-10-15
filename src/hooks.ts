@@ -15,8 +15,29 @@ export type Grade = { pass: boolean; row: string }
 export type Hooks = {
   units: () => Unit[]
   grade: (unit: Unit) => Grade
-  counts: (rows: { unit: string; result: string }[]) => Record<string, number>
+  counts: (rows: CountRow[]) => Record<string, number>
   workerKind: "opencode" | "pi"
+}
+
+// A scorecard row (issue #120): `pass` rides along so a counts hook —
+// and the built-in counter — can count outcomes, not just rows. The
+// scaffold's old shell counter filtered x.pass on a table.json that
+// never carried it (always 0 passed); the typed counter ends that.
+export type CountRow = { unit: string; result: string; pass: boolean }
+
+// The built-in counter (issue #120): what a program gets when it omits
+// hooks.counts or says counts = "default". The old trap: hooks were
+// required fields, the scaffold taught units/grade = "true" as the
+// no-op spelling, and authors copied the token to counts — where the
+// contract (print a JSON object of numbers) makes /bin/true a
+// deterministic report-time fatal (j-64e035: 79 minutes of work, then
+// aborted by an empty stdout).
+export function builtinCounts(rows: CountRow[]): Record<string, number> {
+  return {
+    units: rows.length,
+    passed: rows.filter((r) => r.pass).length,
+    failed: rows.filter((r) => !r.pass).length,
+  }
 }
 
 export type Layout = {
@@ -72,8 +93,8 @@ function stepsFromRaw(raw: unknown): Step[] | undefined {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean }
-  hooks: { units: string; grade: string; counts: string }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
+  hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
   steps?: Step[]
@@ -236,9 +257,14 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   return {
     workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(canary !== undefined ? { canary } : {}) },
     hooks: {
-      units: str(hooks.units, "hooks.units"),
-      grade: str(hooks.grade, "hooks.grade"),
-      counts: str(hooks.counts, "hooks.counts"),
+      units: optHook(hooks.units, "hooks.units", {
+        refuseDefault: 'hooks.units has no built-in default — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
+      }),
+      grade: optHook(hooks.grade, "hooks.grade"),
+      counts: optHook(hooks.counts, "hooks.counts", {
+        refuseNoop:
+          'hooks.counts = "true" prints nothing — a counts hook must print a JSON object of numbers; omit the line for the built-in counter, or use counts = "default" (issue #120, j-64e035)',
+      }),
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     gates: Object.keys(gates).length > 0 ? gates : undefined,
@@ -255,6 +281,24 @@ function str(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new HookError(`workflow.toml is missing ${field}`)
   }
+  return value
+}
+
+// Hooks are optional (issue #120): omitted means the built-in default —
+// counts counts the scorecard, grade always passes, units must come
+// from steps or a real hook. The explicit token "default" spells the
+// same thing for authors who want it visible. The shell no-ops are
+// refused for counts — /bin/true prints nothing, and a counts hook
+// that prints nothing is a deterministic report-time fatal that costs
+// the whole run (j-64e035: 79 minutes of work, then aborted).
+const HOOK_NOOP_CMDS = new Set(["true", "false", ":"])
+function optHook(value: unknown, field: string, opts: { refuseNoop?: string; refuseDefault?: string } = {}): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "string" || value.length === 0) {
+    throw new HookError(`workflow.toml is missing ${field}`)
+  }
+  if (value === "default" && opts.refuseDefault) throw new HookError(opts.refuseDefault)
+  if (HOOK_NOOP_CMDS.has(value) && opts.refuseNoop) throw new HookError(opts.refuseNoop)
   return value
 }
 
@@ -310,6 +354,11 @@ export function unitsFromSteps(taskDir: string, steps: Step[]): Unit[] {
 }
 
 export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
+  if (manifest.hooks.units === undefined) {
+    throw new HookError(
+      "no units hook and no steps — a fan-out program must declare [[step]] entries or provide a units hook that prints one {\"id\",\"brief\"} JSON object per line",
+    )
+  }
   const { stdout, status, stderr, ms } = runHook(manifest.hooks.units, taskDir)
   note({ hook: "units", status, ms })
   if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "units hook exited 75")
@@ -340,6 +389,12 @@ export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
 }
 
 export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade {
+  // Omitted or "default" = always-pass (issue #120): the same outcome
+  // the old grade = "true" spelling produced, now sanctioned and
+  // self-documenting instead of a lucky accident of empty output.
+  if (manifest.hooks.grade === undefined || manifest.hooks.grade === "default") {
+    return { pass: true, row: "ok" }
+  }
   const { stdout, status, ms } = runHook(`${manifest.hooks.grade} ${quote(unit.id)}`, taskDir)
   note({ hook: "grade", target: unit.id, status, ms })
   const row = stdout.split("\n")[0]?.trim()
@@ -349,13 +404,23 @@ export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade
 export function runCounts(
   taskDir: string,
   manifest: Manifest,
-  table: { unit: string; result: string }[],
+  table: CountRow[],
 ): Record<string, number> {
   const tablePath = join(taskDir, "table.json")
+  // pass rides the scorecard (issue #120) so a counting hook — and the
+  // built-in counter — can count outcomes, not just rows
   writeFileSync(tablePath, JSON.stringify(table))
-  const { stdout, status, ms } = runHook(`${manifest.hooks.counts} ${quote(tablePath)}`, taskDir)
+  // Omitted or "default" = the built-in counter (issue #120): the j-64e035
+  // class of bug (a silent counts command) cannot exist when the rail
+  // itself does the counting
+  const cmd = manifest.hooks.counts
+  if (cmd === undefined || cmd === "default") {
+    note({ hook: "counts", status: 0, ms: 0 })
+    return builtinCounts(table)
+  }
+  const { stdout, status, ms } = runHook(`${cmd} ${quote(tablePath)}`, taskDir)
   note({ hook: "counts", status, ms })
-  if (status !== 0) throw new HookError(`counts hook exited ${status}: ${manifest.hooks.counts}`)
+  if (status !== 0) throw new HookError(`counts hook exited ${status}: ${cmd}`)
   let parsed: unknown
   try {
     parsed = JSON.parse(stdout)
