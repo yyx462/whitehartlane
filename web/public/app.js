@@ -1887,6 +1887,11 @@ async function loadJob(seq) {
     sp.job = res.job;
     sp.jobError = null;
     sp.jobLoadedKey = runKey;
+    fetchJSON(`/api/job/${enc(sid)}/${enc(jid)}/models`).then((models) => {
+      if (!current(sp, seq) || sp.route.run !== runKey) return;
+      sp.models = models;
+      if (sp.route.rtab === "receipt") renderRightBody();
+    }).catch(() => {});
   } catch (err) {
     if (!current(sp, seq) || sp.route.run !== runKey) return;
     sp.jobError = err.message;
@@ -1944,6 +1949,21 @@ function receiptBodyHtml() {
   if (job.spawner) {
     outcome += `
       <dt>spawned by</dt><dd>${esc(job.spawner.tool)}:${esc(job.spawner.session_id)} <span class="muted small">· since ${esc(fmtTs(job.spawner.since))} (the fork checkpoint)</span></dd>`;
+  }
+  if (sp.models) {
+    const [sid, jid] = splitKey(sp.route.run);
+    const md = sp.models;
+    const pending = md.pending
+      ? `<div class="warn">pending: ${esc(md.pending.member)} ${esc(md.pending.from || "?")} → ${esc(md.pending.to)} (${esc(md.pending.why || "")})</div>`
+      : "";
+    outcome += `<dt>models</dt><dd>
+      <span class="muted">${esc(md.mode || "ask")}</span>
+      ${(md.order || []).map((m) => `<code>${esc(m)}</code>`).join(" → ") || "<span class='muted'>no ladder</span>"}
+      ${pending}
+      <button class="btn ops" data-models="mode" data-sid="${esc(sid)}" data-jid="${esc(jid)}">${md.mode === "auto" ? "switch to ask" : "switch to auto"}</button>
+      ${md.pending ? `<button class="btn ops" data-models="switch" data-member="${esc(md.pending.member)}" data-sid="${esc(sid)}" data-jid="${esc(jid)}">switch ${esc(md.pending.member)}</button>
+      <button class="btn ops" data-models="stay" data-member="${esc(md.pending.member)}" data-sid="${esc(sid)}" data-jid="${esc(jid)}">stay</button>` : ""}
+    </dd>`;
   }
   if (job.continues) {
     outcome += `<dt>continued</dt><dd><span class="cont-badge" title="times this run was continued back">x${esc(job.continues)}</span></dd>`;
@@ -2788,6 +2808,25 @@ function bodyClick(e) {
     const dagId = trig.dataset.dag;
     const btns = $$(`[data-trig][data-pid="${CSS.escape(pid)}"][data-dag="${CSS.escape(dagId)}"]`);
     triggerDag(pid, dagId, btns);
+    return;
+  }
+  const modelsBtn = e.target.closest("[data-models]");
+  if (modelsBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = modelsBtn.dataset.sid;
+    const jid = modelsBtn.dataset.jid;
+    const kind = modelsBtn.dataset.models;
+    const body = kind === "mode"
+      ? { mode: (state.split.models?.mode === "auto" ? "ask" : "auto") }
+      : { decide: { [modelsBtn.dataset.member]: kind } };
+    fetchJSON(`/api/job/${enc(sid)}/${enc(jid)}/models`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((models) => { state.split.models = models; renderRightBody(); })
+      .catch((err) => toast(err.message));
     return;
   }
   const ops = e.target.closest("[data-ops]");

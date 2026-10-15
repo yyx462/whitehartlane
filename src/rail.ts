@@ -10,12 +10,13 @@
 // shep/herdr invocation funnels through the runner seam (src/runners.ts)
 // injected below. If panes become remote machines tomorrow, the swap
 // happens there, in one file; engines and bins do not change.
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
+import { parseModelRef } from "./model-ladder.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
 import { decidePermission, escalateOnRepeat, PERMISSION_CAP, tunedPermissionJudge, type PermissionJudge } from "./permission.ts"
@@ -78,6 +79,19 @@ export type RailLedger = {
   renew: () => void
 }
 
+function defaultModelSwitch(
+  sessionId: string,
+  model: { providerID: string; id: string },
+  cwd: string,
+): RunnerResult {
+  const r = spawnSync(
+    "opencode",
+    ["api", "POST", `/api/session/${sessionId}/model`, "-d", JSON.stringify({ model })],
+    { cwd, encoding: "utf8", timeout: 20_000 },
+  )
+  return { status: r.status ?? 1, stdout: `${r.stdout ?? ""}${r.stderr ?? ""}` }
+}
+
 export type RailOpts = {
   // argv[2] of the bin, or null for a standalone self-opened run
   argvDir?: string | null
@@ -93,6 +107,13 @@ export type RailOpts = {
   herdrRunner?: (args: string[]) => RunnerResult
   ledger?: RailLedger | null
   judge?: PermissionJudge
+  // In-agent model switch (opencode session.switchModel). Tests inject
+  // this; production dials `opencode api`.
+  modelSwitch?: (
+    sessionId: string,
+    model: { providerID: string; id: string },
+    cwd: string,
+  ) => RunnerResult
   // the home tree dialogs normalize against (default: the real one);
   // tests inject a tmp home so the stripped-form resolver hits real
   // directories without touching ~
@@ -179,6 +200,7 @@ export class Rail implements ShepPort {
   private readonly denyCount = new Map<string, number>()
   private readonly pathAsks = new Map<string, number>()
   private readonly pendingNote = new Map<string, string>()
+  private readonly modelSwitch?: RailOpts["modelSwitch"]
 
   constructor(opts: RailOpts = {}) {
     this.log = opts.log ?? ((msg) => console.log(`${new Date().toISOString()} ${msg}`))
@@ -186,6 +208,7 @@ export class Rail implements ShepPort {
     this.herdrRun = opts.herdrRunner ?? defaultRunner("herdr")
     this.programRoots = opts.programRoots ?? []
     this.judge = opts.judge
+    this.modelSwitch = opts.modelSwitch
     this.home = opts.home ?? homedir()
     this.ledger = opts.ledger !== undefined ? opts.ledger : this.openLedger(opts.argvDir ?? null, opts.workflow ?? "fan-out")
     this.taskDir = opts.argvDir ?? this.ledger?.job.dir ?? resolve(process.cwd())
@@ -925,6 +948,28 @@ export class Rail implements ShepPort {
   // Raw `agent get` stdout — engines grep agent_status from it.
   agentStatus(name: string): string {
     return this.agentState(name)
+  }
+
+  // The pane's own words — budget faults ("token limit") live here,
+  // not in agent_status (which stays idle).
+  readScreen(name: string): string {
+    return this.herdr("agent", "read", this.scopedFn(name)).stdout
+  }
+
+  // Switch the model INSIDE the live session (opencode session.switchModel).
+  // The conversation stays; only the provider of the next turn changes.
+  // Injectable so tests never dial a real server.
+  switchSessionModel(sessionId: string, model: string, cwd: string): { ok: boolean; why?: string } {
+    const ref = parseModelRef(model)
+    if (!ref) return { ok: false, why: `not a provider/model: ${model}` }
+    const run = this.modelSwitch ?? defaultModelSwitch
+    try {
+      const r = run(sessionId, ref, cwd)
+      if (r.status !== 0) return { ok: false, why: `session.switchModel rc=${r.status}: ${r.stdout.slice(0, 120)}` }
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, why: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   renamePane(pane: string, name: string): void {

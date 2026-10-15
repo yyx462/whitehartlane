@@ -351,3 +351,14 @@ test("retry = 0 disarms the respawn — first death is final (policy, not reflex
   assert.match(exchange!.result, /alpha pane died(?! after)/, "no retries were spent")
   assert.equal(report!.table.find((row) => row.unit === "retries"), undefined)
 })
+
+test("a token-limit screen with an empty ladder ends the member honestly — not as a stall", async () => {
+  const dir = await coworkerDir("coworker-budget-")
+  const herdr = fakeHerdr()
+  herdr.readFor = () => "Error: token limit reached"
+  const rail = fakeRail(dir, herdr, null)
+  const report = await runCoworker(rail, { graceMs: 60_000, stallMs: 60_000, beatMs: 10 })
+  assert.equal(report?.status, "failed")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /token budget and the model ladder is empty/)
+})

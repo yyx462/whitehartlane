@@ -9,6 +9,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
 import { runCounts } from "./hooks.ts"
+import { budgetAction, clearPending, readModelsFile, writePending } from "./model-ladder.ts"
 import { emptyBoard } from "./lanes.ts"
 import { drainDeadline } from "./orchestrator.ts"
 import { waitChange, type Rail } from "./rail.ts"
@@ -333,6 +334,77 @@ export async function runCoworker(
     // resets, or permission churn eats the whole nudge budget while
     // the member is talking to the rail, not idling (j-a532f9)
     if (ballOn.name && answered.has(ballOn.name)) ballOn.since = Date.now()
+    // token-budget ladder: a provider refusal ("token limit") is not a
+    // stall and not an answer. auto switches inside the live session;
+    // ask parks a decision in models.json and stands the nudge clock
+    // down until the human (or the UI) writes decide.<member>.
+    const policy = readModelsFile(taskDir, toml)
+    for (const m of members) {
+      if (dead.includes(m.name)) continue
+      const current = m.model
+      let screen = ""
+      try {
+        screen = rail.readScreen(m.name)
+      } catch {
+        screen = ""
+      }
+      const action = budgetAction({
+        screen,
+        member: m.name,
+        current,
+        policy,
+      })
+      if (action.kind === "none") continue
+      if (action.kind === "waiting") {
+        if (ballOn.name === m.name) ballOn.since = Date.now()
+        continue
+      }
+      if (action.kind === "stay") {
+        clearPending(taskDir, policy, m.name)
+        log(`model ask ${m.name}: stayed on ${current ?? "(default)"}`)
+        continue
+      }
+      if (action.kind === "exhausted") {
+        dead.push(m.name)
+        deadWhy.set(m.name, `${m.name} hit a token budget and the model ladder is empty`)
+        ledger?.emit("wake", { why: `member ${m.name} budget exhausted` })
+        log(`member ${m.name} budget exhausted — no next model in the ladder`)
+        break
+      }
+      if (action.kind === "ask") {
+        writePending(taskDir, policy, {
+          member: m.name,
+          from: current ?? "",
+          to: action.to,
+          at: new Date().toISOString(),
+          why: "token budget",
+        })
+        if (ballOn.name === m.name) ballOn.since = Date.now()
+        log(`ASK model switch ${m.name}: ${current ?? "?"} -> ${action.to} — write decide.${m.name}="switch"|"stay" in models.json (or use the window)`)
+        ledger?.emit("model.ask", { member: m.name, to: action.to })
+        continue
+      }
+      const sid = bookedSessionOf(m.name)
+      if (!sid) {
+        log(`model switch ${m.name} -> ${action.to} skipped — no booked session yet`)
+        continue
+      }
+      const switched = rail.switchSessionModel(sid, action.to, sandboxOf.get(m.name) ?? taskDir)
+      if (!switched.ok) {
+        log(`model switch ${m.name} -> ${action.to} failed: ${switched.why}`)
+        continue
+      }
+      m.model = action.to
+      if (policy.pending?.member === m.name) clearPending(taskDir, policy, m.name)
+      rail.promptAgent(
+        m.name,
+        `[rail] Your provider refused another turn (token budget). The model for this session is now ${action.to}. Continue exactly where you left off.`,
+      )
+      if (ballOn.name === m.name) ballOn.since = Date.now()
+      nudged.delete(m.name)
+      log(`model switch ${m.name}: ${current ?? "?"} -> ${action.to} (inside the live session)`)
+      ledger?.emit("model.switch", { member: m.name, to: action.to })
+    }
     // the stall guard: whoever holds the ball and idles too long gets
     // nudged — twice, then the exchange ends. Working resets the clock.
     if (ballOn.name && !dead.includes(ballOn.name)) {

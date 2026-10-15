@@ -142,7 +142,12 @@ export function fakeRail(
   taskDir: string,
   herdr: FakeHerdr,
   ledger: RailLedger | null,
-  railOpts: { judge?: PermissionJudge; home?: string; log?: (msg: string) => void } = {},
+  railOpts: {
+    judge?: PermissionJudge
+    home?: string
+    log?: (msg: string) => void
+    modelSwitch?: Rail["switchSessionModel"] extends never ? never : ConstructorParameters<typeof Rail>[0]["modelSwitch"]
+  } = {},
 ): Rail {
   return new Rail({
     argvDir: taskDir,
@@ -150,6 +155,7 @@ export function fakeRail(
     judge: railOpts.judge,
     home: railOpts.home,
     log: railOpts.log ?? (() => {}),
+    modelSwitch: railOpts.modelSwitch,
     shepRunner: () => ({ status: 0, stdout: "" }),
     herdrRunner: herdr.runner,
   })

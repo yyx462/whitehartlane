@@ -1791,6 +1791,35 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { job: flattenJob(job), report });
   }
 
+  // In-flight model ladder. The engine re-reads models.json every beat,
+  // so a write here changes a LIVE run: mode auto|ask, order, and a
+  // decide line for a pending ask.
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/models$/);
+  if (m) {
+    const [, sid, jid] = m;
+    if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
+    const job = readJson(jobFileOf(sid, jid));
+    if (!job?.dir) return sendError(res, 404, "no such job");
+    const file = path.join(job.dir, "models.json");
+    if (req.method === "GET") {
+      return sendJson(res, 200, fs.existsSync(file) ? readJson(file) : { mode: "ask", order: [] });
+    }
+    if (req.method === "POST") {
+      let body;
+      try {
+        body = JSON.parse(await readBody(req));
+      } catch {
+        return sendError(res, 400, "invalid JSON");
+      }
+      const cur = fs.existsSync(file) ? readJson(file) || {} : { mode: "ask", order: [] };
+      if (body.mode === "auto" || body.mode === "ask") cur.mode = body.mode;
+      if (Array.isArray(body.order)) cur.order = body.order.filter((x) => typeof x === "string");
+      if (body.decide && typeof body.decide === "object") cur.decide = { ...(cur.decide || {}), ...body.decide };
+      fs.writeFileSync(file, JSON.stringify(cur, null, 2) + "\n");
+      return sendJson(res, 200, cur);
+    }
+  }
+
   // v5 (ADR 5): the rail verbs — pause parks a live run (SIGTERM, drains
   // to a unit boundary, books paused), abort kills it (SIGKILL, booked
   // sessions survive), continue rebirths a paused|aborted|orphaned run.

@@ -285,6 +285,51 @@ async function main() {
     return
   }
 
+  if (cmd === "models") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`models: no such Job '${jid ?? ""}'`)
+      process.exitCode = 2
+      return
+    }
+    const path = join(job.dir, "models.json")
+    const cur = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : { mode: "ask", order: [] }
+    const sub = process.argv[4]
+    if (!sub) {
+      console.log(JSON.stringify(cur, null, 2))
+      return
+    }
+    if (sub === "mode") {
+      const mode = process.argv[5]
+      if (mode !== "auto" && mode !== "ask") {
+        console.error("models mode: auto or ask")
+        process.exitCode = 2
+        return
+      }
+      cur.mode = mode
+    } else if (sub === "order") {
+      cur.order = (process.argv[5] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    } else if (sub === "decide") {
+      const member = process.argv[5]
+      const verdict = process.argv[6]
+      if (!member || (verdict !== "switch" && verdict !== "stay")) {
+        console.error("models decide <member> switch|stay")
+        process.exitCode = 2
+        return
+      }
+      cur.decide = { ...(cur.decide ?? {}), [member]: verdict }
+    } else {
+      console.error("models: print | mode auto|ask | order a/b,c/d | decide <member> switch|stay")
+      process.exitCode = 2
+      return
+    }
+    writeFileSync(path, JSON.stringify(cur, null, 2) + "\n")
+    console.log(`${job.id} models updated — the live engine re-reads models.json each beat`)
+    console.log(JSON.stringify(cur, null, 2))
+    return
+  }
+
   if (cmd === "sweep") {
     const live = shepStatus()
     let swept = 0
