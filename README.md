@@ -9,10 +9,20 @@ that several agents are better than one. The point is that an untuned loop
 can run today, and the trace it leaves is what you build the cheap version
 from tomorrow.
 
-**Status.** Early, and MIT licensed. macOS. Not published to npm. A run
+**Status.** Early, and MIT licensed. macOS. A run
 needs [herdr](https://herdr.dev), a coding-agent CLI (opencode or pi), and
 your own model. The examples are the author's runs, with paths rewritten
 to placeholders — not a tutorial yet.
+
+## Install
+
+```console
+$ npm install -g whitehartlane
+```
+
+Zero-install trial: `npx whitehartlane` prints the verb list. Requires
+Node ≥ 22 on macOS; actual runs additionally need
+[herdr](https://herdr.dev) and a coding-agent CLI (opencode or pi).
 
 Formerly **agentic-os** — renamed October 2026. Same tool, same trace: the
 OS disk, sessions, and wakes carry over (a legacy `agentic-os` disk is still
