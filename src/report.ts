@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import type { CountRow } from "./hooks.ts"
 
 export type Report = {
   kind: "report"
@@ -15,13 +16,13 @@ export function writeReport(
   taskDir: string,
   where: string,
   rows: ReportRow[],
-  counts: (rows: { unit: string; result: string }[]) => Record<string, number>,
+  counts: (rows: CountRow[]) => Record<string, number>,
   status?: Report["status"],
 ): Report {
   const body: Report = {
     kind: "report",
     status: status ?? (rows.some((row) => !row.pass) ? "failed" : "done"),
-    counts: counts(rows.map(({ unit, result }) => ({ unit, result }))),
+    counts: counts(rows.map(({ unit, result, pass }) => ({ unit, result, pass }))),
     table: rows.map(({ unit, result }) => ({ unit, result })),
     where,
   }

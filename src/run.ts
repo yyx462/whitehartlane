@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, wri
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { loadSpurFile, type Spur } from "./spur.ts"
-import { HookError, loadManifest } from "./hooks.ts"
+import { HookError, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
 import { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf, type SpurIdentity } from "./project.ts"
@@ -136,17 +136,17 @@ export function spurFileOf(input: string): SpurFile | null {
 
 function defaultManifest(spur: Spur): string {
   const name = spur.name.replaceAll('"', "")
-  const counts = "node -p \"(r=>JSON.stringify({units:r.length,passed:r.filter(x=>x.pass).length,failed:r.filter(x=>!x.pass).length}))(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')))\""
   return [
     "# written by whitehartlane: a spur-only program names steps; the OS supplies the hooks",
     "[workflow]",
     `name = "${name}"`,
     'worker_kind = "opencode"',
     "",
-    "[hooks]",
-    'units = "true"',
-    'grade = "true"',
-    `counts = "${counts}"`,
+    "# hooks are optional (issue #120): omitted counts uses the built-in",
+    '# counter — add counts = "default" to say it out loud. Never write',
+    '# counts = "true": it prints nothing and aborts the run at report',
+    "# time (j-64e035). A units hook is only needed by fan-out programs",
+    "# without steps.",
     "",
   ].join("\n")
 }
@@ -216,6 +216,27 @@ function book(
   const version = contentHashOf(dir)
   const dup = registerSpur(proj.pid, spurId.spurId, version, dir)
   if (dup) warnings.push(dup)
+  // Issue #121 — the staging probe: grammar-check the hooks this run
+  // will actually call, on sample inputs, BEFORE the job is booked or
+  // any pane is born. j-64e035: a counts hook that cannot speak the
+  // protocol was invisible until report time — 79 minutes of clean
+  // work, then a fatal. The probe refuses at the door, where the fix
+  // costs one line of toml instead of a rerun. A scaffolded program
+  // (no toml) has nothing to probe — the defaults are rail-owned.
+  if (existsSync(join(dir, "workflow.toml"))) {
+    try {
+      const manifest = loadManifest(dir)
+      const refusals = probeHooks(dir, manifest, kind)
+      if (refusals.length > 0) {
+        appendEvent(session.id, { actor: "cli", kind: "reject", why: `hook probe: ${refusals[0]}`, workflow: kind })
+        return { ok: false, why: `hook probe refused: ${refusals.join("; ")}`, code: 1 }
+      }
+    } catch (err) {
+      // prepareRun/prepareLabRun already surface manifest faults; one
+      // that slips through to here is a door refusal, never a pass
+      return { ok: false, why: err instanceof Error ? err.message : String(err), code: 1 }
+    }
+  }
   const spur = {
     project: proj.pid,
     project_name: proj.name,

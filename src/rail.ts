@@ -34,6 +34,8 @@ import {
   openSession,
   pauseJob as pauseJobRec,
   readEvents,
+  renewLeaseOf,
+  acquireLease,
   saveJob,
   setPaneSession,
   splitModel,
@@ -71,6 +73,9 @@ export type RailLedger = {
   abort: (reason: string, panesRemaining: number) => void
   pause: (reason: string, panesRemaining: number) => void
   setSession: (label: string, sessionId: string) => void
+  // Issue #123 — renew the job lease on the engine beat (one write per
+  // beat; a lease record must never break the run it observes)
+  renew: () => void
 }
 
 export type RailOpts = {
@@ -214,9 +219,18 @@ export class Rail implements ShepPort {
       }
       job.pid = process.pid
       saveJob(job)
+      // Issue #123 — the orchestrator claims the lease at open: a
+      // written, expiring record of WHO leads this job. Renewed on the
+      // engine beat; expiry is sticky (no message needed on death).
+      try {
+        acquireLease(job, `orchestrator pid=${process.pid}`)
+      } catch {
+        this.log("lease: acquire failed — the run continues unleased")
+      }
       const booked = job
       return {
         job: booked,
+        renew: () => renewLeaseOf(booked),
         emit: (kind, payload) => {
           try {
             appendEvent(booked.sid, { actor: "orchestrator", jid: booked.id, kind, ...payload })
@@ -710,6 +724,12 @@ export class Rail implements ShepPort {
     const r = this.shep("verify")
     const line = r.stdout.split("\n").find((l) => l.includes("pane-reap:"))
     return (line ?? "pane-reap: ? remaining").trim()
+  }
+
+  // Issue #123 — the engines' renew hook (ShepPort.renew): one write
+  // per cycle keeps the job's leadership claim fresh.
+  renew(): void {
+    this.ledger?.renew()
   }
 
   wake(label: string, kind: string, detail: string): void {

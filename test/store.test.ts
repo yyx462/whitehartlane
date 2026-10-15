@@ -26,6 +26,10 @@ const {
   projectJob,
   readEvents,
   shortId,
+  acquireLease,
+  renewLeaseOf,
+  leaseExpired,
+  LEASE_TTL_MS,
 } = await import("../src/store.ts")
 
 test("the home root honors AGENTIC_OS_HOME", () => {
@@ -250,4 +254,45 @@ test("addWorkerRoot refuses degenerate roots — no /, no empty key (j-b6067c)",
     permission: { external_directory: Record<string, string> }
   }
   assert.deepEqual(Object.keys(after.permission.external_directory).sort(), Object.keys(before.permission.external_directory).sort())
+})
+
+// Issue #123 — the lease: leadership over a Job is a written, expiring
+// claim in job.json. Acquire bumps the epoch; renew refreshes the TTL;
+// expiry is a property of the record (sticky), not an event.
+test("a lease is acquired with a bumping epoch, renewed on beat, and expiry is judged with grace", () => {
+  const sess = openSession({ cwd: tmpdir() })
+  const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "lease", dir: "/tmp/lease-1" })
+  assert.equal(job.lease, undefined, "jobs start unleased (back-compat)")
+
+  acquireLease(job, "orchestrator pid=1")
+  assert.equal(job.lease?.epoch, 1)
+  assert.match(job.lease?.holder ?? "", /pid=1/)
+  assert.equal(leaseExpired(job), false, "a fresh lease is not expired")
+
+  // a second claim (takeover shape) bumps the epoch — fencing's anchor
+  acquireLease(job, "orchestrator pid=2")
+  assert.equal(job.lease?.epoch, 2)
+
+  // renewal pushes the horizon out
+  const before = job.lease?.expires
+  renewLeaseOf(job)
+  assert.ok(Date.parse(job.lease!.expires) >= Date.parse(before!), "renew extends the horizon")
+
+  // expiry past TTL+grace: forge an ancient horizon
+  job.lease!.expires = new Date(Date.now() - 10 * LEASE_TTL_MS).toISOString()
+  renewLeaseOf(job)
+  assert.equal(leaseExpired(job), false, "renew heals an expired lease — the holder is back")
+  job.lease!.expires = new Date(Date.now() - 10 * LEASE_TTL_MS).toISOString()
+  assert.equal(leaseExpired(job), true, "no renewal, horizon far past — expired is sticky")
+})
+
+test("orphanJob single-acts: a second sweep on a flipped record no-ops", () => {
+  const sess = openSession({ cwd: tmpdir() })
+  const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "sweep", dir: "/tmp/lease-2", pid: 424242 })
+  const first = orphanJob(job, "orchestrator pid 424242 gone", 0)
+  assert.equal(first.state, "orphaned")
+  // the overlapping sweep hits the same record: nothing to do
+  const second = orphanJob(job, "orchestrator pid 424242 gone", 0)
+  assert.equal(second.state, "orphaned")
+  assert.equal(job.orphan?.reason, "orchestrator pid 424242 gone", "one orphan record, not two")
 })

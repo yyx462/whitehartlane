@@ -68,11 +68,6 @@ test("admission refuses briefs naming existing paths no root covers (#51)", asyn
       'name = "t"',
       'worker_kind = "opencode"',
       "",
-      "[hooks]",
-      'units = "true"',
-      'grade = "echo pass"',
-      'counts = "printf \'{}\'"',
-      "",
     ].join("\n"),
   )
   // temp + nonexistent paths never count; an existing uncovered one does
@@ -101,11 +96,6 @@ async function coworkerDir(prefix: string): Promise<string> {
       "[workflow]",
       'name = "t"',
       'worker_kind = "opencode"',
-      "",
-      "[hooks]",
-      'units = "true"',
-      'grade = "echo pass"',
-      'counts = "printf \'{}\'"',
       "",
       "[members.alpha]",
       "initiates = true",

@@ -50,6 +50,7 @@ export function fakeLedger(): RailLedger & {
     events,
     attached,
     killed,
+    renew: () => {},
     emit: (kind, payload) => events.push({ kind, payload }),
     attach: (label) => attached.push(label),
     kill: (label) => killed.push(label),
@@ -112,6 +113,7 @@ export function fakeHerdr(): FakeHerdr {
       }
       if (args[0] === "agent" && args[1] === "get") {
         const ph = phase[args[2]!] ?? "idle"
+        if (ph === "dead") return { status: 1, stdout: "" }
         return line({ agent: args[2], agent_status: ph === "dialog" ? "blocked" : ph })
       }
       if (args[0] === "agent" && args[1] === "read") {

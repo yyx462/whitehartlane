@@ -202,7 +202,7 @@ test("run refuses a gate step with no [gates] detector and books nothing", async
   )
   writeFileSync(
     join(dir, "workflow.toml"),
-    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[hooks]\nunits = "true"\ngrade = "true"\ncounts = "true"\n',
+    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n',
   )
   const refused = prepareRun(dir)
   assert.equal(refused.ok, false)
@@ -211,7 +211,7 @@ test("run refuses a gate step with no [gates] detector and books nothing", async
 
   writeFileSync(
     join(dir, "workflow.toml"),
-    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[hooks]\nunits = "true"\ngrade = "true"\ncounts = "true"\n\n[gates]\nawait-review = "true"\n',
+    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[gates]\nawait-review = "true"\n',
   )
   const booked = prepareRun(dir)
   assert.equal(booked.ok, true)

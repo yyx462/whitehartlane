@@ -17,7 +17,7 @@ import { liveSpawnerSessionIds, writeWorkerPermissions } from "./store.ts"
 
 export async function runCoworker(
   rail: Rail,
-  opts: { stallMs?: number; beatMs?: number } = {},
+  opts: { stallMs?: number; beatMs?: number; graceMs?: number } = {},
 ): Promise<Report | null> {
   const taskDir = rail.taskDir
   const log = rail.log
@@ -47,14 +47,19 @@ export async function runCoworker(
   const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused, refusedDetail: [...refusedDetail.values()] })
   // A parked member continues its own booked session (write-ahead at
   // birth); a member without one is born fresh, held idle until mail.
+  const bookedSessionOf = (name: string): string | undefined => {
+    if (!ledger) return undefined
+    const latest = ledger.job.panes
+      .filter((p) => p.unit === name && p.transcript)
+      .sort((a, b) => a.born.localeCompare(b.born))
+      .pop()
+    return latest?.transcript?.session_id
+  }
   const resumeOf = new Map<string, string>()
   if (ledger) {
     for (const m of members) {
-      const latest = ledger.job.panes
-        .filter((p) => p.unit === m.name && p.transcript)
-        .sort((a, b) => a.born.localeCompare(b.born))
-        .pop()
-      if (latest?.transcript?.session_id) resumeOf.set(m.name, latest.transcript.session_id)
+      const sid = bookedSessionOf(m.name)
+      if (sid) resumeOf.set(m.name, sid)
     }
   }
   const { messages: priorMessages } = readMessages(join(taskDir, "messages"), names)
@@ -70,6 +75,7 @@ export async function runCoworker(
   const bornAt = new Map<string, number>()
   const prompted = new Set<string>()
   const sandboxOf = new Map<string, string>()
+  const paneOfMember = new Map<string, string | null>()
   for (const m of members) {
     const dir = join(taskDir, "sandboxes", m.name)
     sandboxOf.set(m.name, dir)
@@ -105,6 +111,7 @@ export async function runCoworker(
         )
       : false
     if (slot.pane) rail.renamePane(slot.pane, m.name)
+    paneOfMember.set(m.name, slot.pane)
     if (ok && (m.initiates || resumeId)) prompted.add(m.name)
     if (ok && resumeId && m.name === midTurn) {
       rail.promptAgent(
@@ -119,10 +126,51 @@ export async function runCoworker(
   }
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
   const deadline = Date.now() + 2 * 60 * 60_000
+  // Issue #122 — transport retry: a member pane that dies mid-exchange
+  // (crash, killed TTY) is a malfunction, not an answer. The rail
+  // respawns it from its booked session, bounded by workflow.retry
+  // (default 1), counted per member, and the report carries the churn
+  // so the levy can see it. Semantic outcomes — a stop, a capped
+  // stall, a deny-cap block — are never retried: those are decisions.
+  const retryCap = manifest.workflow.retry ?? 1
+  const retriesUsed = new Map<string, number>()
+  const respawnMember = (m: (typeof members)[number]): boolean => {
+    const dir = sandboxOf.get(m.name) ?? join(taskDir, "sandboxes", m.name)
+    const oldPane = paneOfMember.get(m.name) ?? null
+    if (oldPane) board = rail.dropPane(board, oldPane)
+    rail.retire(m.name) // books the pane death; clears the rail's bookkeeping
+    const slot = rail.ensureRole(board, m.name, dir)
+    board = slot.board
+    paneOfMember.set(m.name, slot.pane)
+    const resumeId = bookedSessionOf(m.name)
+    const ok = slot.pane
+      ? rail.inhabitPane(
+          m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
+          m.model, m.seed, Boolean(resumeId), resumeId,
+        )
+      : false
+    if (slot.pane && ok) rail.renamePane(slot.pane, m.name)
+    if (!ok) return false
+    bornAt.set(m.name, Date.now())
+    // a respawned session already carries its brief — never re-brief it
+    prompted.add(m.name)
+    nudged.delete(m.name)
+    stoodDown.delete(m.name)
+    const attempt = retriesUsed.get(m.name) ?? 1
+    rail.promptAgent(
+      m.name,
+      `[rail] Your process died mid-exchange (transport fault — retry ${attempt}/${retryCap}). Your session was resumed from its checkpoint; pick up exactly where you left off.`,
+    )
+    rail.say("rail", `respawn ${m.name} (transport retry ${attempt}/${retryCap})`)
+    return true
+  }
   // the stall guard's clock and the loop's beat — parameterized so
   // tests drive the nudge ladder in milliseconds
   const stallMs = opts.stallMs ?? 120_000
   const beatMs = opts.beatMs ?? 5_000
+  // the newborn grace: a pane younger than this is not judged dead yet
+  // (birth is asynchronous) — parameterized so tests drive it to 0
+  const graceMs = opts.graceMs ?? 15_000
   const dead: string[] = []
   // why each member died — the report's exchange row carries it, so a
   // "failed" never arrives without its reason (j-5b245e read "ended by
@@ -191,6 +239,10 @@ export async function runCoworker(
     log(`coworker: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
   }
   while (!ended && Date.now() < deadline) {
+    // the lease rides the beat (issue #123): one fs write per beat
+    // keeps the expiring leadership claim fresh; a dead orchestrator
+    // simply stops renewing — absence of renewal is the signal
+    rail.ledger?.renew()
     if (draining) {
       // ADR 5: no new deliveries; a member mid-turn ends its turn.
       // Permission asks, nudges, and dead checks stand down — the
@@ -330,9 +382,21 @@ export async function runCoworker(
     }
     for (const m of members) {
       if (dead.includes(m.name)) continue
-      if (!rail.paneAlive(m.name) && Date.now() - (bornAt.get(m.name) ?? 0) > 15_000) {
+      if (!rail.paneAlive(m.name) && Date.now() - (bornAt.get(m.name) ?? 0) > graceMs) {
+        // transport class (issue #122): the pane is gone — crash, kill,
+        // browned-out TTY. Not the member's answer; respawn it from the
+        // booked session while retries remain, and only then is the
+        // death honest.
+        const used = retriesUsed.get(m.name) ?? 0
+        if (used < retryCap && respawnMember(m)) {
+          retriesUsed.set(m.name, used + 1)
+          ledger?.emit("retry", { member: m.name, attempt: used + 1, why: "pane died" })
+          log(`member ${m.name} pane died — respawned from booked session (transport retry ${used + 1}/${retryCap})`)
+          continue
+        }
+        const spent = retriesUsed.get(m.name) ?? 0
         dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} pane died`)
+        deadWhy.set(m.name, `${m.name} pane died${spent > 0 ? ` after ${spent} transport retry(ies)` : ""}`)
         ledger?.emit("wake", { why: `member ${m.name} is dead` })
         log(`member ${m.name} is dead — ending the exchange`)
         rail.say("watcher", `${m.name} dead`)
@@ -365,6 +429,16 @@ export async function runCoworker(
   if (ended !== "stop") {
     const why = [...deadWhy.values()].join("; ")
     rows.push({ unit: "exchange", result: `ended by ${ended}${why ? ` — ${why}` : ""}`, pass: false })
+  }
+  // transport churn is visible, not silent (issue #122): the levy sees
+  // who was respawned and how often
+  const spent = [...retriesUsed.entries()].filter(([, n]) => n > 0)
+  if (spent.length > 0) {
+    rows.push({
+      unit: "retries",
+      result: `${spent.map(([name, n]) => `${name}×${n}`).join(", ")} transport fault(s) — respawned from booked sessions`,
+      pass: true,
+    })
   }
   // unresolved refused mail is a failure in its own right even on a
   // clean stop — a levy looks at the report first, so the refusals

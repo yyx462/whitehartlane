@@ -36,7 +36,9 @@ import {
   findOrOpenSession,
   homeRoot,
   killPane,
+  leaseExpired,
   listJobs,
+  loadJob,
   normalizeSpur,
   orphanJob,
   readAllEvents,
@@ -288,15 +290,32 @@ async function main() {
     let swept = 0
     for (const job of jobs) {
       if (job.state !== "running") continue
-      if (pidAlive(job.pid)) {
-        console.log(`${job.id} running (pid ${job.pid}) — left alone`)
+      // Issue #123 — the sweep's oracle is the holder pid first; pure
+      // lease expiry (a wedged-but-alive orchestrator) is opt-in via
+      // AGENTIC_OS_LEASE_ENFORCE=1 until beat density is proven across
+      // quiet fan-out waits. Timers grant the right to suspect; the
+      // census decides.
+      const pidGone = !pidAlive(job.pid)
+      const leaseGone =
+        process.env.AGENTIC_OS_LEASE_ENFORCE === "1" && leaseExpired(job)
+      if (!pidGone && !leaseGone) {
+        if (leaseExpired(job)) {
+          console.log(`${job.id} lease expired at ${job.lease?.expires} but pid ${job.pid} is alive — watched, not swept (AGENTIC_OS_LEASE_ENFORCE=1 to act)`)
+        } else {
+          console.log(`${job.id} running (pid ${job.pid}) — left alone`)
+        }
         continue
       }
-      const orphans = livePanesOf(job, live)
-      orphanJob(job, `orchestrator pid ${job.pid ?? "?"} gone`, orphans.length)
+      // single-act: re-read the record — another sweep (or the
+      // orchestrator's own epilogue) may have flipped the state since
+      // this list was built; orphanJob no-ops on non-running either way
+      const fresh = loadJob(job.sid, job.id) ?? job
+      if (fresh.state !== "running") continue
+      const orphans = livePanesOf(fresh, live)
+      orphanJob(fresh, pidGone ? `orchestrator pid ${fresh.pid ?? "?"} gone` : `lease expired at ${fresh.lease?.expires}`, orphans.length)
       swept += 1
-      console.log(`${job.id} orphaned (parked, ask-first) — ${job.dir}`)
-      console.log(`  continue: whitehartlane continue ${job.id} | decline: whitehartlane abort ${job.id}`)
+      console.log(`${fresh.id} orphaned (parked, ask-first) — ${fresh.dir}`)
+      console.log(`  continue: whitehartlane continue ${fresh.id} | decline: whitehartlane abort ${fresh.id}`)
       if (orphans.length > 0) {
         console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }

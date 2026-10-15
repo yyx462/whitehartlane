@@ -3,6 +3,7 @@
 // prompt the reborn pane receives. The body (tab, pane, herdr) lives
 // in bin/whitehartlane.
 import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { spawn } from "node:child_process"
 import type { JobRecord, SeedPointer } from "./store.ts"
 import { appendEvent, findOrOpenSession } from "./store.ts"
@@ -38,12 +39,38 @@ export function forkPrompt(input: {
 // TTY. So the pane closes itself when the reborn turn ends (agent idle),
 // the same second nobody needs to watch it anymore. Detached shell —
 // must survive this process.
-export function forkReaperCmd(label: string, pane: string, tab: string): string {
+//
+// Issue #124 — "idle" is ambiguous before first work: a resumed TTY can
+// sit idle for seconds while it loads the session, and j-64e035's
+// reaper closed the courier in exactly that window (agent prompt rc=0,
+// session store untouched — the wake never landed). So the reaper waits
+// for the FIRST WORKING TURN before it may wait for idle, and writes a
+// receipt the audit can read: worked=true (a live turn took the wake)
+// or worked=false (the pane closed without the prompt ever reaching an
+// agent turn — drain the wake again). Bounds: working-wait 90s
+// (AGENTIC_OS_FORK_WORKING_MS), idle-wait 30min (AGENTIC_OS_FORK_IDLE_MS)
+// — long turns are legitimate, squatting forever is not.
+export function forkReaperCmd(label: string, pane: string, tab: string, receiptPath?: string): string {
+  const r = receiptPath ? shellQuote(receiptPath) : null
+  const workingMs = hookEnvMs("AGENTIC_OS_FORK_WORKING_MS", 90_000)
+  const idleMs = hookEnvMs("AGENTIC_OS_FORK_IDLE_MS", 1_800_000)
   return [
-    `herdr agent wait ${label} --until idle >/dev/null 2>&1 || true`,
+    r
+      ? `if herdr agent wait ${label} --until working --timeout ${workingMs}; then echo '{"worked":true}' > ${r}; else echo '{"worked":false}' > ${r}; fi`
+      : `herdr agent wait ${label} --until working --timeout ${workingMs} || true`,
+    `herdr agent wait ${label} --until idle --timeout ${idleMs} || true`,
     `herdr tab close ${tab}`,
     `herdr pane close ${pane}`,
   ].join("; ")
+}
+
+function hookEnvMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name] ?? "")
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
 // The wake-time rebirth (ADR 0008 rung 3): an unregistered chat levy
@@ -108,12 +135,15 @@ export function forkLevy(
     return { ok: false, why: `the wake prompt did not land (rc=${prompt.status})` }
   }
   // the courier closes its own tab when the reborn turn ends — idle fork
-  // panes (whl-fork-*) used to squat forever after delivery
+  // panes (whl-fork-*) used to squat forever after delivery. The reaper
+  // writes its receipt into the job dir (issue #124): worked=true/false
+  // is the honest record of whether the wake ever reached a live turn,
+  // and wakeAudit surfaces a never-worked courier for a re-drain.
   if (forkTab) {
     const reaper = opts.detachedSpawn ?? ((cmd: string) => {
       spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref()
     })
-    reaper(forkReaperCmd(label, shell, forkTab))
+    reaper(forkReaperCmd(label, shell, forkTab, join(job.dir, "courier.json")))
   }
   return { ok: true, label, pane: shell }
 }

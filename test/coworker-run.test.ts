@@ -259,3 +259,95 @@ test("a member that heeds the quoted refusal self-heals — the exchange finishe
   const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as { delivered: string[] }
   assert.ok(relayLedger.delivered.includes("1-alpha.json"), "the fixed file was delivered")
 })
+
+// Issue #122 — a pane death is a transport fault, not a member's
+// answer: the rail respawns the member from its booked session, bounded
+// by workflow.retry (default 1), and the report carries the churn.
+test("a dead member pane is respawned once and the exchange finishes — retries ride the report", async () => {
+  const dir = await coworkerDir("coworker-retry-")
+  const herdr = fakeHerdr()
+  const ledger = fakeLedger()
+  const rail = fakeRail(dir, herdr, ledger as never)
+  let alphaTurns = 0
+  herdr.onPrompt = (name, text, later) => {
+    if (name.startsWith("alpha")) {
+      alphaTurns += 1
+      if (alphaTurns === 1) {
+        // the first pane dies mid-exchange — a transport fault
+        later(() => {
+          herdr.phase[name] = "dead"
+        })
+        return
+      }
+      // the respawned pane takes the retry prompt and mails beta
+      if (text.includes("transport fault")) {
+        later(() => {
+          mkdirSync(join(dir, "messages"), { recursive: true })
+          writeFileSync(
+            join(dir, "messages", "2-alpha.json"),
+            JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }),
+          )
+        })
+      }
+      return
+    }
+    if (name.startsWith("beta")) {
+      later(() => {
+        mkdirSync(join(dir, "messages"), { recursive: true })
+        writeFileSync(
+          join(dir, "messages", "3-beta.json"),
+          JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
+        )
+      })
+    }
+  }
+  const report = await runCoworker(rail, { graceMs: 0, stallMs: 60_000, beatMs: 10 })
+  assert.equal(report?.status, "done", "the respawn recovered the exchange")
+  const retries = report?.table.find((row) => row.unit === "retries")
+  assert.ok(retries, "the report carries a retries row")
+  assert.match(retries!.result, /alpha×1/)
+  const retryEvents = ledger.events.filter((e) => e.kind === "retry")
+  assert.equal(retryEvents.length, 1, "one retry booked on the trail")
+  assert.equal(retryEvents[0]!.payload.member, "alpha")
+})
+
+test("a member that keeps dying exhausts the retry cap and the death is honest", async () => {
+  const dir = await coworkerDir("coworker-retry-cap-")
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let alphaTurns = 0
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("alpha")) {
+      alphaTurns += 1
+      later(() => {
+        herdr.phase[name] = "dead" // dies on every pane, respawn included
+      })
+      return
+    }
+  }
+  const report = await runCoworker(rail, { graceMs: 0, stallMs: 60_000, beatMs: 10 })
+  assert.equal(report?.status, "failed", "the exchange ended unresolved")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /alpha pane died after 1 transport retry/)
+  assert.match(report!.table.find((row) => row.unit === "retries")!.result, /alpha×1/)
+})
+
+test("retry = 0 disarms the respawn — first death is final (policy, not reflex)", async () => {
+  const dir = await coworkerDir("coworker-retry-0-")
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('name = "test-coworker"', 'name = "test-coworker"\nretry = 0'))
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("alpha")) {
+      later(() => {
+        herdr.phase[name] = "dead"
+      })
+    }
+  }
+  const report = await runCoworker(rail, { graceMs: 0, stallMs: 60_000, beatMs: 10 })
+  assert.equal(report?.status, "failed")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /alpha pane died(?! after)/, "no retries were spent")
+  assert.equal(report!.table.find((row) => row.unit === "retries"), undefined)
+})

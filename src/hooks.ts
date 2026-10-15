@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -15,8 +16,29 @@ export type Grade = { pass: boolean; row: string }
 export type Hooks = {
   units: () => Unit[]
   grade: (unit: Unit) => Grade
-  counts: (rows: { unit: string; result: string }[]) => Record<string, number>
+  counts: (rows: CountRow[]) => Record<string, number>
   workerKind: "opencode" | "pi"
+}
+
+// A scorecard row (issue #120): `pass` rides along so a counts hook —
+// and the built-in counter — can count outcomes, not just rows. The
+// scaffold's old shell counter filtered x.pass on a table.json that
+// never carried it (always 0 passed); the typed counter ends that.
+export type CountRow = { unit: string; result: string; pass: boolean }
+
+// The built-in counter (issue #120): what a program gets when it omits
+// hooks.counts or says counts = "default". The old trap: hooks were
+// required fields, the scaffold taught units/grade = "true" as the
+// no-op spelling, and authors copied the token to counts — where the
+// contract (print a JSON object of numbers) makes /bin/true a
+// deterministic report-time fatal (j-64e035: 79 minutes of work, then
+// aborted by an empty stdout).
+export function builtinCounts(rows: CountRow[]): Record<string, number> {
+  return {
+    units: rows.length,
+    passed: rows.filter((r) => r.pass).length,
+    failed: rows.filter((r) => !r.pass).length,
+  }
 }
 
 export type Layout = {
@@ -72,8 +94,8 @@ function stepsFromRaw(raw: unknown): Step[] | undefined {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean }
-  hooks: { units: string; grade: string; counts: string }
+  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
+  hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
   steps?: Step[]
@@ -181,6 +203,18 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       throw new HookError(`workflow.drain_timeout_ms must be an integer 1000-3600000 (ms): ${workflow.drain_timeout_ms}`)
     }
   }
+  // Issue #122 — transport retry policy: how many times a member whose
+  // pane dies mid-exchange (process crash, killed TTY — the clear
+  // transport class) is respawned from its booked session before the
+  // death is honest. Semantic outcomes (a stop, a capped stall) are
+  // never retried — a failure should be an answer, never an accident.
+  let retry: number | undefined
+  if (workflow.retry !== undefined) {
+    retry = Number(workflow.retry)
+    if (!Number.isInteger(retry) || retry < 0 || retry > 3) {
+      throw new HookError(`workflow.retry must be an integer 0-3: ${workflow.retry}`)
+    }
+  }
   // The fan-out canary is program policy, not an env accident: a bench
   // where a failed task is a measured outcome declares canary = false
   // (no solo first unit, no run stop on its first fail) beside its
@@ -234,11 +268,16 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   }
   const steps = stepsFromRaw(m.step)
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(canary !== undefined ? { canary } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
     hooks: {
-      units: str(hooks.units, "hooks.units"),
-      grade: str(hooks.grade, "hooks.grade"),
-      counts: str(hooks.counts, "hooks.counts"),
+      units: optHook(hooks.units, "hooks.units", {
+        refuseDefault: 'hooks.units has no built-in default — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
+      }),
+      grade: optHook(hooks.grade, "hooks.grade"),
+      counts: optHook(hooks.counts, "hooks.counts", {
+        refuseNoop:
+          'hooks.counts = "true" prints nothing — a counts hook must print a JSON object of numbers; omit the line for the built-in counter, or use counts = "default" (issue #120, j-64e035)',
+      }),
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     gates: Object.keys(gates).length > 0 ? gates : undefined,
@@ -258,16 +297,36 @@ function str(value: unknown, field: string): string {
   return value
 }
 
+// Hooks are optional (issue #120): omitted means the built-in default —
+// counts counts the scorecard, grade always passes, units must come
+// from steps or a real hook. The explicit token "default" spells the
+// same thing for authors who want it visible. The shell no-ops are
+// refused for counts — /bin/true prints nothing, and a counts hook
+// that prints nothing is a deterministic report-time fatal that costs
+// the whole run (j-64e035: 79 minutes of work, then aborted).
+const HOOK_NOOP_CMDS = new Set(["true", "false", ":"])
+function optHook(value: unknown, field: string, opts: { refuseNoop?: string; refuseDefault?: string } = {}): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "string" || value.length === 0) {
+    throw new HookError(`workflow.toml is missing ${field}`)
+  }
+  if (value === "default" && opts.refuseDefault) throw new HookError(opts.refuseDefault)
+  if (HOOK_NOOP_CMDS.has(value) && opts.refuseNoop) throw new HookError(opts.refuseNoop)
+  return value
+}
+
 function runHook(
   cmd: string,
   taskDir: string,
+  opts: { timeoutMs?: number } = {},
 ): { stdout: string; status: number; stderr: string; ms: number } {
+  const timeoutMs = opts.timeoutMs ?? hookTimeoutMs()
   const startedAt = Date.now()
   try {
     const stdout = execSync(cmd, {
       cwd: taskDir,
       encoding: "utf8",
-      timeout: hookTimeoutMs(),
+      timeout: timeoutMs,
       stdio: ["ignore", "pipe", "pipe"],
     })
     return { stdout: stdout ?? "", status: 0, stderr: "", ms: Date.now() - startedAt }
@@ -278,7 +337,7 @@ function runHook(
     // the raw error escaped and aborted a whole run whose verifier was
     // a second from passing). Any kill shape is a hook timeout.
     if (e.killed || e.signal || e.code === "ETIMEDOUT") {
-      throw new HookError(`hook timed out after ${hookTimeoutMs()}ms: ${cmd}`)
+      throw new HookError(`hook timed out after ${timeoutMs}ms: ${cmd}`)
     }
     if (typeof e.status !== "number") throw err
     return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "", ms: Date.now() - startedAt }
@@ -310,6 +369,11 @@ export function unitsFromSteps(taskDir: string, steps: Step[]): Unit[] {
 }
 
 export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
+  if (manifest.hooks.units === undefined) {
+    throw new HookError(
+      "no units hook and no steps — a fan-out program must declare [[step]] entries or provide a units hook that prints one {\"id\",\"brief\"} JSON object per line",
+    )
+  }
   const { stdout, status, stderr, ms } = runHook(manifest.hooks.units, taskDir)
   note({ hook: "units", status, ms })
   if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "units hook exited 75")
@@ -340,6 +404,12 @@ export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
 }
 
 export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade {
+  // Omitted or "default" = always-pass (issue #120): the same outcome
+  // the old grade = "true" spelling produced, now sanctioned and
+  // self-documenting instead of a lucky accident of empty output.
+  if (manifest.hooks.grade === undefined || manifest.hooks.grade === "default") {
+    return { pass: true, row: "ok" }
+  }
   const { stdout, status, ms } = runHook(`${manifest.hooks.grade} ${quote(unit.id)}`, taskDir)
   note({ hook: "grade", target: unit.id, status, ms })
   const row = stdout.split("\n")[0]?.trim()
@@ -349,13 +419,23 @@ export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade
 export function runCounts(
   taskDir: string,
   manifest: Manifest,
-  table: { unit: string; result: string }[],
+  table: CountRow[],
 ): Record<string, number> {
   const tablePath = join(taskDir, "table.json")
+  // pass rides the scorecard (issue #120) so a counting hook — and the
+  // built-in counter — can count outcomes, not just rows
   writeFileSync(tablePath, JSON.stringify(table))
-  const { stdout, status, ms } = runHook(`${manifest.hooks.counts} ${quote(tablePath)}`, taskDir)
+  // Omitted or "default" = the built-in counter (issue #120): the j-64e035
+  // class of bug (a silent counts command) cannot exist when the rail
+  // itself does the counting
+  const cmd = manifest.hooks.counts
+  if (cmd === undefined || cmd === "default") {
+    note({ hook: "counts", status: 0, ms: 0 })
+    return builtinCounts(table)
+  }
+  const { stdout, status, ms } = runHook(`${cmd} ${quote(tablePath)}`, taskDir)
   note({ hook: "counts", status, ms })
-  if (status !== 0) throw new HookError(`counts hook exited ${status}: ${manifest.hooks.counts}`)
+  if (status !== 0) throw new HookError(`counts hook exited ${status}: ${cmd}`)
   let parsed: unknown
   try {
     parsed = JSON.parse(stdout)
@@ -418,6 +498,103 @@ export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifes
       workerKind: manifest.workflow.worker_kind,
     },
   }
+}
+
+// The staging probe (issue #121): grammar-check the hooks this run will
+// actually call, on sample inputs, BEFORE anything is booked or born.
+// j-64e035 proved a hook that cannot speak the protocol is invisible
+// until the worst moment — 79 minutes of clean work, then a fatal at
+// report time. The probe costs milliseconds and refuses at the door,
+// where the fix costs one line of toml instead of a rerun. Refusals
+// speak: each names the hook, the offending output, and the fix.
+// AGENTIC_OS_PROBE=0 disarms; AGENTIC_OS_PROBE_TIMEOUT_MS tunes the
+// per-hook ceiling (default 10s — counters and unit listers are fast;
+// a hook that slow at probe time is itself a finding).
+export function probeHooks(
+  taskDir: string,
+  manifest: Manifest,
+  kind: "fan-out" | "lab" | "coworker",
+): string[] {
+  if (process.env.AGENTIC_OS_PROBE === "0") return []
+  const refusals: string[] = []
+  const probeDir = mkdtempSync(join(tmpdir(), "agentic-os-probe-"))
+  try {
+    const countsCmd = manifest.hooks.counts
+    if (countsCmd !== undefined && countsCmd !== "default") {
+      const tablePath = join(probeDir, "table.json")
+      writeFileSync(tablePath, JSON.stringify([{ unit: "probe", result: "ok", pass: true }]))
+      let stdout = ""
+      let status = 0
+      try {
+        ;({ stdout, status } = runHook(`${countsCmd} ${quote(tablePath)}`, taskDir, { timeoutMs: probeTimeoutMs() }))
+      } catch (err) {
+        refusals.push(`counts hook did not survive the probe: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      if (status !== 0) {
+        refusals.push(`counts hook exited ${status} at probe: ${countsCmd}`)
+      } else if (refusals.length === 0) {
+        try {
+          const parsed = JSON.parse(stdout) as Record<string, unknown>
+          const bad = Object.entries(parsed).find(([, v]) => typeof v !== "number")
+          if (bad) {
+            refusals.push(`counts hook count ${bad[0]} is not a number (${JSON.stringify(bad[1])}) — a counts hook must print a JSON object of numbers`)
+          } else if (Object.keys(parsed).length === 0) {
+            refusals.push('counts hook printed an empty object at probe — count something, omit the line for the built-in counter, or use counts = "default"')
+          }
+        } catch {
+          refusals.push(
+            `counts hook prints no JSON at probe (${stdout.slice(0, 80) || "empty stdout"}) — omit the line for the built-in counter, or use counts = "default" (issue #121)`,
+          )
+        }
+      }
+    }
+    // units is only ever called by a fan-out program without steps —
+    // coworker has members, steps programs derive units from [[step]]
+    const unitsCmd = manifest.hooks.units
+    if (kind === "fan-out" && manifest.steps === undefined && unitsCmd !== undefined) {
+      let stdout = ""
+      let status = 0
+      try {
+        ;({ stdout, status } = runHook(unitsCmd, taskDir, { timeoutMs: probeTimeoutMs() }))
+      } catch (err) {
+        refusals.push(`units hook did not survive the probe: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      if (status === 75) {
+        // the provider refused — provider-dependent, not grammar; skip
+      } else if (status !== 0) {
+        refusals.push(`units hook exited ${status} at probe: ${unitsCmd}`)
+      } else {
+        const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+        if (lines.length === 0) {
+          refusals.push(
+            'units hook produced no units at probe — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
+          )
+        } else {
+          for (let i = 0; i < lines.length; i++) {
+            try {
+              const parsed = JSON.parse(lines[i]) as { id?: unknown }
+              if (typeof parsed.id !== "string" || !SHEP_SAFE_ID.test(parsed.id)) {
+                refusals.push(`units hook line ${i + 1} id is not shep-safe at probe: ${JSON.stringify(parsed.id)}`)
+                break
+              }
+            } catch {
+              refusals.push(`units hook line ${i + 1} is not JSON at probe: ${lines[i].slice(0, 60)}`)
+              break
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true })
+  }
+  return refusals
+}
+
+function probeTimeoutMs(): number {
+  const raw = Number(process.env.AGENTIC_OS_PROBE_TIMEOUT_MS ?? "")
+  if (Number.isFinite(raw) && raw >= 1_000) return Math.min(raw, 60_000)
+  return 10_000
 }
 
 export type ManifestOrigin = "local" | "env" | "user-global" | "builtin"
