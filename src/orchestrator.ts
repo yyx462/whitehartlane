@@ -17,6 +17,9 @@ import { readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
   spawnWorker: (name: string, kind: string, briefPath: string, cwd: string) => boolean
+  // Issue #123 — renew the job lease once per engine cycle (one write).
+  // Optional: a test shep without a ledger simply does not renew.
+  renew?: () => void
   // Resume a parked unit (ADR 5): same pane lifecycle as spawnWorker,
   // but the host session continues from the booked pointer and the
   // brief is the continue brief. Absent or failing, the caller falls
@@ -1029,6 +1032,9 @@ export async function runOrchestrator(input: {
   }
   run()
   while (!finished) {
+    // the lease rides the cycle (issue #123): each queue message or
+    // timer wake renews the expiring leadership claim in job.json
+    input.shep.renew?.()
     kickIfReady()
     for (const id of inFlight.keys()) watchPane(id)
     if (inFlight.size > 0) startLogPoller()

@@ -239,6 +239,10 @@ export async function runCoworker(
     log(`coworker: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
   }
   while (!ended && Date.now() < deadline) {
+    // the lease rides the beat (issue #123): one fs write per beat
+    // keeps the expiring leadership claim fresh; a dead orchestrator
+    // simply stops renewing — absence of renewal is the signal
+    rail.ledger?.renew()
     if (draining) {
       // ADR 5: no new deliveries; a member mid-turn ends its turn.
       // Permission asks, nudges, and dead checks stand down — the

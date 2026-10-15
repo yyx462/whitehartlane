@@ -50,6 +50,7 @@ export function fakeLedger(): RailLedger & {
     events,
     attached,
     killed,
+    renew: () => {},
     emit: (kind, payload) => events.push({ kind, payload }),
     attach: (label) => attached.push(label),
     kill: (label) => killed.push(label),

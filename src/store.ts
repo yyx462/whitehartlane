@@ -110,6 +110,13 @@ export type JobRecord = {
   task: string
   dir: string
   pid?: number
+  // Issue #123 — the lease: leadership over a Job is a written,
+  // expiring claim in job.json, not whoever happens to be running.
+  // The orchestrator acquires at open (epoch bumps on every claim) and
+  // renews on its engine beat; expiry is STICKY — death needs no
+  // message, absence of renewal is the signal. Absent on pre-lease
+  // jobs (back-compat).
+  lease?: { holder: string; epoch: number; renewed: string; expires: string }
   repo?: string
   worktree?: string
   spur?: SpurIdentity
@@ -773,6 +780,44 @@ export function failJob(
 // detects (running + dead pid), the user decides (continue or abort).
 // Graceful stops never orphan — pause drains on purpose, and the
 // signal handler aborts on purpose.
+// Issue #123 — lease lifecycle. LEASE_TTL is the renewal window, not a
+// death sentence: the sweep's robust oracle is the holder pid; pure
+// lease-expiry action stays opt-in (AGENTIC_OS_LEASE_ENFORCE=1) until
+// beat density is proven across quiet fan-out waits. A wedged-but-alive
+// orchestrator (pid alive, lease long expired) is the case the lease
+// exists for — timers grant the right to suspect, the census decides.
+export const LEASE_TTL_MS = 5 * 60_000
+
+export function acquireLease(job: JobRecord, holder: string): void {
+  const epoch = (job.lease?.epoch ?? 0) + 1
+  job.lease = {
+    holder,
+    epoch,
+    renewed: new Date().toISOString(),
+    expires: new Date(Date.now() + LEASE_TTL_MS).toISOString(),
+  }
+  saveJob(job)
+  appendEvent(job.sid, { actor: "orchestrator", kind: "lease.acquired", jid: job.id, epoch, holder })
+}
+
+// Renewal is best-effort and cheap (one fs write per engine beat): the
+// lease record must never break the run it observes.
+export function renewLeaseOf(job: JobRecord): void {
+  if (!job.lease) return
+  job.lease.renewed = new Date().toISOString()
+  job.lease.expires = new Date(Date.now() + LEASE_TTL_MS).toISOString()
+  try {
+    saveJob(job)
+  } catch {}
+}
+
+// Expired past its TTL plus a grace period (one missed beat under load
+// is noise, not death).
+export function leaseExpired(job: JobRecord, graceMs = LEASE_TTL_MS): boolean {
+  if (!job.lease?.expires) return false
+  return Date.now() > Date.parse(job.lease.expires) + graceMs
+}
+
 export function orphanJob(job: JobRecord, reason: string, panesRemaining: number): JobRecord {
   if (job.state !== "running") return job
   const at = new Date().toISOString()
