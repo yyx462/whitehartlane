@@ -3,13 +3,29 @@
 // prompt the reborn pane receives. The body (tab, pane, herdr) lives
 // in bin/whitehartlane.
 import { existsSync } from "node:fs"
-import { join } from "node:path"
+import { homedir } from "node:os"
+import { dirname, join, resolve } from "node:path"
 import { spawn } from "node:child_process"
 import type { JobRecord, SeedPointer } from "./store.ts"
 import { appendEvent, findOrOpenSession } from "./store.ts"
 import { admitFork } from "./policy.ts"
-import { seedSessionFile } from "./transcripts.ts"
+import { seedSessionFile, repointOpencodeSession } from "./transcripts.ts"
 import { defaultRunner, jsonAt, type RunnerResult } from "./runners.ts"
+
+// Issue #127 — the deterministic walk: from a vanished path, the
+// nearest surviving ancestor. $HOME itself is deliberately too vague
+// (an agent parked in ~ is lost, not home) — reaching it refuses.
+export function survivingAncestor(path: string): string | null {
+  const home = homedir()
+  let here = resolve(path)
+  for (;;) {
+    const parent = dirname(here)
+    if (parent === here) return null // filesystem root — nothing survives
+    here = parent
+    if (here === home) return null
+    if (existsSync(here)) return here
+  }
+}
 
 // The seed a fork of this Job's levy points back to — always the
 // spawner pointer, never anything later: the levy session stays the
@@ -23,15 +39,27 @@ export function forkPrompt(input: {
   wake: { message: string }
   seed: SeedPointer
   jid: string
+  relocation?: { from: string; to: string }
 }): string {
-  return [
+  const lines = [
     `[wake] ${input.wake.message}`,
     "",
     `You are the fork of the levy that levied this spur (${input.jid}): your`,
     `session ${input.seed.tool}:${input.seed.session_id} was resumed from the`,
     `checkpoint ${input.seed.since} — the moment the spur was levied.`,
     "Read the report, decide what it means for your work, and carry on.",
-  ].join("\n")
+  ]
+  if (input.relocation) {
+    lines.push(
+      "",
+      `Your session's project directory ${input.relocation.from} no longer exists on disk`,
+      `(renamed, moved, or deleted); this pane repointed you to ${input.relocation.to},`,
+      "the nearest surviving parent. Your session history is intact — find where",
+      "your work lives now (the repo may have moved or been renamed), or ask your",
+      "operator which repo this is before editing anything.",
+    )
+  }
+  return lines.join("\n")
 }
 
 // The fork is a COURIER (ADR 0008 rung 3): it exists to deliver the wake
@@ -103,23 +131,50 @@ export function forkLevy(
     host: { tool: job.spawner.tool, session_id: job.spawner.session_id },
   })
   const label = `fork-${job.id}`
-  const cwd = session.cwd || job.dir
+  let cwd = session.cwd || job.dir
+  let relocation: { from: string; to: string } | undefined
   // Issue #127 — a levy whose project dir is gone births a dead
   // courier: opencode binds a session to its stored directory and goes
   // back to it on resume (probe: oc --session from another cwd chdirs
   // to the old path, ENOENT), so the pane lands on a directory picker
-  // no non-interactive courier can answer. Refuse instead — and the
-  // refusal names both remedies. The durable wake.json waits either
-  // way: nothing is lost, the wake just is not delivered yet.
+  // no non-interactive courier can answer. Ladder: repoint the session
+  // to the nearest SURVIVING ancestor (deterministic walk — the rail
+  // never guesses which repo is "best"; the resumed agent, which has
+  // judgment, gets a relocation note and decides where its work lives),
+  // and refuse — never a ghost courier — when repointing cannot happen.
   if (!existsSync(cwd)) {
-    return {
-      ok: false,
-      why:
-        `the levy's project dir is gone: ${cwd} — opencode binds a session to its directory, so the courier cannot be born elsewhere. ` +
-        `Recreate it (mkdir -p '${cwd}') or restore the repo there, or repoint the session ` +
-        `(UPDATE session SET directory='<a real dir>' WHERE id='${job.spawner.session_id}' in the opencode DB); ` +
-        `the durable wake.json waits at ${join(job.dir, "wake.json")}`,
+    const ghost = cwd
+    const survivor = survivingAncestor(ghost)
+    const manual =
+      `the levy's project dir is gone: ${ghost} — recreate it (mkdir -p '${ghost}') or restore the repo there, ` +
+      `or repoint the session (UPDATE session SET directory='<a real dir>' WHERE id='${job.spawner.session_id}' in the opencode DB); ` +
+      `the durable wake.json waits at ${join(job.dir, "wake.json")}`
+    if (job.spawner.tool !== "opencode") {
+      return { ok: false, why: `auto-repoint is opencode-only; this levy is ${job.spawner.tool} — ${manual}` }
     }
+    if (!survivor) {
+      return { ok: false, why: `no surviving ancestor short of $HOME — too vague to repoint blindly. ${manual}` }
+    }
+    let moved = false
+    try {
+      moved = repointOpencodeSession(job.spawner.session_id, survivor)
+    } catch {
+      moved = false
+    }
+    if (!moved) {
+      return { ok: false, why: `repointing the session row failed (db busy or unreadable). ${manual}` }
+    }
+    cwd = survivor
+    relocation = { from: ghost, to: survivor }
+    appendEvent(session.id, {
+      actor: "levy",
+      kind: "session.repointed",
+      jid: job.id,
+      from: ghost,
+      to: survivor,
+      session_id: job.spawner.session_id,
+      why: "project dir gone — repointed to the nearest surviving ancestor",
+    })
   }
   const tab = run(["tab", "create", "--label", `whl-fork-${job.id}`.slice(0, 40), "--cwd", cwd, "--no-focus"])
   const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
@@ -146,7 +201,7 @@ export function forkLevy(
     seed,
     fork_of: job.id,
   })
-  const prompt = run(["agent", "prompt", label, forkPrompt({ wake, seed, jid: job.id })])
+  const prompt = run(["agent", "prompt", label, forkPrompt({ wake, seed, jid: job.id, ...(relocation ? { relocation } : {}) })])
   if (prompt.status !== 0) {
     run(["pane", "close", shell])
     return { ok: false, why: `the wake prompt did not land (rc=${prompt.status})` }

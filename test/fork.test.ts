@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdtempSync, chmodSync, writeFileSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { DatabaseSync } from "node:sqlite"
@@ -98,9 +98,9 @@ test("fork courier: delivery arms the self-close reaper", async () => {
   assert.match(reaped[0], /tab close wF:t7/)
 })
 
-test("fork refuses a levy whose project dir is gone — no courier is born into a ghost (issue #127)", async () => {
+test("fork repoints a ghost-levy to the nearest surviving ancestor and tells the agent (issue #127)", async () => {
   const dbDir = mkdtempSync(join(tmpdir(), "aos-ghost-"))
-  const ghost = join(dbDir, "moved-away") // never created
+  const ghost = join(dbDir, "moved-away") // never created; dbDir survives
   process.env.OPENCODE_DB = join(dbDir, "opencode.db")
   const db = new DatabaseSync(process.env.OPENCODE_DB)
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
@@ -108,22 +108,87 @@ test("fork refuses a levy whose project dir is gone — no courier is born into 
   db.close()
   const { openSession } = await import("../src/store.ts")
   openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_ghost" } })
+  const prompts: string[] = []
+  const tabs: string[] = []
+  const herdrRun = (args: string[]): RunnerResult => {
+    const a = args.join(" ")
+    if (a.startsWith("tab create")) tabs.push(a)
+    if (a.startsWith("agent prompt")) prompts.push(args[3] ?? "")
+    return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wF:sh" }, root_pane: { pane_id: "wF:root", tab_id: "wF:t9" }, tab: { tab_id: "wF:t9" } } }) }
+  }
+  const job = {
+    id: "j-ghost", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_ghost", since: "n1" },
+  } as unknown as JobRecord
+  const out = forkLevy(job, { message: "spur done" }, { herdrRun, detachedSpawn: () => {} })
+  assert.equal(out.ok, true, "the courier is born — in the surviving ancestor, not the ghost")
+  // the session row moved: ghost -> dbDir (the nearest surviving parent)
+  const check = new DatabaseSync(process.env.OPENCODE_DB, { readOnly: true })
+  const row = check.prepare("SELECT directory FROM session WHERE id = ?").get("ses_ghost") as { directory: string }
+  check.close()
+  assert.equal(row.directory, dbDir)
+  // the pane was born with the ancestor as cwd
+  assert.ok(tabs[0]!.includes(dbDir), "tab create carried the surviving ancestor as cwd")
+  // the relocation note tells the agent what happened and what to do
+  const prompt = prompts[0] ?? ""
+  assert.match(prompt, /no longer exists on disk/)
+  assert.match(prompt, new RegExp(dbDir.replaceAll("/", "\\/")))
+  assert.match(prompt, /find where\s+your work lives now|find where your work lives now/)
+})
+
+test("fork refuses when no ancestor survives short of $HOME — too vague to repoint blindly (issue #127)", async () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "aos-ghost-home-"))
+  const ghost = join(homedir(), "no-such-project-root", "gone") // walk hits $HOME
+  process.env.OPENCODE_DB = join(dbDir, "opencode.db")
+  const db = new DatabaseSync(process.env.OPENCODE_DB)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_vague", ghost, 1)
+  db.close()
+  const { openSession } = await import("../src/store.ts")
+  openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_vague" } })
   const calls: string[] = []
   const herdrRun = (args: string[]): RunnerResult => {
     calls.push(args.join(" "))
     return { status: 0, stdout: JSON.stringify({ result: {} }) }
   }
   const job = {
-    id: "j-ghost", dir: dbDir, status: "retired", created: "", updated: "",
-    spawner: { tool: "opencode", session_id: "ses_ghost", since: "n1" },
+    id: "j-vague", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_vague", since: "n1" },
   } as unknown as JobRecord
   const out = forkLevy(job, { message: "spur done" }, { herdrRun })
   assert.equal(out.ok, false)
   if (!out.ok) {
-    assert.match(out.why, /project dir is gone/)
-    assert.match(out.why, new RegExp(`mkdir -p '${ghost.replaceAll("/", "\\/")}'`), "the refusal names the recreate fix")
-    assert.match(out.why, /UPDATE session SET directory/, "the refusal names the repoint fix")
-    assert.match(out.why, /wake\.json waits/, "the durable receipt is named")
+    assert.match(out.why, /too vague to repoint/)
+    assert.match(out.why, /mkdir -p/)
+    assert.match(out.why, /UPDATE session SET directory/)
+    assert.match(out.why, /wake\.json waits/)
   }
-  assert.equal(calls.length, 0, "nothing was spawned — no tab, no pane, no dead courier")
+  assert.equal(calls.length, 0, "nothing was spawned — no dead courier")
+})
+
+test("fork refuses when the session row will not move (db unwritable) (issue #127)", async () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "aos-ghost-dbbad-"))
+  const ghost = join(dbDir, "moved-away")
+  const dbPath = join(dbDir, "opencode.db")
+  process.env.OPENCODE_DB = dbPath
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_ro", ghost, 1)
+  db.close()
+  // the seed still resolves (reads fine) but the row will not move
+  chmodSync(dbPath, 0o444)
+  const { openSession } = await import("../src/store.ts")
+  openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_ro" } })
+  const job = {
+    id: "j-ro", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_ro", since: "n1" },
+  } as unknown as JobRecord
+  try {
+    const out = forkLevy(job, { message: "spur done" }, { herdrRun: () => ({ status: 0, stdout: "{}" }) })
+    assert.equal(out.ok, false)
+    if (!out.ok) assert.match(out.why, /repointing the session row failed/)
+  } finally {
+    chmodSync(dbPath, 0o644)
+    delete process.env.OPENCODE_DB
+  }
 })
