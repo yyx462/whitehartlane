@@ -104,6 +104,23 @@ export function forkLevy(
   })
   const label = `fork-${job.id}`
   const cwd = session.cwd || job.dir
+  // Issue #127 — a levy whose project dir is gone births a dead
+  // courier: opencode binds a session to its stored directory and goes
+  // back to it on resume (probe: oc --session from another cwd chdirs
+  // to the old path, ENOENT), so the pane lands on a directory picker
+  // no non-interactive courier can answer. Refuse instead — and the
+  // refusal names both remedies. The durable wake.json waits either
+  // way: nothing is lost, the wake just is not delivered yet.
+  if (!existsSync(cwd)) {
+    return {
+      ok: false,
+      why:
+        `the levy's project dir is gone: ${cwd} — opencode binds a session to its directory, so the courier cannot be born elsewhere. ` +
+        `Recreate it (mkdir -p '${cwd}') or restore the repo there, or repoint the session ` +
+        `(UPDATE session SET directory='<a real dir>' WHERE id='${job.spawner.session_id}' in the opencode DB); ` +
+        `the durable wake.json waits at ${join(job.dir, "wake.json")}`,
+    }
+  }
   const tab = run(["tab", "create", "--label", `whl-fork-${job.id}`.slice(0, 40), "--cwd", cwd, "--no-focus"])
   const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
   const forkTab = jsonAt(tab.stdout, (d) => d?.result?.tab?.tab_id ?? d?.result?.root_pane?.tab_id ?? null)

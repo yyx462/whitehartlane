@@ -70,13 +70,16 @@ test("fork courier: without a receipt path the reaper keeps the ordering but wri
   assert.doesNotMatch(cmd, /worked/)
 })
 
-test("fork courier: delivery arms the self-close reaper", () => {
+test("fork courier: delivery arms the self-close reaper", async () => {
   const dbDir = mkdtempSync(join(tmpdir(), "aos-courier-"))
+  const realCwd = mkdtempSync(join(tmpdir(), "aos-courier-cwd-"))
   process.env.OPENCODE_DB = join(dbDir, "opencode.db")
   const db = new DatabaseSync(process.env.OPENCODE_DB)
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
-  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", "/tmp/courier", 1)
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
+  const { openSession } = await import("../src/store.ts")
+  openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
   const reaped: string[] = []
   const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
   const herdrRun = (args: string[]): RunnerResult => {
@@ -86,11 +89,41 @@ test("fork courier: delivery arms the self-close reaper", () => {
     return ok({ result: {} })
   }
   const job = {
-    id: "j-courier", dir: "/tmp/courier", status: "retired", created: "", updated: "",
+    id: "j-courier", dir: dbDir, status: "retired", created: "", updated: "",
     spawner: { tool: "opencode", session_id: "ses_x", since: "n1" },
   } as unknown as JobRecord
   const out = forkLevy(job, { message: "spur done" }, { herdrRun, detachedSpawn: (cmd) => reaped.push(cmd) })
   assert.equal(out.ok, true)
   assert.equal(reaped.length, 1, "reaper armed on delivery")
   assert.match(reaped[0], /tab close wF:t7/)
+})
+
+test("fork refuses a levy whose project dir is gone — no courier is born into a ghost (issue #127)", async () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "aos-ghost-"))
+  const ghost = join(dbDir, "moved-away") // never created
+  process.env.OPENCODE_DB = join(dbDir, "opencode.db")
+  const db = new DatabaseSync(process.env.OPENCODE_DB)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_ghost", ghost, 1)
+  db.close()
+  const { openSession } = await import("../src/store.ts")
+  openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_ghost" } })
+  const calls: string[] = []
+  const herdrRun = (args: string[]): RunnerResult => {
+    calls.push(args.join(" "))
+    return { status: 0, stdout: JSON.stringify({ result: {} }) }
+  }
+  const job = {
+    id: "j-ghost", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_ghost", since: "n1" },
+  } as unknown as JobRecord
+  const out = forkLevy(job, { message: "spur done" }, { herdrRun })
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.match(out.why, /project dir is gone/)
+    assert.match(out.why, new RegExp(`mkdir -p '${ghost.replaceAll("/", "\\/")}'`), "the refusal names the recreate fix")
+    assert.match(out.why, /UPDATE session SET directory/, "the refusal names the repoint fix")
+    assert.match(out.why, /wake\.json waits/, "the durable receipt is named")
+  }
+  assert.equal(calls.length, 0, "nothing was spawned — no tab, no pane, no dead courier")
 })
