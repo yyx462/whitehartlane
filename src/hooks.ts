@@ -203,6 +203,18 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       throw new HookError(`workflow.drain_timeout_ms must be an integer 1000-3600000 (ms): ${workflow.drain_timeout_ms}`)
     }
   }
+  // Issue #122 — transport retry policy: how many times a member whose
+  // pane dies mid-exchange (process crash, killed TTY — the clear
+  // transport class) is respawned from its booked session before the
+  // death is honest. Semantic outcomes (a stop, a capped stall) are
+  // never retried — a failure should be an answer, never an accident.
+  let retry: number | undefined
+  if (workflow.retry !== undefined) {
+    retry = Number(workflow.retry)
+    if (!Number.isInteger(retry) || retry < 0 || retry > 3) {
+      throw new HookError(`workflow.retry must be an integer 0-3: ${workflow.retry}`)
+    }
+  }
   // The fan-out canary is program policy, not an env accident: a bench
   // where a failed task is a measured outcome declares canary = false
   // (no solo first unit, no run stop on its first fail) beside its
@@ -256,7 +268,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   }
   const steps = stepsFromRaw(m.step)
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(canary !== undefined ? { canary } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
     hooks: {
       units: optHook(hooks.units, "hooks.units", {
         refuseDefault: 'hooks.units has no built-in default — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
