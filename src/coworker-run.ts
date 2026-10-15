@@ -399,7 +399,7 @@ export async function runCoworker(
       const deadSet = deadModels.get(m.name) ?? new Set<string>()
       if (m.model) deadSet.add(m.model)
       deadModels.set(m.name, deadSet)
-      const remaining = remainingCandidates(policy.order, deadSet, fault ? { model: m.model, detail: fault.type } : null)
+      const remaining = remainingCandidates(policy.order, deadSet)
       if (remaining.length === 0) {
         dead.push(m.name)
         deadWhy.set(m.name, `${m.name} hit a token budget and every candidate model has failed`)

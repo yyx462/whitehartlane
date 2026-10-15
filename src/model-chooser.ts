@@ -20,43 +20,29 @@ export type CatalogEntry = { cost: string; depth: string }
 
 export const CATALOG: Record<string, CatalogEntry> = {
   "zhipuai-coding-plan/glm-5.3": {
-    cost: "full price (same as grok-4.7)",
-    depth: "full-depth agentic work: multi-step verification, code migration, deep debugging",
+    cost: "$1.40 in / $4.40 out per 1M tokens; covered by the operator's GLM coding plan (the preferred workhorse)",
+    depth: "full-depth agentic work: multi-step verification, code migration, deep debugging; 1M context",
   },
   "zhipuai-coding-plan/glm-5.3-flash": {
-    cost: "1/5 price",
+    cost: "$0.15 in / $0.50 out per 1M tokens — ~1/9 of glm-5.3, also plan-covered; shares the GLM plan's 5-hour cap pool with glm-5.3",
     depth: "mechanical runs, log greps, simple edits, short replies",
   },
   "xai/grok-4.7": {
-    cost: "full price (same as glm-5.3); metered, no 5-hour plan cap",
-    depth: "full-depth work and the hardest stretches; long context",
+    cost: "$2.00 in / $6.00 out per 1M tokens (above 200k context up to $4.40/$13.20) — the most expensive option; metered, outside the GLM plan",
+    depth: "full-depth work; the escape hatch when no GLM candidate is live (plan cap) or a stretch clearly exceeds GLM",
   },
 }
 
 export const CHOOSER_MIN_CONFIDENCE = 0.6
 
-// A plan-cap fault plausibly binds every model on the same provider
-// plan. Pre-filter them ONLY when a live off-plan alternative exists —
-// otherwise the judge would be asked to pick among certain 429s. When
-// everything left is on the capped plan, keep them and let the next
-// fault drive the honest death walk.
-export function capBound(fault: { detail?: string } | null | undefined): boolean {
-  if (!fault) return false
-  return /使用上限|usage[- ]?cap|5-hour|限额/.test(fault.detail ?? "")
-}
-
-export function remainingCandidates(
-  order: string[],
-  dead: Iterable<string>,
-  fault?: { model?: string; detail?: string } | null,
-): string[] {
+// The just-faulted model leaves the candidate set; everything else stays
+// and the judge decides with the fault + notes in view. A wrong GLM pick
+// under a plan cap costs one refused turn (~nothing); forcing grok from
+// code would silently buy the most expensive model against the
+// operator's stated preference.
+export function remainingCandidates(order: string[], dead: Iterable<string>): string[] {
   const deadSet = new Set(dead)
-  if (fault?.model) deadSet.add(fault.model)
-  const live = order.filter((m) => !deadSet.has(m))
-  if (!capBound(fault)) return live
-  const offPlan = live.filter((m) => !m.startsWith("zhipuai-coding-plan/"))
-  if (offPlan.length === 0) return live
-  return offPlan
+  return order.filter((m) => !deadSet.has(m))
 }
 
 export function chooserState(input: {
@@ -95,9 +81,10 @@ export function chooserQuestions(remaining: string[]): Record<string, unknown> {
       type: "choice",
       instructions:
         "Which model should run `member`'s next stretch of work, given `work` and `fault`? " +
-        "Pick the cheapest candidate that can still carry the work to completion. " +
-        "Full-price candidates cost the same as each other, so between them choose on " +
-        "depth fit and availability (see `fault` and each candidate's notes), never on price. " +
+        "The operator holds a GLM coding plan, so GLM candidates are plan-covered and strongly preferred: " +
+        "prefer a live GLM candidate over grok-4.7 whenever it can carry the work. " +
+        "Otherwise pick the cheapest candidate that can still carry the work to completion, and " +
+        "escalate to grok-4.7 only when no GLM candidate is live (`fault`, candidate notes) or the work clearly exceeds GLM's depth. " +
         "When `fault` shows a model just failed, do not pick that model or anything its notes say shares the same cap.",
       criteria,
     },

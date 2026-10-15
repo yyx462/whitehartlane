@@ -5,7 +5,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   CATALOG,
-  capBound,
   chooserQuestions,
   chooserState,
   chooseModel,
@@ -19,43 +18,25 @@ const ORDER = [
   "xai/grok-4.7",
 ]
 
-test("capBound recognizes plan-cap faults only", () => {
-  assert.equal(capBound({ detail: "provider.rate-limit" }), false)
-  assert.equal(capBound({ detail: "已达到 5 小时的使用上限。您的限额将在 2026-10-15 20:06:04 重置。" }), true)
-  assert.equal(capBound({ detail: "5-hour usage cap reached" }), true)
-  assert.equal(capBound(null), false)
-})
-
-test("remainingCandidates drops the dead and the just-faulted model", () => {
-  assert.deepEqual(remainingCandidates(ORDER, new Set(["zhipuai-coding-plan/glm-5.3-flash"]), null), [
+test("remainingCandidates drops the dead and keeps the rest for the judge", () => {
+  assert.deepEqual(remainingCandidates(ORDER, new Set(["zhipuai-coding-plan/glm-5.3-flash"])), [
     "zhipuai-coding-plan/glm-5.3",
     "xai/grok-4.7",
   ])
-  assert.deepEqual(
-    remainingCandidates(ORDER, new Set(), { model: "zhipuai-coding-plan/glm-5.3", detail: "provider.rate-limit" }),
-    ["zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"],
-  )
+  // a plan-cap fault does NOT pre-filter same-plan candidates: a wrong
+  // GLM pick costs one refused turn (~nothing), forcing grok from code
+  // would buy the most expensive model against the operator's preference
+  assert.deepEqual(remainingCandidates(ORDER, new Set()), ORDER)
 })
 
-test("a plan-cap fault pre-filters same-plan candidates when an off-plan one is live", () => {
-  assert.deepEqual(
-    remainingCandidates(ORDER, new Set(), { model: "zhipuai-coding-plan/glm-5.3", detail: "已达到 5 小时的使用上限" }),
-    ["xai/grok-4.7"],
-  )
-  // everything left is on the capped plan — keep them, the next fault
-  // drives the honest death walk
-  const planOnly = ["zhipuai-coding-plan/glm-5.3", "zhipuai-coding-plan/glm-5.3-flash"]
-  assert.deepEqual(
-    remainingCandidates(planOnly, new Set(), { model: "zhipuai-coding-plan/glm-5.3", detail: "已达到 5 小时的使用上限" }),
-    ["zhipuai-coding-plan/glm-5.3-flash"],
-  )
-})
-
-test("questions cover exactly the live candidates, with the corrected pricing", () => {
-  const q = chooserQuestions(["xai/grok-4.7"]) as { pick: { criteria: Record<string, string> } }
+test("questions cover exactly the live candidates, with real rates and GLM-first policy", () => {
+  const q = chooserQuestions(["xai/grok-4.7"]) as { pick: { criteria: Record<string, string>; instructions: string } }
   assert.deepEqual(Object.keys(q.pick.criteria), ["xai/grok-4.7"])
-  assert.match(q.pick.criteria["xai/grok-4.7"], /same as glm-5\.3/)
-  assert.match(chooserQuestions(ORDER).pick.criteria["zhipuai-coding-plan/glm-5.3-flash"], /1\/5 price/)
+  assert.match(q.pick.criteria["xai/grok-4.7"], /most expensive/)
+  assert.match(q.pick.instructions, /GLM coding plan/)
+  assert.match(q.pick.instructions, /strongly preferred/)
+  assert.match(chooserQuestions(ORDER).pick.criteria["zhipuai-coding-plan/glm-5.3-flash"], /\$0\.15/)
+  assert.match(chooserQuestions(ORDER).pick.criteria["zhipuai-coding-plan/glm-5.3"], /\$1\.40/)
   assert.ok(CATALOG["zhipuai-coding-plan/glm-5.3"])
 })
 
