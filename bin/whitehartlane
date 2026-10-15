@@ -21,6 +21,7 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/run.ts"
+import { refreshWait } from "../src/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkPrompt, forkSeedOf } from "../src/fork.ts"
@@ -359,6 +360,72 @@ async function main() {
     }
     markPromoted(job, note || "pr opened")
     console.log(formatGate(job.id, [], note || "opened"))
+    return
+  }
+
+  // refresh: a person asked the running orchestrator to get out of the
+  // way so the current door can take the job. Drain to paused, then
+  // continue. Never automatic. A ceiling miss does not continue.
+  if (cmd === "refresh") {
+    const jid = process.argv[3]
+    const job = jobs.find((j) => j.id === jid)
+    if (!jid || !job) {
+      console.error(`refresh: no such Job '${jid ?? ""}'`)
+      process.exitCode = 2
+      return
+    }
+    if (job.state !== "running" || !pidAlive(job.pid)) {
+      console.error(`refresh: ${job.id} is ${job.state}${job.pid ? " (orchestrator not live)" : ""} — only a running Job refreshes. A parked one is continue.`)
+      process.exitCode = 2
+      return
+    }
+    const ceiling = 10 * 60_000
+    writeFileSync(join(job.dir, "drain.deadline"), new Date(Date.now() + ceiling).toISOString())
+    try {
+      process.kill(job.pid, "SIGTERM")
+    } catch (err) {
+      console.error(`refresh: could not signal pid ${job.pid} (${err.message})`)
+      process.exitCode = 1
+      return
+    }
+    console.log(`refresh: draining ${job.id} (pid ${job.pid}) — continue follows only after it books paused`)
+    const started = Date.now()
+    let fresh = job
+    for (;;) {
+      fresh = loadJob(job.sid, job.id) ?? fresh
+      const step = refreshWait(fresh.state, Date.now() - started, ceiling)
+      if (step === "wait") {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+        continue
+      }
+      if (step === "timeout") {
+        console.error(`refresh: drain did not park within ${ceiling}ms — not continued. Abort, then continue, if you want to force it.`)
+        process.exitCode = 1
+        return
+      }
+      if (step === "stopped") {
+        console.error(`refresh: ${job.id} left the drain as ${fresh.state} — not continued`)
+        process.exitCode = 1
+        return
+      }
+      break
+    }
+    for (const pane of fresh.panes.filter((p) => p.died === undefined)) {
+      try {
+        execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
+      } catch {}
+      killPane(fresh, pane.label)
+    }
+    const orchestrator = join(import.meta.dirname, orchestratorBin(fresh.workflow))
+    const logFd = openSync(join(fresh.dir, "orchestrator.log"), "a")
+    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, fresh.dir], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env, AGENTIC_OS_SID: fresh.sid, AGENTIC_OS_JID: fresh.id },
+    })
+    child.unref()
+    continueJob(fresh, child.pid)
+    console.log(`refreshed ${fresh.id} (pid ${child.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
     return
   }
 

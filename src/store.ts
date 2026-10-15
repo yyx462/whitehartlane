@@ -110,6 +110,9 @@ export type JobRecord = {
   task: string
   dir: string
   pid?: number
+  // The door this orchestrator was born from. A later merge does not
+  // enter the process; Refresh is how a person loads the new one.
+  door?: { rev: string; started: string }
   // Issue #123 — the lease: leadership over a Job is a written,
   // expiring claim in job.json, not whoever happens to be running.
   // The orchestrator acquires at open (epoch bumps on every claim) and
