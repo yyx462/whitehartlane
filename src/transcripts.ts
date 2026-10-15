@@ -200,12 +200,70 @@ export function resolveTranscript(
   return null
 }
 
+// Issue #127 — repoint a session whose project directory vanished
+// (repo renamed/moved/deleted) to a surviving ancestor. opencode binds
+// a session to its stored directory on resume (it chdirs back to the
+// old path, ENOENT), so moving the binding is the only way a ghost
+// session can be woken. The rule is deterministic — the caller picks
+// the target (nearest surviving ancestor), the rail never guesses;
+// the old→new move is recorded in the caller's trail, so every
+// repoint is auditable and reversible.
+export function opencodeSessionDirectoryOf(id: string): string | null {
+  if (!existsSync(opencodeDb())) return null
+  let db: DatabaseSync
+  try {
+    db = new DatabaseSync(opencodeDb(), { readOnly: true })
+  } catch {
+    return null
+  }
+  try {
+    for (const table of OPENCODE_SESSION_TABLES) {
+      try {
+        const row = db.prepare(`SELECT directory FROM ${table} WHERE id = ?`).get(id) as
+          | { directory?: string }
+          | undefined
+        if (typeof row?.directory === "string") return row.directory
+      } catch {
+        /* table absent on this opencode version — try the next */
+      }
+    }
+    return null
+  } finally {
+    db.close()
+  }
+}
+
+// Returns true when at least one row moved. WAL allows the write
+// beside a live opencode server; a busy db throws and the caller
+// falls back to the refusal that names the manual remedy.
+export function repointOpencodeSession(id: string, directory: string): boolean {
+  if (!existsSync(opencodeDb())) return false
+  let db: DatabaseSync
+  try {
+    db = new DatabaseSync(opencodeDb())
+  } catch {
+    return false
+  }
+  try {
+    for (const table of OPENCODE_SESSION_TABLES) {
+      try {
+        const r = db.prepare(`UPDATE ${table} SET directory = ? WHERE id = ?`).run(directory, id)
+        if (r.changes > 0) return true
+      } catch {
+        /* table absent on this opencode version — try the next */
+      }
+    }
+    return false
+  } finally {
+    db.close()
+  }
+}
+
 // A fork seed names a host session by id, not by a (cwd, since)
 // window: pi → the session file its header ids, opencode → the db row
 // (the CLI list is the fallback). This is the "seed must resolve"
 // half of fork admission (zen 6).
-export function seedSessionFile(seed: { tool: string; session_id: string }): string | null {
-  if (seed.tool === "pi") {
+export function seedSessionFile(seed: { tool: string; session_id: string }): string | null {  if (seed.tool === "pi") {
     const root = piSessionsRoot()
     if (!existsSync(root)) return null
     for (const entry of readdirSync(root, { withFileTypes: true })) {
