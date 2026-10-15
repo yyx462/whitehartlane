@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -305,13 +306,15 @@ function optHook(value: unknown, field: string, opts: { refuseNoop?: string; ref
 function runHook(
   cmd: string,
   taskDir: string,
+  opts: { timeoutMs?: number } = {},
 ): { stdout: string; status: number; stderr: string; ms: number } {
+  const timeoutMs = opts.timeoutMs ?? hookTimeoutMs()
   const startedAt = Date.now()
   try {
     const stdout = execSync(cmd, {
       cwd: taskDir,
       encoding: "utf8",
-      timeout: hookTimeoutMs(),
+      timeout: timeoutMs,
       stdio: ["ignore", "pipe", "pipe"],
     })
     return { stdout: stdout ?? "", status: 0, stderr: "", ms: Date.now() - startedAt }
@@ -322,7 +325,7 @@ function runHook(
     // the raw error escaped and aborted a whole run whose verifier was
     // a second from passing). Any kill shape is a hook timeout.
     if (e.killed || e.signal || e.code === "ETIMEDOUT") {
-      throw new HookError(`hook timed out after ${hookTimeoutMs()}ms: ${cmd}`)
+      throw new HookError(`hook timed out after ${timeoutMs}ms: ${cmd}`)
     }
     if (typeof e.status !== "number") throw err
     return { stdout: e.stdout ?? "", status: e.status, stderr: e.stderr ?? "", ms: Date.now() - startedAt }
@@ -483,6 +486,103 @@ export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifes
       workerKind: manifest.workflow.worker_kind,
     },
   }
+}
+
+// The staging probe (issue #121): grammar-check the hooks this run will
+// actually call, on sample inputs, BEFORE anything is booked or born.
+// j-64e035 proved a hook that cannot speak the protocol is invisible
+// until the worst moment — 79 minutes of clean work, then a fatal at
+// report time. The probe costs milliseconds and refuses at the door,
+// where the fix costs one line of toml instead of a rerun. Refusals
+// speak: each names the hook, the offending output, and the fix.
+// AGENTIC_OS_PROBE=0 disarms; AGENTIC_OS_PROBE_TIMEOUT_MS tunes the
+// per-hook ceiling (default 10s — counters and unit listers are fast;
+// a hook that slow at probe time is itself a finding).
+export function probeHooks(
+  taskDir: string,
+  manifest: Manifest,
+  kind: "fan-out" | "lab" | "coworker",
+): string[] {
+  if (process.env.AGENTIC_OS_PROBE === "0") return []
+  const refusals: string[] = []
+  const probeDir = mkdtempSync(join(tmpdir(), "agentic-os-probe-"))
+  try {
+    const countsCmd = manifest.hooks.counts
+    if (countsCmd !== undefined && countsCmd !== "default") {
+      const tablePath = join(probeDir, "table.json")
+      writeFileSync(tablePath, JSON.stringify([{ unit: "probe", result: "ok", pass: true }]))
+      let stdout = ""
+      let status = 0
+      try {
+        ;({ stdout, status } = runHook(`${countsCmd} ${quote(tablePath)}`, taskDir, { timeoutMs: probeTimeoutMs() }))
+      } catch (err) {
+        refusals.push(`counts hook did not survive the probe: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      if (status !== 0) {
+        refusals.push(`counts hook exited ${status} at probe: ${countsCmd}`)
+      } else if (refusals.length === 0) {
+        try {
+          const parsed = JSON.parse(stdout) as Record<string, unknown>
+          const bad = Object.entries(parsed).find(([, v]) => typeof v !== "number")
+          if (bad) {
+            refusals.push(`counts hook count ${bad[0]} is not a number (${JSON.stringify(bad[1])}) — a counts hook must print a JSON object of numbers`)
+          } else if (Object.keys(parsed).length === 0) {
+            refusals.push('counts hook printed an empty object at probe — count something, omit the line for the built-in counter, or use counts = "default"')
+          }
+        } catch {
+          refusals.push(
+            `counts hook prints no JSON at probe (${stdout.slice(0, 80) || "empty stdout"}) — omit the line for the built-in counter, or use counts = "default" (issue #121)`,
+          )
+        }
+      }
+    }
+    // units is only ever called by a fan-out program without steps —
+    // coworker has members, steps programs derive units from [[step]]
+    const unitsCmd = manifest.hooks.units
+    if (kind === "fan-out" && manifest.steps === undefined && unitsCmd !== undefined) {
+      let stdout = ""
+      let status = 0
+      try {
+        ;({ stdout, status } = runHook(unitsCmd, taskDir, { timeoutMs: probeTimeoutMs() }))
+      } catch (err) {
+        refusals.push(`units hook did not survive the probe: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      if (status === 75) {
+        // the provider refused — provider-dependent, not grammar; skip
+      } else if (status !== 0) {
+        refusals.push(`units hook exited ${status} at probe: ${unitsCmd}`)
+      } else {
+        const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+        if (lines.length === 0) {
+          refusals.push(
+            'units hook produced no units at probe — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
+          )
+        } else {
+          for (let i = 0; i < lines.length; i++) {
+            try {
+              const parsed = JSON.parse(lines[i]) as { id?: unknown }
+              if (typeof parsed.id !== "string" || !SHEP_SAFE_ID.test(parsed.id)) {
+                refusals.push(`units hook line ${i + 1} id is not shep-safe at probe: ${JSON.stringify(parsed.id)}`)
+                break
+              }
+            } catch {
+              refusals.push(`units hook line ${i + 1} is not JSON at probe: ${lines[i].slice(0, 60)}`)
+              break
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true })
+  }
+  return refusals
+}
+
+function probeTimeoutMs(): number {
+  const raw = Number(process.env.AGENTIC_OS_PROBE_TIMEOUT_MS ?? "")
+  if (Number.isFinite(raw) && raw >= 1_000) return Math.min(raw, 60_000)
+  return 10_000
 }
 
 export type ManifestOrigin = "local" | "env" | "user-global" | "builtin"
