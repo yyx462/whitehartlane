@@ -10,6 +10,7 @@
 //          (or the UI) writes decide.<member> = "switch" | "stay"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { DEFAULT_ORDER } from "./model-chooser.ts"
 
 export type FallbackMode = "auto" | "ask"
 
@@ -54,6 +55,18 @@ export function isProviderBudgetError(error: { type?: string; status?: number } 
   if (!error) return false
   if (error.type && BUDGET_TYPES.has(error.type)) return true
   return error.status === 429
+}
+
+// ANY provider refusal is ladder-worthy, not only budget ones: an
+// auth error from a model the operator has no subscription for (the
+// wrong-model demo), model-not-found, 5xx — all mean "this provider
+// will not take another turn", and the answer is the same: re-pick
+// from the candidates. Non-provider errors (a human abort, an agent
+// stop) are decisions, not faults — the ladder must not touch them.
+export function isProviderFault(error: { type?: string; status?: number } | null | undefined): boolean {
+  if (!error) return false
+  if (error.type && error.type.startsWith("provider.")) return true
+  return typeof error.status === "number" && error.status >= 400
 }
 
 export type BudgetAction =
@@ -110,8 +123,44 @@ export function policyFromToml(toml: string): ModelPolicy & { chooser?: "jev" } 
   }
 }
 
-export function readModelsFile(taskDir: string, toml: string): ModelsFile {
-  const base = policyFromToml(toml)
+// The model policy is layered, most specific wins:
+//   1. run models.json — in-flight override (the human's ballot box)
+//   2. the spur's workflow.toml [fallback] — per-spur policy
+//   3. models.local.toml at the door checkout root — the operator's
+//      global default, local-only and gitignored (never pushed)
+//   4. the built-in candidate order — zero-config: auto, static walk
+//
+// A spur section with a mode but no order borrows the order from the
+// layer below (multi-model spurs name their own order; everything else
+// inherits). doorRoot is where step 3 looks; production passes the
+// door checkout root, tests pass a fixture dir.
+function globalPolicy(doorRoot: string): ModelsFile | null {
+  const path = join(doorRoot, "models.local.toml")
+  if (!existsSync(path)) return null
+  try {
+    const g = policyFromToml(readFileSync(path, "utf8"))
+    if (g.order.length === 0) return null
+    return { mode: g.mode, order: g.order, ...(g.chooser ? { chooser: g.chooser } : {}) }
+  } catch {
+    return null
+  }
+}
+
+function layeredBase(toml: string, doorRoot: string | null): ModelsFile {
+  const hasOwn = /^\s*\[fallback\]/m.test(toml)
+  const own = policyFromToml(toml)
+  const g = doorRoot ? globalPolicy(doorRoot) : null
+  if (hasOwn) {
+    const order = own.order.length > 0 ? own.order : (g && g.order.length > 0 ? g.order : DEFAULT_ORDER)
+    const chooser = own.chooser ?? g?.chooser
+    return { mode: own.mode, order, ...(chooser ? { chooser } : {}) }
+  }
+  if (g && g.order.length > 0) return g
+  return { mode: "auto", order: DEFAULT_ORDER }
+}
+
+export function readModelsFile(taskDir: string, toml: string, doorRoot?: string | null): ModelsFile {
+  const base = layeredBase(toml, doorRoot ?? null)
   const path = join(taskDir, "models.json")
   if (!existsSync(path)) return base
   try {

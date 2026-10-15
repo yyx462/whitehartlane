@@ -35,6 +35,10 @@ export const CATALOG: Record<string, CatalogEntry> = {
 
 export const CHOOSER_MIN_CONFIDENCE = 0.6
 
+// The built-in candidate order — the zero-config default when neither
+// the spur toml nor the local global file names any.
+export const DEFAULT_ORDER = Object.keys(CATALOG)
+
 // The just-faulted model leaves the candidate set; everything else stays
 // and the judge decides with the fault + notes in view. A wrong GLM pick
 // under a plan cap costs one refused turn (~nothing); forcing grok from

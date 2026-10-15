@@ -15,7 +15,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
-import { isProviderBudgetError, parseModelRef } from "./model-ladder.ts"
+import { isProviderFault, parseModelRef } from "./model-ladder.ts"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
@@ -960,7 +960,7 @@ export class Rail implements ShepPort {
     }
     if (!Array.isArray(data) || data.length === 0) return null
     const latest = [...data].sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0))[0]
-    if (!latest?.id || !isProviderBudgetError(latest.error)) return null
+    if (!latest?.id || !isProviderFault(latest.error)) return null
     return { id: latest.id, type: latest.error?.type ?? "provider.rate-limit" }
   }
 

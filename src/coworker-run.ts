@@ -17,6 +17,10 @@ import { waitChange, type Rail } from "./rail.ts"
 import { writeReport, type Report } from "./report.ts"
 import { liveSpawnerSessionIds, writeWorkerPermissions } from "./store.ts"
 
+// The door checkout root — where the operator's global models.local.toml
+// lives (layer 3 of the policy ladder).
+const DOOR_ROOT = join(import.meta.dirname, "..")
+
 export async function runCoworker(
   rail: Rail,
   opts: { stallMs?: number; beatMs?: number; graceMs?: number } = {},
@@ -103,7 +107,7 @@ export async function runCoworker(
     // No explicit member model + a configured chooser = the judge picks
     // the birth model from the candidate order. A fresh member has no
     // fault history; the brief excerpt is the only evidence that matters.
-    const birthPolicy = readModelsFile(taskDir, toml)
+    const birthPolicy = readModelsFile(taskDir, toml, DOOR_ROOT)
     if (!m.model && birthPolicy.chooser === "jev" && birthPolicy.order.length > 0) {
       const pick = chooseModel({
         taskDir,
@@ -356,7 +360,7 @@ export async function runCoworker(
     // resets, or permission churn eats the whole nudge budget while
     // the member is talking to the rail, not idling (j-a532f9)
     if (ballOn.name && answered.has(ballOn.name)) ballOn.since = Date.now()
-    const policy = readModelsFile(taskDir, toml)
+    const policy = readModelsFile(taskDir, toml, DOOR_ROOT)
     for (const m of members) {
       if (dead.includes(m.name)) continue
       if (switchedAwaitingTurn.has(m.name)) {
@@ -378,12 +382,12 @@ export async function runCoworker(
       }
       if (action.kind === "exhausted") {
         dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a token budget and the model ladder is empty`)
-        log(`member ${m.name} budget exhausted — no next model in the ladder`)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and the model ladder is empty`)
+        log(`member ${m.name} out of candidates — no next model in the ladder`)
         break
       }
       if (action.kind === "ask") {
-        writePending(taskDir, policy, { member: m.name, from: m.model ?? "", to: action.to, at: new Date().toISOString(), why: "token budget" })
+        writePending(taskDir, policy, { member: m.name, from: m.model ?? "", to: action.to, at: new Date().toISOString(), why: "provider fault" })
         if (ballOn.name === m.name) ballOn.since = Date.now()
         log(`ASK model switch ${m.name}: ${m.model ?? "?"} -> ${action.to}`)
         continue
@@ -402,8 +406,8 @@ export async function runCoworker(
       const remaining = remainingCandidates(policy.order, deadSet)
       if (remaining.length === 0) {
         dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a token budget and every candidate model has failed`)
-        log(`member ${m.name} budget exhausted — every candidate model failed`)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        log(`member ${m.name} out of candidates — every candidate model failed`)
         break
       }
       let to: string | null = null
@@ -424,8 +428,8 @@ export async function runCoworker(
       if (!to) to = nextModel(remaining, m.model)
       if (!to) {
         dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a token budget and every candidate model has failed`)
-        log(`member ${m.name} budget exhausted — no next model among [${remaining.join(", ")}]`)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        log(`member ${m.name} out of candidates — no next model among [${remaining.join(", ")}]`)
         break
       }
       const switched = rail.switchSessionModel(sid, to, sandboxOf.get(m.name) ?? taskDir)
@@ -435,7 +439,7 @@ export async function runCoworker(
       }
       m.model = to
       switchedAwaitingTurn.add(m.name)
-      rail.promptAgent(m.name, `[rail] Your provider refused another turn (token budget). The model for this session is now ${to}. Continue exactly where you left off.`)
+      rail.promptAgent(m.name, `[rail] Your provider refused another turn. The model for this session is now ${to}. Continue exactly where you left off.`)
       if (ballOn.name === m.name) ballOn.since = Date.now()
       log(`model switch ${m.name}: -> ${to} (inside the live session)`)
     }

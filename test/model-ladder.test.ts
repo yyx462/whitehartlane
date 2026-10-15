@@ -6,11 +6,13 @@ import test from "node:test"
 import {
   budgetAction,
   isProviderBudgetError,
+  isProviderFault,
   nextModel,
   policyFromToml,
   readModelsFile,
   writePending,
 } from "../src/model-ladder.ts"
+import { DEFAULT_ORDER } from "../src/model-chooser.ts"
 
 const TOML = `[workflow]
 name = "t"
@@ -26,6 +28,59 @@ test("a provider.rate-limit message is a budget fault; ordinary work is not", ()
   assert.equal(isProviderBudgetError({ status: 429 }), true)
   assert.equal(isProviderBudgetError({ type: "provider.auth" }), false)
   assert.equal(isProviderBudgetError(undefined), false)
+})
+
+test("ANY provider.* error is a fault; non-provider errors are decisions", () => {
+  assert.equal(isProviderFault({ type: "provider.auth", status: 401 }), true)
+  assert.equal(isProviderFault({ type: "provider.model-not-found" }), true)
+  assert.equal(isProviderFault({ type: "provider.rate-limit", status: 429 }), true)
+  assert.equal(isProviderFault({ status: 403 }), true)
+  assert.equal(isProviderFault({ status: 500 }), true)
+  assert.equal(isProviderFault({ type: "auth" }), false)
+  assert.equal(isProviderFault({}), false)
+  assert.equal(isProviderFault(undefined), false)
+})
+
+test("policy layering: spur toml > local global file > built-in default", () => {
+  const root = mkdtempSync(join(tmpdir(), "aos-policy-"))
+  const plainToml = "[workflow]\nname = \"t\"\n"
+  // no spur section, no global file -> built-in default (static, auto)
+  assert.deepEqual(readModelsFile(mkdtempSync(join(tmpdir(), "aos-run-")), plainToml, root), {
+    mode: "auto",
+    order: DEFAULT_ORDER,
+  })
+  // global file fills an empty policy, chooser included
+  writeFileSync(
+    join(root, "models.local.toml"),
+    '[fallback]\nmode = "auto"\nchooser = "jev"\norder = ["a/one", "b/two"]\n',
+  )
+  assert.deepEqual(readModelsFile(mkdtempSync(join(tmpdir(), "aos-run-")), plainToml, root), {
+    mode: "auto",
+    order: ["a/one", "b/two"],
+    chooser: "jev",
+  })
+  // a spur section with a mode but no order borrows the order below
+  const spurModeOnly = '[fallback]\nmode = "ask"\n'
+  assert.deepEqual(readModelsFile(mkdtempSync(join(tmpdir(), "aos-run-")), spurModeOnly, root), {
+    mode: "ask",
+    order: ["a/one", "b/two"],
+    chooser: "jev",
+  })
+  // a spur order is the most specific — wins over the global file; the
+  // chooser MECHANISM still inherits (narrowing candidates is not a
+  // vote against the judge; a spur that wants static omits nothing —
+  // there is no static escape yet, by design)
+  const spurFull = '[fallback]\nmode = "auto"\norder = ["c/three"]\n'
+  assert.deepEqual(readModelsFile(mkdtempSync(join(tmpdir(), "aos-run-")), spurFull, root), {
+    mode: "auto",
+    order: ["c/three"],
+    chooser: "jev",
+  })
+  // no doorRoot: no global lookup, still the built-in default
+  assert.deepEqual(readModelsFile(mkdtempSync(join(tmpdir(), "aos-run-")), plainToml), {
+    mode: "auto",
+    order: DEFAULT_ORDER,
+  })
 })
 
 test("next model walks the order and stops at the end", () => {
