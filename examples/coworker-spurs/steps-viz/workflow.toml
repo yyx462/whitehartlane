@@ -12,6 +12,4 @@ initiates = true
 model = "zai-coding-plan/glm-5.3-flash"
 
 [hooks]
-units = "true"
-grade = "true"
 counts = "node hooks/counts.mjs"

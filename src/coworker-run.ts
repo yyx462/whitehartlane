@@ -8,12 +8,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
+import { budgetAction, clearPending, nextModel, readModelsFile, writePending } from "./model-ladder.ts"
+import { chooseModel, remainingCandidates } from "./model-chooser.ts"
 import { runCounts } from "./hooks.ts"
 import { emptyBoard } from "./lanes.ts"
 import { drainDeadline } from "./orchestrator.ts"
 import { waitChange, type Rail } from "./rail.ts"
 import { writeReport, type Report } from "./report.ts"
 import { liveSpawnerSessionIds, writeWorkerPermissions } from "./store.ts"
+
+// The door checkout root — where the operator's global models.local.toml
+// lives (layer 3 of the policy ladder).
+const DOOR_ROOT = join(import.meta.dirname, "..")
 
 export async function runCoworker(
   rail: Rail,
@@ -50,7 +56,7 @@ export async function runCoworker(
   const bookedSessionOf = (name: string): string | undefined => {
     if (!ledger) return undefined
     const latest = ledger.job.panes
-      .filter((p) => p.unit === name && p.transcript)
+      .filter((p) => (p.unit === name || p.unit?.startsWith(`${name}-`)) && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id
@@ -63,6 +69,15 @@ export async function runCoworker(
     }
   }
   const { messages: priorMessages } = readMessages(join(taskDir, "messages"), names)
+  // Kind-scoped hooks, taught not suffered (j-64e035): a coworker runs
+  // only counts. units/grade are fan-out/lab concepts — declared here
+  // they are dead config, and a scaffold that copied them from a
+  // fan-out example is one counts="true" away from a report-time death.
+  if (manifest.hooks.units || manifest.hooks.grade) {
+    log(
+      "coworker ignores hooks.units/hooks.grade (the members are the units; only counts runs) — remove them from the spur toml",
+    )
+  }
   const initiator = members.find((m) => m.initiates)?.name
   const midTurn = interruptedMember(priorMessages, delivered, initiator)
   if (resumeOf.size > 0) {
@@ -98,6 +113,20 @@ export async function runCoworker(
     )
     const slot = rail.ensureRole(board, m.name, dir)
     board = slot.board
+    // No explicit member model + a configured chooser = the judge picks
+    // the birth model from the candidate order. A fresh member has no
+    // fault history; the brief excerpt is the only evidence that matters.
+    const birthPolicy = readModelsFile(taskDir, toml, DOOR_ROOT)
+    if (!m.model && birthPolicy.chooser === "jev" && birthPolicy.order.length > 0) {
+      const pick = chooseModel({
+        taskDir,
+        member: m.name,
+        remaining: birthPolicy.order,
+        briefExcerpt: brief.slice(0, 400),
+      })
+      m.model = pick.ok && pick.model ? pick.model : birthPolicy.order[0]
+      log(`chooser birth ${m.name}: ${m.model}${pick.ok ? ` (jev confidence ${pick.confidence})` : ` (${pick.why} — order[0] fallback)`}`)
+    }
     // the initiator wakes on its brief alone; everyone else is held
     // idle until the rail delivers brief + first message together —
     // except a resumed member (ADR 5): its session already carries the
@@ -111,7 +140,11 @@ export async function runCoworker(
         )
       : false
     if (slot.pane) rail.renamePane(slot.pane, m.name)
-    paneOfMember.set(m.name, slot.pane)
+    // A failed start ghost-clears its pane. Leave that id on the board
+    // and the next member splits from a closed anchor (j-ea5f4d: junior
+    // timed out, senior's split was `pane not found`, senior never born).
+    if (!ok && slot.pane) board = rail.dropPane(board, slot.pane)
+    paneOfMember.set(m.name, ok ? slot.pane : null)
     if (ok && (m.initiates || resumeId)) prompted.add(m.name)
     if (ok && resumeId && m.name === midTurn) {
       rail.promptAgent(
@@ -172,6 +205,9 @@ export async function runCoworker(
   // (birth is asynchronous) — parameterized so tests drive it to 0
   const graceMs = opts.graceMs ?? 15_000
   const dead: string[] = []
+  const switchedAwaitingTurn = new Set<string>()
+  const actedFault = new Map<string, string>()
+  const deadModels = new Map<string, Set<string>>()
   // why each member died — the report's exchange row carries it, so a
   // "failed" never arrives without its reason (j-5b245e read "ended by
   // dead" with the cap hit only in the log)
@@ -333,6 +369,89 @@ export async function runCoworker(
     // resets, or permission churn eats the whole nudge budget while
     // the member is talking to the rail, not idling (j-a532f9)
     if (ballOn.name && answered.has(ballOn.name)) ballOn.since = Date.now()
+    const policy = readModelsFile(taskDir, toml, DOOR_ROOT)
+    for (const m of members) {
+      if (dead.includes(m.name)) continue
+      if (switchedAwaitingTurn.has(m.name)) {
+        if (rail.agentStatus(m.name).includes('"agent_status":"working"')) switchedAwaitingTurn.delete(m.name)
+        else continue
+      }
+      const sid = bookedSessionOf(m.name)
+      const fault = sid ? rail.latestSessionFault(sid, sandboxOf.get(m.name) ?? taskDir) : null
+      if (fault && fault.id === actedFault.get(m.name)) continue
+      const action = budgetAction({ fault: Boolean(fault), member: m.name, current: m.model, policy })
+      if (action.kind === "none") continue
+      if (action.kind === "waiting") {
+        if (ballOn.name === m.name) ballOn.since = Date.now()
+        continue
+      }
+      if (action.kind === "stay") {
+        clearPending(taskDir, policy, m.name)
+        continue
+      }
+      if (action.kind === "exhausted") {
+        dead.push(m.name)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and the model ladder is empty`)
+        log(`member ${m.name} out of candidates — no next model in the ladder`)
+        break
+      }
+      if (action.kind === "ask") {
+        writePending(taskDir, policy, { member: m.name, from: m.model ?? "", to: action.to, at: new Date().toISOString(), why: "provider fault" })
+        if (ballOn.name === m.name) ballOn.since = Date.now()
+        log(`ASK model switch ${m.name}: ${m.model ?? "?"} -> ${action.to}`)
+        continue
+      }
+      if (!sid) {
+        log(`model switch ${m.name} -> ${action.to} skipped — no booked session yet`)
+        continue
+      }
+      if (fault) actedFault.set(m.name, fault.id)
+      // The failed model leaves the candidate set; the chooser (or the
+      // static ladder, when no chooser is configured) picks among what
+      // is still live. Empty remaining = the honest death walk.
+      const deadSet = deadModels.get(m.name) ?? new Set<string>()
+      if (m.model) deadSet.add(m.model)
+      deadModels.set(m.name, deadSet)
+      const remaining = remainingCandidates(policy.order, deadSet)
+      if (remaining.length === 0) {
+        dead.push(m.name)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        log(`member ${m.name} out of candidates — every candidate model failed`)
+        break
+      }
+      let to: string | null = null
+      if (policy.chooser === "jev") {
+        const pick = chooseModel({
+          taskDir,
+          member: m.name,
+          remaining,
+          fault: fault ? { model: m.model ?? "", detail: fault.type } : null,
+        })
+        if (pick.ok && pick.model) {
+          to = pick.model
+          log(`chooser ${m.name}: ${to} (jev confidence ${pick.confidence}) over [${remaining.join(", ")}]`)
+        } else {
+          log(`chooser ${m.name}: ${pick.why} — static ladder fallback over [${remaining.join(", ")}]`)
+        }
+      }
+      if (!to) to = nextModel(remaining, m.model)
+      if (!to) {
+        dead.push(m.name)
+        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        log(`member ${m.name} out of candidates — no next model among [${remaining.join(", ")}]`)
+        break
+      }
+      const switched = rail.switchSessionModel(sid, to, sandboxOf.get(m.name) ?? taskDir)
+      if (!switched.ok) {
+        log(`model switch ${m.name} -> ${to} failed: ${switched.why}`)
+        continue
+      }
+      m.model = to
+      switchedAwaitingTurn.add(m.name)
+      rail.promptAgent(m.name, `[rail] Your provider refused another turn. The model for this session is now ${to}. Continue exactly where you left off.`)
+      if (ballOn.name === m.name) ballOn.since = Date.now()
+      log(`model switch ${m.name}: -> ${to} (inside the live session)`)
+    }
     // the stall guard: whoever holds the ball and idles too long gets
     // nudged — twice, then the exchange ends. Working resets the clock.
     if (ballOn.name && !dead.includes(ballOn.name)) {

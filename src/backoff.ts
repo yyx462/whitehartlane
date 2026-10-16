@@ -31,16 +31,16 @@ export function backoffMs(base: number, attempt: number): number {
 // 0 under node:test (a single attempt never pauses anyway, and tests
 // that scale the loop name their own base)
 export function backoffBase(envVar: string, productionDefault: number): number {
-  const raw = Number(process.env[envVar] ?? "")
-  if (Number.isFinite(raw) && raw >= 0) return raw
+  const raw = process.env[envVar]
+  if (raw !== undefined && raw !== "" && Number.isFinite(Number(raw)) && Number(raw) >= 0) return Number(raw)
   return process.env.NODE_TEST_CONTEXT ? 0 : productionDefault
 }
 
 // an explicit env bound always wins; otherwise the production default,
 // except under node:test (0 — no jitter to slow the suite)
 export function jitterBound(envVar: string, productionDefault: number): number {
-  const raw = Number(process.env[envVar] ?? "")
-  if (Number.isFinite(raw) && raw >= 0) return raw
+  const raw = process.env[envVar]
+  if (raw !== undefined && raw !== "" && Number.isFinite(Number(raw)) && Number(raw) >= 0) return Number(raw)
   return process.env.NODE_TEST_CONTEXT ? 0 : productionDefault
 }
 

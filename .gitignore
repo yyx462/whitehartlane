@@ -2,3 +2,6 @@ node_modules
 server.log
 .yyx-meta.json
 dist
+
+# operator-local global model policy (never pushed)
+models.local.toml

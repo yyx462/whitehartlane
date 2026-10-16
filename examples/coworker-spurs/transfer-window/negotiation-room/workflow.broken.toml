@@ -26,6 +26,4 @@ model = "zhipuai-coding-plan/glm-5.3-flash"
 initiates = true
 
 [hooks]
-units = "true"
-grade = "true"
 counts = "node hooks/counts.mjs"

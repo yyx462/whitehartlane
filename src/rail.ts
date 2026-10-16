@@ -15,6 +15,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
+import { isProviderFault, parseModelRef } from "./model-ladder.ts"
 import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
@@ -941,6 +942,42 @@ export class Rail implements ShepPort {
     return this.agentState(name)
   }
 
+  // Latest session message whose error.type is a provider budget fault.
+  // OpenCode puts this on the message (`provider.rate-limit`, status 429),
+  // not on the pane. Returns the message id so a stale fault is not re-judged.
+  latestSessionFault(sessionId: string, cwd: string): { id: string; type: string } | null {
+    const r = spawnSync("opencode", ["api", "GET", `/api/session/${sessionId}/message`], {
+      cwd,
+      encoding: "utf8",
+      timeout: 20_000,
+    })
+    if ((r.status ?? 1) !== 0 || !r.stdout) return null
+    let data: Array<{ id?: string; time?: { created?: number }; error?: { type?: string; status?: number } }>
+    try {
+      data = JSON.parse(r.stdout).data
+    } catch {
+      return null
+    }
+    if (!Array.isArray(data) || data.length === 0) return null
+    const latest = [...data].sort((a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0))[0]
+    if (!latest?.id || !isProviderFault(latest.error)) return null
+    return { id: latest.id, type: latest.error?.type ?? "provider.rate-limit" }
+  }
+
+  // Switch the model inside the live session. A resumed session keeps
+  // its old provider; the sandbox opencode.json does not override it.
+  switchSessionModel(sessionId: string, model: string, cwd: string): { ok: boolean; why?: string } {
+    const ref = parseModelRef(model)
+    if (!ref) return { ok: false, why: `not a provider/model: ${model}` }
+    const r = spawnSync(
+      "opencode",
+      ["api", "POST", `/api/session/${sessionId}/model`, "-d", JSON.stringify({ model: ref })],
+      { cwd, encoding: "utf8", timeout: 20_000 },
+    )
+    if ((r.status ?? 1) !== 0) return { ok: false, why: `session model rc=${r.status}: ${(r.stdout ?? r.stderr ?? "").slice(0, 120)}` }
+    return { ok: true }
+  }
+
   renamePane(pane: string, name: string): void {
     this.herdr("pane", "rename", pane, name)
   }
@@ -1017,7 +1054,7 @@ export class Rail implements ShepPort {
       const tab = board.tabs[placed.tab]
       const from = tab.lanes[tab.lanes.length - 1]!.panes[0]!
       const pane = this.splitPane(from, "right", dir, 0.5)
-      if (!pane) return { board, pane: null }
+      if (!pane) return this.freshRole(board, role, dir)
       const next = note(board, placed, pane)
       this.equalize(next.tabs[placed.tab].lanes.map((lane) => lane.panes[0]!), "x")
       return { board: next, pane }
@@ -1025,10 +1062,19 @@ export class Rail implements ShepPort {
     const lane = board.tabs[placed.tab].lanes[placed.lane]
     const from = lane.panes[lane.panes.length - 1]!
     const pane = this.splitPane(from, "down", dir, 0.5)
-    if (!pane) return { board, pane: null }
+    if (!pane) return this.freshRole(board, role, dir)
     const next = note(board, placed, pane)
     this.equalize(next.tabs[placed.tab].lanes[placed.lane].panes, "y")
     return { board: next, pane }
+  }
+
+  // The recorded anchor was already closed (a failed start ghost-clears
+  // its pane). A null split must not skip the member — open a new tab.
+  private freshRole(board: Board, role: string, dir: string): { board: Board; pane: string | null } {
+    const pane = this.openShell(dir, role)
+    if (!pane) return { board, pane: null }
+    this.log(`split anchor dead for ${role} — opened a fresh tab`)
+    return { board: note(board, { kind: "overflow-tab", role }, pane), pane }
   }
 
   dropPane(board: Board, pane: string): Board {

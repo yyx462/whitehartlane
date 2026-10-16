@@ -5,6 +5,10 @@
 Shapes: see yyxSkills `docs/agents/repo-layout.md`.
 <!-- /yyx:repo-layout -->
 
+<!-- agent-api: coding-agent and herdr state comes from API fields
+     (OpenCode message error.type / finish, herdr agent_status). Never
+     scrape pane screen text or TUI chrome for control flow. -->
+
 <!-- window server: verifying UI changes on :8787 after a merge — static
      assets (app.js/style.css) refresh on browser reload, but server.mjs
      runs in the launchd daemon's memory: bounce it with
