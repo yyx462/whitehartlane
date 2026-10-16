@@ -10,7 +10,7 @@
 // shep/herdr invocation funnels through the runner seam (src/runners.ts)
 // injected below. If panes become remote machines tomorrow, the swap
 // happens there, in one file; engines and bins do not change.
-import { spawn, spawnSync } from "node:child_process"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
@@ -415,31 +415,14 @@ export class Rail implements ShepPort {
     }
     this.fleetRoot = root
     this.fleetTab = jsonAt(r.stdout, (d) => (d as { result?: { tab?: { tab_id?: string } } }).result?.tab?.tab_id ?? null)
-    // The tab root is not a shell. Split a shell, close the root, then
-    // split that shell 50-50. The lane and the worker column are both new panes.
-    const shell = this.splitPane(root, "right", dir, 0.5)
-    if (!shell) {
-      this.log("fleet pre-split failed — falling back to same-tab layout")
-      this.layout = { ...this.layout, tab: "same" }
-      this.fleetRoot = null
-      return
-    }
-    this.herdr("pane", "close", root)
-    const side = this.splitPane(shell, "right", dir, WORKER_SHARE)
-    if (!side) {
-      this.log("fleet pre-split failed — falling back to same-tab layout")
-      this.layout = { ...this.layout, tab: "same" }
-      this.fleetRoot = null
-      return
-    }
-    if (this.layout.orchestrator === "left") {
-      this.viewerPane = shell
-      this.colPane = side
-    } else {
-      this.viewerPane = side
-      this.colPane = shell
-    }
-    this.log(`fleet tab ${label} opened (workers ${WORKER_SHARE} / lane ${1 - WORKER_SHARE})`)
+    this.log(`fleet tab ${label} opened (workers anchor on the tab root — no viewer lane)`)
+    // v2 layout (2026-10-17): no reserved viewer lane. The old layout
+    // pre-split a 50-50 "orchestrator viewer" pane that no code ever
+    // populated — it sat empty for the job's whole lifetime and read as
+    // a stuck pane. The worker column anchors on the tab root itself:
+    // the first worker splits it downward and takes over (splitForWorker).
+    this.viewerPane = null
+    this.colPane = root
   }
 
   // Split a pane for the next worker in the fleet tab's column: the
@@ -460,7 +443,9 @@ export class Rail implements ShepPort {
       const pane = this.splitPane(anchor, "down", cwd, 0.5)
       if (pane) return pane
     }
-    if (this.viewerPane) return this.splitPane(this.viewerPane, "right", cwd, 0.7)
+    // v2: the viewer-lane fallback is gone (the lane never existed as a
+    // populated pane) — a lane with no live worker pane to anchor on fails
+    // loudly instead of splitting a dead pane.
     return null
   }
 
@@ -725,13 +710,22 @@ export class Rail implements ShepPort {
     this.paneOf.clear()
     this.liveWorkerPanes.length = 0
     this.log("retired every pane this orchestrator spawned")
-    // close what we opened: the fleet tab (viewer + worker column) is this
+    // close what we opened: the fleet tab (worker panes) is this
     // orchestrator's own chrome — leftover fan-out-* tabs told the user
     // nothing about whose they were. Parked runs re-open it on continue.
     if (this.fleetTab) {
       this.herdr("tab", "close", this.fleetTab)
       this.log(`fleet tab ${this.fleetTab} closed`)
       this.fleetTab = null
+    }
+    // process-level guarantee (2026-10-17 ghost-levy incident): herdr's
+    // registry can forget a pane while its agent process lives on and keeps
+    // executing its brief. Anything still holding this job's run dir as its
+    // world must die with the job.
+    try {
+      execFileSync("pkill", ["-9", "-f", this.taskDir ?? ".__never_matches__"], { timeout: 10_000 })
+    } catch {
+      /* no stragglers — fine */
     }
   }
 

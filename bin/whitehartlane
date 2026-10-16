@@ -784,6 +784,13 @@ async function main() {
         } catch {}
         killPane(job, pane.label)
       }
+      // process-level guarantee (2026-10-17 ghost-worker incident): herdr's
+      // registry can forget a pane while its agent process lives on in the
+      // job's run dir, still executing its brief (recreating containers,
+      // re-booking jobs). Anything holding this job's dir dies with the job.
+      try {
+        execFileSync("pkill", ["-9", "-f", job.dir], { timeout: 10_000 })
+      } catch {}
       abortJob(job, `killed pid ${job.pid}`, 0, "levy")
       console.log(`aborted ${job.id} (killed orchestrator; sessions kept — continue resumes) — ${job.dir}`)
       return
