@@ -117,3 +117,12 @@ test("the door refuses a silent counts hook before booking anything (j-64e035 re
   // no job booked — nothing to abort; the assert above is the contract
   void abortJob
 })
+
+test("a counts hook printing a bare number is refused as a non-object — not misread as an empty object", () => {
+  const dir = copyExample()
+  writeFileSync(join(dir, "badcounts.cjs"), "console.log('0')")
+  retoml(dir, "counts", "node badcounts.cjs")
+  const refusals = probeHooks(dir, loadManifest(dir), "fan-out")
+  assert.equal(refusals.length, 1)
+  assert.match(refusals[0], /must print a JSON object of numbers at probe \(got 0\)/)
+})

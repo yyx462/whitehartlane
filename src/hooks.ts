@@ -534,12 +534,19 @@ export function probeHooks(
         refusals.push(`counts hook exited ${status} at probe: ${countsCmd}`)
       } else if (refusals.length === 0) {
         try {
-          const parsed = JSON.parse(stdout) as Record<string, unknown>
-          const bad = Object.entries(parsed).find(([, v]) => typeof v !== "number")
-          if (bad) {
-            refusals.push(`counts hook count ${bad[0]} is not a number (${JSON.stringify(bad[1])}) — a counts hook must print a JSON object of numbers`)
-          } else if (Object.keys(parsed).length === 0) {
-            refusals.push('counts hook printed an empty object at probe — count something, omit the line for the built-in counter, or use counts = "default"')
+          const parsed = JSON.parse(stdout) as unknown
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+            refusals.push(
+              `counts hook must print a JSON object of numbers at probe (got ${JSON.stringify(parsed).slice(0, 60)}) — omit the line for the built-in counter, or use counts = "default"`,
+            )
+          } else {
+            const obj = parsed as Record<string, unknown>
+            const bad = Object.entries(obj).find(([, v]) => typeof v !== "number")
+            if (bad) {
+              refusals.push(`counts hook count ${bad[0]} is not a number (${JSON.stringify(bad[1])}) — a counts hook must print a JSON object of numbers`)
+            } else if (Object.keys(obj).length === 0) {
+              refusals.push('counts hook printed an empty object at probe — count something, omit the line for the built-in counter, or use counts = "default"')
+            }
           }
         } catch {
           refusals.push(
