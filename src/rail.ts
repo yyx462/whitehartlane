@@ -177,7 +177,6 @@ export class Rail implements ShepPort {
   private colPane: string | null = null
   private colUsed = false
   private readonly liveWorkerPanes: string[] = []
-  private readonly paneOf = new Map<string, string>()
   // verbose lane
   private readonly seen = new Map<string, string>()
   private verbosePath: string | null = null

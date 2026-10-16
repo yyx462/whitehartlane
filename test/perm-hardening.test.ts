@@ -121,16 +121,24 @@ test("a dialog the rail keeps answering is progress — the nudge budget is not 
   herdr.onPrompt = (name) => {
     herdr.phase[name] = "dialog"
   }
-  herdr.readFor = (n) => (n.startsWith("alpha") ? askFor(join(dir, "notes", `x-${Math.random()}.txt`)) : "")
+  // the stop is EVENT-CHOREOGRAPHED, not wall-clock: it lands after the
+  // third dialog is asked, on the engine's own beat. A setTimeout stop
+  // raced the ladder under suite load (#52 flake): slow beats meant the
+  // stop could arrive before two verdicts accumulated.
+  let asked = 0
+  herdr.readFor = (n) => {
+    if (!n.startsWith("alpha")) return ""
+    asked++
+    if (asked === 3) {
+      mkdirSync(join(dir, "messages"), { recursive: true })
+      writeFileSync(
+        join(dir, "messages", "9-beta.json"),
+        JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
+      )
+    }
+    return askFor(join(dir, "notes", `x-${Math.random()}.txt`))
+  }
   herdr.onKeys = () => {}
-
-  setTimeout(() => {
-    mkdirSync(join(dir, "messages"), { recursive: true })
-    writeFileSync(
-      join(dir, "messages", "9-beta.json"),
-      JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
-    )
-  }, 900).unref?.()
 
   const report = await runCoworker(rail, { stallMs: 250, beatMs: 80 })
   const nudges = ledger.events.filter((e) => e.kind === "reprompt" && e.payload.nudge)
@@ -165,13 +173,24 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
     herdr.hold.add(name) // the pane will not take another prompt
   }
 
+  // the stop is a 30s BACKSTOP only — the ladder's honest death is what
+  // ends this run. At 2600ms it raced the ladder under suite load
+  // (#53a flake): stretched beats let the stop land first, the
+  // exchange finished "done", and the honest-death assertion failed.
+  // try/catch: if the ladder already ended the run and the fixture dir
+  // is gone, the backstop dies quietly instead of throwing in an
+  // unref'd timer.
   setTimeout(() => {
-    mkdirSync(join(dir, "messages"), { recursive: true })
-    writeFileSync(
-      join(dir, "messages", "9-beta.json"),
-      JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
-    )
-  }, 2600).unref?.()
+    try {
+      mkdirSync(join(dir, "messages"), { recursive: true })
+      writeFileSync(
+        join(dir, "messages", "9-beta.json"),
+        JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
+      )
+    } catch {
+      /* the run already ended and the fixture is gone */
+    }
+  }, 30_000).unref?.()
 
   const report = await runCoworker(rail, { stallMs: 250, beatMs: 80 })
   const kinds = ledger.events.map((e) => `${e.kind}:${e.payload.nudge ?? e.payload.deferred ?? ""}`)
