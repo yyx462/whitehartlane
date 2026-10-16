@@ -41,7 +41,7 @@ function rung(job: JobRecord, name: string) {
   return job.woke?.rungs?.find((r) => r.rung === name)
 }
 
-test("spool rung is config-off by default — a fresh heartbeat alone does not arm it, and the trace says so", () => {
+test("spool rung stays off in test contexts unless armed by env — and the trace says why", () => {
   resetLadders()
   mkdirSync(spoolDirOf(SPAWNER.session_id), { recursive: true })
   writeFileSync(join(spoolDirOf(SPAWNER.session_id), "alive.json"), JSON.stringify({ pid: 7, at: Date.now() }))
@@ -49,7 +49,7 @@ test("spool rung is config-off by default — a fresh heartbeat alone does not a
   const { notifications, port } = bells()
   wakeFirstMate(job, "failed", null, { promptPane: () => false, ...port })
   assert.equal(job.woke?.delivery, "doorbell")
-  assert.match(rung(job, "spool")?.why ?? "", /off by config/)
+  assert.match(rung(job, "spool")?.why ?? "", /off in test context/)
   assert.equal(existsSync(join(spoolDirOf(SPAWNER.session_id), "queue.jsonl")), false, "nothing spooled while disarmed")
   assert.equal(notifications.length, 1)
 })
@@ -96,11 +96,11 @@ test("every rung attempt lands in the session trail and the job's orchestrator.l
     ...port,
   })
   const kinds = readEvents("s-tr5").filter((e) => e.kind === "wake.rung").map((e) => e.rung)
-  assert.deepEqual(kinds, ["parent-pane", "fork", "spool", "doorbell"])
+  assert.deepEqual(kinds, ["spool", "parent-pane", "fork", "doorbell"])
   const log = readFileSync(join(job.dir, "orchestrator.log"), "utf8")
+  assert.match(log, /wake rung spool no — off in test context/)
   assert.match(log, /wake rung parent-pane no — no parent pane booked at spawn/)
   assert.match(log, /wake rung fork no — fork refused: herdr down/)
-  assert.match(log, /wake rung spool no — off by config/)
   assert.match(log, /wake rung doorbell/)
 })
 

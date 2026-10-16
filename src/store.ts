@@ -443,13 +443,23 @@ function forkArmed(): boolean {
   return process.env.AGENTIC_OS_FORK_WAKE !== "0" && !process.env.NODE_TEST_CONTEXT
 }
 
-// The spool rung is config-OFF by default (the 2026-10-13 call): the
-// reader is an opt-in plugin and was never installed on this machine,
-// so the ladder must not pretend the channel exists. Arm it with
-// AGENTIC_OS_SPOOL_WAKE=1 once `whl plugin install` has run and
-// opencode has restarted; until then the trace says why it is skipped.
+// The spool rung arms itself when the plugin is installed (the
+// symlink IS the contract — 2026-10-17: the plugin ships on the
+// opencode v2 API and one verb installs it); the heartbeat freshness
+// check inside the rung stays the real trust. AGENTIC_OS_SPOOL_WAKE=0
+// disarms, =1 forces (tests, or verifying before an opencode restart);
+// test contexts default off so unit runs never touch a real install.
 function spoolArmed(): boolean {
-  return process.env.AGENTIC_OS_SPOOL_WAKE === "1"
+  if (process.env.AGENTIC_OS_SPOOL_WAKE === "0") return false
+  if (process.env.AGENTIC_OS_SPOOL_WAKE === "1") return true
+  if (process.env.NODE_TEST_CONTEXT) return false
+  return existsSync(join(homedir(), ".config", "opencode", "plugins", "agentic-wake.js"))
+}
+
+function spoolDisarmedWhy(): string {
+  if (process.env.AGENTIC_OS_SPOOL_WAKE === "0") return "disarmed by AGENTIC_OS_SPOOL_WAKE=0"
+  if (process.env.NODE_TEST_CONTEXT) return "off in test context — AGENTIC_OS_SPOOL_WAKE=1 arms it"
+  return "plugin not installed — run: whl plugin install (then restart opencode)"
 }
 
 export function wakeFirstMate(
@@ -515,14 +525,33 @@ export function wakeFirstMate(
   if (railSpawner) {
     step("in-band", false, "rail spawner — in-band rungs skipped; wake.json is the receipt")
   }
-  // rungs 1-4 live in one chain: parent pane, rebirth, spool, doorbell.
-  // (2026-10-13 simplification: the worker-pane scan and the manual
-  // registry rungs are gone — the spawn-time parent pane does their one
-  // job with a better source of truth, and the registry survives only
-  // as audit bookkeeping for legitimately-live unbooked panes.)
+  // rungs 1-4 live in one chain: spool, parent pane, rebirth, doorbell.
+  // (2026-10-17 reorder: the spool outranks the pane rungs — a fresh
+  // heartbeat is the levy's own process saying "I am listening", so a
+  // listening conversation never pays for a pane prompt or a rebirth
+  // tab. 2026-10-13 simplification kept: the worker-pane scan and the
+  // manual registry rungs are gone — the spawn-time parent pane does
+  // their one job with a better source of truth.)
   if (delivery === "queued" && !railSpawner) {
+    // rung 1 — the spool: in-band, zero panes. The agentic-wake plugin
+    // (riding the levy's own opencode process) drains the row into the
+    // conversation; a fresh heartbeat is the proof it listens.
+    if (!spoolArmed()) {
+      step("spool", false, spoolDisarmedWhy())
+    } else if (job.spawner.tool !== "opencode") {
+      step("spool", false, `opencode-only rung; this spawner is ${job.spawner.tool}`)
+    } else if (!spoolAlive(job.spawner.session_id)) {
+      step("spool", false, `no fresh heartbeat for session ${job.spawner.session_id} (alive.json stale or absent)`)
+    } else if (appendSpoolWake({ at, to: job.spawner.session_id, jid: job.id, text: message })) {
+      delivery = "inband"
+      to = job.spawner.session_id
+      step("spool", true, "row queued in-band; the plugin drains it into the conversation")
+    } else {
+      step("spool", false, "queue append failed (fs error)")
+    }
+    if (delivery === "queued") {
     let paneTook = false
-    // rung 1 — the parent pane (booked at spawn): the levy handed the
+    // rung 2 — the parent pane (booked at spawn): the levy handed the
     // spur over from INSIDE a herdr pane, and the door booked that pane
     // on the spawner record (--pane or HERDR_PANE_ID) — the strongest
     // address the wake holds, no registry involved. herdr cannot name
@@ -565,12 +594,13 @@ export function wakeFirstMate(
         step("parent-pane", false, `parent pane ${parentPane} is alive but did not take the prompt`)
       }
     }
-    // rung 2 — the fork: the parent pane is dead, not booked, or
+    // rung 3 — the fork: the parent pane is dead, not booked, or
     // recycled (ADR 0008). The wake rebirths the levy into a fresh
     // pane — session resumed from the checkpoint, wake as the first
-    // prompt. An injected port always runs (tests); the default is
-    // armed in production only — disarmed under node:test and by
-    // AGENTIC_OS_FORK_WAKE=0 (herdr-less hosts).
+    // prompt. Last resort among the rungs: it is the only one that
+    // opens anything. An injected port always runs (tests); the
+    // default is armed in production only — disarmed under node:test
+    // and by AGENTIC_OS_FORK_WAKE=0 (herdr-less hosts).
     if (!paneTook && (port.forkLevy ?? forkArmed())) {
       // the brownout guard's wake half (ADR 0010): a refused fork is
       // not final — herdr may be brown at exactly this moment. Knock
@@ -611,26 +641,7 @@ export function wakeFirstMate(
           : "disarmed (test context — NODE_TEST_CONTEXT is set)",
       )
     }
-    // rung 3 — the spool: config-gated plugin territory (the levy
-    // installed the agentic-wake reader itself), then heartbeat-gated.
-    // Only reached when the fork could not take the wake — a fresh
-    // heartbeat never outranks it. Off by default: the reader is not
-    // installed on this machine.
-    if (delivery === "queued") {
-      if (!spoolArmed()) {
-        step("spool", false, "off by config — AGENTIC_OS_SPOOL_WAKE=1 arms it (after whl plugin install)")
-      } else if (job.spawner.tool !== "opencode") {
-        step("spool", false, `opencode-only rung; this spawner is ${job.spawner.tool}`)
-      } else if (!spoolAlive(job.spawner.session_id)) {
-        step("spool", false, `no fresh heartbeat for session ${job.spawner.session_id} (alive.json stale or absent)`)
-      } else if (appendSpoolWake({ at, to: job.spawner.session_id, jid: job.id, text: message })) {
-        delivery = "inband"
-        to = job.spawner.session_id
-        step("spool", true, "row queued in-band; the plugin drains it into the conversation")
-      } else {
-        step("spool", false, "queue append failed (fs error)")
-      }
-    }
+    } // end rungs 2-3 (pane + fork) — skipped entirely when the spool took the wake
   }
   // rung 4 — the doorbell: the levy is a chat a person holds, or no
   // rung above could take the wake. A rail spawner skips it: machines

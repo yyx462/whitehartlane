@@ -76,18 +76,21 @@ test("a levy without a booked pane is forked — the rule", () => {
   assert.deepEqual(prompts, [], "nothing to prompt — no pane was booked at spawn")
 })
 
-test("when the fork cannot take it, a fresh spool heartbeat still can (config-armed plugin)", () => {
+test("a fresh spool heartbeat outranks the fork — a listening levy never pays for a rebirth tab", () => {
   const prev = process.env.AGENTIC_OS_SPOOL_WAKE
   process.env.AGENTIC_OS_SPOOL_WAKE = "1"
   try {
     const job = levied("s-lad5")
     mkdirSync(join(HOME, "wake-spool", SPAWNER.session_id), { recursive: true })
     writeFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "alive.json"), JSON.stringify({ pid: 1, at: Date.now() }))
+    let forkTried = 0
     wakeFirstMate(job, "done", null, {
       promptPane: () => false,
-      forkLevy: () => ({ ok: false, why: "herdr down" }),
+      forkLevy: () => { forkTried++; return { ok: false, why: "herdr down" } },
     })
     assert.equal(job.woke?.delivery, "inband")
+    assert.equal(forkTried, 0, "the fork rung never runs when the spool takes the wake")
+    assert.equal(job.woke?.rungs?.some((r) => r.rung === "fork"), false, "no fork trace either — nothing opened")
     const q = readFileSync(join(HOME, "wake-spool", SPAWNER.session_id, "queue.jsonl"), "utf8")
     assert.match(q, /ladder probe/)
   } finally {
