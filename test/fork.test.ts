@@ -192,3 +192,65 @@ test("fork refuses when the session row will not move (db unwritable) (issue #12
     delete process.env.OPENCODE_DB
   }
 })
+
+test("C02: a live booked pane anchors the split — no new tab, and the borrowed tab survives the reaper", async () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "aos-c02a-"))
+  const realCwd = mkdtempSync(join(tmpdir(), "aos-c02a-cwd-"))
+  process.env.OPENCODE_DB = join(dbDir, "opencode.db")
+  const db = new DatabaseSync(process.env.OPENCODE_DB)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
+  db.close()
+  const { openSession } = await import("../src/store.ts")
+  const session = openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
+  const calls: string[] = []
+  const reaped: string[] = []
+  const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
+  const herdrRun = (args: string[]): RunnerResult => {
+    const a = args.join(" ")
+    calls.push(a)
+    if (a.startsWith("pane list")) return ok({ result: { panes: [{ pane_id: "wF:pAnchor", tab_id: "wF:tLevy" }] } })
+    if (a.startsWith("pane split")) return ok({ result: { pane: { pane_id: "wF:sh" } } })
+    return ok({ result: {} })
+  }
+  const job = {
+    id: "j-c02a", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_x", since: "n1", pane: "wF:pAnchor" },
+  } as unknown as JobRecord
+  const out = forkLevy(job, { message: "spur done" }, { herdrRun, detachedSpawn: (cmd) => reaped.push(cmd) })
+  assert.equal(out.ok, true)
+  assert.ok(calls.some((c) => c.startsWith("pane split --pane wF:pAnchor")), "the split anchors on the booked pane")
+  assert.ok(!calls.some((c) => c.startsWith("tab create")), "no new tab when the levy's pane lives")
+  assert.ok(!reaped[0]!.includes("tab close"), "the borrowed tab is never closed")
+  assert.match(reaped[0], /pane close wF:sh/, "the courier pane still closes itself")
+  const born = readEvents(session.id).find((e) => e.kind === "pane.born" && e.label === "fork-j-c02a")
+  assert.equal((born as { beside?: string })?.beside, "wF:pAnchor", "the trace names the anchor")
+})
+
+test("C02: a dead booked pane scopes the fallback tab to the levy's workspace", async () => {
+  const dbDir = mkdtempSync(join(tmpdir(), "aos-c02b-"))
+  const realCwd = mkdtempSync(join(tmpdir(), "aos-c02b-cwd-"))
+  process.env.OPENCODE_DB = join(dbDir, "opencode.db")
+  const db = new DatabaseSync(process.env.OPENCODE_DB)
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
+  db.close()
+  const { openSession } = await import("../src/store.ts")
+  openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
+  const tabs: string[] = []
+  const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
+  const herdrRun = (args: string[]): RunnerResult => {
+    const a = args.join(" ")
+    if (a.startsWith("pane list")) return ok({ result: { panes: [] } })
+    if (a.startsWith("tab create")) { tabs.push(a); return ok({ result: { root_pane: { pane_id: "wF:root", tab_id: "wF:t9" }, tab: { tab_id: "wF:t9" } } }) }
+    if (a.startsWith("pane split")) return ok({ result: { pane: { pane_id: "wF:sh" } } })
+    return ok({ result: {} })
+  }
+  const job = {
+    id: "j-c02b", dir: dbDir, status: "retired", created: "", updated: "",
+    spawner: { tool: "opencode", session_id: "ses_x", since: "n1", pane: "wF:pDead" },
+  } as unknown as JobRecord
+  const out = forkLevy(job, { message: "spur done" }, { herdrRun, detachedSpawn: () => {} })
+  assert.equal(out.ok, true)
+  assert.ok(tabs[0]!.includes("--workspace wF"), "the fallback tab opens in the levy's workspace, not whatever is focused")
+})

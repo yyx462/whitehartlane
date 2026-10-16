@@ -78,7 +78,7 @@ export function forkPrompt(input: {
 // agent turn — drain the wake again). Bounds: working-wait 90s
 // (AGENTIC_OS_FORK_WORKING_MS), idle-wait 30min (AGENTIC_OS_FORK_IDLE_MS)
 // — long turns are legitimate, squatting forever is not.
-export function forkReaperCmd(label: string, pane: string, tab: string, receiptPath?: string): string {
+export function forkReaperCmd(label: string, pane: string, tab: string | null, receiptPath?: string): string {
   const r = receiptPath ? shellQuote(receiptPath) : null
   const workingMs = hookEnvMs("AGENTIC_OS_FORK_WORKING_MS", 90_000)
   const idleMs = hookEnvMs("AGENTIC_OS_FORK_IDLE_MS", 1_800_000)
@@ -87,7 +87,9 @@ export function forkReaperCmd(label: string, pane: string, tab: string, receiptP
       ? `if herdr agent wait ${label} --until working --timeout ${workingMs}; then echo '{"worked":true}' > ${r}; else echo '{"worked":false}' > ${r}; fi`
       : `herdr agent wait ${label} --until working --timeout ${workingMs} || true`,
     `herdr agent wait ${label} --until idle --timeout ${idleMs} || true`,
-    `herdr tab close ${tab}`,
+    // a tab whl OPENED is the courier's own — close it. A borrowed tab
+    // (the levy's own tab, C02) must survive: close the pane only.
+    ...(tab ? [`herdr tab close ${tab}`] : []),
     `herdr pane close ${pane}`,
   ].join("; ")
 }
@@ -111,6 +113,17 @@ function shellQuote(value: string): string {
 export type ForkOutcome =
   | { ok: true; label: string; pane: string }
   | { ok: false; why: string }
+
+// C02 — the pane list is the placement oracle: one call says whether
+// the booked pane still lives and, when it does, which tab it sits in.
+function panesOf(run: (a: string[]) => RunnerResult): { pane_id?: string; tab_id?: string }[] {
+  try {
+    const out = run(["pane", "list"])
+    return (JSON.parse(out.stdout ?? "")?.result?.panes ?? []) as { pane_id?: string; tab_id?: string }[]
+  } catch {
+    return [] // herdr unreachable — placement falls to a fresh tab
+  }
+}
 
 export function forkLevy(
   job: JobRecord,
@@ -176,14 +189,40 @@ export function forkLevy(
       why: "project dir gone — repointed to the nearest surviving ancestor",
     })
   }
-  const tab = run(["tab", "create", "--label", `whl-fork-${job.id}`.slice(0, 40), "--cwd", cwd, "--no-focus"])
-  const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
-  const forkTab = jsonAt(tab.stdout, (d) => d?.result?.tab?.tab_id ?? d?.result?.root_pane?.tab_id ?? null)
-  if (!root) return { ok: false, why: `could not open a pane (herdr rc=${tab.status})` }
-  const split = run(["pane", "split", "--pane", root, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
-  const shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
-  if (root) run(["pane", "close", root])
-  if (!shell) return { ok: false, why: "pane split failed" }
+  // C02 — the courier belongs beside the levy, never in a random tab.
+  // Ladder: (1) the booked pane still lives → split from IT — same
+  // tab, same workspace for free; the anchor only chooses where the
+  // split lands, so even a recycled pane hosting another session is a
+  // fine anchor. (2) the pane is gone → a fresh tab in the levy's OWN
+  // workspace (the pane id's prefix, "wK:pSS" → wK), not whatever
+  // herdr happens to focus. The reaper may close a tab whl opened; a
+  // borrowed tab survives — only the courier pane closes.
+  let shell: string | null = null
+  let forkTab: string | null = null
+  let beside: string | undefined
+  const panes = panesOf(run)
+  const anchor = job.spawner.pane ? panes.find((p) => p.pane_id === job.spawner.pane) : undefined
+  if (anchor?.pane_id) {
+    const split = run(["pane", "split", "--pane", anchor.pane_id, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
+    shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
+    if (shell) {
+      forkTab = null // borrowed tab — the reaper closes the pane only
+      beside = anchor.pane_id
+    }
+  }
+  if (!shell) {
+    const tabArgs = ["tab", "create", "--label", `whl-fork-${job.id}`.slice(0, 40), "--cwd", cwd, "--no-focus"]
+    const workspace = job.spawner.pane?.split(":")[0]
+    if (workspace) tabArgs.push("--workspace", workspace)
+    const tab = run(tabArgs)
+    const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
+    forkTab = jsonAt(tab.stdout, (d) => d?.result?.tab?.tab_id ?? d?.result?.root_pane?.tab_id ?? null)
+    if (!root) return { ok: false, why: `could not open a pane (herdr rc=${tab.status})` }
+    const split = run(["pane", "split", "--pane", root, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
+    shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
+    if (root) run(["pane", "close", root])
+    if (!shell) return { ok: false, why: "pane split failed" }
+  }
   const start = run([
     "agent", "start", label, "--kind", job.spawner.tool, "--pane", shell,
     "--timeout", "60000", "--", "--session", job.spawner.session_id,
@@ -200,6 +239,7 @@ export function forkLevy(
     parent: "levy",
     seed,
     fork_of: job.id,
+    ...(beside ? { beside } : {}),
   })
   const prompt = run(["agent", "prompt", label, forkPrompt({ wake, seed, jid: job.id, ...(relocation ? { relocation } : {}) })])
   if (prompt.status !== 0) {
@@ -211,11 +251,11 @@ export function forkLevy(
   // writes its receipt into the job dir (issue #124): worked=true/false
   // is the honest record of whether the wake ever reached a live turn,
   // and wakeAudit surfaces a never-worked courier for a re-drain.
-  if (forkTab) {
-    const reaper = opts.detachedSpawn ?? ((cmd: string) => {
-      spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref()
-    })
-    reaper(forkReaperCmd(label, shell, forkTab, join(job.dir, "courier.json")))
-  }
+  // the courier always reaps itself — in a borrowed tab only the pane
+  // closes (forkTab null); a tab whl opened closes with it.
+  const reaper = opts.detachedSpawn ?? ((cmd: string) => {
+    spawn("sh", ["-c", cmd], { detached: true, stdio: "ignore" }).unref()
+  })
+  reaper(forkReaperCmd(label, shell, forkTab, join(job.dir, "courier.json")))
   return { ok: true, label, pane: shell }
 }

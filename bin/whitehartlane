@@ -24,7 +24,7 @@ import { prepareRun, spawnerFromArgs } from "../src/run.ts"
 import { refreshWait } from "../src/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
-import { forkPrompt, forkSeedOf } from "../src/fork.ts"
+import { forkLevy } from "../src/fork.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
 import { seedSessionFile } from "../src/transcripts.ts"
 import { admitFork } from "../src/policy.ts"
@@ -536,7 +536,6 @@ async function main() {
       process.exitCode = 1
       return
     }
-    const seed = forkSeedOf(job)
     const seedFile = seedSessionFile(job.spawner)
     const admission = admitFork({
       seed: { ...job.spawner, ...(seedFile ? { session_file: seedFile } : {}) },
@@ -548,62 +547,27 @@ async function main() {
       process.exitCode = 1
       return
     }
+    // the birth body is forkLevy's — the same ladder the rail's wake
+    // uses (targeted placement beside the levy when its pane lives,
+    // a workspace-scoped tab otherwise, courier reaper, receipt). The
+    // verb adds only what a human at the door needs: prints + booking.
+    const outcome = forkLevy(job, { message: wake.message })
+    if (!outcome.ok) {
+      console.error(`fork: ${outcome.why} — the durable wake stays at ${wakePath}`)
+      process.exitCode = 1
+      return
+    }
     const { session, created } = findOrOpenSession({
       cwd: job.dir,
       host: { tool: job.spawner.tool, session_id: job.spawner.session_id },
     })
-    const label = `fork-${job.id}`
-    const cwd = session.cwd || job.dir
-    // the pane: a fresh tab holding one shell for the reborn levy
-    const tabLabel = `whl-fork-${job.id}`.slice(0, 40)
-    const tab = herdrAt(["tab", "create", "--label", tabLabel, "--cwd", cwd, "--no-focus"])
-    const root = jsonAt(tab.stdout, (d) => d?.result?.root_pane?.pane_id ?? null)
-    if (!root) {
-      console.error(`fork: could not open a pane (herdr rc=${tab.status}) — the durable wake stays at ${wakePath}`)
-      process.exitCode = 1
-      return
-    }
-    const split = herdrAt(["pane", "split", "--pane", root, "--direction", "right", "--ratio", "0.5", "--cwd", cwd, "--no-focus"])
-    const shell = jsonAt(split.stdout, (d) => d?.result?.pane?.pane_id ?? null)
-    if (root) herdrAt(["pane", "close", root])
-    if (!shell) {
-      console.error(`fork: pane split failed — the durable wake stays at ${wakePath}`)
-      process.exitCode = 1
-      return
-    }
-    const start = herdrAt([
-      "agent", "start", label, "--kind", job.spawner.tool, "--pane", shell,
-      "--timeout", "60000", "--", "--session", job.spawner.session_id,
-    ])
-    if (start.status !== 0) {
-      herdrAt(["pane", "close", shell])
-      console.error(`fork: agent start failed (rc=${start.status}) — the durable wake stays at ${wakePath}`)
-      process.exitCode = 1
-      return
-    }
-    appendEvent(session.id, {
-      actor: "levy",
-      kind: "pane.born",
-      label,
-      pane: shell,
-      parent: "levy",
-      seed,
-      fork_of: job.id,
-    })
-    const text = forkPrompt({ wake, seed, jid: job.id })
-    const prompt = herdrAt(["agent", "prompt", label, text])
-    console.log(`fork: ${label} born in tab ${tabLabel}${created ? " (levy session opened)" : ""}`)
+    const at = new Date().toISOString()
+    job.consumed = { at, via: "fork", label: outcome.label, pane: outcome.pane }
+    saveJob(job)
+    appendEvent(job.sid, { actor: "levy", kind: "wake.consumed", jid: job.id, via: "fork", label: outcome.label })
+    console.log(`fork: ${outcome.label} born at pane ${outcome.pane}${created ? " (levy session opened)" : ""}`)
     console.log(`session: ${job.spawner.tool}:${job.spawner.session_id} resumed from ${job.spawner.since}`)
     console.log(`wake: ${wake.message}`)
-    if (prompt.status !== 0) {
-      console.error(`fork: the wake prompt did not land (rc=${prompt.status}) — re-prompt it:`)
-      console.error(`  herdr agent prompt ${label} '${wake.message}'`)
-      return
-    }
-    const at = new Date().toISOString()
-    job.consumed = { at, via: "fork", label, pane: shell }
-    saveJob(job)
-    appendEvent(job.sid, { actor: "levy", kind: "wake.consumed", jid: job.id, via: "fork", label })
     console.log(`trace: ${eventsPath(session.id)}`)
     return
   }
