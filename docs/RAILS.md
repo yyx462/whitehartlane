@@ -167,3 +167,10 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - Direct has **no retry rail at all** — the open chat is the
   supervisor; a blocked turn is visible and the user resends.
   Unattended work belongs to a Job, not Direct.
+- herdr CAN place panes deliberately (`pane split` takes a target
+  PANE_ID; `tab create` takes `--workspace`) — the rail must always
+  ask, never let a birth land "wherever herdr is focused". The fork
+  ladder (spool → parent-pane → fork) uses the booked pane as the
+  split anchor and its id prefix as the workspace; a borrowed tab is
+  never closed by the courier's reaper (2026-10-17, ADR 0008
+  amendment).

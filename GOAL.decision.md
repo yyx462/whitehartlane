@@ -309,3 +309,17 @@ Open debts, tracked here until closed: ~~real backpressure (provider
 signal, not slots)~~ closed 2026-10-01 (refusal-only retry at the
 headless-call layer); ~~orchestrator-death relaunch~~ closed 2026-10-01
 (ask-first relaunch queue, cap 2).
+
+2026-10-17 — RSI iteration 1: friction mining replaces guessing. The
+loop: dump every session transcript the project touched (70), fan out
+miners to extract friction events (337), triage into clusters against
+current code (24 — 9 already-fixed, honestly excluded), fix the
+still-live ones one cluster per PR, evaluate against the recorded
+baseline, remember. Landed: wake chain rebuilt (v2 plugin port,
+spool-first ladder, targeted fork placement — the "random tabs" and
+dormant-wake complaints), perf (shared db handle, scan TTL cache),
+test debt (de-flaked #52/#53a, viewer-lane pin), docs truth pass,
+e2e battery un-broken (fixture counts drift). Baseline 370 tests/368
+pass → 379/379. Serves all six rules; the loop itself is now the way
+this OS iterates on itself. Rejected: fixing non-reproducing friction
+(stale clusters are findings, not work).
