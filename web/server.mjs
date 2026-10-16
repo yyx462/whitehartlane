@@ -86,7 +86,24 @@ function readJson(file) {
   }
 }
 
+// C06 — the polling UI asked this scan (a full walk of the OS disk:
+// every session dir, every job dir) once per GET. Serve a short TTL
+// cache instead; every POST — the server's own mutations — busts it
+// so a verb's effect is visible on the very next poll. External disk
+// changes (a running orchestrator) surface within the TTL: a viewer
+// budget, not a bookkeeping change.
+let scanCache = null;
+const SCAN_TTL_MS = 1000;
+
 function readSessions() {
+  const now = Date.now();
+  if (scanCache && now - scanCache.at < SCAN_TTL_MS) return scanCache.out;
+  const out = scanSessions();
+  scanCache = { at: now, out };
+  return out;
+}
+
+function scanSessions() {
   let entries = [];
   try {
     entries = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
@@ -320,7 +337,17 @@ function doorNowRev() {
   }
 }
 
+let jobsCache = null;
+
 function listAllJobs() {
+  const now = Date.now();
+  if (jobsCache && now - jobsCache.at < SCAN_TTL_MS) return jobsCache.out;
+  const out = scanAllJobs();
+  jobsCache = { at: now, out };
+  return out;
+}
+
+function scanAllJobs() {
   const out = [];
   for (const s of fs.existsSync(SESSIONS_DIR)
     ? fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })
@@ -1578,6 +1605,13 @@ function spawnVerb(verb, jid, extraArgs = [], capMs = 120_000) {
 async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const q = url.searchParams;
+
+  // C06 — the server's own mutations must be visible to the very next
+  // poll: any POST busts the scan cache before it runs.
+  if (req.method === "POST") {
+    scanCache = null;
+    jobsCache = null;
+  }
 
   if (req.method === "GET" && pathname === "/api/summary") {
     const sessions = readSessions();

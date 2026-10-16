@@ -5,7 +5,7 @@
 // instant"; per-unit working directories make that unique. Resolvers
 // turn a pointer into readable bytes.
 import { execFileSync } from "node:child_process"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -73,6 +73,41 @@ function opencodeDb(): string {
   return process.env.OPENCODE_DB ?? join(homedir(), ".local", "share", "opencode", "opencode.db")
 }
 
+// C06 — one shared read-only handle, not a fresh open per helper: the
+// real db is 4GB+ of WAL and every wake/probe path opened it
+// synchronously. Keyed on (path, mtime) so a replaced db (tests, a
+// migration) never reads a stale inode; SQLite itself sees WAL
+// freshness, the key only detects REPLACEMENT. A failed open returns
+// null and callers fall through exactly as before. The one writer
+// (repointOpencodeSession) keeps its own per-call connection.
+let readCache: { path: string; mtimeMs: number; db: DatabaseSync } | null = null
+function opencodeReadDb(): DatabaseSync | null {
+  const path = opencodeDb()
+  let st: { mtimeMs: number }
+  try {
+    st = statSync(path)
+  } catch {
+    readCache = null
+    return null
+  }
+  if (readCache && readCache.path === path && readCache.mtimeMs === st.mtimeMs) {
+    return readCache.db
+  }
+  try {
+    readCache?.db.close()
+  } catch {
+    /* already gone */
+  }
+  try {
+    const db = new DatabaseSync(path, { readOnly: true })
+    readCache = { path, mtimeMs: st.mtimeMs, db }
+    return db
+  } catch {
+    readCache = null
+    return null
+  }
+}
+
 // opencode v2.0.x migrated its storage: `session_v2` is the live
 // table — everything created after the migration lives ONLY there,
 // while legacy `session` is frozen at the migration instant. The p10
@@ -109,39 +144,35 @@ function opencodeFirstUserHas(db: DatabaseSync, id: string, expect: string): boo
 // siblings born into one shared cwd.
 export function resolveOpencode(pointer: TranscriptPointer, expect?: string): { id: string } | null {
   const since = Date.parse(pointer.since)
-  if (existsSync(opencodeDb())) {
+  const db = opencodeReadDb()
+  if (db) {
     try {
-      const db = new DatabaseSync(opencodeDb(), { readOnly: true })
-      try {
-        for (const table of OPENCODE_SESSION_TABLES) {
-          try {
-            const rows = db
-              .prepare(
-                `SELECT id FROM ${table} WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 50`,
-              )
-              .all(pointer.cwd, since) as { id?: string }[]
-            const ids = rows.filter((r) => typeof r.id === "string").map((r) => r.id as string)
-            if (ids.length === 0) continue
-            if (expect) {
-              for (const id of ids) {
-                if (opencodeFirstUserHas(db, id, expect)) return { id }
-              }
-              // no candidate carries the marker: the pane's own first
-              // user message is not committed yet (j-eafc83: siblings
-              // born seconds apart race message persistence) — booking
-              // newest-wins here IS the cross-booking. No id; the
-              // caller's late probe retries.
-              return null
+      for (const table of OPENCODE_SESSION_TABLES) {
+        try {
+          const rows = db
+            .prepare(
+              `SELECT id FROM ${table} WHERE directory = ? AND time_created >= ? ORDER BY time_created DESC LIMIT 50`,
+            )
+            .all(pointer.cwd, since) as { id?: string }[]
+          const ids = rows.filter((r) => typeof r.id === "string").map((r) => r.id as string)
+          if (ids.length === 0) continue
+          if (expect) {
+            for (const id of ids) {
+              if (opencodeFirstUserHas(db, id, expect)) return { id }
             }
-            return { id: ids[0]! }
-          } catch {
-            /* table absent on this opencode version — try the next */
+            // no candidate carries the marker: the pane's own first
+            // user message is not committed yet (j-eafc83: siblings
+            // born seconds apart race message persistence) — booking
+            // newest-wins here IS the cross-booking. No id; the
+            // caller's late probe retries.
+            return null
           }
+          return { id: ids[0]! }
+        } catch {
+          /* table absent on this opencode version — try the next */
         }
-        return null
-      } finally {
-        db.close()
       }
+      return null
     } catch {
       // fall through to the CLI
     }
@@ -209,13 +240,8 @@ export function resolveTranscript(
 // the old→new move is recorded in the caller's trail, so every
 // repoint is auditable and reversible.
 export function opencodeSessionDirectoryOf(id: string): string | null {
-  if (!existsSync(opencodeDb())) return null
-  let db: DatabaseSync
-  try {
-    db = new DatabaseSync(opencodeDb(), { readOnly: true })
-  } catch {
-    return null
-  }
+  const db = opencodeReadDb()
+  if (!db) return null
   try {
     for (const table of OPENCODE_SESSION_TABLES) {
       try {
@@ -228,8 +254,8 @@ export function opencodeSessionDirectoryOf(id: string): string | null {
       }
     }
     return null
-  } finally {
-    db.close()
+  } catch {
+    return null
   }
 }
 
@@ -284,19 +310,15 @@ export function seedSessionFile(seed: { tool: string; session_id: string }): str
 }
 
 export function opencodeSessionExists(id: string): boolean {
-  if (existsSync(opencodeDb())) {
+  const db = opencodeReadDb()
+  if (db) {
     try {
-      const db = new DatabaseSync(opencodeDb(), { readOnly: true })
-      try {
-        for (const table of OPENCODE_SESSION_TABLES) {
-          try {
-            if (db.prepare(`SELECT 1 FROM ${table} WHERE id = ? LIMIT 1`).get(id) !== undefined) return true
-          } catch {
-            /* table absent on this opencode version — try the next */
-          }
+      for (const table of OPENCODE_SESSION_TABLES) {
+        try {
+          if (db.prepare(`SELECT 1 FROM ${table} WHERE id = ? LIMIT 1`).get(id) !== undefined) return true
+        } catch {
+          /* table absent on this opencode version — try the next */
         }
-      } finally {
-        db.close()
       }
     } catch {
       // fall through to the CLI
@@ -313,20 +335,16 @@ export function opencodeSessionExists(id: string): boolean {
 // or no title is a state, not an error: null, and the guard stands
 // down.
 export function opencodeSessionTitle(id: string): string | null {
-  if (!existsSync(opencodeDb())) return null
+  const db = opencodeReadDb()
+  if (!db) return null
   try {
-    const db = new DatabaseSync(opencodeDb(), { readOnly: true })
-    try {
-      for (const table of ["session_v2", "session"]) {
-        try {
-          const row = db.prepare(`SELECT title FROM ${table} WHERE id = ? LIMIT 1`).get(id) as { title?: string } | undefined
-          if (typeof row?.title === "string" && row.title) return row.title
-        } catch {
-          /* table absent or has no title column — try the next */
-        }
+    for (const table of ["session_v2", "session"]) {
+      try {
+        const row = db.prepare(`SELECT title FROM ${table} WHERE id = ? LIMIT 1`).get(id) as { title?: string } | undefined
+        if (typeof row?.title === "string" && row.title) return row.title
+      } catch {
+        /* table absent or has no title column — try the next */
       }
-    } finally {
-      db.close()
     }
   } catch {
     /* unreadable db — no title */
