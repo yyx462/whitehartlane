@@ -180,6 +180,10 @@ export class Rail implements ShepPort {
   private readonly paneOf = new Map<string, string>()
   // verbose lane
   private readonly seen = new Map<string, string>()
+  // C06 — the provider-fault probe is a 20s-ceiling CLI call and the
+  // coworker judgment loop asks per cycle per member; within one TTL
+  // window the answer cannot change (the ladder's backoff is minutes).
+  private readonly faultMemo = new Map<string, { at: number; hit: { id: string; type: string } | null }>()
   private verbosePath: string | null = null
   private verbosePane: string | null = null
   // the drain hook a SIGTERM-running engine installs (ADR 5): the
@@ -940,6 +944,14 @@ export class Rail implements ShepPort {
   // OpenCode puts this on the message (`provider.rate-limit`, status 429),
   // not on the pane. Returns the message id so a stale fault is not re-judged.
   latestSessionFault(sessionId: string, cwd: string): { id: string; type: string } | null {
+    const memo = this.faultMemo.get(sessionId)
+    if (memo && Date.now() - memo.at < 10_000) return memo.hit
+    const hit = this.probeSessionFault(sessionId, cwd)
+    this.faultMemo.set(sessionId, { at: Date.now(), hit })
+    return hit
+  }
+
+  private probeSessionFault(sessionId: string, cwd: string): { id: string; type: string } | null {
     const r = spawnSync("opencode", ["api", "GET", `/api/session/${sessionId}/message`], {
       cwd,
       encoding: "utf8",
