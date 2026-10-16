@@ -89,7 +89,11 @@ Runs; the events trace pane shows every booked fact.
    NO `dag.mjs`/`spur.mjs` in a fan-out/coworker spur folder — a
    program file present makes it a LAB spur (a different rail).
    Coworker needs `members/*.md`, one brief per member — a brief is a
-   prompt, write it like one. Copy a shape from this checkout:
+   prompt, write it like one. HOOKS ARE KIND-SCOPED: a coworker runs
+   ONLY `counts` (a real JSON-printing command — `counts = "true"` once
+   killed a run at report time, j-64e035); `units`/`grade` are
+   fan-out/lab concepts and are ignored — never scaffold them into a
+   coworker toml. Copy a shape from this checkout:
    `examples/fan-out-spurs/staged-waves` (waves + a check),
    `examples/fan-out-spurs/nested-wakes` (wake steps),
    `examples/coworker-spurs/steps-viz` (coworker),

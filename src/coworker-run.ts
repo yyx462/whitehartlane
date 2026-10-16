@@ -69,6 +69,15 @@ export async function runCoworker(
     }
   }
   const { messages: priorMessages } = readMessages(join(taskDir, "messages"), names)
+  // Kind-scoped hooks, taught not suffered (j-64e035): a coworker runs
+  // only counts. units/grade are fan-out/lab concepts — declared here
+  // they are dead config, and a scaffold that copied them from a
+  // fan-out example is one counts="true" away from a report-time death.
+  if (manifest.hooks.units || manifest.hooks.grade) {
+    log(
+      "coworker ignores hooks.units/hooks.grade (the members are the units; only counts runs) — remove them from the spur toml",
+    )
+  }
   const initiator = members.find((m) => m.initiates)?.name
   const midTurn = interruptedMember(priorMessages, delivered, initiator)
   if (resumeOf.size > 0) {

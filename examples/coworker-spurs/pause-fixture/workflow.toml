@@ -14,6 +14,4 @@ initiates = true
 [members.beta]
 
 [hooks]
-units = "true"
-grade = "true"
 counts = "node hooks/counts.mjs"
