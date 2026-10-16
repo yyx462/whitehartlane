@@ -1,4 +1,4 @@
-# Agentic OS
+# WhiteHartLane
 
 A shell and supervisor for subagent work. The user talks to a levy; every pane is born booked.
 

@@ -350,8 +350,9 @@ docs use the long name, you'll type the short one.
 - **Examples that run today:** `examples/coworker-spurs/` (`ui-pause`,
   `steps-viz`), `examples/fan-out-spurs/`, `examples/chain-spurs/` (two-hop
   hand-off), `examples/lab-spurs/` (`trivia-bench`, an eval harness).
-- **The window:** `http://127.0.0.1:8787` — a viewer for runs, not a second
-  OS.
+- **The window:** `http://127.0.0.1:8787` locally — the server binds
+  `0.0.0.0` by default, so the same UI is reachable over the tailnet at
+  this machine's tailnet IP. A viewer for runs, not a second OS.
 
 ## The words
 
@@ -377,7 +378,7 @@ One word per concept, enforced — the full dictionary is
   [`GOAL.decision.md`](GOAL.decision.md) — every dated branch from them.
 - [`docs/RAILS.md`](docs/RAILS.md) — the rails/hooks inventory, written from
   use.
-- [`docs/adr/`](docs/adr/) — eleven accepted decisions, argued.
+- [`docs/adr/`](docs/adr/) — twelve accepted decisions, argued.
 - [`docs/plans/eval-vs-single-agent.md`](docs/plans/eval-vs-single-agent.md)
   — how this OS gets evaluated against a single agent: paired arms,
   pre-registered hypotheses, attention and isolation instruments built
