@@ -519,3 +519,32 @@ test("a fatal engine closes the fleet tab on the way down (j-5701b2)", async () 
   const close = calls.find((c) => c.args[0] === "tab" && c.args[1] === "close" && c.args[2] === "wX:t9")
   assert.ok(close, "close what we opened — even on a fatal")
 })
+
+test("C03 regression: the fleet layout pre-splits nothing — no pane is born before a worker needs it", () => {
+  const mk = () => {
+    const calls: { tool: string; args: string[] }[] = []
+    const herdrRunner = (args: string[]): RunnerResult => {
+      calls.push({ tool: "herdr", args })
+      if (args[0] === "tab" && args[1] === "create") {
+        return { status: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }) }
+      }
+      if (args[0] === "pane" && args[1] === "split") return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: "wX:s1" } } }) }
+      return { status: 0, stdout: "" }
+    }
+    const ledger = fakeLedger()
+    ledger.job.spawner = { tool: "opencode", session_id: "ses_levy", since: new Date().toISOString(), pane: "wK:pGT" }
+    const rail = new Rail({
+      argvDir: mkdtempSync(join(tmpdir(), "rail-c03-")),
+      ledger,
+      log: () => {},
+      shepRunner: () => ({ status: 0, stdout: "" }) as RunnerResult,
+      herdrRunner,
+    })
+    return { rail, calls }
+  }
+  const one = mk()
+  one.rail.setLayout({ tab: "new", orchestrator: "left" }, "/tmp/sess/jobs/j-c03/run")
+  const splits = one.calls.filter((c) => c.args[0] === "pane" && c.args[1] === "split")
+  assert.equal(splits.length, 0, "v2 layout anchors the column on the tab root — the never-populated viewer lane must not return")
+  assert.ok(one.calls.some((c) => c.args[0] === "tab" && c.args[1] === "create"), "the fleet tab itself opens")
+})
