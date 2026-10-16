@@ -164,3 +164,33 @@ with a better source of truth, and a nested worker that levies a
 child carries its own `HERDR_PANE_ID` at spawn. The registry file
 survives solely as audit bookkeeping (exempting a live levy pane from
 stray-pane violations); the wake never reads it.
+
+## Amendment (2026-10-17): the spool outranks the pane rungs
+
+The 2026-10-13 order (parent pane → fork → spool → doorbell) made the
+most invasive delivery the default: any levy whose pane died was
+rebirthed into a NEW tab (`whl-fork-<jid>`) before the in-band channel
+was even consulted — the "random tabs" the owner flagged twice, live
+in the Oct-16 orchestrator logs (j-fdc632, j-abefa8, j-7e481b). The
+spool rung sat behind a config flag that was honest only while the
+plugin could not load at all: `opencode-wake.js` shipped a v1 export
+shape, which opencode 2.x never loads — so the flag guarded a channel
+that could not exist.
+
+Both halves are fixed together:
+
+1. The plugin is ported to the v2 plugin API (`{ id, setup(ctx) }`,
+   `ctx.session.prompt` delivery — the shape gwt-ambient proved on
+   this machine). `whl plugin install` is unchanged: the symlink is
+   still the contract.
+2. The rung order is now **spool → parent pane → fork → doorbell**,
+   and the spool rung arms itself when the plugin is installed
+   (symlink present), not by env. The heartbeat freshness check inside
+   the rung stays the real trust: armed-but-stale falls through
+   honestly, exactly as before. `AGENTIC_OS_SPOOL_WAKE=0` disarms,
+   `=1` forces (tests); test contexts default off.
+
+The rule the order now encodes: a fresh heartbeat is the levy's own
+process saying "I am listening" — a listening conversation never pays
+for a pane prompt or a rebirth tab. The fork is the last resort among
+the rungs: the only one that opens anything.
