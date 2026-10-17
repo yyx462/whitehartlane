@@ -15,7 +15,7 @@ import {
 import { RefusedError } from "../src/backpressure.ts"
 import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
-import { readState, finishUnit } from "../src/state.ts"
+import { readCheckpoints, readState, finishUnit } from "../src/state.ts"
 
 import { copyExample, copyExampleNamed } from "./util.ts"
 
@@ -814,4 +814,71 @@ test("every cycle sweeps privileges — the rail answers, the engine carries the
   cycle(d) // spawn
   cycle(d) // a beat with a pane in flight
   assert.ok(sweeps >= 2, `the engine swept on every cycle (got ${sweeps})`)
+})
+
+// #144 — a grade FAULT is infra, never an answer: it cannot trip the
+// canary (the gate judges plans, not hooks), it lands on the stage
+// ledger as a regradable card, and a failing grade that says nothing
+// is labeled a fault, not a verdict.
+
+test("a grade-fault never trips the canary and lands as a ledger card (#144)", async () => {
+  const dir = await copyExample("orch-grade-fault-")
+  const shep = fakeShep()
+  const canaryState = { enabled: true, released: false, failed: false }
+  const base = deps(dir, shep.port, { canary: canaryState, slots: 3 })
+  const realGrade = base.hooks.grade
+  base.hooks = {
+    ...base.hooks,
+    grade: (unit) =>
+      unit.id === "france"
+        ? { pass: false, row: "grade-fault: exit 127", fault: "grade-fault" }
+        : realGrade(unit),
+  }
+  cycle(base) // spawn france (canary cap 1)
+  appendFileSync(join(dir, "units", "france", "log.txt"), "done france\n")
+  cycle(base) // france finishes; grade faults
+  assert.equal(canaryState.failed, false, "a grade-fault must not stop the line")
+  const cps = readCheckpoints(dir)
+  assert.ok(cps.some((c) => c.stage === "grade:france" && c.status === "grade-fault"), "the ledger has the fault card")
+  assert.ok(cps.some((c) => c.stage === "unit:france" && c.status === "ok"), "the worker card stays ok — only the grade card failed")
+})
+
+test("a grade that throws is a fault too: no canary trip, a ledger card, a wake (#144)", async () => {
+  const dir = await copyExample("orch-grade-throw-fault-")
+  const { port, wakes } = fakeShep()
+  const canaryState = { enabled: true, released: false, failed: false }
+  const base = deps(dir, port, { canary: canaryState, slots: 3 })
+  const realGrade = base.hooks.grade
+  base.hooks = {
+    ...base.hooks,
+    grade: (unit) => {
+      if (unit.id === "france") throw new HookError("hook timed out after 300000ms")
+      return realGrade(unit)
+    },
+  }
+  cycle(base)
+  appendFileSync(join(dir, "units", "france", "log.txt"), "done france\n")
+  cycle(base)
+  assert.equal(canaryState.failed, false, "a thrown grade is infra — the canary stays untouched")
+  const cps = readCheckpoints(dir)
+  assert.ok(cps.some((c) => c.stage === "grade:france" && c.status === "grade-fault"))
+  assert.ok(wakes.some((w) => w.detail.includes("grade error")))
+})
+
+test("a REAL answer fail still trips the canary — the immunity is for faults only", async () => {
+  const dir = await copyExample("orch-canary-real-fail-")
+  const shep = fakeShep()
+  const canaryState = { enabled: true, released: false, failed: false }
+  const base = deps(dir, shep.port, { canary: canaryState, slots: 3 })
+  const realGrade = base.hooks.grade
+  base.hooks = {
+    ...base.hooks,
+    grade: (unit) => (unit.id === "france" ? { pass: false, row: "FAIL" } : realGrade(unit)),
+  }
+  cycle(base)
+  appendFileSync(join(dir, "units", "france", "log.txt"), "done france\n")
+  cycle(base)
+  assert.equal(canaryState.failed, true, "a loud FAIL is an answer fail — the gate trips")
+  const cps = readCheckpoints(dir)
+  assert.ok(cps.some((c) => c.stage === "grade:france" && c.status === "FAILED"))
 })

@@ -12,7 +12,7 @@ import {
   type LevyOutcome,
 } from "./levy.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
-import { readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
+import { checkpoint, readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
@@ -340,11 +340,15 @@ export function cycle(deps: CycleDeps): boolean {
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
 
   // Every unit's finish flows through here: state.json (resume projection) plus
-  // the unit.finished event — the grade row's one and only home.
-  const finish = (id: string, pass: boolean, row: ReportRow): void => {
+  // the unit.finished event — the grade row's one and only home. A
+  // grade-FAULT (infra, not answer) never trips the canary: the stop-the-
+  // line gate exists to protect slots from a doomed PLAN, and a broken
+  // hook says nothing about the plan (#144).
+  const faultUnits = new Set<string>()
+  const finish = (id: string, pass: boolean, row: ReportRow, faultsCanary = true): void => {
     finishUnit(deps.taskDir, id, pass, row)
     deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
-    if (deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
+    if (faultsCanary && deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
       else deps.canary.failed = true
     }
@@ -354,6 +358,7 @@ export function cycle(deps: CycleDeps): boolean {
     const size = existsSync(flight.logPath) ? readFileSync(flight.logPath).length : 0
     const text = logText(flight.logPath)
     if (text.includes(`done ${id}`)) {
+      checkpoint(deps.taskDir, `unit:${id}`, "ok", "worker output landed")
       if (deps.canary?.enabled && !deps.canary.released) {
         writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
       }
@@ -361,20 +366,31 @@ export function cycle(deps: CycleDeps): boolean {
       // never the run. j-5701b2: a 300s verifier timeout surfaced as a
       // raw ETIMEDOUT and aborted a whole pass one second before the
       // verifier passed. The row says grade error; the wake carries it;
-      // the siblings keep their chance.
-      let grade: { pass: boolean; row: string }
+      // the siblings keep their chance. A throw is always infra: it
+      // cannot trip the canary and it lands on the stage ledger as a
+      // grade-fault card `regrade` can re-enter.
+      let grade: { pass: boolean; row: string; fault?: "grade-fault" }
       try {
         grade = deps.hooks.grade(flight.unit)
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err)
-        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false })
+        faultUnits.add(id)
+        checkpoint(deps.taskDir, `grade:${id}`, "grade-fault", why.split("\n")[0])
+        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false }, false)
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
         deps.shep.wake(id, "blocked", `grade error: ${why.split("\n")[0]}`)
         continue
       }
-      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass })
+      if (grade.fault) faultUnits.add(id)
+      checkpoint(
+        deps.taskDir,
+        `grade:${id}`,
+        grade.pass ? "ok" : grade.fault ? "grade-fault" : "FAILED",
+        grade.row,
+      )
+      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass }, !grade.fault)
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -383,6 +399,7 @@ export function cycle(deps: CycleDeps): boolean {
       }
     } else if (text.includes(`blocked ${id}`)) {
       const why = text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? ""
+      checkpoint(deps.taskDir, `unit:${id}`, "FAILED", why.slice(0, 120))
       finish(id, false, { unit: id, result: "blocked", pass: false })
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
@@ -1074,13 +1091,32 @@ export async function runOrchestrator(input: {
     setHookRunNote(null)
     return null
   }
+  // The honest label (#144): two distinct stops. canary.failed = a REAL
+  // answer failed and stopped the line — "canary-stopped". The other
+  // shape: the canary never released because the first unit's grade
+  // FAULTED (faults can't trip the gate, and can't release it either) —
+  // the fleet stayed capped at 1 and the run ended stalled behind a
+  // broken hook, an infra story, never an answer story. The arm-e night
+  // read 28 verifier-passes as fleet hazards; the parenthetical keeps
+  // the stop legible AND excluded from answer pass-rates. Fault rows
+  // are derived from their rows' own prefixes — the stage ledger
+  // (checkpoints.jsonl) carries the same cards with timestamps.
+  const isFaultRow = (row: ReportRow) =>
+    row.result.startsWith("grade-fault:") || row.result.startsWith("grade error:")
+  const faultCount = rows.filter(isFaultRow).length
+  const canaryStatus = canary.failed
+    ? "canary-stopped"
+    : canary.enabled && !canary.released && faultCount > 0 && rows.length > 0
+      ? "canary-stopped(grade-fault)"
+      : undefined
   const report = writeReport(
     input.taskDir,
     where,
     rows,
     loaded.hooks.counts,
-    canary.failed ? "canary-stopped" : undefined,
+    canaryStatus,
   )
+  checkpoint(input.taskDir, "report", "info", report.status)
   setHookRunNote(null)
   input.shep.retireAll()
   const receipt = input.shep.verify()

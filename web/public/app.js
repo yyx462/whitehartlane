@@ -2620,12 +2620,15 @@ async function triggerDag(pid, dagId, btns) {
 // running -> Pause+Abort (the only state where both are live) · the
 // parks (paused|aborted|orphaned) -> Continue+Delete — Delete is the
 // "I no longer need this spur" exit, its files leave the disk ·
-// retired (success|failed) -> Delete alone (no dead buttons parked)
+// retired (success) -> Delete alone · retired (failed) -> Re-grade
+// (re-run the grade hook for failed units whose worker output
+// survives — the workers never spawn again) + Delete
 function opsButtonsHtml(st, sid, jid) {
   const key = `${sid}/${jid}`;
   const busy = state.opsBusy[key];
   const running = st === "running";
   const retired = st === "success" || st === "failed";
+  const failedRetired = st === "failed";
   const slot = running ? ["pause", "Pause"]
     : st === "paused" ? ["continue", "Resume"]
     : ["continue", "Continue"];
@@ -2634,6 +2637,7 @@ function opsButtonsHtml(st, sid, jid) {
     pause: "drains to a unit boundary, then parks",
     abort: "kills now — booked sessions survive; a Continue can bring it back",
     continue: "resumes from booked sessions",
+    regrade: "re-run the grade hook for failed units whose worker output survives — no worker re-runs (#144)",
     delete: "removes this spur's files from disk for good — not revertable",
   };
   const pTitle = titles[slot[0]];
@@ -2643,8 +2647,10 @@ function opsButtonsHtml(st, sid, jid) {
   const pBtn = `<button class="btn ops" data-ops="${slot[0]}" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(pTitle)}">${pLabel}</button>`;
   const aBtn = `<button class="btn ops danger" data-ops="abort" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.abort)}">${busy ? "Aborting…" : "Abort"}</button>`;
   const rBtn = `<button class="btn ops" data-ops="refresh" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="restart the orchestrator on the current door; sessions resume from where they parked">${busy === "refresh" ? "Refreshing…" : "Refresh"}</button>`;
+  const gBtn = `<button class="btn ops" data-ops="regrade" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.regrade)}">${busy === "regrade" ? "Re-grading…" : "Re-grade"}</button>`;
   const dBtn = `<button class="btn ops danger" data-ops="delete" data-sid="${esc(sid)}" data-jid="${esc(jid)}"${dis} title="${esc(titles.delete)}">${dLabel}</button>`;
   const buttons = running ? pBtn + aBtn + rBtn
+    : failedRetired ? gBtn + dBtn
     : retired ? dBtn
     : pBtn + dBtn;
   return `<span class="ops-pair">${buttons}</span>`;
@@ -2700,6 +2706,11 @@ function confirmBox(opts) {
 }
 
 const OPS_CONFIRMS = {
+  regrade: (jid) => ({
+    title: "Re-grade run",
+    body: `Re-grade run ${jid}? Re-runs the grade hook for failed units whose worker output survives — workers never spawn again (#144).`,
+    confirmLabel: "Re-grade",
+  }),
   pause: (jid) => ({
     title: "Pause run",
     body: `Pause run ${jid}? It drains to a unit boundary, then parks.`,
@@ -2747,6 +2758,7 @@ async function runOps(verb, sid, jid) {
       : verb === "abort" ? "abort signalled"
       : verb === "continue" ? "continue signalled"
       : verb === "refresh" ? "refresh: drained, then restarted on the current door"
+      : verb === "regrade" ? "re-grade ran — failed units re-entered at the grade card"
       : "deleted — the spur's files are gone";
     const lines = res.lines || (verb === "delete" ? res.removed : []);
     showToast([head, ...lines].filter(Boolean).join("\n"), "ok");

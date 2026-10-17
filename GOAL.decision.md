@@ -323,3 +323,22 @@ e2e battery un-broken (fixture counts drift). Baseline 370 tests/368
 pass → 379/379. Serves all six rules; the loop itself is now the way
 this OS iterates on itself. Rejected: fixing non-reproducing friction
 (stale clusters are findings, not work).
+
+2026-10-17 — The grade contract + regrade: infra faults stop wearing
+answer-failure labels (#144). Evidence: the arm-e TB2 night — 33/48
+jobs "canary-stopped", 28 of them verifier-passes; the primary killer
+a skeleton root one dir short (exit-127 in 13ms, zero artifacts,
+41/41 hooks), secondary container races; the canary gate treated both
+as answer fails and retired whole runs; the levy's only recourse a
+FULL re-attempt (4 tasks paid one for a 1-line hook fix). Decided:
+(1) a failing grade must SAY why — silence + non-zero = grade-fault,
+one retry, honest label, canary immunity (the gate judges plans, not
+hooks); (2) the stage ledger — run/checkpoints.jsonl, append-only,
+stage-keyed so resume re-enters the failed card, never the journey;
+(3) `whl regrade <jid>` re-runs grade only for failed units with
+surviving worker output; needsRerun is named, never guessed; (4)
+admission smoke — a hook declaring --check runs at booking (50ms
+catches the 13ms bug); (5) window Re-grade button on retired-failed
+runs. Serves rules 2 (honest receipts) and 6 (cheap: re-grade vs
+re-run). Rejected: pausing instead of retiring on canary stop (holds
+panes hostage; regrade achieves the resume without zombies).

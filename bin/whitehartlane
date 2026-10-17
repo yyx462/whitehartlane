@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // whitehartlane run <folder> | jobs | events | audit | sweep | pause | abort |
-// fail | continue | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
+// fail | continue | regrade | fork | register | promote | plugin install|uninstall|status — the start door is run. It reads workflow.toml and
 // starts that workflow's engine. The rest read and finish the OS disk
 // (~/.local/share/whitehartlane). jobs lists every Job record with its state
 // and receipt; audit diffs live shep panes against booked panes (every
@@ -25,6 +25,7 @@ import { refreshWait } from "../src/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkLevy } from "../src/fork.ts"
+import { regradeJob } from "../src/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
 import { seedSessionFile } from "../src/transcripts.ts"
 import { admitFork } from "../src/policy.ts"
@@ -501,6 +502,39 @@ async function main() {
     child.unref()
     continueJob(job, child.pid)
     console.log(`continued ${job.id} (pid ${child.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)
+    return
+  }
+
+  // regrade (#144): the minimal-rerun resume for a TERMINAL job. Units
+  // that failed at the GRADE stage (worker output on disk, verdict bad
+  // or faulty) re-enter at exactly that card — the worker never runs
+  // again; the levy fixes/blesses the hook first, then one verb turns
+  // mislabeled stops into honest reports. Units without worker output
+  // say so: they want a rerun (fresh booking), not a regrade.
+  if (cmd === "regrade") {
+    const jid = process.argv[3]
+    if (!jid) {
+      console.error("regrade: wants a job id — whitehartlane regrade j-xxxx")
+      process.exitCode = 2
+      return
+    }
+    const r = regradeJob(jid)
+    if (!r.ok) {
+      console.error(`regrade: ${r.why}`)
+      process.exitCode = 1
+      return
+    }
+    if (r.regraded.length === 0) {
+      console.log(`regrade ${jid}: nothing failed — report stands (${r.report?.status ?? "none"})`)
+      return
+    }
+    for (const row of r.regraded) {
+      console.log(`regrade ${jid}: ${row.unit} → ${row.pass ? "PASS" : "FAIL"} (${row.row})`)
+    }
+    if (r.needsRerun.length > 0) {
+      console.log(`regrade ${jid}: ${r.needsRerun.join(", ")} lack worker output — rerun (a fresh booking spares done units)`)
+    }
+    console.log(`regrade ${jid}: report ${r.report?.status} at ${r.dir ? join(r.dir, "report.json") : "(run dir)"}`)
     return
   }
 
