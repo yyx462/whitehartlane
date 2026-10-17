@@ -325,16 +325,32 @@ function flattenJob(job) {
   };
 }
 
+// perf — the rev is checkout metadata: identical for every job in a
+// response, so flattenJob must NOT pay one sync `git rev-parse` per job
+// (on a 160-job disk that froze this single-threaded server for a
+// minute+ per /api/jobs poll — under launchd `git` resolves to the
+// /usr/bin/git xcrun shim at ~0.4s a spawn). One spawn per TTL window;
+// failures cache too, so a git-less machine pays the lookup once.
+const DOOR_REV_TTL_MS = 30_000;
+let doorRevCache = null; // {at, rev}
+
 function doorNowRev() {
+  const now = Date.now();
+  if (doorRevCache && now - doorRevCache.at < DOOR_REV_TTL_MS) {
+    return doorRevCache.rev;
+  }
+  let rev = null;
   try {
-    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+    rev = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
       cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), ".."),
       encoding: "utf8",
       timeout: 5000,
-    }).trim();
+    }).trim() || null;
   } catch {
-    return null;
+    rev = null;
   }
+  doorRevCache = { at: now, rev };
+  return rev;
 }
 
 let jobsCache = null;
