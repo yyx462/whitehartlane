@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, wri
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { loadSpurFile, type Spur } from "./spur.ts"
-import { HookError, loadManifest, probeHooks } from "./hooks.ts"
+import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "./policy.ts"
 import { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf, type SpurIdentity } from "./project.ts"
@@ -371,6 +371,18 @@ export function prepareRun(folder: string): RunReady | RunRefused {
     const manifest = loadManifest(dir)
     slots = manifest.workflow.slots ?? 2
     task = manifest.workflow.name
+    // Admission smoke (#144): a grade hook that declares --check runs
+    // ONCE here — a broken hook dies before the run, not two seconds
+    // after the worker finishes. The arm-e night paid 4 full attempts
+    // to discover a 13ms exit-127 the check catches in 50ms.
+    const smoke = gradeSmoke(dir, manifest)
+    if (smoke.kind === "refuse") {
+      return {
+        ok: false,
+        why: `grade hook failed its own --check — fix it before booking:\n${smoke.output}`,
+        code: 1,
+      }
+    }
   } catch (err) {
     const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
     return { ok: false, why, code: 1 }

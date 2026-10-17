@@ -156,6 +156,21 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - Hook contract for the planner hook: STRICT JSONL on stdout; exit 75
   = provider refusal (the rail retries), other nonzero = deterministic
   (fail fast).
+- The grade contract (#144): a FAILING grade must say why — its first
+  stdout line is the verdict row. Silence + non-zero exit is a
+  **grade-fault** (broken path, dead container, race): one immediate
+  retry, then a `grade-fault: …` row that can never be read as an
+  answer failure, never trips the canary (the gate judges plans, not
+  hooks), and lands on the stage ledger (`run/checkpoints.jsonl`,
+  append-only, one line per stage transition) as a card `regrade` can
+  re-enter. `whl regrade <jid>` re-runs ONLY the grade for failed
+  units whose worker output survives (the `done` marker is the
+  ticket); units without output are named needsRerun — a fresh booking
+  (state.json spares the done units) is their path, never a guess. A
+  grade hook that declares `--check` in its source runs it ONCE at
+  admission — a broken hook dies before the run, not two seconds
+  after the worker finishes (the arm-e night: 41/41 hooks exit-127'd
+  in ~13ms wearing answer-failure labels; 28 were verifier-passes).
 
 ## Classified on purpose
 

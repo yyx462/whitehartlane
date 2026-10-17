@@ -1842,9 +1842,12 @@ async function handleApi(req, res, url) {
   // v5 (ADR 5): the rail verbs — pause parks a live run (SIGTERM, drains
   // to a unit boundary, books paused), abort kills it (SIGKILL, booked
   // sessions survive), continue rebirths a paused|aborted|orphaned run.
-  // The CLI is the truth: server-side we only check the Job exists, the
-  // CLI's own refusal line rides back verbatim as an honest 4xx.
-  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/(pause|abort|continue|refresh)$/);
+  // regrade (#144) re-enters a TERMINAL job at the grade card only —
+  // failed units with worker output get their hook re-run, workers
+  // never spawn. The CLI is the truth: server-side we only check the
+  // Job exists, the CLI's own refusal line rides back verbatim as an
+  // honest 4xx.
+  m = pathname.match(/^\/api\/job\/([^/]+)\/([^/]+)\/(pause|abort|continue|refresh|regrade)$/);
   if (req.method === "POST" && m) {
     const [, sid, jid, verb] = m;
     if (!ID_RE.test(sid) || !ID_RE.test(jid)) return sendError(res, 400, "bad id");
@@ -1866,7 +1869,7 @@ async function handleApi(req, res, url) {
       }
       extraArgs.push("--wait", body.wait.trim());
     }
-    const r = await spawnVerb(verb, jid, extraArgs, verb === "refresh" ? 11 * 60_000 : 120_000);
+    const r = await spawnVerb(verb, jid, extraArgs, verb === "refresh" || verb === "regrade" ? 11 * 60_000 : 120_000);
     if (r.reason === "error") {
       return sendJson(res, 500, {
         ok: false,

@@ -11,7 +11,7 @@ const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 export type Unit = { id: string; brief: string }
 
-export type Grade = { pass: boolean; row: string }
+export type Grade = { pass: boolean; row: string; fault?: "grade-fault" }
 
 export type Hooks = {
   units: () => Unit[]
@@ -410,10 +410,51 @@ export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade
   if (manifest.hooks.grade === undefined || manifest.hooks.grade === "default") {
     return { pass: true, row: "ok" }
   }
-  const { stdout, status, ms } = runHook(`${manifest.hooks.grade} ${quote(unit.id)}`, taskDir)
-  note({ hook: "grade", target: unit.id, status, ms })
-  const row = stdout.split("\n")[0]?.trim()
-  return { pass: status === 0, row: row || (status === 0 ? "ok" : "failed") }
+  const cmd = `${manifest.hooks.grade} ${quote(unit.id)}`
+  const first = runHook(cmd, taskDir)
+  note({ hook: "grade", target: unit.id, status: first.status, ms: first.ms })
+  const firstRow = first.stdout.split("\n")[0]?.trim() ?? ""
+  if (first.status === 0) return { pass: true, row: firstRow || "ok" }
+  // A failing grade must SAY why (its first stdout line is the verdict
+  // row). Silence + non-zero = the hook itself is broken — not-found
+  // path, dead container, race — an infra fault, never an answer fault
+  // (#144: the arm-e night, 28/33 "canary-stops" were exit-127s with
+  // zero artifacts wearing answer-failure labels). One immediate retry
+  // catches the warm-container race; a persistent fault keeps a label
+  // that can never be confused for a verdict.
+  if (firstRow) return { pass: false, row: firstRow }
+  const retry = runHook(cmd, taskDir)
+  note({ hook: "grade", target: unit.id, status: retry.status, ms: retry.ms })
+  const retryRow = retry.stdout.split("\n")[0]?.trim() ?? ""
+  if (retry.status === 0) return { pass: true, row: `${retryRow || "ok"} (after grade-fault retry)` }
+  const why =
+    retryRow || retry.stderr.split("\n").find((line) => line.trim()) || `exit ${retry.status}`
+  return { pass: false, row: `grade-fault: ${why}`.slice(0, 200), fault: "grade-fault" }
+}
+
+// Admission smoke (#144): a grade hook that declares a --check mode is
+// executed ONCE at booking time — before the run, not two seconds after
+// the worker finishes. Opt-in by the hook's own source mentioning
+// --check (an old hook without the mode simply runs as before). A
+// refusal carries the check's own output: the operator sees exactly
+// which contract leg failed (TASK_ID, verifier path, tests dir).
+export function gradeSmoke(
+  taskDir: string,
+  manifest: Manifest,
+): { kind: "skip" } | { kind: "pass" } | { kind: "refuse"; output: string } {
+  const cmd = manifest.hooks.grade
+  if (cmd === undefined || cmd === "default") return { kind: "skip" }
+  // resolve the script path the way stageRun absolutizes: "bash <path> args…"
+  const tokens = cmd.split(/\s+/)
+  const script = tokens[0] === "bash" || tokens[0] === "sh" ? tokens[1] : tokens[0]
+  if (!script) return { kind: "skip" }
+  const scriptPath = resolve(taskDir, script)
+  if (!existsSync(scriptPath)) return { kind: "skip" }
+  if (!readFileSync(scriptPath, "utf8").includes("--check")) return { kind: "skip" }
+  const { stdout, status } = runHook(`${cmd} --check`, taskDir, { timeoutMs: 10_000 })
+  if (status === 0) return { kind: "pass" }
+  const output = stdout.split("\n").filter((line) => line.trim()).slice(0, 6).join("\n")
+  return { kind: "refuse", output: output || `grade --check exited ${status}` }
 }
 
 export function runCounts(
