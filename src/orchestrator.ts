@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFi
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
-import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import {
   readChildWake,
@@ -16,7 +16,7 @@ import { checkpoint, readState, finishUnit, writeUnitsSnapshot } from "./state.t
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
-  spawnWorker: (name: string, kind: string, briefPath: string, cwd: string) => boolean
+  spawnWorker: (name: string, kind: string, briefPath: string, cwd: string, model?: string) => boolean
   // Issue #123 — renew the job lease once per engine cycle (one write).
   // Optional: a test shep without a ledger simply does not renew.
   renew?: () => void
@@ -30,6 +30,7 @@ export type ShepPort = {
     session: ResumePointer,
     briefPath: string,
     cwd: string,
+    model?: string,
   ) => boolean
   paneAlive: (name: string) => boolean
   // Heartbeat of last resort (j-964391): a worker mid-generation or a
@@ -114,6 +115,10 @@ export type CycleDeps = {
   // Absent (no stages) = every unit takes the task-level grade —
   // byte-identical to the pre-stage rail.
   stagePlan?: Map<string, GradePlan>
+  // Per-mind model pins (unit.model → stage.model → manifest):
+  // absent = undefined passed to the spawn seam, which falls to the
+  // manifest pin — byte-identical to the pre-stage rail.
+  unitModels?: Map<string, string>
 }
 
 const DEFAULT_SLOTS = 2
@@ -325,10 +330,12 @@ function resumeSpawn(
   const continuePath = join(paths.dir, "continue.md")
   writeFileSync(continuePath, continueBriefFor(unit, resume, paths))
   const cwd = deps.worktree ?? resume.cwd ?? paths.dir
+  // a resumed unit keeps its pin (the nearest declaration at mint time)
+  const model = deps.unitModels?.get(unit.id)
   if (deps.shep.resumeWorker) {
-    return deps.shep.resumeWorker(`w-${unit.id}`, resume, continuePath, cwd)
+    return deps.shep.resumeWorker(`w-${unit.id}`, resume, continuePath, cwd, model)
   }
-  return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd)
+  return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd, model)
 }
 
 export function cycle(deps: CycleDeps): boolean {
@@ -586,6 +593,7 @@ export function cycle(deps: CycleDeps): boolean {
             deps.hooks.workerKind,
             paths.briefPath,
             deps.worktree ?? paths.dir,
+            deps.unitModels?.get(unit.id),
           )
       if (ok) {
       deps.attempts.delete(unit.id)
@@ -741,6 +749,7 @@ export async function runOrchestrator(input: {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromStages(stages) }
   }
   const stagePlan = stages?.length ? gradePlanFromStages(stages) : undefined
+  const unitModels = stages?.length ? modelPlanFromStages(stages) : undefined
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
@@ -821,6 +830,7 @@ export async function runOrchestrator(input: {
         bookedWait: input.bookedWait,
         steps,
         stagePlan,
+        unitModels,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.finished" && typeof payload.unit === "string") {

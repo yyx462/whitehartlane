@@ -183,6 +183,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   does it) · grade = bind (task verifier, last unit stage by default)
   signal/end = observe (lab detectors)
 
+  model pins: a mind's pin = its nearest declaration —
+  unit.model → stage.model → [workflow] model (fresh per stage)
+
   dry-run: worker_kind = "mock" — no agent born; checks/gates/grades
   still fire; a whole program rehearses in seconds, zero tokens`)
     return
