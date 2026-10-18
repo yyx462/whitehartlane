@@ -7,10 +7,10 @@
 import assert from "node:assert/strict"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
-import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, type Stage } from "../src/hooks.ts"
+import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, type Stage } from "../src/hooks.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-stages-"))
 process.env.AGENTIC_OS_NOTIFY = "0"
@@ -236,7 +236,7 @@ test("stages compile: units, per-unit steps sharing waves, grade plan defaults",
 test("stage declarations refuse honestly", async () => {
   const cases: Array<[string, string, RegExp]> = [
     [
-      "coworker",
+      "coworker with one member",
       `[workflow]
 name = "x"
 worker_kind = "opencode"
@@ -244,8 +244,39 @@ worker_kind = "opencode"
 [[stage]]
 id = "pair"
 topology = "coworker"
+members = [{ name = "alex", brief = "b", initiates = true }]
 `,
-      /coworker stages land with the runner unification/,
+      /at least two/,
+    ],
+    [
+      "coworker with no initiator",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "pair"
+topology = "coworker"
+members = [
+  { name = "alex", brief = "b" },
+  { name = "sam", brief = "b" },
+]
+`,
+      /exactly one member must carry initiates/,
+    ],
+    [
+      "members on a solo stage",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "s"
+topology = "solo"
+brief = "b"
+members = [{ name = "alex", brief = "b", initiates = true }]
+`,
+      /members belong to coworker stages/,
     ],
     [
       "split",
@@ -337,6 +368,152 @@ brief = "b"
     writeFileSync(join(dir, "workflow.toml"), toml)
     assert.throws(() => loadManifest(dir), pattern, name)
   }
+})
+
+// ── coworker stages: delegation to a minted child program ─────────
+test("a coworker stage needs a levy port — refused before any booking", async () => {
+  const dir = taskDir("coworker-noport")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "work"
+topology = "solo"
+brief = "w"
+
+[[stage]]
+id = "review"
+topology = "coworker"
+members = [
+  { name = "alex", brief = "review as alex", initiates = true },
+  { name = "sam", brief = "review as sam" },
+]
+`,
+  )
+  await assert.rejects(
+    () => run(dir, fakeShep().port),
+    /wake steps \(and coworker stages, which delegate to a child program\) need a levy port/,
+  )
+})
+
+test("coworker stage mints its child program, levies it once, wakes advance the chain", async () => {
+  const dir = taskDir("coworker-flow")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "coworker-flow"
+worker_kind = "opencode"
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[[stage]]
+id = "draft"
+topology = "solo"
+brief = "draft the thing"
+
+[[stage]]
+id = "review"
+topology = "coworker"
+members = [
+  { name = "alex", brief = "review as alex", initiates = true },
+  { name = "sam", brief = "review as sam", model = "zhipuai-coding-plan/glm-5.3" },
+]
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  const levies: Array<{ unitId: string; folder: string }> = []
+  const levyChild = (unitId: string, folder: string) => {
+    levies.push({ unitId, folder })
+    const jobDir = join(dir, "child-jobs", unitId)
+    mkdirSync(jobDir, { recursive: true })
+    writeFileSync(
+      join(jobDir, "job.json"),
+      JSON.stringify({
+        id: `j-${unitId}`,
+        sid: "s-child",
+        workflow: "coworker",
+        task: unitId,
+        dir: jobDir,
+        state: "running",
+        spawner: { tool: "rail", session_id: "s-parent", since: new Date().toISOString() },
+      }),
+    )
+    // the child exchange completes immediately: its end-of-job wake
+    writeFileSync(
+      join(jobDir, "wake.json"),
+      JSON.stringify({ outcome: "done", report: join(jobDir, "report.json"), at: new Date().toISOString() }),
+    )
+    return { ok: true as const, jid: `j-${unitId}`, jobDir, warnings: [] }
+  }
+  const shep = fakeShep()
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: shep.port,
+    levyChild,
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "done")
+  // the child program was minted from the stage's members
+  const childToml = readFileSync(join(dir, "stages", "review", "workflow.toml"), "utf8")
+  assert.match(childToml, /\[members\.alex\][\s\S]*initiates = true/)
+  assert.match(childToml, /\[members\.sam\][\s\S]*model = "zhipuai-coding-plan\/glm-5\.3"/)
+  assert.match(childToml, /model = "zhipuai-coding-plan\/glm-5\.3-flash"/) // inherited default
+  assert.equal(
+    readFileSync(join(dir, "stages", "review", "members", "sam.md"), "utf8"),
+    "review as sam\n",
+  )
+  // levied exactly once, into the minted folder
+  assert.deepEqual(levies, [{ unitId: "review", folder: join(dir, "stages", "review") }])
+  // NO worker pane was born for the coworker stage — the members are
+  // the child program's workers, not this rail's
+  assert.deepEqual(shep.spawned, ["w-draft"])
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.match(byUnit.review, /^child j-review done/)
+})
+
+// ── dry-run: worker_kind = "mock" births no agent ──────────────────
+test("mock worker kind parses and the mock lands the done line itself", async () => {
+  const dir = taskDir("mock")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "mockrun"
+worker_kind = "mock"
+
+[[stage]]
+id = "a"
+topology = "solo"
+brief = "anything"
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  // loadManifest accepts the mock kind
+  // (already implied by the run below; explicit for the matrix)
+  const shep = fakeShep()
+  const report = await run(dir, shep.port)
+  assert.equal(report.status, "done")
+  // the helper the REAL rail calls: brief in, done line + result out
+  const briefPath = join(dir, "units", "a", "brief.md")
+  mkdirSync(dirname(briefPath), { recursive: true })
+  writeFileSync(briefPath, "b\n")
+  const logPath = landMockUnit(briefPath, "w-a")
+  assert.equal(logPath, join(dir, "units", "a", "log.txt"))
+  assert.equal(readFileSync(logPath, "utf8"), "done a\n")
+  assert.match(readFileSync(join(dir, "units", "a", "result.md"), "utf8"), /DRY-RUN/)
 })
 
 // ── back-compat: no [[stage]], the units hook path is unchanged ────

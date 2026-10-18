@@ -723,7 +723,7 @@ test("a wake step without a levy port refuses to run — no silent nesting (ADR 
   const { port } = fakeShep()
   await assert.rejects(
     () => runOrchestrator({ taskDir: dir, shep: port, log: () => {} }),
-    /wake steps need a levy port/,
+    /wake steps \(and coworker stages, which delegate to a child program\) need a levy port/,
   )
 })
 

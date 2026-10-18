@@ -17,7 +17,7 @@ export type Hooks = {
   units: () => Unit[]
   grade: (unit: Unit) => Grade
   counts: (rows: CountRow[]) => Record<string, number>
-  workerKind: "opencode" | "pi"
+  workerKind: "opencode" | "pi" | "mock"
 }
 
 // A scorecard row (issue #120): `pass` rides along so a counts hook —
@@ -69,11 +69,20 @@ export type Step = {
 // every unit is a fresh worker session either way (continuity is the
 // shared task container, which the chain keeps). Grade binding rides
 // the plan (#150): verify.sh fires only where a stage says so.
+export type StageMember = {
+  name: string
+  brief: string
+  initiates?: boolean
+  model?: string
+}
+
 export type Stage = {
   id: string
   topology: "solo" | "fan-out" | "coworker" | "gate"
   brief?: string
   units?: { id: string; brief: string }[]
+  members?: StageMember[]
+  model?: string
   check?: string
   run?: string
   grade?: boolean
@@ -137,9 +146,56 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       )
     }
     if (topology === "coworker") {
-      throw new HookError(
-        `stage ${id} is topology coworker — coworker stages land with the runner unification (#152 follow-up); run the exchange as its own workflow today`,
-      )
+      // the exchange, as one chain link: members are minted into a
+      // CHILD coworker program (stages/<id>/workflow.toml) and the
+      // wake machinery levies it once at the frontier — the child's
+      // wake receipt settles the stage like any wake step
+      if (!Array.isArray(t.members) || t.members.length < 2) {
+        throw new HookError(
+          `stage ${id} is topology coworker: members must be an array of at least two {name, brief, initiates} tables`,
+        )
+      }
+      let initiates = 0
+      const names = new Set<string>()
+      for (const [i, mem] of t.members.entries()) {
+        const row = mem as Record<string, unknown>
+        const name = str(row.name, `stage ${id} members[${i}].name`)
+        if (!SHEP_SAFE_ID.test(name)) throw new HookError(`stage ${id} member name is not shep-safe: ${name}`)
+        if (names.has(name)) throw new HookError(`stage ${id} member repeats name ${name}`)
+        names.add(name)
+        if (row.initiates === true) initiates += 1
+        else if (row.initiates !== undefined && row.initiates !== false) {
+          throw new HookError(`stage ${id} members[${i}].initiates must be true or false: ${String(row.initiates)}`)
+        }
+      }
+      if (initiates !== 1) {
+        throw new HookError(
+          `stage ${id} is topology coworker: exactly one member must carry initiates = true (got ${initiates}) — otherwise everyone idles and the exchange never starts`,
+        )
+      }
+      if (t.brief !== undefined) {
+        throw new HookError(`stage ${id} is topology coworker: members carry their own briefs — stage-level brief does not apply`)
+      }
+      if (t.run !== undefined) {
+        throw new HookError(`stage ${id} is topology coworker: run belongs to gate stages — the exchange is the members' work`)
+      }
+      if (t.units !== undefined) {
+        throw new HookError(`stage ${id} is topology coworker: the members ARE the workers — units does not apply`)
+      }
+      if (t.check !== undefined || t.grade !== undefined) {
+        throw new HookError(
+          `stage ${id} is topology coworker: check/grade do not apply — the child program's own exchange settles the stage`,
+        )
+      }
+    } else {
+      if (t.members !== undefined) {
+        throw new HookError(`stage ${id} is topology ${topology}: members belong to coworker stages`)
+      }
+      if (t.model !== undefined) {
+        throw new HookError(
+          `stage ${id} is topology ${topology}: per-stage model lands with the #152 follow-up (coworker stages carry the child's model today)`,
+        )
+      }
     }
     const cmd = (value: unknown, field: string): string | undefined => {
       if (value === undefined) return undefined
@@ -149,6 +205,18 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       return value
     }
     const stage: Stage = { id, topology }
+    if (topology === "coworker") {
+      stage.members = (t.members as Record<string, unknown>[]).map((row) => {
+        const member: StageMember = {
+          name: row.name as string,
+          brief: str(row.brief, `stage ${id} members[${row.name as string}].brief`),
+        }
+        if (row.initiates === true) member.initiates = true
+        if (row.model !== undefined) member.model = str(row.model, `stage ${id} members[${row.name as string}].model`)
+        return member
+      })
+      if (t.model !== undefined) stage.model = str(t.model, `stage ${id} model`)
+    }
     if (topology === "solo") {
       stage.brief = str(t.brief, `stage ${id} brief`)
       if (t.units !== undefined) {
@@ -223,12 +291,33 @@ export function stepsFromStages(stages: Stage[]): Step[] {
       steps.push({ id: stage.id, finished_by: "gate", wave, check: stage.run })
       continue
     }
+    if (stage.topology === "coworker") {
+      // the exchange is delegated: the child program lives at
+      // stages/<id>/ (minted by the orchestrator) and the wake
+      // machinery levies it once at the frontier — the child's wake
+      // receipt settles this stage like any wake step
+      steps.push({ id: stage.id, finished_by: "wake", wave, folder: join("stages", stage.id) })
+      continue
+    }
     // one end-step per unit, all on the stage's wave: the wave gate
     // binds every unit, not just the first
     const ids = stage.topology === "fan-out" ? stage.units!.map((u) => u.id) : [stage.id]
     for (const id of ids) steps.push({ id, finished_by: "end", wave })
   }
   return steps
+}
+
+// DRY-RUN: worker_kind = "mock" births no agent. The unit's done line
+// lands synchronously next to its brief and the cycle settles it
+// through the real path — checks, gates, grades all fire. Rehearse a
+// whole program's shape in seconds, zero tokens. (The test suite's
+// fake ports have done this for years; now real runs can too.)
+export function landMockUnit(briefPath: string, workerName: string): string {
+  const dir = dirname(briefPath)
+  const id = workerName.startsWith("w-") ? workerName.slice(2) : workerName
+  writeFileSync(join(dir, "result.md"), "DRY-RUN: no agent was spawned\n")
+  writeFileSync(join(dir, "log.txt"), `done ${id}\n`)
+  return join(dir, "log.txt")
 }
 
 export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
@@ -251,7 +340,7 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
   hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
@@ -344,8 +433,10 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   }
   const name = str(workflow.name, "workflow.name")
   const workerKind = str(workflow.worker_kind, "workflow.worker_kind")
-  if (workerKind !== "opencode" && workerKind !== "pi") {
-    throw new HookError(`workflow.worker_kind must be opencode or pi: ${workerKind}`)
+  if (workerKind !== "opencode" && workerKind !== "pi" && workerKind !== "mock") {
+    throw new HookError(
+      `workflow.worker_kind must be opencode, pi, or mock (dry-run: no agent is born; checks/gates/grades still fire): ${workerKind}`,
+    )
   }
   let slots: number | undefined
   if (workflow.slots !== undefined) {
