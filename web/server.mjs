@@ -883,12 +883,43 @@ function stepsFromToml(tomlText) {
 // all-of-earlier-waves, so the fan is honest), and a wake step carries
 // its CHILD job (booking -> job record -> the child's own staged steps)
 // for the box-in-box. Missing bookings render hollow with the reason.
+// OPTIMUM §4 state-store consolidation: the unit ledger
+// (checkpoints.jsonl) is a run's only lifecycle store — settled is a
+// fold of unit-carrying cards. A legacy run's state.json still speaks
+// (its ledger is half-populated, so the file wins when present).
 function stepStatesOf(folder) {
-  const st = readJson(path.join(folder, "state.json")) || {};
-  return {
-    done: Array.isArray(st.done) ? st.done : [],
-    failed: Array.isArray(st.failed) ? st.failed : [],
-  };
+  const legacy = path.join(folder, "state.json");
+  if (fs.existsSync(legacy)) {
+    const st = readJson(legacy) || {};
+    return {
+      done: Array.isArray(st.done) ? st.done : [],
+      failed: Array.isArray(st.failed) ? st.failed : [],
+    };
+  }
+  const done = [];
+  const failed = [];
+  const ledger = path.join(folder, "checkpoints.jsonl");
+  if (!fs.existsSync(ledger)) return { done, failed };
+  for (const line of fs.readFileSync(ledger, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let card;
+    try {
+      card = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!card.unit || card.status === "info") continue;
+    if (card.status === "ok") {
+      if (!done.includes(card.unit)) done.push(card.unit);
+      const i = failed.indexOf(card.unit);
+      if (i >= 0) failed.splice(i, 1);
+    } else {
+      if (!failed.includes(card.unit)) failed.push(card.unit);
+      const i = done.indexOf(card.unit);
+      if (i >= 0) done.splice(i, 1);
+    }
+  }
+  return { done, failed };
 }
 
 // one wake step's child: { levied, jid, sid, state, status, outcome,
@@ -981,7 +1012,9 @@ function stepsDefn(folder) {
     if (!waves.includes(w)) waves.push(w);
   }
   const states = stepStatesOf(folder);
-  const hasRun = fs.existsSync(path.join(folder, "state.json"));
+  const hasRun =
+    fs.existsSync(path.join(folder, "state.json")) ||
+    fs.existsSync(path.join(folder, "checkpoints.jsonl"));
   const finished = new Set([...states.done, ...states.failed]);
   const failed = new Set(states.failed);
   const nodes = steps.map((s) => {

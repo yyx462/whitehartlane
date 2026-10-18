@@ -12,7 +12,7 @@ import {
   type LevyOutcome,
 } from "./levy.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
-import { checkpoint, readState, finishUnit, writeUnitsSnapshot } from "./state.ts"
+import { checkpoint, readState, settle, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
@@ -350,14 +350,23 @@ export function cycle(deps: CycleDeps): boolean {
   const sweep = deps.shep.tickPrivilege()
   const units = loadUnitsFor(deps.taskDir, deps.hooks)
 
-  // Every unit's finish flows through here: state.json (resume projection) plus
-  // the unit.finished event — the grade row's one and only home. A
-  // grade-FAULT (infra, not answer) never trips the canary: the stop-the-
-  // line gate exists to protect slots from a doomed PLAN, and a broken
-  // hook says nothing about the plan (#144).
+  // Every unit's finish flows through here: ONE ledger card (the
+  // settle — the unit ledger is the task dir's only lifecycle store,
+  // OPTIMUM §4) plus the unit.finished event. A grade-FAULT (infra,
+  // not answer) never trips the canary: the stop-the-line gate exists
+  // to protect slots from a doomed PLAN, and a broken hook says
+  // nothing about the plan (#144).
   const faultUnits = new Set<string>()
-  const finish = (id: string, pass: boolean, row: ReportRow, faultsCanary = true): void => {
-    finishUnit(deps.taskDir, id, pass, row)
+  const finish = (
+    id: string,
+    pass: boolean,
+    row: ReportRow,
+    stage: string,
+    faultsCanary = true,
+    fault = false,
+    detail?: string,
+  ): void => {
+    settle(deps.taskDir, id, `${stage}:${id}`, pass, detail ?? row.result, fault)
     deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
     if (faultsCanary && deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
@@ -369,7 +378,7 @@ export function cycle(deps: CycleDeps): boolean {
     const size = existsSync(flight.logPath) ? readFileSync(flight.logPath).length : 0
     const text = logText(flight.logPath)
     if (text.includes(`done ${id}`)) {
-      checkpoint(deps.taskDir, `unit:${id}`, "ok", "worker output landed")
+      checkpoint(deps.taskDir, `unit:${id}`, "info", "worker output landed", id)
       // Stage binding (#150): a stage may claim this unit's verdict for
       // itself — its own check, or its own word — instead of the task
       // verifier. Only "task"-bound units ever invoke [hooks] grade.
@@ -384,12 +393,11 @@ export function cycle(deps: CycleDeps): boolean {
           } catch (err) {
             why = err instanceof Error ? err.message.split("\n")[0] : String(err)
           }
-          checkpoint(deps.taskDir, `check:${id}`, pass ? "ok" : "FAILED", pass ? "stage check passed" : why)
           finish(id, pass, {
             unit: id,
             result: pass ? "stage check passed" : `stage check failed: ${why.slice(0, 120)}`,
             pass,
-          })
+          }, "check")
           deps.shep.retire(`w-${id}`)
           deps.inFlight.delete(id)
           deps.attempts.delete(id)
@@ -399,7 +407,7 @@ export function cycle(deps: CycleDeps): boolean {
         // "none": the stage declared no hook — the worker's done is the
         // unit's word; grading belongs to a later stage's gate
         checkpoint(deps.taskDir, `check:${id}`, "info", "no check declared")
-        finish(id, true, { unit: id, result: "stage complete (no check declared)", pass: true })
+        finish(id, true, { unit: id, result: "stage complete (no check declared)", pass: true }, "unit")
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -421,8 +429,7 @@ export function cycle(deps: CycleDeps): boolean {
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err)
         faultUnits.add(id)
-        checkpoint(deps.taskDir, `grade:${id}`, "grade-fault", why.split("\n")[0])
-        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false }, false)
+        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false }, "grade", false, true)
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -430,13 +437,7 @@ export function cycle(deps: CycleDeps): boolean {
         continue
       }
       if (grade.fault) faultUnits.add(id)
-      checkpoint(
-        deps.taskDir,
-        `grade:${id}`,
-        grade.pass ? "ok" : grade.fault ? "grade-fault" : "FAILED",
-        grade.row,
-      )
-      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass }, !grade.fault)
+      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass }, "grade", !grade.fault, Boolean(grade.fault))
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -445,8 +446,7 @@ export function cycle(deps: CycleDeps): boolean {
       }
     } else if (text.includes(`blocked ${id}`)) {
       const why = text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? ""
-      checkpoint(deps.taskDir, `unit:${id}`, "FAILED", why.slice(0, 120))
-      finish(id, false, { unit: id, result: "blocked", pass: false })
+      finish(id, false, { unit: id, result: "blocked", pass: false }, "unit", true, false, why.slice(0, 120))
       deps.shep.retire(`w-${id}`)
       deps.inFlight.delete(id)
       deps.attempts.delete(id)
@@ -458,7 +458,7 @@ export function cycle(deps: CycleDeps): boolean {
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
       } else {
-        finish(id, false, { unit: id, result: "pane dead", pass: false })
+        finish(id, false, { unit: id, result: "pane dead", pass: false }, "unit", true, false, "pane not live in herdr")
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -525,7 +525,7 @@ export function cycle(deps: CycleDeps): boolean {
           flight.lastChange = now()
           deps.emit?.("stall-deferred", { unit: id, reason: "agent working" })
         } else {
-          finish(id, false, { unit: id, result: "stalled", pass: false })
+          finish(id, false, { unit: id, result: "stalled", pass: false }, "unit", true, false, `no log output for ${stallMs}ms`)
           deps.shep.retire(`w-${id}`)
           deps.inFlight.delete(id)
           deps.attempts.delete(id)
@@ -573,7 +573,7 @@ export function cycle(deps: CycleDeps): boolean {
           unit: unit.id,
           result: `wave blocked by failed ${r.blockedBy}`,
           pass: false,
-        })
+        }, "wave")
       }
     }
     unfinished = spawnable
@@ -615,7 +615,7 @@ export function cycle(deps: CycleDeps): boolean {
           unit: unit.id,
           result: "spawn failed",
           pass: false,
-        })
+        }, "spawn", true, false, `spawn failed ${attempts} times`)
         deps.shep.wake(unit.id, "blocked", `spawn failed ${attempts} times`)
       }
     }
@@ -870,7 +870,7 @@ export async function runOrchestrator(input: {
       if (now() - started > deadlineMs) {
         log("orchestrator: deadline passed; settling the rest failed")
         for (const [id, flight] of [...inFlight]) {
-          finishUnit(input.taskDir, id, false, { unit: id, result: "deadline", pass: false })
+          settle(input.taskDir, id, `deadline:${id}`, false, "deadline")
           emit("unit.finished", { unit: id, pass: false, result: "deadline" })
           rows.push({ unit: id, result: "deadline", pass: false })
           input.shep.retire(`w-${id}`)
@@ -880,11 +880,7 @@ export async function runOrchestrator(input: {
         const units = loadUnitsFor(input.taskDir, loaded.hooks)
         for (const unit of units) {
           if (!state.done.includes(unit.id) && !state.failed.includes(unit.id)) {
-            finishUnit(input.taskDir, unit.id, false, {
-              unit: unit.id,
-              result: "deadline",
-              pass: false,
-            })
+            settle(input.taskDir, unit.id, `deadline:${unit.id}`, false, "deadline — never started")
             emit("unit.finished", { unit: unit.id, pass: false, result: "deadline" })
             rows.push({ unit: unit.id, result: "deadline", pass: false })
           }
@@ -1007,7 +1003,7 @@ export async function runOrchestrator(input: {
       }
       gateCache.set(step.id, { at: now(), pass })
       if (pass) {
-        finishUnit(input.taskDir, step.id, true, { unit: step.id, result: "gate passed", pass: true })
+        settle(input.taskDir, step.id, `gate:${step.id}`, true, "gate passed")
         emit("unit.finished", { unit: step.id, pass: true, result: "gate passed" })
         rows.push({ unit: step.id, result: "gate passed", pass: true })
         log(`gate ${step.id} passed — wave ${step.wave} can finish`)
@@ -1043,12 +1039,7 @@ export async function runOrchestrator(input: {
       } catch (err) {
         why = err instanceof Error ? err.message.split("\n")[0] : String(err)
       }
-      checkpoint(input.taskDir, `gate:${step.id}`, pass ? "ok" : "FAILED", pass ? "stage gate passed" : why)
-      finishUnit(input.taskDir, step.id, pass, {
-        unit: step.id,
-        result: pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`,
-        pass,
-      })
+      settle(input.taskDir, step.id, `gate:${step.id}`, pass, pass ? "stage gate passed" : why)
       emit("unit.finished", { unit: step.id, pass, result: pass ? "stage gate passed" : "stage gate failed" })
       rows.push({ unit: step.id, result: pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`, pass })
       log(`stage gate ${step.id} ${pass ? "passed — chain advances" : "FAILED — downstream blocked"}`)
@@ -1090,11 +1081,7 @@ export async function runOrchestrator(input: {
         if (!outcome.ok) {
           // deterministic refusal (missing manifest, policy) — an honest
           // failed row, not a retry loop
-          finishUnit(input.taskDir, step.id, false, {
-            unit: step.id,
-            result: `levy failed: ${outcome.why}`,
-            pass: false,
-          })
+          settle(input.taskDir, step.id, `levy:${step.id}`, false, `levy failed: ${outcome.why}`)
           emit("unit.finished", { unit: step.id, pass: false, result: `levy failed: ${outcome.why}` })
           rows.push({ unit: step.id, result: `levy failed: ${outcome.why}`, pass: false })
           log(`wake ${step.id}: levy failed — ${outcome.why}`)
@@ -1128,7 +1115,7 @@ export async function runOrchestrator(input: {
         }
       }
       const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}${checkRow}`
-      finishUnit(input.taskDir, step.id, pass, { unit: step.id, result, pass })
+      settle(input.taskDir, step.id, `wake:${step.id}`, pass, result.slice(0, 120))
       emit("unit.finished", { unit: step.id, pass, result })
       rows.push({ unit: step.id, result, pass })
       wakesPending -= 1

@@ -1,23 +1,35 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { ReportRow } from "./report.ts"
 
 export type Settled = { done: string[]; failed: string[] }
 
-// The stage ledger (#144): every meaningful transition appends one line,
-// keyed specific enough that `regrade` (and any future resume verb) can
-// find the exact card that failed and re-enter THERE — never the journey.
+// The unit ledger — the task dir's ONE lifecycle store (OPTIMUM §4,
+// state-store consolidation): append-only, one card per fact — the
+// zen-2 law the OS disk already lives by (events.jsonl is the trace,
+// job.json a projection). A card that carries `unit` SETTLES that
+// unit: ok → done, FAILED/grade-fault → failed; `info` observes and
+// never settles; the last settle card wins, so a regrade flips a unit
+// by APPENDING, never by rewriting. regrade (and any future resume
+// verb) finds the exact card that failed and re-enters THERE (#144).
+//
+// state.json is deleted as a store. It survives one release as a
+// READ-ONLY spelling for pre-consolidation runs — their ledgers are
+// half-populated (stalled/deadline/spawn-fail settles never carded),
+// so for those dirs the file stays the truth and regrade still flips
+// it (flipLegacyState). New runs never write it.
 export type CheckpointStatus = "ok" | "FAILED" | "grade-fault" | "info"
-export type Checkpoint = { ts: string; stage: string; status: CheckpointStatus; detail?: string }
+export type Checkpoint = { ts: string; stage: string; status: CheckpointStatus; unit?: string; detail?: string }
 
 export function checkpoint(
   taskDir: string,
   stage: string,
   status: CheckpointStatus,
   detail?: string,
+  unit?: string,
 ): void {
   mkdirSync(taskDir, { recursive: true })
   const entry: Checkpoint = { ts: new Date().toISOString(), stage, status }
+  if (unit) entry.unit = unit
   if (detail) entry.detail = detail
   appendFileSync(join(taskDir, "checkpoints.jsonl"), `${JSON.stringify(entry)}\n`)
 }
@@ -37,6 +49,21 @@ export function readCheckpoints(taskDir: string): Checkpoint[] {
     })
 }
 
+// One settle, one card — the only settle verb. stage names the act
+// (`unit:u1`, `grade:u1`, `gate:g1`, `wake:k1`…); the card IS the
+// write; readState's fold is the only reader. No projection file is
+// maintained on the side — that second store was the drift.
+export function settle(
+  taskDir: string,
+  unit: string,
+  stage: string,
+  pass: boolean,
+  detail?: string,
+  fault = false,
+): void {
+  checkpoint(taskDir, stage, pass ? "ok" : fault ? "grade-fault" : "FAILED", detail, unit)
+}
+
 export function writeUnitsSnapshot(
   taskDir: string,
   units: { id: string; brief: string }[],
@@ -46,42 +73,45 @@ export function writeUnitsSnapshot(
   writeFileSync(join(taskDir, "units.jsonl"), `${body}\n`)
 }
 
-export function readState(taskDir: string): Settled {
-  const path = join(taskDir, "state.json")
-  if (!existsSync(path)) return { done: [], failed: [] }
+function readLegacyState(taskDir: string): Settled {
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<Settled>
+    const parsed = JSON.parse(readFileSync(join(taskDir, "state.json"), "utf8")) as Partial<Settled>
     return { done: parsed.done ?? [], failed: parsed.failed ?? [] }
   } catch {
     return { done: [], failed: [] }
   }
 }
 
-export function finishUnit(
-  taskDir: string,
-  unitId: string,
-  pass: boolean,
-  row?: ReportRow,
-): Settled {
-  const state = readState(taskDir)
-  ;(pass ? state.done : state.failed).push(unitId)
-  mkdirSync(taskDir, { recursive: true })
-  writeFileSync(join(taskDir, "state.json"), JSON.stringify(state, null, 2))
-  return state
+// settled = a pure fold of the ledger, in card order (the finish
+// order the old file captured). A legacy state.json wins when present:
+// it was written on EVERY settle path, its sibling ledger was not.
+export function readState(taskDir: string): Settled {
+  if (existsSync(join(taskDir, "state.json"))) return readLegacyState(taskDir)
+  let done: string[] = []
+  let failed: string[] = []
+  for (const card of readCheckpoints(taskDir)) {
+    if (!card.unit || card.status === "info") continue
+    if (card.status === "ok") {
+      failed = failed.filter((id) => id !== card.unit)
+      if (!done.includes(card.unit)) done.push(card.unit)
+    } else {
+      done = done.filter((id) => id !== card.unit)
+      if (!failed.includes(card.unit)) failed.push(card.unit)
+    }
+  }
+  return { done, failed }
 }
 
-// A re-grade flips a unit's settled side without duplicating it (the
-// stage ledger's whole point: the WORKER card stays, only the GRADE
-// card re-enters). state.json stays the resume projection it always was.
-export function regradeUnit(taskDir: string, unitId: string, pass: boolean): Settled {
-  const state = readState(taskDir)
+// The legacy flip — regrade only, and only for a pre-consolidation
+// dir (state.json present). New dirs settle by appending a card.
+export function flipLegacyState(taskDir: string, unitId: string, pass: boolean): void {
+  if (!existsSync(join(taskDir, "state.json"))) return
+  const state = readLegacyState(taskDir)
   if (pass) {
     state.failed = state.failed.filter((id) => id !== unitId)
     if (!state.done.includes(unitId)) state.done.push(unitId)
   } else if (!state.failed.includes(unitId)) {
     state.failed.push(unitId)
   }
-  mkdirSync(taskDir, { recursive: true })
   writeFileSync(join(taskDir, "state.json"), JSON.stringify(state, null, 2))
-  return state
 }

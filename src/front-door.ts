@@ -1,6 +1,6 @@
 import { hooksFromDir, type Hooks, type Manifest, type Unit } from "./hooks.ts"
 import { writeReport, type Report } from "./report.ts"
-import { finishUnit, writeUnitsSnapshot } from "./state.ts"
+import { settle, writeUnitsSnapshot } from "./state.ts"
 
 export type { Grade, Hooks, Unit } from "./hooks.ts"
 export type { Report } from "./report.ts"
@@ -157,7 +157,7 @@ export async function standUp(input: {
       if (input.runWorker) await input.runWorker(unit)
       const grade = hooks.grade(unit)
       table.push({ unit: unit.id, result: grade.row, pass: grade.pass })
-      if (loaded.manifest) finishUnit(taskDir, unit.id, grade.pass)
+      if (loaded.manifest) settle(taskDir, unit.id, `grade:${unit.id}`, grade.pass, grade.row)
       index = i + 1
     }
     return index
