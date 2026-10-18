@@ -16,7 +16,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
 import { isProviderFault, parseModelRef } from "./model-ladder.ts"
-import { loadManifest, type Layout, type Manifest } from "./hooks.ts"
+import { landMockUnit, loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
 import { decidePermission, escalateOnRepeat, PERMISSION_CAP, tunedPermissionJudge, type PermissionJudge } from "./permission.ts"
@@ -595,6 +595,15 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    // DRY-RUN (worker_kind = "mock"): no pane, no agent — the unit's
+    // done line lands next to its brief and the cycle settles it
+    // through the real path. Checks, gates, and grades all fire, so a
+    // whole program's shape rehearses in seconds, zero tokens.
+    if (kind === "mock") {
+      landMockUnit(briefPath, name)
+      this.log(`dry-run: ${label} settled by mock — no pane, no agent`)
+      return true
+    }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
       if (!pane) {

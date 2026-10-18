@@ -1,7 +1,7 @@
 import { execSync, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
@@ -692,7 +692,33 @@ export async function runOrchestrator(input: {
   // wave machinery finishes downstream units as blocked rows.
   const steps = manifest.stages?.length ? stepsFromStages(manifest.stages) : manifest.steps
   if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
-    throw new HookError("wake steps need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)")
+    throw new HookError(
+      "wake steps (and coworker stages, which delegate to a child program) need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)",
+    )
+  }
+  const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
+  // Coworker stages mint their child program up front (idempotent): the
+  // members become a full coworker workflow.toml under stages/<id>/ and
+  // the wake machinery levies it once at the frontier. On-disk beats
+  // in-memory — a paused or crashed parent re-nurses the SAME child.
+  for (const stage of manifest.stages ?? []) {
+    if (stage.topology !== "coworker") continue
+    const childToml = join(input.taskDir, "stages", stage.id, "workflow.toml")
+    if (!existsSync(childToml)) {
+      const childDir = dirname(childToml)
+      mkdirSync(join(childDir, "members"), { recursive: true })
+      const model = stage.model ?? manifest.workflow.model
+      let toml = `[workflow]\nname = "${stage.id}"\nworker_kind = "${manifest.workflow.worker_kind}"\nslots = 1\n`
+      if (model) toml += `model = "${model}"\n`
+      for (const member of stage.members!) {
+        writeFileSync(join(childDir, "members", `${member.name}.md`), `${member.brief}\n`)
+        toml += `\n[members.${member.name}]\n`
+        if (member.initiates) toml += "initiates = true\n"
+        if (member.model) toml += `model = "${member.model}"\n`
+      }
+      writeFileSync(childToml, toml)
+      log(`coworker stage ${stage.id}: minted child program at ${childToml}`)
+    }
   }
   if (steps?.length && !manifest.stages?.length) {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromSteps(input.taskDir, steps) }
@@ -712,7 +738,6 @@ export async function runOrchestrator(input: {
   const gateCheckMs = input.gateCheckMs ?? DEFAULT_GATE_CHECK_MS
   const deadlineMs = input.deadlineMs ?? 2 * 60 * 60_000
   const now = input.now ?? Date.now
-  const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
   const inFlight = new Map<string, Flight>()
   const attempts = new Map<string, number>()
   const started = now()
