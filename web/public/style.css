@@ -1406,7 +1406,9 @@ td.empty, .empty {
    column; the header row says what everything is */
 .ev-head, .ev-line {
   display: grid;
-  grid-template-columns: 84px minmax(92px, auto) minmax(64px, auto) 70px minmax(0, 1fr);
+  /* 104px: "MM-DD HH:MM:SS" is 14 mono chars (~101px at 12px) — a fixed
+     84px made the trailing seconds digit paint over the event column */
+  grid-template-columns: 104px minmax(92px, auto) minmax(64px, auto) 70px minmax(0, 1fr);
   gap: 10px;
   align-items: baseline;
   font-size: 12px;
