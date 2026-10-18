@@ -149,6 +149,45 @@ async function main() {
     if (reg) registerLevyPane({ ...reg, at: new Date().toISOString() })
   }
 
+  // help — the stage manual's front door (full manual: docs/STAGES.md)
+  if (cmd === "help" || cmd === "--help") {
+    const topic = process.argv[3]
+    if (topic && topic !== "stages") {
+      console.error(`help: unknown topic '${topic}' — try: whitehartlane help stages`)
+      process.exitCode = 2
+      return
+    }
+    console.log(`whitehartlane — the door
+
+  run <folder> [--from <tool>:<sid>]   commission a spur (the levy walks away)
+  jobs                                 the board
+  events | audit | sweep | promote     observation and care
+  pause | continue | regrade | fork    the resume ladder
+  help [stages]                        this text / the stage cheat-sheet
+
+stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
+
+  topology   workforce              the one-line rule
+  ─────────────────────────────────────────────────────────────
+  solo       one briefed worker     the simple link
+  fan-out    N interchangeable      parallel shards/attempts; slots cap
+  coworker   roles that TALK        delegated child program, levied once
+  gate       nobody — the rail      run executes once; verify.sh lives here
+  lab        one ACTOR, observed    detectors (signal/end), delegated child
+
+  brief taxonomy: stage brief (one mind) · roster brief (per worker)
+  starting brief (a ROLE — the initiates member) · preamble (the
+  roster's shared part; effective brief = preamble + own entry)
+
+  verdict verbs: check = judge (stage's own hook) · run = act (rail
+  does it) · grade = bind (task verifier, last unit stage by default)
+  signal/end = observe (lab detectors)
+
+  dry-run: worker_kind = "mock" — no agent born; checks/gates/grades
+  still fire; a whole program rehearses in seconds, zero tokens`)
+    return
+  }
+
   if (cmd === "run") {
     const args = process.argv.slice(3)
     const verbose = args.includes("--verbose")
