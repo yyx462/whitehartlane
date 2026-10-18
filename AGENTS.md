@@ -5,6 +5,19 @@
 Shapes: see yyxSkills `docs/agents/repo-layout.md`.
 <!-- /yyx:repo-layout -->
 
+<!-- momentum (product direction — read before designing anything) -->
+The PRD at `docs/prd/OPTIMUM.md` is the momentum vector: refit from ALL
+merged PRs, regenerated whole, never appended. Hard invariants it found:
+programs are data ([[stage]] chains; refusal beats silence); minds are
+delegated, fresh, briefed from one source; ordering is the chain, never
+brief text; verdicts are honest (check=judge, run=act, grade=bind,
+signal/end=observe; infra ≠ answer); one wake per commission; the
+window only views; a mind's pin = its nearest declaration. When fixing:
+replace the worst DESIGN (highest reversal-count component), never
+patch inside it. Do not fight the momentum without writing down why in
+the PRD first.
+<!-- /momentum -->
+
 <!-- agent-api: coding-agent and herdr state comes from API fields
      (OpenCode message error.type / finish, herdr agent_status). Never
      scrape pane screen text or TUI chrome for control flow. -->
