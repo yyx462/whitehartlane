@@ -1,9 +1,9 @@
-// The coworker engine (moved out of bin/lab-orchestrator so tests can
-// reach it — the bin is only the door). Members talk through the rail:
-// this loop births each named member with its own brief and model,
-// relays message files as prompts to the named pane, ends on stop or
-// the cap, then reports. The privilege sweep, pane bookkeeping, and
-// layout all live on the Rail.
+// The coworker engine. Members talk through the rail: this loop
+// births each named member with its own brief and model, relays
+// message files as prompts to the named pane, ends on stop or the
+// cap, then reports. The privilege sweep, pane bookkeeping, and
+// layout all live on the Rail; the runner door picks this engine by
+// shape (src/engine.ts).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"

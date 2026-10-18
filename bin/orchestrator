@@ -1,0 +1,38 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// The runner door — the only one (OPTIMUM §2: the dispatch layer is
+// deleted; was fan-out-orchestrator + lab-orchestrator, two kind-mapped
+// bins with a second dispatch between them). The staged workflow.toml
+// names the shape; src/engine.ts picks the engine in this process.
+// Runs detached; its log is the lane pane's content. Plain JS on
+// purpose: this file has no extension, so Node will not type-strip it.
+// Usage: bin/orchestrator <taskDir>
+import { resolve } from "node:path"
+import { engineFor, programRootsOf, stagedKind } from "../src/engine.ts"
+import { Rail } from "../src/rail.ts"
+
+const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
+const programRoots = programRootsOf(argvDir ?? process.cwd())
+let kind
+try {
+  kind = stagedKind(argvDir ?? process.cwd())
+} catch (err) {
+  console.error(`orchestrator: refusing — ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(2)
+}
+const rail = new Rail({ argvDir, workflow: kind, programRoots })
+// an env-booked run without argv stages its program at the job dir,
+// not the cwd — re-derive there (the old lab bin did too)
+try {
+  kind = stagedKind(rail.taskDir)
+} catch {
+  // boot-dir kind stands: a staged program cannot carry garbage kind
+}
+// per-run opencode.json: fan-out workers live in the task dir's tree
+// and take the program's roots here; coworker/lab write per-worker
+// permissions inside their engines (roots included there)
+rail.writePermissions(rail.taskDir, kind === "fan-out" ? programRoots : [])
+// SIGINT aborts. SIGTERM: the coworker engine installs a drainHook
+// (ADR 5) via termDrains; the fan-out engine traps SIGTERM itself
+// (runOrchestrator's drain), so the rail must not double-trap it.
+rail.trapSignals(kind === "fan-out" ? {} : { termDrains: true })
+process.exit(await rail.run(engineFor(rail, kind, import.meta.dirname)))

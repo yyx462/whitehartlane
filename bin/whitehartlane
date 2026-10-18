@@ -23,7 +23,6 @@ import { fileURLToPath } from "node:url"
 import { prepareRun, spawnerFromArgs } from "../src/run.ts"
 import { refreshWait } from "../src/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/runners.ts"
-import { orchestratorBin } from "../src/workflow-kind.ts"
 import { forkLevy } from "../src/fork.ts"
 import { regradeJob } from "../src/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
@@ -238,7 +237,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       ready.job.spawner = spawner
       saveJob(ready.job)
     }
-    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, orchestratorBin(ready.kind))
+    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, "orchestrator")
     if (!existsSync(orchestrator)) {
       abortJob(ready.job, `no orchestrator at ${orchestrator}`, 0, "cli")
       console.error(`run: no orchestrator at ${orchestrator}`)
@@ -459,7 +458,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       } catch {}
       killPane(fresh, pane.label)
     }
-    const orchestrator = join(import.meta.dirname, orchestratorBin(fresh.workflow))
+    const orchestrator = join(import.meta.dirname, "orchestrator")
     const logFd = openSync(join(fresh.dir, "orchestrator.log"), "a")
     const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, fresh.dir], {
       detached: true,
@@ -534,7 +533,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       } catch {}
       killPane(job, pane.label)
     }
-    const orchestrator = join(import.meta.dirname, orchestratorBin(job.workflow))
+    const orchestrator = join(import.meta.dirname, "orchestrator")
     const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
     const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, job.dir], {
       detached: true,
