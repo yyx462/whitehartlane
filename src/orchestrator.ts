@@ -723,7 +723,8 @@ export async function runOrchestrator(input: {
         writeFileSync(join(childDir, "actor.md"), `${stage.brief}\n`)
       }
       for (const member of stage.members ?? []) {
-        writeFileSync(join(childDir, "members", `${member.name}.md`), `${member.brief}\n`)
+        const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
+        writeFileSync(join(childDir, "members", `${member.name}.md`), `${pre}${member.brief}\n`)
         toml += `\n[members.${member.name}]\n`
         if (member.initiates) toml += "initiates = true\n"
         if (member.model) toml += `model = ${tomlStr(member.model)}\n`
