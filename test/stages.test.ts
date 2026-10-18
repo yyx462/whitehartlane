@@ -331,6 +331,49 @@ units = [{ id = "u", brief = "ub" }]
       /units carry their own briefs/,
     ],
     [
+      "grade on a coworker stage",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "pair"
+topology = "coworker"
+grade = true
+members = [
+  { name = "alex", brief = "b", initiates = true },
+  { name = "sam", brief = "b" },
+]
+`,
+      /grade does not apply — the task verifier binds to unit stages and gates/,
+    ],
+    [
+      "signal on a solo stage",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "s"
+topology = "solo"
+brief = "b"
+signal = "true"
+`,
+      /signal\/end detectors belong to lab stages/,
+    ],
+    [
+      "lab without a brief",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "exp"
+topology = "lab"
+`,
+      /stage exp brief/,
+    ],
+    [
       "run on a solo stage",
       `[workflow]
 name = "x"
@@ -514,6 +557,111 @@ run = "true"
   assert.equal(logPath, join(dir, "units", "a", "log.txt"))
   assert.equal(readFileSync(logPath, "utf8"), "done a\n")
   assert.match(readFileSync(join(dir, "units", "a", "result.md"), "utf8"), /DRY-RUN/)
+})
+
+// ── lab stages: the actor experiment, delegated like coworker ─────
+function autoWakeLevy(dir: string, outcome: string, levies: Array<{ unitId: string; folder: string }>) {
+  return (unitId: string, folder: string) => {
+    levies.push({ unitId, folder })
+    const jobDir = join(dir, "child-jobs", unitId)
+    mkdirSync(jobDir, { recursive: true })
+    writeFileSync(
+      join(jobDir, "job.json"),
+      JSON.stringify({ id: `j-${unitId}`, dir: jobDir, state: "running", spawner: { tool: "rail" } }),
+    )
+    writeFileSync(
+      join(jobDir, "wake.json"),
+      JSON.stringify({ outcome, report: join(jobDir, "report.json"), at: new Date().toISOString() }),
+    )
+    return { ok: true as const, jid: `j-${unitId}`, jobDir, warnings: [] }
+  }
+}
+
+test("lab stage mints a kind=lab child with actor.md + detectors, levied once", async () => {
+  const dir = taskDir("lab-flow")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "lab-flow"
+worker_kind = "opencode"
+
+[[stage]]
+id = "explore"
+topology = "lab"
+brief = "find the signal in the noise"
+end = "test -f found.md"
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  const levies: Array<{ unitId: string; folder: string }> = []
+  const shep = fakeShep()
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: shep.port,
+    levyChild: autoWakeLevy(dir, "done", levies),
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "done")
+  const childToml = readFileSync(join(dir, "stages", "explore", "workflow.toml"), "utf8")
+  assert.match(childToml, /^kind = "lab"$/m)
+  assert.match(childToml, /\[detectors\][\s\S]*end = "test -f found\.md"/)
+  assert.equal(readFileSync(join(dir, "stages", "explore", "actor.md"), "utf8"), "find the signal in the noise\n")
+  assert.deepEqual(levies.map((l) => l.unitId), ["explore"])
+  assert.deepEqual(shep.spawned, []) // the actor is the child's, not ours
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.match(byUnit.explore, /^child j-explore done/)
+})
+
+test("a coworker stage's check runs after the wake — green receipt, red check fails", async () => {
+  const dir = taskDir("coworker-check")
+  writeFileSync(join(dir, "check.sh"), "echo checked >> trail.log\nexit 1\n")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "coworker-check"
+worker_kind = "opencode"
+
+[[stage]]
+id = "review"
+topology = "coworker"
+check = "bash check.sh"
+members = [
+  { name = "alex", brief = "b", initiates = true },
+  { name = "sam", brief = "b" },
+]
+
+[[stage]]
+id = "payload"
+topology = "solo"
+brief = "after the exchange"
+`,
+  )
+  const shep = fakeShep()
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: shep.port,
+    levyChild: autoWakeLevy(dir, "done", []),
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "failed")
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.match(byUnit.review, /stage check failed/)
+  // the check actually RAN (the receipt was green; the check made it red)
+  assert.equal(readFileSync(join(dir, "trail.log"), "utf8"), "checked\n")
+  // downstream never spawned
+  assert.deepEqual(shep.spawned, [])
 })
 
 // ── back-compat: no [[stage]], the units hook path is unchanged ────
