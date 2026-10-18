@@ -151,8 +151,14 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
     const stage: Stage = { id, topology }
     if (topology === "solo") {
       stage.brief = str(t.brief, `stage ${id} brief`)
+      if (t.units !== undefined) {
+        throw new HookError(`stage ${id} is topology solo: units belong to fan-out stages — a solo stage's one worker takes brief`)
+      }
     }
     if (topology === "fan-out") {
+      if (t.brief !== undefined) {
+        throw new HookError(`stage ${id} is topology fan-out: units carry their own briefs — stage-level brief does not apply`)
+      }
       if (!Array.isArray(t.units) || t.units.length === 0) {
         throw new HookError(`stage ${id} is topology fan-out: units must be a non-empty array of {id, brief} tables`)
       }

@@ -272,6 +272,34 @@ topology = "fan-out"
       /units must be a non-empty array/,
     ],
     [
+      "units on a solo stage",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "s"
+topology = "solo"
+brief = "b"
+units = [{ id = "u", brief = "ub" }]
+`,
+      /units belong to fan-out stages/,
+    ],
+    [
+      "brief on a fan-out stage",
+      `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "fan"
+topology = "fan-out"
+brief = "shared preamble"
+units = [{ id = "u", brief = "ub" }]
+`,
+      /units carry their own briefs/,
+    ],
+    [
       "run on a solo stage",
       `[workflow]
 name = "x"
