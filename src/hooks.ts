@@ -52,12 +52,38 @@ export type Layout = {
 // grouping, not steps; the report is the epilogue after the last wave.
 export type Step = {
   id: string
-  finished_by: "end" | "check" | "wake"
+  // "gate" is synthesized-only: [[stage]] topology = "gate" compiles to
+  // a gate step; raw [[step]] tables still refuse it (their enum below)
+  finished_by: "end" | "check" | "wake" | "gate"
   wave: string
   brief?: string
   check?: string
   folder?: string
 }
+
+// Issue #152 slice 1 — stage-first workflows. A workflow may declare
+// [[stage]] tables: the CHAIN (table order = execution order), each
+// stage with its own topology and its own hooks. "split" is dead by
+// design review (2026-10-18): ordering is the workflow's job, never a
+// node's — what split used to express is a chain of solo stages, and
+// every unit is a fresh worker session either way (continuity is the
+// shared task container, which the chain keeps). Grade binding rides
+// the plan (#150): verify.sh fires only where a stage says so.
+export type Stage = {
+  id: string
+  topology: "solo" | "fan-out" | "coworker" | "gate"
+  brief?: string
+  units?: { id: string; brief: string }[]
+  check?: string
+  run?: string
+  grade?: boolean
+}
+
+// Per-unit grade binding compiled from stages: "task" = the task-level
+// [hooks] grade (verify.sh); "check" = the unit's OWN stage check, never
+// the task verifier; "none" = the stage declared no hook — the worker's
+// done is the unit's word, grading belongs to a later stage's gate.
+export type GradePlan = { grade: "task" | "check" | "none"; check?: string }
 
 function stepsFromRaw(raw: unknown): Step[] | undefined {
   if (raw === undefined) return undefined
@@ -93,12 +119,138 @@ function stepsFromRaw(raw: unknown): Step[] | undefined {
   return steps
 }
 
+function stagesFromRaw(raw: unknown): Stage[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) throw new HookError("stages must be an array of [[stage]] tables")
+  const stages: Stage[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    const t = entry as Record<string, unknown>
+    const id = str(t.id, "stage.id")
+    if (!SHEP_SAFE_ID.test(id)) throw new HookError(`stage id is not shep-safe: ${id}`)
+    if (seen.has(id)) throw new HookError(`stage repeats id ${id}`)
+    seen.add(id)
+    const topology = str(t.topology, `stage ${id} topology`)
+    if (topology !== "solo" && topology !== "fan-out" && topology !== "coworker" && topology !== "gate") {
+      throw new HookError(
+        `stage ${id} topology must be solo, fan-out, coworker, or gate (issue #152; "split" is dead — order the chain with stages): ${topology}`,
+      )
+    }
+    if (topology === "coworker") {
+      throw new HookError(
+        `stage ${id} is topology coworker — coworker stages land with the runner unification (#152 follow-up); run the exchange as its own workflow today`,
+      )
+    }
+    const cmd = (value: unknown, field: string): string | undefined => {
+      if (value === undefined) return undefined
+      if (typeof value !== "string" || value.length === 0) {
+        throw new HookError(`${field} must be a command string: ${String(value)}`)
+      }
+      return value
+    }
+    const stage: Stage = { id, topology }
+    if (topology === "solo") {
+      stage.brief = str(t.brief, `stage ${id} brief`)
+    }
+    if (topology === "fan-out") {
+      if (!Array.isArray(t.units) || t.units.length === 0) {
+        throw new HookError(`stage ${id} is topology fan-out: units must be a non-empty array of {id, brief} tables`)
+      }
+      stage.units = t.units.map((u, i) => {
+        const row = u as Record<string, unknown>
+        const uid = str(row.id, `stage ${id} units[${i}].id`)
+        if (!SHEP_SAFE_ID.test(uid)) throw new HookError(`stage ${id} unit id is not shep-safe: ${uid}`)
+        if (seen.has(uid)) throw new HookError(`stage unit repeats id ${uid}`)
+        seen.add(uid)
+        return { id: uid, brief: str(row.brief, `stage ${id} units[${i}].brief`) }
+      })
+    }
+    if (topology === "gate") {
+      stage.run = cmd(t.run, `stage ${id} run`)
+      const brief = cmd(t.brief, `stage ${id} brief`)
+      if (brief !== undefined) throw new HookError(`stage ${id} is topology gate: it runs no worker — brief does not apply`)
+    }
+    if (topology === "solo" || topology === "fan-out") {
+      stage.check = cmd(t.check, `stage ${id} check`)
+      if (t.grade !== undefined) {
+        if (typeof t.grade !== "boolean") throw new HookError(`stage ${id} grade must be true or false: ${String(t.grade)}`)
+        stage.grade = t.grade
+      }
+      if (t.run !== undefined) {
+        throw new HookError(`stage ${id} is topology ${topology}: run belongs to gate stages — declare check for this stage's own hook`)
+      }
+    } else {
+      for (const field of ["check", "grade", "units"] as const) {
+        if (t[field] !== undefined) {
+          throw new HookError(`stage ${id} is topology ${topology}: ${field} does not apply (gate stages declare run)`)
+        }
+      }
+    }
+    stages.push(stage)
+  }
+  if (stages.length === 0) throw new HookError("stages table is empty — remove it or declare [[stage]] entries")
+  return stages
+}
+
+// Stages compile to the fan-out core (issue #152): units for the
+// workers, steps for the wave machinery (the chain), and a grade plan
+// for #150's binding. A chain was always the workflow's job.
+const stageWave = (index: number): string => `stage-${index}`
+
+export function unitsFromStages(stages: Stage[]): Unit[] {
+  const units: Unit[] = []
+  for (const stage of stages) {
+    if (stage.topology === "solo") units.push({ id: stage.id, brief: stage.brief! })
+    if (stage.topology === "fan-out") units.push(...stage.units!)
+  }
+  if (units.length === 0) {
+    throw new HookError("stages declare no unit stages (solo/fan-out) — nothing can run")
+  }
+  return units
+}
+
+export function stepsFromStages(stages: Stage[]): Step[] {
+  const steps: Step[] = []
+  for (const [index, stage] of stages.entries()) {
+    const wave = stageWave(index)
+    if (stage.topology === "gate") {
+      steps.push({ id: stage.id, finished_by: "gate", wave, check: stage.run })
+      continue
+    }
+    // one end-step per unit, all on the stage's wave: the wave gate
+    // binds every unit, not just the first
+    const ids = stage.topology === "fan-out" ? stage.units!.map((u) => u.id) : [stage.id]
+    for (const id of ids) steps.push({ id, finished_by: "end", wave })
+  }
+  return steps
+}
+
+export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
+  const unitStages = stages
+    .map((stage, index) => ({ stage, index }))
+    .filter(({ stage }) => stage.topology === "solo" || stage.topology === "fan-out")
+  const lastIndex = unitStages[unitStages.length - 1]?.index
+  const plan = new Map<string, GradePlan>()
+  for (const { stage, index } of unitStages) {
+    // default binding (#150's mental model): the LAST unit stage carries
+    // the task verifier; earlier stages run their own check if declared,
+    // else finish on the worker's word. grade = true/false overrides.
+    const task = stage.grade === true || (stage.grade !== false && index === lastIndex)
+    const ids = stage.topology === "fan-out" ? stage.units!.map((u) => u.id) : [stage.id]
+    for (const id of ids) {
+      plan.set(id, task ? { grade: "task" } : stage.check ? { grade: "check", check: stage.check } : { grade: "none" })
+    }
+  }
+  return plan
+}
+
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
   hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
   steps?: Step[]
+  stages?: Stage[]
   report?: { where?: string }
   layout?: Partial<Layout>
 }
@@ -267,6 +419,12 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     if (cmd !== undefined) gates[id] = cmd
   }
   const steps = stepsFromRaw(m.step)
+  const stages = stagesFromRaw(m.stage)
+  // [[step]] and [[stage]] are two dialects of the same declaration —
+  // mixing them would make the chain ambiguous, so the rail refuses
+  if (steps?.length && stages?.length) {
+    throw new HookError("declare [[step]] or [[stage]], not both — steps are node-level topology, stages are the chain (issue #152)")
+  }
   return {
     workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
     hooks: {
@@ -282,6 +440,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     gates: Object.keys(gates).length > 0 ? gates : undefined,
     steps,
+    stages,
     report: report.where ? { where: str(report.where, "report.where") } : {},
     layout: {
       tab: tab as "same" | "new" | undefined,

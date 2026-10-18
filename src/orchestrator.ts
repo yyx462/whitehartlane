@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFi
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
-import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, type Hooks, type Layout, type Manifest, type Step, type Unit } from "./hooks.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import {
   readChildWake,
@@ -110,6 +110,10 @@ export type CycleDeps = {
   // ADR 0007: the manifest's finish-typed steps, when declared. Drives
   // wave gating and the done condition (check steps must finish too).
   steps?: Step[]
+  // Issue #152/#150: per-unit grade binding compiled from [[stage]].
+  // Absent (no stages) = every unit takes the task-level grade —
+  // byte-identical to the pre-stage rail.
+  stagePlan?: Map<string, GradePlan>
 }
 
 const DEFAULT_SLOTS = 2
@@ -359,6 +363,41 @@ export function cycle(deps: CycleDeps): boolean {
     const text = logText(flight.logPath)
     if (text.includes(`done ${id}`)) {
       checkpoint(deps.taskDir, `unit:${id}`, "ok", "worker output landed")
+      // Stage binding (#150): a stage may claim this unit's verdict for
+      // itself — its own check, or its own word — instead of the task
+      // verifier. Only "task"-bound units ever invoke [hooks] grade.
+      const plan = deps.stagePlan?.get(id)
+      if (plan && plan.grade !== "task") {
+        if (plan.grade === "check") {
+          let pass = false
+          let why = ""
+          try {
+            execSync(plan.check!, { cwd: deps.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+            pass = true
+          } catch (err) {
+            why = err instanceof Error ? err.message.split("\n")[0] : String(err)
+          }
+          checkpoint(deps.taskDir, `check:${id}`, pass ? "ok" : "FAILED", pass ? "stage check passed" : why)
+          finish(id, pass, {
+            unit: id,
+            result: pass ? "stage check passed" : `stage check failed: ${why.slice(0, 120)}`,
+            pass,
+          })
+          deps.shep.retire(`w-${id}`)
+          deps.inFlight.delete(id)
+          deps.attempts.delete(id)
+          if (!pass) deps.shep.wake(id, "blocked", `stage check failed: ${why.slice(0, 120)}`)
+          continue
+        }
+        // "none": the stage declared no hook — the worker's done is the
+        // unit's word; grading belongs to a later stage's gate
+        checkpoint(deps.taskDir, `check:${id}`, "info", "no check declared")
+        finish(id, true, { unit: id, result: "stage complete (no check declared)", pass: true })
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+        continue
+      }
       if (deps.canary?.enabled && !deps.canary.released) {
         writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
       }
@@ -591,7 +630,7 @@ export function cycle(deps: CycleDeps): boolean {
     return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
   }
   const stepsFinished = steps
-    .filter((s) => s.finished_by === "check" || s.finished_by === "wake")
+    .filter((s) => s.finished_by === "check" || s.finished_by === "wake" || s.finished_by === "gate")
     .every((s) => finalFinished.has(s.id) || unreachable(s))
   return (
     units.every((unit) => finalFinished.has(unit.id)) &&
@@ -646,13 +685,23 @@ export async function runOrchestrator(input: {
   // job, books itself as spawner, and the step finishes on the child's
   // wake. No levy port (a rail that cannot spawn child jobs) still
   // refuses honestly — never a silent lie about nesting.
-  const steps = manifest.steps
+  // Issue #152 slice 1: [[stage]] compiles to the fan-out core —
+  // steps (the chain, via waves), units (the workers), and the grade
+  // plan (#150's binding). Gate stages are one-shot verdicts, not the
+  // polling check steps of ADR 0007: a failed stage gate FAILS, and the
+  // wave machinery finishes downstream units as blocked rows.
+  const steps = manifest.stages?.length ? stepsFromStages(manifest.stages) : manifest.steps
   if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
     throw new HookError("wake steps need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)")
   }
-  if (steps?.length) {
+  if (steps?.length && !manifest.stages?.length) {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromSteps(input.taskDir, steps) }
   }
+  const stages = manifest.stages
+  if (stages?.length) {
+    loaded.hooks = { ...loaded.hooks, units: () => unitsFromStages(stages) }
+  }
+  const stagePlan = stages?.length ? gradePlanFromStages(stages) : undefined
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
@@ -733,6 +782,7 @@ export async function runOrchestrator(input: {
         resumes: input.resumes,
         bookedWait: input.bookedWait,
         steps,
+        stagePlan,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.finished" && typeof payload.unit === "string") {
@@ -920,6 +970,45 @@ export async function runOrchestrator(input: {
     return passed
   }
 
+  // Issue #152: stage gates — the rail ACTS (runs the stage's command)
+  // at the chain's frontier, once. Unlike ADR 0007 check steps (polling
+  // readiness, debounced retry), a stage gate is a verdict: pass opens
+  // the next wave; FAIL finishes the gate failed and the wave machinery
+  // blocks the downstream stages honestly. The final grade stage is
+  // exactly this shape — verify.sh fires once, at the end, never
+  // mid-chain (#150).
+  const runStageGates = (): number => {
+    let acted = 0
+    const gateSteps = (steps ?? []).filter((s) => s.finished_by === "gate")
+    if (!gateSteps.length) return 0
+    const state = readState(input.taskDir)
+    const finishedIds = new Set<string>([...state.done, ...state.failed])
+    const failedIds = new Set<string>(state.failed)
+    for (const step of gateSteps) {
+      if (finishedIds.has(step.id)) continue
+      if (!frontier(step.wave, finishedIds, failedIds)) continue
+      let pass = false
+      let why = ""
+      try {
+        execSync(step.check!, { cwd: input.taskDir, timeout: 300_000, stdio: ["ignore", "ignore", "pipe"] })
+        pass = true
+      } catch (err) {
+        why = err instanceof Error ? err.message.split("\n")[0] : String(err)
+      }
+      checkpoint(input.taskDir, `gate:${step.id}`, pass ? "ok" : "FAILED", pass ? "stage gate passed" : why)
+      finishUnit(input.taskDir, step.id, pass, {
+        unit: step.id,
+        result: pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`,
+        pass,
+      })
+      emit("unit.finished", { unit: step.id, pass, result: pass ? "stage gate passed" : "stage gate failed" })
+      rows.push({ unit: step.id, result: pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`, pass })
+      log(`stage gate ${step.id} ${pass ? "passed — chain advances" : "FAILED — downstream blocked"}`)
+      acted += 1
+    }
+    return acted
+  }
+
   // ADR 0007 stage 3 — wake steps: the rail as levy. Each frontier wake
   // step gets ONE child job (booked durably under wakes/<id>.json — a
   // paused or crashed parent re-nurses the same child, never a second
@@ -1061,6 +1150,10 @@ export async function runOrchestrator(input: {
       continue
     }
     if (evaluateGates() > 0) {
+      run()
+      continue
+    }
+    if (runStageGates() > 0) {
       run()
       continue
     }
