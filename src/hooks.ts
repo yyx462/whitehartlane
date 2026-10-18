@@ -78,7 +78,7 @@ export type StageMember = {
 
 export type Stage = {
   id: string
-  topology: "solo" | "fan-out" | "coworker" | "gate"
+  topology: "solo" | "fan-out" | "coworker" | "gate" | "lab"
   brief?: string
   units?: { id: string; brief: string }[]
   members?: StageMember[]
@@ -86,6 +86,8 @@ export type Stage = {
   check?: string
   run?: string
   grade?: boolean
+  signal?: string
+  end?: string
 }
 
 // Per-unit grade binding compiled from stages: "task" = the task-level
@@ -140,10 +142,20 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
     if (seen.has(id)) throw new HookError(`stage repeats id ${id}`)
     seen.add(id)
     const topology = str(t.topology, `stage ${id} topology`)
-    if (topology !== "solo" && topology !== "fan-out" && topology !== "coworker" && topology !== "gate") {
+    if (
+      topology !== "solo" && topology !== "fan-out" && topology !== "coworker" &&
+      topology !== "gate" && topology !== "lab"
+    ) {
       throw new HookError(
-        `stage ${id} topology must be solo, fan-out, coworker, or gate (issue #152; "split" is dead — order the chain with stages): ${topology}`,
+        `stage ${id} topology must be solo, fan-out, coworker, gate, or lab (issue #152; "split" is dead — order the chain with stages): ${topology}`,
       )
+    }
+    const cmd = (value: unknown, field: string): string | undefined => {
+      if (value === undefined) return undefined
+      if (typeof value !== "string" || value.length === 0) {
+        throw new HookError(`${field} must be a command string: ${String(value)}`)
+      }
+      return value
     }
     if (topology === "coworker") {
       // the exchange, as one chain link: members are minted into a
@@ -182,29 +194,57 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       if (t.units !== undefined) {
         throw new HookError(`stage ${id} is topology coworker: the members ARE the workers — units does not apply`)
       }
-      if (t.check !== undefined || t.grade !== undefined) {
+      if (t.grade !== undefined) {
         throw new HookError(
-          `stage ${id} is topology coworker: check/grade do not apply — the child program's own exchange settles the stage`,
+          `stage ${id} is topology coworker: grade does not apply — the task verifier binds to unit stages and gates, never to an exchange (check IS allowed: it runs after the child's wake, as the stage's own verdict on the members' joint output)`,
         )
       }
-    } else {
+    }
+    if (topology === "lab") {
+      // the experiment, as one chain link: ONE mind — the actor —
+      // whose brief is the stage's brief (the actor's job text), with
+      // signal/end detectors observing instead of a done-protocol.
+      // Delegates like coworker: minted as a child lab program
+      // (kind = "lab"), levied once; the wake receipt + the stage's
+      // check settle it.
+      str(t.brief, `stage ${id} brief`)
+      if (t.units !== undefined) {
+        throw new HookError(`stage ${id} is topology lab: the actor composes its own waves at runtime — units does not apply`)
+      }
+      if (t.members !== undefined) {
+        throw new HookError(`stage ${id} is topology lab: the actor directs mock waves — members does not apply`)
+      }
+      if (t.run !== undefined) {
+        throw new HookError(`stage ${id} is topology lab: run belongs to gate stages — the actor is the workforce here`)
+      }
+      if (t.grade !== undefined) {
+        throw new HookError(
+          `stage ${id} is topology lab: grade does not apply — the task verifier binds to unit stages and gates, never to an experiment (check IS allowed: it runs after the child's wake)`,
+        )
+      }
+      cmd(t.signal, `stage ${id} signal`)
+      cmd(t.end, `stage ${id} end`)
+    }
+    if (topology !== "coworker" && topology !== "lab") {
       if (t.members !== undefined) {
         throw new HookError(`stage ${id} is topology ${topology}: members belong to coworker stages`)
       }
       if (t.model !== undefined) {
         throw new HookError(
-          `stage ${id} is topology ${topology}: per-stage model lands with the #152 follow-up (coworker stages carry the child's model today)`,
+          `stage ${id} is topology ${topology}: refused for now, not by principle — the spawn seam carries ONE model pin per run, so per-stage pinning needs the seam widened (tracked on #152); coworker/lab stages carry their child's model today`,
         )
       }
     }
-    const cmd = (value: unknown, field: string): string | undefined => {
-      if (value === undefined) return undefined
-      if (typeof value !== "string" || value.length === 0) {
-        throw new HookError(`${field} must be a command string: ${String(value)}`)
-      }
-      return value
+    if (topology !== "lab" && (t.signal !== undefined || t.end !== undefined)) {
+      throw new HookError(`stage ${id} is topology ${topology}: signal/end detectors belong to lab stages`)
     }
     const stage: Stage = { id, topology }
+    if (topology === "lab") {
+      stage.brief = str(t.brief, `stage ${id} brief`)
+      stage.signal = cmd(t.signal, `stage ${id} signal`)
+      stage.end = cmd(t.end, `stage ${id} end`)
+      if (t.model !== undefined) stage.model = str(t.model, `stage ${id} model`)
+    }
     if (topology === "coworker") {
       stage.members = (t.members as Record<string, unknown>[]).map((row) => {
         const member: StageMember = {
@@ -244,14 +284,18 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       const brief = cmd(t.brief, `stage ${id} brief`)
       if (brief !== undefined) throw new HookError(`stage ${id} is topology gate: it runs no worker — brief does not apply`)
     }
-    if (topology === "solo" || topology === "fan-out") {
+    if (topology === "solo" || topology === "fan-out" || topology === "coworker" || topology === "lab") {
+      // the stage's own verdict hook: worker stages run it per finishing
+      // unit; coworker/lab stages run it after the child's wake receipt
       stage.check = cmd(t.check, `stage ${id} check`)
-      if (t.grade !== undefined) {
-        if (typeof t.grade !== "boolean") throw new HookError(`stage ${id} grade must be true or false: ${String(t.grade)}`)
-        stage.grade = t.grade
-      }
-      if (t.run !== undefined) {
-        throw new HookError(`stage ${id} is topology ${topology}: run belongs to gate stages — declare check for this stage's own hook`)
+      if (topology === "solo" || topology === "fan-out") {
+        if (t.grade !== undefined) {
+          if (typeof t.grade !== "boolean") throw new HookError(`stage ${id} grade must be true or false: ${String(t.grade)}`)
+          stage.grade = t.grade
+        }
+        if (t.run !== undefined) {
+          throw new HookError(`stage ${id} is topology ${topology}: run belongs to gate stages — declare check for this stage's own hook`)
+        }
       }
     } else {
       for (const field of ["check", "grade", "units"] as const) {
@@ -277,9 +321,8 @@ export function unitsFromStages(stages: Stage[]): Unit[] {
     if (stage.topology === "solo") units.push({ id: stage.id, brief: stage.brief! })
     if (stage.topology === "fan-out") units.push(...stage.units!)
   }
-  if (units.length === 0) {
-    throw new HookError("stages declare no unit stages (solo/fan-out) — nothing can run")
-  }
+  // zero units is LEGAL: a chain of gates, exchanges, and experiments
+  // needs no briefed worker of its own — the rail-acted steps drive it
   return units
 }
 
@@ -291,12 +334,19 @@ export function stepsFromStages(stages: Stage[]): Step[] {
       steps.push({ id: stage.id, finished_by: "gate", wave, check: stage.run })
       continue
     }
-    if (stage.topology === "coworker") {
-      // the exchange is delegated: the child program lives at
-      // stages/<id>/ (minted by the orchestrator) and the wake
+    if (stage.topology === "coworker" || stage.topology === "lab") {
+      // the exchange/experiment is delegated: the child program lives
+      // at stages/<id>/ (minted by the orchestrator) and the wake
       // machinery levies it once at the frontier — the child's wake
-      // receipt settles this stage like any wake step
-      steps.push({ id: stage.id, finished_by: "wake", wave, folder: join("stages", stage.id) })
+      // receipt settles this stage like any wake step; an optional
+      // stage check runs after the receipt as the stage's own verdict
+      steps.push({
+        id: stage.id,
+        finished_by: "wake",
+        wave,
+        folder: join("stages", stage.id),
+        ...(stage.check ? { check: stage.check } : {}),
+      })
       continue
     }
     // one end-step per unit, all on the stage's wave: the wave gate

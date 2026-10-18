@@ -697,27 +697,39 @@ export async function runOrchestrator(input: {
     )
   }
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
-  // Coworker stages mint their child program up front (idempotent): the
-  // members become a full coworker workflow.toml under stages/<id>/ and
+  // Coworker/lab stages mint their child program up front (idempotent):
+  // the members/actor become a full workflow.toml under stages/<id>/ and
   // the wake machinery levies it once at the frontier. On-disk beats
   // in-memory — a paused or crashed parent re-nurses the SAME child.
+  // JSON.stringify emits valid TOML basic strings (quotes/backslashes
+  // escaped) — arbitrary hook commands must survive the round trip.
+  const tomlStr = (s: string): string => JSON.stringify(s)
   for (const stage of manifest.stages ?? []) {
-    if (stage.topology !== "coworker") continue
+    if (stage.topology !== "coworker" && stage.topology !== "lab") continue
     const childToml = join(input.taskDir, "stages", stage.id, "workflow.toml")
     if (!existsSync(childToml)) {
       const childDir = dirname(childToml)
       mkdirSync(join(childDir, "members"), { recursive: true })
       const model = stage.model ?? manifest.workflow.model
-      let toml = `[workflow]\nname = "${stage.id}"\nworker_kind = "${manifest.workflow.worker_kind}"\nslots = 1\n`
-      if (model) toml += `model = "${model}"\n`
-      for (const member of stage.members!) {
+      let toml = stage.topology === "lab" ? 'kind = "lab"\n\n' : ""
+      toml += `[workflow]\nname = ${tomlStr(stage.id)}\nworker_kind = ${tomlStr(manifest.workflow.worker_kind)}\nslots = 1\n`
+      if (model) toml += `model = ${tomlStr(model)}\n`
+      if (stage.topology === "lab") {
+        if (stage.signal || stage.end) {
+          toml += "\n[detectors]\n"
+          if (stage.signal) toml += `signal = ${tomlStr(stage.signal)}\n`
+          if (stage.end) toml += `end = ${tomlStr(stage.end)}\n`
+        }
+        writeFileSync(join(childDir, "actor.md"), `${stage.brief}\n`)
+      }
+      for (const member of stage.members ?? []) {
         writeFileSync(join(childDir, "members", `${member.name}.md`), `${member.brief}\n`)
         toml += `\n[members.${member.name}]\n`
         if (member.initiates) toml += "initiates = true\n"
-        if (member.model) toml += `model = "${member.model}"\n`
+        if (member.model) toml += `model = ${tomlStr(member.model)}\n`
       }
       writeFileSync(childToml, toml)
-      log(`coworker stage ${stage.id}: minted child program at ${childToml}`)
+      log(`${stage.topology} stage ${stage.id}: minted child program at ${childToml}`)
     }
   }
   if (steps?.length && !manifest.stages?.length) {
@@ -1088,8 +1100,23 @@ export async function runOrchestrator(input: {
       watchChild(booking.jobDir)
       const wake = readChildWake(booking.jobDir)
       if (!wake) continue
-      const pass = wake.outcome === "done"
-      const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}`
+      // A stage's own check (coworker/lab stages): the child's wake
+      // receipt says the exchange/experiment ENDED; the check says it
+      // ended WELL. Both must pass — a green receipt with a red check
+      // fails the stage honestly.
+      let pass = wake.outcome === "done"
+      let checkRow = ""
+      if (pass && step.check) {
+        try {
+          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          checkRow = " — stage check passed"
+        } catch (err) {
+          pass = false
+          const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]?.slice(0, 100) ?? ""
+          checkRow = ` — stage check failed: ${why}`
+        }
+      }
+      const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}${checkRow}`
       finishUnit(input.taskDir, step.id, pass, { unit: step.id, result, pass })
       emit("unit.finished", { unit: step.id, pass, result })
       rows.push({ unit: step.id, result, pass })
