@@ -664,6 +664,84 @@ brief = "after the exchange"
   assert.deepEqual(shep.spawned, [])
 })
 
+// ── preamble: the roster's shared context, authored once ──────────
+test("preamble prepends to every fan-out unit brief and every coworker member brief", async () => {
+  const dir = taskDir("preamble")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "preamble"
+worker_kind = "opencode"
+slots = 2
+
+[[stage]]
+id = "shards"
+topology = "fan-out"
+preamble = "SHARED: output one JSON object per line."
+units = [
+  { id = "one", brief = "shard one" },
+  { id = "two", brief = "shard two" },
+]
+
+[[stage]]
+id = "review"
+topology = "coworker"
+preamble = "We are building the orders API."
+members = [
+  { name = "alex", brief = "backend first", initiates = true },
+  { name = "sam", brief = "frontend after" },
+]
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: fakeShep().port,
+    levyChild: autoWakeLevy(dir, "done", []),
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "done")
+  // fan-out: every unit's effective brief carries the preamble
+  const units = readFileSync(join(dir, "units.jsonl"), "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as { id: string; brief: string })
+  assert.ok(units.every((u) => u.brief.startsWith("SHARED: output one JSON object per line.\n\n")))
+  // coworker: every minted member file carries the preamble
+  for (const name of ["alex", "sam"]) {
+    assert.match(
+      readFileSync(join(dir, "stages", "review", "members", `${name}.md`), "utf8"),
+      /^We are building the orders API\.\n\n/,
+    )
+  }
+})
+
+test("preamble on a one-mind stage refuses", () => {
+  const dir = taskDir("preamble-refuse")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "s"
+topology = "solo"
+brief = "b"
+preamble = "shared"
+`,
+  )
+  assert.throws(() => loadManifest(dir), /preamble belongs to roster stages/)
+})
+
 // ── back-compat: no [[stage]], the units hook path is unchanged ────
 test("a units-hook workflow (no stages) task-grades every unit, exactly as before", async () => {
   const dir = taskDir("backcompat")

@@ -88,6 +88,7 @@ export type Stage = {
   grade?: boolean
   signal?: string
   end?: string
+  preamble?: string
 }
 
 // Per-unit grade binding compiled from stages: "task" = the task-level
@@ -304,6 +305,15 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         }
       }
     }
+    if (topology === "fan-out" || topology === "coworker") {
+      // the roster's shared context, authored once: each mind's
+      // effective brief = preamble + its own roster entry
+      if (t.preamble !== undefined) stage.preamble = str(t.preamble, `stage ${id} preamble`)
+    } else if (t.preamble !== undefined) {
+      throw new HookError(
+        `stage ${id} is topology ${topology}: preamble belongs to roster stages (fan-out, coworker) — a stage with one mind has no shared context to factor out; write it into the brief`,
+      )
+    }
     stages.push(stage)
   }
   if (stages.length === 0) throw new HookError("stages table is empty — remove it or declare [[stage]] entries")
@@ -319,7 +329,12 @@ export function unitsFromStages(stages: Stage[]): Unit[] {
   const units: Unit[] = []
   for (const stage of stages) {
     if (stage.topology === "solo") units.push({ id: stage.id, brief: stage.brief! })
-    if (stage.topology === "fan-out") units.push(...stage.units!)
+    if (stage.topology === "fan-out") {
+      // preamble = the roster's shared context: each unit's effective
+      // brief is preamble + its own entry
+      const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
+      units.push(...stage.units!.map((u) => ({ id: u.id, brief: `${pre}${u.brief}` })))
+    }
   }
   // zero units is LEGAL: a chain of gates, exchanges, and experiments
   // needs no briefed worker of its own — the rail-acted steps drive it
