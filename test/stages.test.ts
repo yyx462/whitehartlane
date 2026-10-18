@@ -10,7 +10,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
-import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, type Stage } from "../src/hooks.ts"
+import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, modelPlanFromStages, type Stage } from "../src/hooks.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-stages-"))
 process.env.AGENTIC_OS_NOTIFY = "0"
@@ -19,10 +19,12 @@ test.after(() => rmSync(process.env.AGENTIC_OS_HOME!, { recursive: true, force: 
 
 function fakeShep() {
   const spawned: string[] = []
+  const models = new Map<string, string | undefined>()
   const port: ShepPort = {
     setLayout: () => {},
-    spawnWorker: (name, _kind, _briefPath, cwd) => {
+    spawnWorker: (name, _kind, _briefPath, cwd, model) => {
       spawned.push(name)
+      models.set(name.slice(2), model)
       const id = name.slice(2)
       writeFileSync(join(cwd, "result.md"), "READY\n")
       writeFileSync(join(cwd, "log.txt"), `done ${id}\n`)
@@ -35,7 +37,7 @@ function fakeShep() {
     wake: () => {},
     tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
   }
-  return { port, spawned }
+  return { port, spawned, models }
 }
 
 function taskDir(name: string): string {
@@ -740,6 +742,96 @@ preamble = "shared"
 `,
   )
   assert.throws(() => loadManifest(dir), /preamble belongs to roster stages/)
+})
+
+// ── per-mind model pins: nearest declaration wins ─────────────────
+test("fan-out units spawn with their own pins; solo carries its stage pin; nothing declared → undefined", async () => {
+  const dir = taskDir("model-pins")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "model-pins"
+worker_kind = "opencode"
+model = "prov/run-default"
+slots = 2
+
+[[stage]]
+id = "prep"
+topology = "solo"
+model = "prov/solo-pin"
+brief = "prepare"
+
+[[stage]]
+id = "shards"
+topology = "fan-out"
+model = "prov/stage-default"
+units = [
+  { id = "csv",     brief = "csv slice" },
+  { id = "parquet", brief = "parquet slice", model = "prov/own-pin" },
+]
+
+[[stage]]
+id = "plain"
+topology = "solo"
+brief = "no pin declared"
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  const shep = fakeShep()
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: shep.port,
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "done")
+  assert.equal(shep.models.get("prep"), "prov/solo-pin") // solo: stage pin
+  assert.equal(shep.models.get("csv"), "prov/stage-default") // roster default
+  assert.equal(shep.models.get("parquet"), "prov/own-pin") // own pin wins
+  assert.equal(shep.models.get("plain"), undefined) // falls to the manifest pin
+})
+
+test("modelPlanFromStages compiles the nearest-declaration ladder", () => {
+  const stages: Stage[] = [
+    { id: "a", topology: "solo", brief: "A", model: "prov/a" },
+    { id: "fan", topology: "fan-out", model: "prov/default", units: [
+      { id: "f1", brief: "F1" },
+      { id: "f2", brief: "F2", model: "prov/f2" },
+    ] },
+    { id: "nopin", topology: "solo", brief: "N" },
+    { id: "g", topology: "gate", run: "true" },
+  ]
+  const pins = modelPlanFromStages(stages)
+  assert.equal(pins.get("a"), "prov/a")
+  assert.equal(pins.get("f1"), "prov/default")
+  assert.equal(pins.get("f2"), "prov/f2")
+  assert.ok(!pins.has("nopin"))
+  assert.ok(!pins.has("g"))
+})
+
+test("model on a gate stage refuses: no mind, no pin", () => {
+  const dir = taskDir("gate-model-refuse")
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "x"
+worker_kind = "opencode"
+
+[[stage]]
+id = "g"
+topology = "gate"
+run = "true"
+model = "prov/pin"
+`,
+  )
+  assert.throws(() => loadManifest(dir), /no mind, no pin/)
 })
 
 // ── back-compat: no [[stage]], the units hook path is unchanged ────

@@ -80,7 +80,7 @@ export type Stage = {
   id: string
   topology: "solo" | "fan-out" | "coworker" | "gate" | "lab"
   brief?: string
-  units?: { id: string; brief: string }[]
+  units?: { id: string; brief: string; model?: string }[]
   members?: StageMember[]
   model?: string
   check?: string
@@ -158,6 +158,12 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       }
       return value
     }
+    // a pin validates like [workflow] model: provider/model, no spaces
+    const modelStr = (value: unknown, field: string): string => {
+      const m = str(value, field)
+      if (!/^[^/\s]+\/[^/\s]+$/.test(m)) throw new HookError(`${field} must be provider/model: ${m}`)
+      return m
+    }
     if (topology === "coworker") {
       // the exchange, as one chain link: members are minted into a
       // CHILD coworker program (stages/<id>/workflow.toml) and the
@@ -230,10 +236,8 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       if (t.members !== undefined) {
         throw new HookError(`stage ${id} is topology ${topology}: members belong to coworker stages`)
       }
-      if (t.model !== undefined) {
-        throw new HookError(
-          `stage ${id} is topology ${topology}: refused for now, not by principle — the spawn seam carries ONE model pin per run, so per-stage pinning needs the seam widened (tracked on #152); coworker/lab stages carry their child's model today`,
-        )
+      if (topology === "gate" && t.model !== undefined) {
+        throw new HookError(`stage ${id} is topology gate: no mind, no pin — gate stages run a command, not a worker`)
       }
     }
     if (topology !== "lab" && (t.signal !== undefined || t.end !== undefined)) {
@@ -244,7 +248,7 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       stage.brief = str(t.brief, `stage ${id} brief`)
       stage.signal = cmd(t.signal, `stage ${id} signal`)
       stage.end = cmd(t.end, `stage ${id} end`)
-      if (t.model !== undefined) stage.model = str(t.model, `stage ${id} model`)
+      if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)
     }
     if (topology === "coworker") {
       stage.members = (t.members as Record<string, unknown>[]).map((row) => {
@@ -256,10 +260,11 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         if (row.model !== undefined) member.model = str(row.model, `stage ${id} members[${row.name as string}].model`)
         return member
       })
-      if (t.model !== undefined) stage.model = str(t.model, `stage ${id} model`)
+      if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)
     }
     if (topology === "solo") {
       stage.brief = str(t.brief, `stage ${id} brief`)
+      if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)
       if (t.units !== undefined) {
         throw new HookError(`stage ${id} is topology solo: units belong to fan-out stages — a solo stage's one worker takes brief`)
       }
@@ -268,6 +273,7 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       if (t.brief !== undefined) {
         throw new HookError(`stage ${id} is topology fan-out: units carry their own briefs — stage-level brief does not apply`)
       }
+      if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)
       if (!Array.isArray(t.units) || t.units.length === 0) {
         throw new HookError(`stage ${id} is topology fan-out: units must be a non-empty array of {id, brief} tables`)
       }
@@ -277,7 +283,12 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         if (!SHEP_SAFE_ID.test(uid)) throw new HookError(`stage ${id} unit id is not shep-safe: ${uid}`)
         if (seen.has(uid)) throw new HookError(`stage unit repeats id ${uid}`)
         seen.add(uid)
-        return { id: uid, brief: str(row.brief, `stage ${id} units[${i}].brief`) }
+        const unit: { id: string; brief: string; model?: string } = {
+          id: uid,
+          brief: str(row.brief, `stage ${id} units[${i}].brief`),
+        }
+        if (row.model !== undefined) unit.model = modelStr(row.model, `stage ${id} units[${i}].model`)
+        return unit
       })
     }
     if (topology === "gate") {
@@ -413,6 +424,26 @@ export type Manifest = {
   stages?: Stage[]
   report?: { where?: string }
   layout?: Partial<Layout>
+}
+
+// Per-mind model pins compiled from stages (the #152 seam widening):
+// a mind's pin = its NEAREST declaration — unit.model → stage.model.
+// Absent from the map = fall to the manifest pin (byte-identical to
+// the pre-stage rail). Fresh per stage: no inheritance from earlier
+// stages, ever.
+export function modelPlanFromStages(stages: Stage[]): Map<string, string> {
+  const pins = new Map<string, string>()
+  for (const stage of stages) {
+    if (stage.topology === "solo") {
+      if (stage.model) pins.set(stage.id, stage.model)
+    } else if (stage.topology === "fan-out") {
+      for (const unit of stage.units ?? []) {
+        const pin = unit.model ?? stage.model
+        if (pin) pins.set(unit.id, pin)
+      }
+    }
+  }
+  return pins
 }
 
 export function resolvedLayout(manifest: Manifest): Layout {

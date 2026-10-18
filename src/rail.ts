@@ -591,7 +591,7 @@ export class Rail implements ShepPort {
     if (want.tab === "new") this.openFleetTab(dir)
   }
 
-  spawnWorker(name: string, kind: string, briefPath: string, cwd: string): boolean {
+  spawnWorker(name: string, kind: string, briefPath: string, cwd: string, model?: string): boolean {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
@@ -604,13 +604,22 @@ export class Rail implements ShepPort {
       this.log(`dry-run: ${label} settled by mock — no pane, no agent`)
       return true
     }
+    // Per-mind pin (issue #152 seam widening): a spawn carrying a pin
+    // that differs from the manifest pin cannot ride the CLI
+    // transport (it passes --kind only) — refuse honestly, never
+    // silently downgrade a worker to the wrong model.
+    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
+      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+      this.log(`spawn refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+      return false
+    }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
       if (!pane) {
         this.log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      const ok = this.inhabitPane(name, kind, pane, briefPath, cwd)
+      const ok = this.inhabitPane(name, kind, pane, briefPath, cwd, model)
       if (ok) {
         this.liveWorkerPanes.push(pane)
         this.paneOf.set(label, pane)
@@ -636,17 +645,22 @@ export class Rail implements ShepPort {
   // (--session passes through herdr to the agent CLI) and the continue
   // brief. The shep path has no arg pass-through — a fresh pane with the
   // continue brief covers it (the unit dir is the outliving memory).
-  resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string): boolean {
+  resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string, model?: string): boolean {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
+      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+      this.log(`resume refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+      return false
+    }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
       if (!pane) {
         this.log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      const ok = this.inhabitPane(name, session.tool, pane, briefPath, cwd, this.workerModel, undefined, false, session.session_id)
+      const ok = this.inhabitPane(name, session.tool, pane, briefPath, cwd, model ?? this.workerModel, undefined, false, session.session_id)
       if (ok) {
         this.liveWorkerPanes.push(pane)
         this.paneOf.set(label, pane)

@@ -50,14 +50,20 @@ ids) and `topology` (required).
   worker finishes. Never the task verifier.
 - `grade` — optional bool. Task-verifier binding (default: the LAST
   unit stage takes it — solo/fan-out are the unit stages).
+- `model` — optional. The worker's pin (falls to `[workflow] model`).
 
 **fan-out**
-- `units` — required. Array of `{ id, brief }`; each entry is a
-  complete worker with its own slice.
+- `units` — required. Array of `{ id, brief, model? }`; each entry is a
+  complete worker with its own slice and optional own pin.
 - `preamble` — optional. Shared context prepended to EVERY unit's
   brief (authored once, not pasted per entry).
 - `check` — optional; runs per finishing unit.
 - `grade` — optional bool, as solo.
+- `model` — optional. The roster's default pin: every unit without
+  its own takes this. Precedence: `unit.model → stage.model →
+  workflow.model`, resolved fresh per stage. (A differing pin on the
+  CLI spawn transport refuses honestly — per-unit pinning needs the
+  fleet-pane path.)
 
 **coworker**
 - `members` — required. Array of `{ name, brief, initiates?, model? }`;
