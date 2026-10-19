@@ -1,9 +1,15 @@
 import assert from "node:assert/strict"
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdtemp, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+
+// the door's settles ride the OS-disk trace (OPTIMUM §8) — standUp
+// runs without a booked job, so the suite needs its own disk for the
+// ledger records it mints
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-door-"))
+
 import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
 import { readState } from "../src/state.ts"
 

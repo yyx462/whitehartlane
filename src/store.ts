@@ -301,12 +301,22 @@ export function appendEvent(sid: string, event: Omit<OsEvent, "ts" | "sid"> & { 
   return full
 }
 
+// A torn tail line (crash mid-append) is skipped, never thrown: the
+// trace is append-only, and since the unit ledger fold (OPTIMUM §8)
+// readState rides this reader on the orchestrator's every cycle — one
+// partial line must not brick a live run's state read.
 export function readEvents(sid: string): OsEvent[] {
   if (!existsSync(eventsPath(sid))) return []
-  return readFileSync(eventsPath(sid), "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as OsEvent)
+  const events: OsEvent[] = []
+  for (const line of readFileSync(eventsPath(sid), "utf8").split("\n")) {
+    if (!line.trim()) continue
+    try {
+      events.push(JSON.parse(line) as OsEvent)
+    } catch {
+      /* torn tail — the next append completes or overwrites it */
+    }
+  }
+  return events
 }
 
 export function readAllEvents(): { sid: string; events: OsEvent[] }[] {

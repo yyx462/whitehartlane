@@ -8,6 +8,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+
+// the unit ledger rides the OS-disk trace (OPTIMUM §8) — card tests
+// resolve a session there, so they need their own disk
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-chain-"))
+
 import { chainOf, stepRecorder } from "../src/orchestrator-chain.ts"
 import { readCheckpoints } from "../src/state.ts"
 import type { Step } from "../src/hooks.ts"

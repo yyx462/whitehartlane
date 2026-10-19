@@ -3,6 +3,11 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+
+// the fan-out engine settles cards onto the OS-disk trace (OPTIMUM
+// §8) — this suite drives full runs, so it needs its own disk
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-engine-"))
+
 import { engineFor, programRootsOf, stagedKind } from "../src/engine.ts"
 import { declareScope } from "../src/permission.ts"
 import type { Rail } from "../src/rail.ts"
