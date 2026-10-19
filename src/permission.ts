@@ -1,4 +1,7 @@
-// The permission half of JEV (zen 6): when a worker pane blocks on a
+// The permission half of JEV (zen 6), and THE canonical path predicate
+// (OPTIMUM §5): every path question the rail asks — a blocked dialog,
+// a pre-seed glob, an admission scan — is answered from the scope this
+// module constructs. When a worker pane blocks on a
 // permission dialog, the rail asks this typed decider — a script, not
 // an agent, never a person waiting. Allow what is inside the member's
 // roots and temp scratch; deny the dangerous patterns outright; the
@@ -16,8 +19,8 @@
 // hold steady while the terminal's rendering wobbles. Every verdict
 // carries a message the rail injects into the pane. Prompts never
 // queue for a human.
-import { existsSync, realpathSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
@@ -84,14 +87,100 @@ function under(path: string, root: string): boolean {
   return path === r || path.startsWith(`${r}/`)
 }
 
+// -- the canonical path predicate (OPTIMUM §5) ---------------------------------
+//
+// Four side layers used to re-spell this file's three primitives (the
+// deny set, the under-test, the temp set), and they drifted: run.ts's
+// admission scan carried a private temp list missing the realpath
+// form, its `~` regex differed from coworker-run's, and a hard-deny
+// root in roots.txt was stripped by the doors but still counted
+// "covered" at admission (#77 enforced at one boundary only). One
+// PathScope, constructed from the program's declaration, is the
+// currency now: the dialog ladder, the pre-seed globs, and the
+// admission scan all ask the scope; nothing re-owns the primitives.
+
+// One tilde spelling: `~` and `~/…` resolve against the real home.
+export function expandHome(p: string): string {
+  return p.replace(/^~(?=\/|$)/, homedir())
+}
+
+// The declared-roots view of a program directory: roots.txt beside the
+// workflow, one absolute or `~`-relative path per line. The one
+// spelling — the doors' own readers fold onto this next slice.
+export function readRootsTxt(dir: string): string[] {
+  try {
+    return readFileSync(join(dir, "roots.txt"), "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  } catch {
+    return []
+  }
+}
+
+export type PathScope = { roots: string[] }
+
+// Construct the scope: expand `~`, strip hard-deny roots (deny
+// outranks roots EVERYWHERE a root can ride — #77, the pre-seed
+// projection included), drop empties, dedupe. Idempotent: the doors
+// pass already-sanitized programRoots through unchanged.
+export function declareScope(roots: string[]): PathScope {
+  const { kept } = sanitizeRoots(roots)
+  return { roots: [...new Set(kept.map(expandHome).filter((r) => r.length > 0))] }
+}
+
+// The admission view (#51): the program dir plus its declared roots.
+export function scopeFromDir(dir: string): PathScope {
+  return declareScope([dir, ...readRootsTxt(dir)])
+}
+
+// Is a path covered by the scope — a root or temp scratch? The static
+// question the door asks about brief text; the runtime ladder below is
+// strictly richer (it judges the gray zone). Temp counts covered
+// without the ladder's outside-home guard: a brief naming scratch
+// under a home-planted temp tree is not a mismatch to refuse over.
+export function scopeCovers(scope: PathScope, path: string): boolean {
+  return [...scope.roots, ...TEMP_ROOTS].some((root) => under(path, root))
+}
+
+// The pre-seed projection: what the worker's own opencode.json allows
+// from session start, so a dialog the ladder would only re-allow every
+// beat never fires (j-b6067c). Derived from the same primitives — the
+// writer (store.ts) never re-owns the knowledge. Every root grants
+// BOTH spellings, the bare form and `/**`: the ladder's under()
+// accepts the root itself, and a glob alone does not.
+export function allowGlobs(roots: string[]): Record<string, string> {
+  const external: Record<string, string> = { "*": "ask" }
+  for (const root of [...roots, ...TEMP_ROOTS]) grantRoot(external, root)
+  return external
+}
+
+// Grant one root into an external_directory map: both path forms plus
+// the realpath opencode canonicalizes its project root to (j-b6067c —
+// on symlinked roots a one-form glob leaks prompts). Degenerate roots
+// ("/", "") are the CALLER's to refuse; a missing root still seeds its
+// literal spelling.
+export function grantRoot(external: Record<string, string>, root: string): void {
+  try {
+    for (const form of new Set([root, realpathSync(root)])) {
+      external[form] = "allow"
+      external[`${form}/**`] = "allow"
+    }
+  } catch {
+    // no realpath (the root does not exist yet) — the literal spelling
+    // still seeds both forms, exactly as an existing root's does
+    external[root] = "allow"
+    external[`${root}/**`] = "allow"
+  }
+}
+
 // Temp space is working scratch, not a boundary: mktemp/git/pip writes
 // land there, and a flat outside-home deny stall-reaps a worker that
 // only wanted scratch (j-ba18b7: /tmp). Sensitive paths stay
 // hard-denied above; wandering elsewhere outside home is judged below.
-// Exported so the sandbox configs pre-seed the same roots (j-b6067c):
-// a dialog the rail would only re-allow every beat is wasted turns —
-// the worker's own opencode.json allows temp before a dialog fires.
-export const TEMP_ROOTS: string[] = (() => {
+// Private now: the pre-seed projection (allowGlobs) lives in this file,
+// so no consumer needs the list itself (j-b6067c behavior kept).
+const TEMP_ROOTS: string[] = (() => {
   const roots = new Set(["/tmp", "/private/tmp", "/var/folders", tmpdir()])
   try {
     roots.add(realpathSync(tmpdir()))
@@ -112,8 +201,9 @@ export const TEMP_ROOTS: string[] = (() => {
 // by construction; a bare `/…` that does not exist on disk while
 // `home + path` does is the stripped form; a first segment like
 // `/Users_<name>/` whose slash-repaired form exists (or is the home
-// prefix) is the mangled form.
-export function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
+// prefix) is the mangled form. Private: the repair is the predicate's
+// own concern — callers hand it raw dialog text.
+function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
   let p = raw
   if (p === "~" || p.startsWith("~/")) p = home.replace(/\/$/, "") + p.slice(1)
   if (!p.startsWith("/")) p = cwd ? join(cwd, p) : p
@@ -133,10 +223,15 @@ export function normalizeDialogPath(raw: string, home: string, cwd?: string): st
   return p.replace(/\/+$/, "") || p
 }
 
+// THE verdict: one entry point for "may this worker touch this path?"
+// The dialog text arrives raw; the repair (normalizeDialogPath) and the
+// root assembly ([cwd, …scope.roots]) are the predicate's internals.
+// The ladder: hard-deny → scope roots → temp-outside-home → the tuned
+// judge → deny-unneeded (a repeat ask escalates — see below).
 export function decidePermission(
   input: {
     question: string
-    allowedRoots: string[]
+    scope: PathScope
     home?: string
     cwd?: string
     context?: string
@@ -144,6 +239,7 @@ export function decidePermission(
   judge?: PermissionJudge,
 ): PermissionDecision {
   const home = input.home ?? "/Users/"
+  const allowedRoots = [input.cwd ?? "", ...input.scope.roots].filter((r) => r.length > 0)
   // the longest path mentioned in the dialog is the subject; the
   // leading `~` of a tilde-form path rides the match, or it is lost
   const rawPath = (input.question.match(/~?\/[A-Za-z0-9._~\/+-]+/g) ?? [])
@@ -166,7 +262,7 @@ export function decidePermission(
       message: `denied: ${path} looks like secrets or credentials. Never touch it in this Job. Continue your own task.`,
     }
   }
-  if (input.allowedRoots.some((root) => under(path, root))) {
+  if (allowedRoots.some((root) => under(path, root))) {
     return {
       decision: "allow",
       path,

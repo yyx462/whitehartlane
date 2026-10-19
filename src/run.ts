@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
-import { homedir, tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
+import { expandHome, scopeCovers, scopeFromDir } from "./permission.ts"
 import { loadSpurFile, type Spur } from "./spur.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
@@ -273,19 +273,15 @@ function stageSpur(spur: Spur, dir: string, toml: boolean): (store: string) => v
 // Issue #51: a program whose briefs name paths no root covers is a
 // manifest-level mismatch — better refused at the door than discovered
 // by the worker dying mid-run (j-a532f9: a missing roots.txt turned
-// every target-tree touch into a jev gray-zone ask). Scans the static
-// text the program ships (task.txt, actor.md, members/*.md) for
-// existing absolute paths; any not under the program dir, a roots.txt
-// entry, or temp scratch is named in the refusal.
+// every target-tree touch into a jev gray-zone ask). The coverage
+// question is the canonical predicate's (permission.ts scopeFromDir /
+// scopeCovers): the same sanitized, tilde-expanded roots the rail will
+// enforce — what the door admits is exactly what the run allows (a
+// hard-deny root is stripped at scope construction, so a brief naming
+// its paths is refused here, not silently hard-denied mid-run — #77 at
+// both boundaries now).
 function uncoveredBriefPaths(source: string): string[] {
-  const roots = [source]
-  const rootsTxt = join(source, "roots.txt")
-  if (existsSync(rootsTxt)) {
-    for (const line of readFileSync(rootsTxt, "utf8").split("\n")) {
-      const t = line.trim().replace(/^~(?=\/)/, homedir())
-      if (t) roots.push(t)
-    }
-  }
+  const scope = scopeFromDir(source)
   const texts: string[] = []
   for (const name of ["task.txt", "actor.md"]) {
     const f = join(source, name)
@@ -297,13 +293,11 @@ function uncoveredBriefPaths(source: string): string[] {
       if (f.endsWith(".md")) texts.push(readFileSync(join(membersDir, f), "utf8"))
     }
   }
-  const tempRoots = ["/tmp", "/private/tmp", "/var/folders", tmpdir()]
   const uncovered = new Set<string>()
   for (const text of texts) {
     for (const raw of text.match(/~?\/[A-Za-z0-9._~+-]+(?:\/[A-Za-z0-9._~+-]+)+/g) ?? []) {
-      const p = raw.replace(/^~(?=\/)/, homedir())
-      if (roots.some((r) => p === r || p.startsWith(`${r}/`))) continue
-      if (tempRoots.some((t) => p === t || p.startsWith(`${t}/`))) continue
+      const p = expandHome(raw)
+      if (scopeCovers(scope, p)) continue
       if (!existsSync(p)) continue // to-be-created scratch is not a boundary
       uncovered.add(p)
     }
