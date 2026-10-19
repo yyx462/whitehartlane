@@ -40,6 +40,14 @@
 > side (revive4's adopted fixer failed → DEAD-iter4; re-armed as
 > iteration 5 on the same target, landed clean). strikes.json {};
 > no ESCALATED records; D3 unexercised.
+> Refit 6: 2026-10-20, over PRs #2–#176 (125 merged; +2 since refit 5:
+> #175 this file's refit-5 landing (absorbed clean), #176 program-
+> grammar slice 1 — iteration 6 GREEN, receipt 1 round / 0 strikes /
+> topo-tune green on the joint target (33,8), cap 900 = the diff
+> exactly (250+/650−)). Zero strikes, no ESCALATED records; D3
+> unexercised. The commissioning's MAX-6 budget is consumed (iters
+> 1,2,3,4-dead,5,6): slice 2 arms under a FRESH commissioning on this
+> refit's proposal.
 
 ## L0 — the product thesis (one page)
 
@@ -68,10 +76,11 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 5: #174 executed the fold refit 4 picked —
-§8 converged when the ledger's cards retired onto the OS-disk trace
-the store already owned (one carded store, and it IS the trace); no
-new axis appeared.
+The thesis held under refit 6: #176 executed §1's slice 1 — a dialect
+died by refusal (`[[step]]` tables and the units-hook quick-mint now
+answer "use [[stage]]", the door refuses a stage-less fan-out manifest
+before booking) and no new axis appeared. Deletion as convergence: the
+PR is 650 lines gone, 250 added, tests 437 green.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
@@ -87,7 +96,7 @@ all — see the gaps note below):
 
 | component | fix-density | oscillation | churn | runtime-loss | score |
 |---|---|---|---|---|---|
-| runner-dispatch | 73 | 0 | 40028 | — | 113.0 |
+| runner-dispatch | 74 | 0 | 40928 | — | 114.9 |
 | window | 27 | 0 | 16364 | — | 43.4 |
 | permissions | 13 | 0 | 10717 | — | 23.7 |
 | resume-parking | 4 | 0 | 1780 | — | 5.8 |
@@ -96,40 +105,41 @@ all — see the gaps note below):
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-Refit 5's pick reads the table after the discounts, every one by
-receipt: rank 1 **runner-dispatch** (113.0) converged — its +1 IS
-#174's seam discipline (the five readers NOT moving was the fold's own
-receipt; orchestrator.ts shifted 5 lines and held the interface while
-the store under it changed — convergence churn, not sickness); rank 2
-**window** (43.4) unchanged since refit 3's churn read — #174 touched
-nothing under `web/`; rank 3 **permissions** (23.7) converged at refit
-4 (#172); rank 4 **resume-parking** (5.8) — its +1 IS #174 closing the
-residual fold §4 had named (the three-stores cure completes under
-§8's mandate; the closing slice is the +1 itself); rank 5
-**wake-ladder** KEEP, no alternative known; rank 6 **model-pinning**
-WATCH, no new evidence. Rank 7 **relay** (0.0) converged THIS
-iteration — #174 executed the events fold; it bills 0.0 to relay only
-through the attribution gap below. The pick is rank 8
-**program-grammar** — 0.0 on the table (narrow globs, and they match
-no code file) and now UN-GATED: §1's retirement debt was gated on
-levy migration, and the migration is evidence-complete this refit —
-the levy surface mints `[[stage]]` (the eval LEVY-CARD's required
-reading is docs/STAGES.md; the loop's own programs are stage chains),
-and the ops tree greps clean of `[[step]]`/units-hook authors. The
-milestone forbids carrying an un-gated known-simpler alternative; §1
-is the last one on the books.
+Refit 6's pick reads the table after the discounts, every one by
+receipt: rank 1 **runner-dispatch** (114.9) converged — its +1/+900 IS
+#176 billing through orchestrator.ts (8 lines: the door resolving steps
+ONLY from stages) while the dialect surface itself (hooks.ts −153,
+run.ts +14) is unattributed — the attribution gap's cleanest receipt
+yet: the DIALECT RETIREMENT bills 0.0 to program-grammar; rank 2
+**window** (43.4) unchanged since refit 3's churn read — #176 touched
+nothing under `web/` (ADR 0014 pins the viewer's own `[[step]]`
+renderer for HISTORICAL run dirs — history, not authoring); rank 3
+**permissions** (23.7) converged at refit 4 (#172); rank 4
+**resume-parking** (5.8) converged (#174 closed its named residual
+fold); rank 5 **wake-ladder** KEEP, no alternative known; rank 6
+**model-pinning** WATCH, no new evidence. Rank 7 **relay** (0.0)
+converged (#174). The pick is rank 8 **program-grammar** — 0.0 on the
+table (narrow globs matching no code file) and HALF-EXECUTED: #176
+landed slice 1 of the one-authoring-story retirement (ADR 0014
+records the split the landing PR stated); slice 2 — the legacy lab
+program path — is the remaining half of the LAST un-gated
+known-simpler alternative on the books. The milestone forbids carrying
+it; the pick completes what refit 5 armed.
 
 Attribution gaps (human note — the constitution is not refit's to
 edit): `src/lab*` and `src/store*` match no component's globs, and §1's
 defaults (`src/stage*`, `src/parse*`) match no FILE — the dialects
 parse inside `src/hooks.ts`, and the legacy lab path lives in
 `src/run.ts`/`src/lab.ts`/`src/spur.ts`, all unattributed. Proof by
-receipt: #174, the relay fold itself, bills its churn to
+receipt, twice over: #174 (the relay fold) bills its churn to
 resume-parking (state.ts) and runner-dispatch (orchestrator.ts) while
-store.ts lands on nobody. At the next constitution touch: relay should
-own `src/store*`, program-grammar should own `src/hooks.ts` +
-`src/run.ts` (the authoring dialects), runner-dispatch `src/lab*`. And
-the shared `engine.ts` surface still double-bills permissions work to
+store.ts lands on nobody; #176 (the grammar retirement itself) bills
+its whole 900 to runner-dispatch through 8 lines of orchestrator.ts
+while hooks.ts/run.ts — the entire dialect surface — bill 0.0 to
+§1. At the next constitution touch: relay should own `src/store*`,
+program-grammar should own `src/hooks.ts` + `src/run.ts` (the
+authoring dialects), runner-dispatch `src/lab*`. And the shared
+`engine.ts` surface still double-bills permissions work to
 runner-dispatch (#163, #172).
 
 ### 1. Program grammar
@@ -139,30 +149,37 @@ runner-dispatch (#163, #172).
   #42/#43/#50 settle-typed steps → ADR 0009 dag→spur rename →
   units-hook quick-mint (arm-e era) coexisting → #153–#158 stages
   (5 topologies, per-stage hooks, preamble, pins, manual) → refit 5
-  lifts the levy-migration gate on evidence: the levy surface authors
-  `[[stage]]` (the eval LEVY-CARD sends STAGES.md as required
-  reading), the loop's own programs are stage chains, and the ops
-  tree has zero `[[step]]`/units-hook authors left — the old
-  dialect's only residents are rail-internal (hooks.ts's raw
-  `[[step]]` tables + units-hook mint; run.ts/lab.ts/spur.ts's
-  ADR-0009 lab program path beside `[[stage]]`).
+  lifts the levy-migration gate on evidence → **#176 slice 1 — one
+  authoring story, half-landed (ADR 0014)**: `[[step]]` tables REFUSED
+  at parse pointing at `[[stage]]` (issue #152's mutual refusal is now
+  one-way); `hooks.units` quick-mint refused (workers are declared,
+  never minted at runtime); a stage-less fan-out manifest refused at
+  the door BEFORE booking; the driveLife tick-harness and its toy
+  tests deleted; the shared example is a `[[stage]]` fixture
+  (three-lookups). Steps survive only as the compilation target of
+  stages — internal, never authored.
 - **Oscillation**: HIGH historically — three dialects for one concept;
   #150 (grade per unit) was the units-hook path's missing per-stage
-  honesty. Resolved 2026-10-18: stages compile; steps+stages refused
-  together. Zero attribution ever — the globs own no code file.
-- **Simpler alternative**: THE PICK, un-gated at refit 5. ONE
-  authoring story: retire the units-hook quick-mint and the raw
-  `[[step]]` tables in hooks.ts (one honest refusal pointing at
-  `[[stage]]` — refusal beats silence, the house manner); retire the
-  legacy lab program path (run.ts's prepareLabRun admitting
-  spur.mjs/dag.mjs, lab.ts's spur branch, spur.ts's step scheduler if
-  the stage executors leave it consumer-less); docs/STAGES.md is the
-  surviving manual. The steps+stages mutual refusal (issue #152)
-  becomes a one-way refusal.
-- **Verdict**: INVESTIGATE (refit 5's pick: NEXT-TARGET
-  program-grammar, cap 900 — blast set = the dialect owners
-  (hooks.ts, run.ts, lab.ts, spur.ts) + the chain seam as contingent
-  (orchestrator*, workflow-kind) + STAGES.md/RAILS.md/adr/prd + test/).
+  honesty. Resolving monotonically: #176 deleted dialect code (−650)
+  with zero reversal pairs. Zero attribution ever — the globs own no
+  code file.
+- **Simpler alternative**: slice 2 — the named second half (ADR 0014
+  §3, stated in the landing PR): retire the legacy lab program path.
+  run.ts `prepareLabRun` stops admitting spur.mjs/dag.mjs; lab.ts's
+  spur branch goes (the lab stage chain drives the actor, as
+  wake-steps.test.ts already demonstrates); spur.ts's ADR-0009 step
+  scheduler is deleted whole (238 lines — stage executors leave it
+  consumer-less); `[gates]` detector plumbing retires with the step
+  gates it served (stages bind verify.sh — #150); the e2e battery
+  (8 programs, still `[[step]]`/`hooks.units`/`[report]`-shaped
+  museum pieces that would be REFUSED if fired today) converts to
+  stage chains; `examples/`-spurs retire with them. docs/STAGES.md is
+  the surviving manual; ADR 0014 flips to executed.
+- **Verdict**: INVESTIGATE (refit 6's pick: NEXT-TARGET
+  program-grammar slice 2, cap 1000 — blast set = the dialect owners
+  (spur.ts, lab.ts, run.ts, hooks.ts) + the chain seam as contingent
+  (orchestrator*, workflow-kind) + e2e/examples + STAGES.md/RAILS.md/
+  adr/prd + test/).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -190,19 +207,23 @@ runner-dispatch (#163, #172).
   this +1 to runner-dispatch; it is convergence churn) → #174 the
   five readers held the seam (orchestrator.ts shifted 5 lines while
   the card store under it changed — the reader NOT moving was the
-  fold's receipt).
+  fold's receipt) → #176 the seam absorbs the one-dialect law
+  (orchestrator.ts: steps resolve ONLY from `manifest.stages`; 8
+  lines; the table's +1/+900 bills here — the door holding the seam
+  again, convergence churn not sickness).
 - **Oscillation**: RESOLVED. The old MED (split → rejoin-via-
   delegation) dissolved monotonically: #161→#164→#167→#170→#172
-  share one direction (dispatch machinery deleted, engines kept),
-  zero reversal pairs — five slices, one line.
+  →#176 share one direction (dispatch machinery deleted, engines
+  kept), zero reversal pairs — six slices, one line.
 - **Simpler alternative**: NONE LEFT. The PRIME suspect ("a single
   runner with kind-specific step execution") is fully landed: one
   door, one chain object, one walker, three executors, the lab shape
   honors the same drain/resume law as its siblings, and the door now
   holds no path knowledge at all.
-- **Verdict**: KEEP (converged at refit 3; #172/#174 purified it
-  further). The residual dialect surface (legacy spur path inside
-  runLab) is §1's to retire — iteration 6's target.
+- **Verdict**: KEEP (converged at refit 3; #172/#174/#176 purified it
+  further). The residual dialect surface (the legacy spur path inside
+  the lab door) is §1 slice 2's to retire — the next commissioning's
+  target.
 
 ### 3. Wake ladder
 - **Concept**: one wake per commission; spool-first, per-rung trace.
@@ -291,8 +312,10 @@ runner-dispatch (#163, #172).
   read refit 2 instructed: the loop-era churn is the SERVER mirroring
   rail-side redesigns (grade contract #145, unit ledger #162, scan
   perf #139) — follower churn, not window-intrinsic sickness; the
-  viewer-only line has held since #69. Refits 4–5: nothing new under
-  `web/` — the read stands.
+  viewer-only line has held since #69. Refits 4–6: nothing new under
+  `web/` — the read stands. ADR 0014 exempts the viewer's own
+  `[[step]]` manifest renderer deliberately (it renders HISTORICAL
+  run dirs with its own parser — history-keeping, not authoring).
 - **Verdict**: KEEP. Stays #2 on the table (43.4) by follower churn;
   not a candidate until a window-INTRINSIC question appears.
 
@@ -325,34 +348,39 @@ runner-dispatch (#163, #172).
    + ONE real ≤30-min bench task exercising the redesign.
 4. **Merge** → back to 1.
 
-Loop-v2 status (refit 5's read): four iterations landed GREEN — #167
+Loop-v2 status (refit 6's read): five iterations landed GREEN — #167
 (iteration 1), #170 (iteration 2), #172 (iteration 3: one eval-red
 bounce root-caused INFRA — zhipuai's 5-hour quota window, re-proven
-direct, regate PASS), #174 (iteration 5: 1 round, 0 strikes, clean).
-Iteration 4 died driver-side (DEAD-iter4: driver death mid-flight,
-revive4's adopted fixer failed — never a gate-red round, never a
-strike; D4's boundary held). #173's absorb was refused once by the
-refit lane's evidence fence (body must cite ≥2 PR refs — this file's
-own authors must comply) and human-merged. strikes.json {} — no
-same-cause strike ever billed; D3 unexercised (a circuit breaker, not
-a KPI). #169 (operator amendment) made refit proposals effective
-as-written, which raises this file's duty: the discount chain and
-pick receipts above ARE the audit trail that keeps D2 honest —
-momentum.py's mechanical rank-1 echo (runner-dispatch, cap 900) was
-read and overridden BY RECEIPT, not by taste. Iteration 6 arms on
-refit 5's proposal (§1's dialect retirement) — the commissioning's
-MAX-6 budget ceiling; after it, a fresh commissioning (the milestone's
-remaining leg, the composite eval case, is a BUILD — and the eval
-lane itself is constitution: the operator points it at the new case).
+direct, regate PASS), #174 (iteration 5: 1 round, 0 strikes, clean),
+#176 (iteration 6: 1 round, 0 strikes, cap 900 = diff exactly,
+topo-tune green (33,8)). Iteration 4 died driver-side (DEAD-iter4:
+driver death mid-flight, revive4's adopted fixer failed — never a
+gate-red round, never a strike; D4's boundary held). Every refit PR
+absorbed except one (#173's absorb was refused once by the refit
+lane's evidence fence — body must cite ≥2 PR refs, this file's own
+authors must comply — and human-merged; #175 absorbed clean).
+strikes.json {} — no same-cause strike ever billed; D3 unexercised (a
+circuit breaker, not a KPI). #169 (operator amendment) made refit
+proposals effective as-written, which raises this file's duty: the
+discount chain and pick receipts above ARE the audit trail that keeps
+D2 honest — momentum.py's mechanical rank-1 echo (runner-dispatch,
+cap 900) was read and overridden BY RECEIPT, not by taste, four
+refits running. The MAX-6 commissioning budget is CONSUMED (six
+iterations billed: 1, 2, 3, 4-dead, 5, 6): slice 2 arms under a
+FRESH commissioning on refit 6's NEXT-TARGET (§1, cap 1000); after it
+lands, the milestone's remaining leg (the composite eval case) is a
+BUILD — and the eval lane itself is constitution: the operator points
+it at the new case.
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
 known-simpler alternative (§2 closed at refit 3; §5 at refit 4; §8 at
-refit 5 (#174); §1's retirement un-gated at refit 5 and PICKED —
-iteration 6's target; §6's one-transport question stays WATCH for
-want of new evidence); composite eval green. After §1: the composite
-eval case is the milestone's last unbuilt leg — a green eval case
-graduates the loop to the FULL benchmark pass.
+refit 5 (#174); §1 HALF-closed at #176 — slice 2 is the next
+commissioning's first target, the last open alternative on the books;
+§6's one-transport question stays WATCH for want of new evidence);
+composite eval green. After §1 slice 2: the composite eval case is
+the milestone's last unbuilt leg — a green eval case graduates the
+loop to the FULL benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -376,8 +404,9 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
 Target ≤30 min real; mock rehearsal = seconds. Still build-next —
 untouched by the loop so far (the loop's eval lane used topo-tune's
 real levy, joint target (33,8) green on #167, #170, #172's re-proof,
-and #174). #170 makes the scout stage honest to bench: a
+#174, and #176). #170 makes the scout stage honest to bench: a
 paused-and-continued lab now resumes rather than restarts, so the
-≤30-min budget survives human interference. Sequencing held by refit
-5: §1's retirement (iteration 6) lands BEFORE the case is authored,
-so the case authors against the final one-dialect grammar.
+≤30-min budget survives human interference. Sequencing held by refits
+5–6: §1's retirement (slice 1 landed #176; slice 2 next) lands BEFORE
+the case is authored, so the case authors against the final
+one-dialect grammar.
