@@ -103,6 +103,11 @@ export type CycleDeps = {
   // not read as stalled — worktree churn is a heartbeat. Injectable so
   // the fake clock in tests never touches real mtimes.
   churnSince?: (worktree: string, sinceMs: number) => boolean
+  // #165 / j-214576: a failed spawn below the retry cap must not wait out
+  // the stall ladder — with nothing in flight the next wake can be
+  // ~stallMs away, so 3 tries spanned 101 minutes. The runner arms a
+  // short retry wake through this seam; tests spy on it.
+  onSpawnRetry?: (unitId: string, attempts: number) => void
   canary?: CanaryState
   // Pause drain (ADR 5): while draining, no new panes are claimed and a
   // dead or stalled pane does not finish — the drain ceiling decides,
@@ -146,6 +151,8 @@ const LOG_POLL_MS = 5_000
 // pend, so an unpassed gate cannot dead-sleep the rail)
 const DEFAULT_GATE_CHECK_MS = 30_000
 const RETRY_CAP = 3
+// #165: spawn retries ride THIS, not the stall ladder
+const SPAWN_RETRY_MS = 30_000
 const SHEP_LABEL_MAX = 32
 
 // Worktree churn as a stall heartbeat (j-3520f7): a worker whose log is
@@ -608,6 +615,10 @@ export function cycle(deps: CycleDeps): boolean {
           pass: false,
         }, "spawn", true, false, `spawn failed ${attempts} times`)
         deps.shep.wake(unit.id, "blocked", `spawn failed ${attempts} times`)
+      } else {
+        // #165: arm a near-term retry — never ride the stall ladder for a
+        // spawn that already failed (j-214576: attempts 2→3 took 101 min)
+        deps.onSpawnRetry?.(unit.id, attempts)
       }
     }
     }
@@ -819,6 +830,15 @@ export async function runOrchestrator(input: {
         canary,
         draining,
         resumes: input.resumes,
+        onSpawnRetry: (unitId, attempts) => {
+          // #165: the failed spawn gets a 30s retry wake — the stall
+          // ladder only knows about live workers, and this one was never born
+          const t = setTimeout(() => {
+            timers.delete(t)
+            enqueue(`spawn-retry:${unitId}:${attempts}`)
+          }, SPAWN_RETRY_MS)
+          timers.add(t)
+        },
         bookedWait: input.bookedWait,
         steps,
         stagePlan,

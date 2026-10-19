@@ -452,6 +452,27 @@ export class Rail implements ShepPort {
     // v2: the viewer-lane fallback is gone (the lane never existed as a
     // populated pane) — a lane with no live worker pane to anchor on fails
     // loudly instead of splitting a dead pane.
+    // #165 / j-214576: "loudly" must not mean "instantly dead" when the
+    // TAB is alive. Between stages every worker pane may be retired while
+    // the column head was consumed at birth (first worker split it and it
+    // closed) — an empty live-anchor list then orphaned the whole next
+    // stage. The fleet tab itself is the anchor of last resort: any live
+    // pane in OUR tab can seed the new column. Splitting a stranger in
+    // our own house is honest; a stage dying because cleanup ran between
+    // stages is not.
+    const listed = this.herdr("pane", "list")
+    const seed = jsonAt(listed.stdout, (d) => {
+      const panes = (d as { result?: { panes?: Array<{ pane_id?: string; tab_id?: string }> } }).result?.panes ?? []
+      return panes.find((p) => p.tab_id === this.fleetTab && p.pane_id)?.pane_id ?? null
+    })
+    if (seed) {
+      const fresh = this.splitPane(seed, "down", cwd, 0.5)
+      if (fresh) {
+        this.log(`column re-seeded on fleet-tab pane ${seed} — live-anchor list was empty between stages (#165)`)
+        return fresh
+      }
+    }
+    this.log(`pane split failed for the fleet column — no live anchor (tab ${this.fleetTab ?? "?"}; pane-list rc=${listed.status}${seed ? ", split failed" : ", tab empty"})`)
     return null
   }
 
