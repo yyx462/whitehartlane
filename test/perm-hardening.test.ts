@@ -163,7 +163,12 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
   // refuses every prompt (held): the deny guidance cannot land, exactly
   // the j-a532f9 race. The ladder must nudge, nudge, DEFER at the cap
   // (guidance queued), then die honestly on the second expiry.
-  const outside = join(import.meta.dirname, "perm-hardening.test.ts") // exists, covered by no root
+  // The wandering path lives under HOME, never under this checkout: the
+  // merge gate clones the head into a TMPDIR, and temp-outside-home is
+  // free scratch by design (j-ba18b7) — a checkout-local "uncovered"
+  // path stops being uncovered exactly where the gate tests, the ask
+  // flips to allow, no deny queues, and the defer never happens.
+  const outside = join(homedir(), "wandering-ask", "outside-roots.txt")
   let asked = false
   herdr.onPrompt = (name) => {
     if (!asked) {
