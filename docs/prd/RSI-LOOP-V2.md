@@ -36,12 +36,19 @@ is not added until ≥3 clean triggered iterations prove the body.
 **D1 — constitution layering.** Invariant: the loop never edits its own
 constitution. Three layers: (a) the OUTER constitution (gate fences,
 global caps, briefs, this doc) — human-signed only; (b) `refit_agent`
-proposals — gated by the human (refit PRs carrying parameter changes
-wait for a sign; the driver checks `state/SIGNED.<iter>` before arming
-the next fixer); (c) per-component rules for `redesign_fixer`
-(whitelist = blast set, per-component cap) — authored by refit, bounded
-by the outer ceiling. refit is isolated from the fixer; refit never
-authors the fixer's constitution, only its per-target parameters.
+proposals — **AMENDED 2026-10-19 per operator, in session: the
+signature gate is REMOVED.** The operator's words: "they are two
+different agents and I permit that" — fixer and refit being distinct
+agents, the refit's NEXT-TARGET (blast set, cap, slice) takes effect
+as-written and the driver chains it straight into the next fixer
+(`iterate.sh --loop`). The refit's in-repo half (a docs/prd-only PR,
+lane `rsi-refit:`) is absorbed by the driver: fences + fresh-clone
+tests, eval SKIPPED on mechanical grounds (verified docs-only diff =
+zero executable files), merge on green. (c) per-component rules for
+`redesign_fixer` (whitelist = blast set, per-component cap) — authored
+by refit, bounded by the outer ceiling. refit is isolated from the
+fixer; refit never authors the fixer's constitution, only its
+per-target parameters.
 
 **D2 — the worst is a number, not a vibe.** `momentum.py` computes per
 component: fix-density (merged PRs touching it), oscillation (reversal
@@ -115,12 +122,15 @@ target fields, never topology:
     accounting. Parameter changes are INERT until human sign (D1).
 The HARD quality gate is stage 2 — scripts only, zero agent judgment.
 
-**D6 — cadence: triggered ×3, then loop.** Right now each iteration is
-fired by hand (`iterate.sh`), then CHECKED (monitor + receipts), then
-the next. After the 3rd clean triggered iteration we may build the
-auto-retrigger driver. Each refit is a fresh context; the only memory
-is OPTIMUM.md + the strike ledger (that is why they must carry
-everything).
+**D6 — cadence: triggered ×3, then loop.** **SUPERSEDED 2026-10-19 per
+operator: chaining is permitted immediately** — `iterate.sh --loop`
+runs iterations back-to-back in one commissioning (the amendment to D1
+removed the per-iteration stop). The chain continues ONLY on clean full
+landings (fixer → gate → merge → refit → absorb); every terminal state
+— DEAD, GATE-INFRA, refused-twice, BUDGET-OUT (MAX 6 per
+commissioning), refit failure, red absorb — still stops the loop for
+the human. Each refit is a fresh context; the only memory is OPTIMUM.md
++ the strike ledger (that is why they must carry everything).
 
 **D7 — pin and master.** The loop runs whl from a worktree PINNED at
 loop start (`state/pin` = {path, commit}); master stays the
@@ -163,5 +173,7 @@ pin worktree.
    never the fixer (D4).
 5. No component gets more than 3 same-cause strikes in one iteration
    (D3).
-6. Refit parameter changes are inert until signed (D1).
+6. Refit parameter changes take effect as-written (D1, amended
+   2026-10-19); a red refit-PR absorb or any terminal state stops the
+   loop for the human.
 7. The loop's whl runs only from the pin (D7).
