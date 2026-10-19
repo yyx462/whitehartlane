@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { HookError, loadManifest, runGrade } from "./hooks.ts"
 import { readReport, writeReport, type Report, type ReportRow } from "./report.ts"
-import { checkpoint, readState, regradeUnit } from "./state.ts"
+import { checkpoint, flipLegacyState, readState } from "./state.ts"
 import { appendEvent, jobRunDir, listJobs, type JobRecord } from "./store.ts"
 
 // regrade — the minimal-rerun resume (#144): a terminal Job whose units
@@ -13,8 +13,9 @@ import { appendEvent, jobRunDir, listJobs, type JobRecord } from "./store.ts"
 // turns the night's mislabeled stops into honest reports.
 //
 // Units that failed WITHOUT worker output (blocked, killed, deadline)
-// are not regradable — they need a rerun (a fresh booking; state.json
-// spares the done units), and the receipt says so instead of guessing.
+// are not regradable — they need a rerun (a fresh booking; the ledger's
+// settled fold spares the done units), and the receipt says so instead
+// of guessing.
 
 export type RegradeReceipt = {
   ok: boolean
@@ -75,8 +76,16 @@ export function regradeJob(jid: string): RegradeReceipt {
       continue
     }
     const grade = runGrade(taskDir, manifest, unit)
-    regradeUnit(taskDir, id, grade.pass)
-    checkpoint(taskDir, `grade:${id}:regrade`, grade.pass ? "ok" : grade.fault ? "grade-fault" : "FAILED", grade.row)
+    // the regrade card flips the unit in the ledger fold; a legacy
+    // dir (state.json present) keeps its file truthful too
+    checkpoint(
+      taskDir,
+      `grade:${id}:regrade`,
+      grade.pass ? "ok" : grade.fault ? "grade-fault" : "FAILED",
+      grade.row,
+      id,
+    )
+    flipLegacyState(taskDir, id, grade.pass)
     regraded.push({ unit: id, pass: grade.pass, row: grade.row })
   }
 

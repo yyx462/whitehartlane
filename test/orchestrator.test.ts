@@ -15,7 +15,7 @@ import {
 import { RefusedError } from "../src/backpressure.ts"
 import { HookError } from "../src/hooks.ts"
 import { hooksFromDir } from "../src/hooks.ts"
-import { readCheckpoints, readState, finishUnit } from "../src/state.ts"
+import { readCheckpoints, readState, settle } from "../src/state.ts"
 
 import { copyExample, copyExampleNamed } from "./util.ts"
 
@@ -458,7 +458,7 @@ test("a reprompted worker that then writes its sentinel finished_by normally", a
 
 test("cycle skips units already finished", async () => {
   const dir = await copyExample("orch-resume-")
-  finishUnit(dir, "france", true, { unit: "france", result: "found", pass: true })
+  settle(dir, "france", "unit:france", true, "found")
   const { port, spawned } = fakeShep()
 
   cycle(deps(dir, port))
@@ -840,7 +840,7 @@ test("a grade-fault never trips the canary and lands as a ledger card (#144)", a
   assert.equal(canaryState.failed, false, "a grade-fault must not stop the line")
   const cps = readCheckpoints(dir)
   assert.ok(cps.some((c) => c.stage === "grade:france" && c.status === "grade-fault"), "the ledger has the fault card")
-  assert.ok(cps.some((c) => c.stage === "unit:france" && c.status === "ok"), "the worker card stays ok — only the grade card failed")
+  assert.ok(cps.some((c) => c.stage === "unit:france" && c.status === "info"), "the worker card observes (info) — only the grade card settles")
 })
 
 test("a grade that throws is a fault too: no canary trip, a ledger card, a wake (#144)", async () => {

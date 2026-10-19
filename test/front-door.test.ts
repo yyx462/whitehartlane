@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
+import { readState } from "../src/state.ts"
 
 const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
 
@@ -348,8 +349,7 @@ test("project mode runs the example workflow from its manifest", async () => {
   const snapshot = readFileSync(join(dir, "units.jsonl"), "utf8").trim().split("\n")
   assert.equal(snapshot.length, 3)
   assert.ok(snapshot[0].includes('"id":"france"'))
-  const state = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"))
-  assert.deepEqual(state, { done: ["france", "japan", "peru"], failed: [] })
+  assert.deepEqual(readState(dir), { done: ["france", "japan", "peru"], failed: [] })
 })
 
 test("project mode finished_by a missing artifact as failed", async () => {
@@ -369,8 +369,7 @@ test("project mode finished_by a missing artifact as failed", async () => {
   if (report.kind !== "report") return
   assert.equal(report.status, "failed")
   assert.deepEqual(report.counts, { lookups: 3, failed: 1 })
-  const state = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"))
-  assert.deepEqual(state, { done: ["france", "peru"], failed: ["japan"] })
+  assert.deepEqual(readState(dir), { done: ["france", "peru"], failed: ["japan"] })
 })
 
 test("a worker port runs before grade and produces the artifacts", async () => {
