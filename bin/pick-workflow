@@ -44,7 +44,7 @@ cfg() {
 }
 
 REQ="$(jq -n --arg state "$STATE" --arg q "$QUESTION" --arg fanout "$CRIT_FANOUT" --arg direct "$CRIT_DIRECT" '{
-  model: "jev-1.13",
+  model: "jev-1.14",
   state: $state,
   questions: {
     q: {
