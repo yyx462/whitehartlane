@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { engineFor, programRootsOf, stagedKind } from "../src/engine.ts"
+import { declareScope } from "../src/permission.ts"
 import type { Rail } from "../src/rail.ts"
 import type { Report } from "../src/report.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
@@ -22,11 +23,22 @@ test("stagedKind: the staged program names its shape; missing = fan-out; garbage
   assert.throws(() => stagedKind(dirOf('kind = "swarm"\n')), /swarm/)
 })
 
-test("programRootsOf: roots.txt rides along, hard-deny roots never do", () => {
+test("programRootsOf: the fold onto the canonical predicate — roots ride, hard-deny never does, the strip still warns (§5 slice 2)", (t) => {
   const dir = dirOf()
   assert.deepEqual(programRootsOf(dir), [])
   writeFileSync(join(dir, "roots.txt"), ["/tmp/some-root", "/Users/x/.ssh/id_rsa", ""].join("\n"))
-  assert.deepEqual(programRootsOf(dir), ["/tmp/some-root"])
+  // the loud strip moved INTO the canonical predicate (permission.ts
+  // declareScope) — nothing was lost in transit
+  const warn = t.mock.method(console, "error", () => {})
+  const roots = programRootsOf(dir)
+  assert.deepEqual(roots, ["/tmp/some-root"])
+  assert.equal(warn.mock.calls.length, 1)
+  assert.match(String(warn.mock.calls[0].arguments[0]), /id_rsa/)
+  // idempotent transit: Rail's declareScope re-passes the sanitized
+  // roots quietly (a fresh read of the dirty file warns again — that
+  // is each door process reading its own declaration once)
+  assert.deepEqual(declareScope(roots).roots, ["/tmp/some-root"])
+  assert.equal(warn.mock.calls.length, 1)
 })
 
 test("engineFor: one dispatch — the shape picks the engine, in process", async () => {

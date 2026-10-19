@@ -13,7 +13,7 @@ import { runCoworker } from "./coworker-run.ts"
 import { levyChildProgram } from "./levy.ts"
 import { runLab } from "./lab.ts"
 import { runOrchestrator, worktreeChurnedSince } from "./orchestrator.ts"
-import { sanitizeRoots } from "./permission.ts"
+import { declareScope, readRootsTxt } from "./permission.ts"
 import type { Rail } from "./rail.ts"
 import type { Report } from "./report.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
@@ -25,23 +25,16 @@ export type EngineDeps = {
   runFanOut?: typeof runOrchestrator
 }
 
-// roots.txt beside the staged program, one absolute path per line —
-// the program's named extra roots. Hard-deny paths (secrets,
-// credentials) never ride along: they are stripped here, loudly, so a
-// rooted .env is never pre-allowed (j-1deef9). Shared by every shape;
-// was copy-pasted per bin.
+// roots.txt beside the staged program — the program's named extra
+// roots. A pure fold onto the canonical predicate (OPTIMUM §5 slice 2):
+// reading, tilde expansion, dedupe, and the loud hard-deny strip are
+// permission.ts's (readRootsTxt/declareScope) — this held the second
+// of two roots.txt spellings (a private reader + its own strip and
+// warning, copy-pasted per bin before #161); it keeps none of that
+// knowledge now. Rail's declareScope passes the result through
+// unchanged (idempotent). Shared by every shape.
 export function programRootsOf(dir: string): string[] {
-  try {
-    const raw = readFileSync(join(dir, "roots.txt"), "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-    const { kept, stripped } = sanitizeRoots(raw)
-    for (const s of stripped) console.error(`warning: roots.txt names ${s} — hard-deny paths are never roots; stripped`)
-    return kept
-  } catch {
-    return []
-  }
+  return declareScope(readRootsTxt(dir)).roots
 }
 
 // The staged shape. A missing workflow.toml is a bare standalone run

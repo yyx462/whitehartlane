@@ -296,9 +296,16 @@ test("a literal existing underscore path is never reshaped", () => {
 // The four side layers this replaces each re-spelled the deny set, the
 // under-test, and the temp set; these pin the ONE spelling they now share.
 
-test("declareScope expands ~, strips hard-deny roots, and dedupes", () => {
+test("declareScope expands ~, strips hard-deny roots LOUDLY, and dedupes (j-1deef9)", (t) => {
+  // the strip is the predicate's own concern now (§5 slice 2 retired
+  // the sanitizeRoots export): what the runner door stripped with a
+  // private reader + its own warning, the canonical construction
+  // strips and warns on — every site loud, none quieter than the door
+  const warn = t.mock.method(console, "error", () => {})
   const s = declareScope(["~/.vista", "/tmp/a", "/tmp/a", "", "/tmp/a/.env"])
   assert.deepEqual(s.roots, [`${homedir()}/.vista`, "/tmp/a"])
+  assert.equal(warn.mock.calls.length, 1)
+  assert.match(String(warn.mock.calls[0].arguments[0]), /\/tmp\/a\/\.env/)
 })
 
 test("readRootsTxt is the one roots.txt spelling — trim, skip blanks", () => {
@@ -308,11 +315,16 @@ test("readRootsTxt is the one roots.txt spelling — trim, skip blanks", () => {
   assert.deepEqual(readRootsTxt(mkdtempSync(join(tmpdir(), "aos-noroots-"))), [])
 })
 
-test("scopeFromDir: the program dir is a root; a hard-deny root covers nothing (#77 at admission too)", () => {
+test("scopeFromDir: the program dir is a root; a hard-deny root covers nothing (#77 at admission too)", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aos-scope-"))
   writeFileSync(join(dir, "roots.txt"), "/opt/a/.env\n/opt/tools\n")
+  // the admission scan's construction warns too — the loud strip moved
+  // into the predicate, so every site that builds a scope is loud
+  const warn = t.mock.method(console, "error", () => {})
   const s = scopeFromDir(dir)
   assert.deepEqual(s.roots, [dir, "/opt/tools"])
+  assert.equal(warn.mock.calls.length, 1)
+  assert.match(String(warn.mock.calls[0].arguments[0]), /\/opt\/a\/\.env/)
   assert.equal(scopeCovers(s, `${dir}/units/x/brief.md`), true)
   assert.equal(scopeCovers(s, "/opt/tools/bin/tool"), true)
   // stripped at construction — the door refuses the program instead of
