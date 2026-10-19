@@ -30,10 +30,12 @@ export function fakeLedger(): RailLedger & {
   events: { kind: string; payload: Record<string, unknown> }[]
   attached: string[]
   killed: string[]
+  paused: { reason: string; panesRemaining: number }[]
 } {
   const events: { kind: string; payload: Record<string, unknown> }[] = []
   const attached: string[] = []
   const killed: string[] = []
+  const paused: { reason: string; panesRemaining: number }[] = []
   const job = {
     id: "j-test",
     sid: "s-test",
@@ -50,14 +52,28 @@ export function fakeLedger(): RailLedger & {
     events,
     attached,
     killed,
+    paused,
     renew: () => {},
     emit: (kind, payload) => events.push({ kind, payload }),
-    attach: (label) => attached.push(label),
-    kill: (label) => killed.push(label),
+    // records real pane rows (label + RAW unit + transcript), the way
+    // store.attachPane does — the ADR-5 resume folds (engine.ts's
+    // re-key, lab.ts's labBookings) read them back
+    attach: (label, pane, unit, transcript, seed) => {
+      attached.push(label)
+      job.panes.push({ label, pane, unit, transcript, seed, born: new Date().toISOString() })
+    },
+    kill: (label) => {
+      killed.push(label)
+      const rec = job.panes.find((p) => p.label === label && !p.died)
+      if (rec) rec.died = new Date().toISOString()
+    },
     finish: () => {},
     abort: () => {},
-    pause: () => {},
-    setSession: () => {},
+    pause: (reason, panesRemaining) => paused.push({ reason, panesRemaining }),
+    setSession: (label, sessionId) => {
+      const rec = [...job.panes].filter((p) => p.label === label).pop()
+      if (rec) rec.transcript = { tool: rec.transcript?.tool ?? "opencode", ...rec.transcript, session_id: sessionId }
+    },
   }
 }
 

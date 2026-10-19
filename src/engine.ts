@@ -74,8 +74,16 @@ export function fanOutEngine(
   rail.writePermissions(rail.taskDir)
   return () => {
     // ADR 5: unfinished units of an earlier generation resume from the
-    // pane ledger's booked session pointers.
-    const resumes = rail.resumesForUnfinished()
+    // pane ledger's booked session pointers. The ledger's unit column
+    // carries the transport name (w-<id> for fan-out workers); the
+    // walker keys by the bare unit id — re-key here, at the engine
+    // that owns the w- convention. (Probe receipt 2026-10-19: the
+    // un-rekeyed map's keys never matched the walker's lookup, so
+    // every production continue silently took the fresh-brief
+    // fallback; the booked-session path only ever ran in tests.)
+    const resumes = new Map(
+      [...rail.resumesForUnfinished()].map(([k, v]) => [k.startsWith("w-") ? k.slice(2) : k, v]),
+    )
     if (resumes.size > 0) {
       rail.log(
         `continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`,

@@ -28,7 +28,8 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   `bin/orchestrator` is the one thin entry that constructs one `Rail`
   and picks the engine by the staged program's shape (`src/engine.ts`)
   — kind-blind beyond that single pick: SIGTERM is one protocol for
-  every shape (the engine's registered drain hook, else abort;
+  every shape (every engine registers a drain hook — fan-out,
+  coworker, and lab alike drain to their own boundary and park;
   sessions stay booked either way), and every verb that hands a Job to
   a runner process goes through `spawnRunner`/`rebirthRunner`
   (`src/levy.ts`) — one door resolution, one rebirth ceremony. The
@@ -112,7 +113,10 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   and books `paused` (ADR 5); `abort` kills now (SIGKILL — booked
   sessions survive); `continue` is user-decided, retires stragglers of
   the parked generation first, and rebirths unfinished work from booked
-  session pointers — never capped, a soft `continued ×N` counter.
+  session pointers — never capped, a soft `continued ×N` counter. The
+  lab drains to quiescence (no mock in flight, the actor not
+  mid-turn) and its continue resumes the actor's booked session — the
+  experiment's one mind — plus every in-flight mock's.
 - **Backpressure and the retry cap.** Backpressure is the provider's
   refusal treated as information: the hook classifies (exit 75 =
   refused/slowed; anything else is deterministic), the rail retries —

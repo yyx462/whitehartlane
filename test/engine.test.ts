@@ -65,7 +65,14 @@ test("fanOutEngine: the moved wiring — levy port only with a ledger, manifest 
   assert.equal((got!.deadlineMs as number), 900000)
   assert.equal(got!.existingRows, undefined)
   // a ledger → the levy port exists; env canary wins over the manifest
-  const booked = fakeRail(dirOf(toml), fakeHerdr(), fakeLedger() as never)
+  const bookedLedger = fakeLedger()
+  bookedLedger.job.panes.push({
+    label: "w-flag-r1",
+    unit: "w-flag",
+    transcript: { tool: "pi", session_id: "sess-1", cwd: "/tmp" },
+    born: "2026-10-19T00:00:00.000Z",
+  })
+  const booked = fakeRail(dirOf(toml), fakeHerdr(), bookedLedger as never)
   process.env.AGENTIC_OS_CANARY = "0"
   try {
     await engineFor(booked, "fan-out", "/door-root", deps)()
@@ -76,4 +83,11 @@ test("fanOutEngine: the moved wiring — levy port only with a ledger, manifest 
   assert.equal(got!.canary, false)
   assert.equal((got!.taskDir as string), booked.taskDir)
   assert.deepEqual(got!.existingRows, [])
+  // ADR 5 re-key: the ledger books the transport name (w-<id>); the
+  // walker keys by the bare unit id — the engine re-keys at the seam
+  // (probe receipt 2026-10-19: un-rekeyed, every continue silently
+  // took the fresh-brief fallback)
+  const resumes = got!.resumes as Map<string, { session_id?: string }>
+  assert.equal(resumes.get("flag")?.session_id, "sess-1")
+  assert.equal(resumes.has("w-flag"), false)
 })
