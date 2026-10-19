@@ -228,14 +228,7 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
   assert.equal(report.status, "failed")
 })
 
-test("sanitizeRoots strips hard-deny paths from a program's declared roots (j-1deef9)", async () => {
-  const { sanitizeRoots } = await import("../src/permission.ts")
-  const { kept, stripped } = sanitizeRoots([
-    "/Users/x/proj",
-    "/Users/x/.ssh",
-    "/Users/x/vault/.env",
-    "/Users/x/normal/tree",
-  ])
-  assert.deepEqual(kept, ["/Users/x/proj", "/Users/x/normal/tree"])
-  assert.deepEqual(stripped, ["/Users/x/.ssh", "/Users/x/vault/.env"])
-})
+// (sanitizeRoots pin retired with the export, §5 slice 2: the strip is
+// internal to the canonical predicate now — its behavior + the LOUD
+// warning are pinned in permission.test.ts via declareScope/scopeFromDir,
+// and the fold itself in engine.test.ts programRootsOf)

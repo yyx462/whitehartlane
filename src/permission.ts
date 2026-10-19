@@ -37,13 +37,20 @@ export const PERMISSION_CAP = 6
 // roots.txt naming ~/.e2e-vault/.env pre-allowed it in the worker's
 // opencode.json, so no dialog ever fired and the rail's HARD_DENY (which
 // outranks roots only AT a dialog) never got a say: the worker read the
-// secret silently. Such roots are stripped loudly instead.
-export function sanitizeRoots(roots: string[]): { kept: string[]; stripped: string[] } {
+// secret silently (j-1deef9). Such roots are stripped loudly instead.
+// The loud strip lives HERE now (§5 slice 2 — it moved out of the
+// runner door): every scope construction site warns, the runner's
+// programRootsOf AND the admission scan. Internal on purpose — the
+// strip is the predicate's own concern, pinned through declareScope.
+function sanitizeRoots(roots: string[]): { kept: string[]; stripped: string[] } {
   const kept: string[] = []
   const stripped: string[] = []
   for (const root of roots) {
     if (HARD_DENY.some((re) => re.test(root))) stripped.push(root)
     else kept.push(root)
+  }
+  for (const s of stripped) {
+    console.error(`warning: declared root ${s} — hard-deny paths are never roots; stripped`)
   }
   return { kept, stripped }
 }
@@ -98,6 +105,9 @@ function under(path: string, root: string): boolean {
 // PathScope, constructed from the program's declaration, is the
 // currency now: the dialog ladder, the pre-seed globs, and the
 // admission scan all ask the scope; nothing re-owns the primitives.
+// Slice 2 folded the last second spelling — the runner door's private
+// roots.txt reader — onto readRootsTxt/declareScope: this file is the
+// component's only path knowledge.
 
 // One tilde spelling: `~` and `~/…` resolve against the real home.
 export function expandHome(p: string): string {
@@ -106,7 +116,8 @@ export function expandHome(p: string): string {
 
 // The declared-roots view of a program directory: roots.txt beside the
 // workflow, one absolute or `~`-relative path per line. The one
-// spelling — the doors' own readers fold onto this next slice.
+// spelling — the door's programRootsOf is a pure fold onto this +
+// declareScope (§5 slice 2), holding no path knowledge of its own.
 export function readRootsTxt(dir: string): string[] {
   try {
     return readFileSync(join(dir, "roots.txt"), "utf8")
@@ -122,8 +133,10 @@ export type PathScope = { roots: string[] }
 
 // Construct the scope: expand `~`, strip hard-deny roots (deny
 // outranks roots EVERYWHERE a root can ride — #77, the pre-seed
-// projection included), drop empties, dedupe. Idempotent: the doors
-// pass already-sanitized programRoots through unchanged.
+// projection included; the strip is LOUD, see sanitizeRoots), drop
+// empties, dedupe. Idempotent: the doors pass already-sanitized
+// programRoots through unchanged — and quietly, since a second pass
+// strips nothing.
 export function declareScope(roots: string[]): PathScope {
   const { kept } = sanitizeRoots(roots)
   return { roots: [...new Set(kept.map(expandHome).filter((r) => r.length > 0))] }
