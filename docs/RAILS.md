@@ -22,9 +22,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - **One Rail class (`src/rail.ts`).** The shared machinery every
   orchestrator runs on: the Job ledger, pane bookkeeping (birth,
   session booking, retire, the receipt), layout, the verbose lane,
-  and the permission sweep. `bin/fan-out-orchestrator` and
-  `bin/lab-orchestrator` are thin entries that construct one `Rail`
-  and drive their engine against it; the fan-out engine
+  and the permission sweep. `bin/orchestrator` is the one thin entry
+  that constructs one `Rail` and picks the engine by the staged
+  program's shape (`src/engine.ts`); the fan-out engine
   (`runOrchestrator`) speaks the port the Rail implements. Engines
   address workers by name only — every shep/herdr call funnels through
   the Rail's injected runners, so the day panes become remote

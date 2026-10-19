@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "no
 import { join } from "node:path"
 import { prepareRun } from "./run.ts"
 import { abortJob, saveJob } from "./store.ts"
-import { orchestratorBin } from "./workflow-kind.ts"
 
 export type LevyOutcome =
   | { ok: true; jid: string; jobDir: string; warnings: string[] }
@@ -30,8 +29,7 @@ export function levyChildProgram(input: {
     session_id: input.parentSid,
     since: (input.now ?? (() => new Date()))().toISOString(),
   }
-  const orchestrator =
-    process.env.AGENTIC_OS_ORCHESTRATOR ?? join(input.orchestratorRoot, orchestratorBin(ready.kind))
+  const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(input.orchestratorRoot, "orchestrator")
   if (!existsSync(orchestrator)) {
     abortJob(ready.job, `no orchestrator at ${orchestrator}`, 0, "rail")
     return { ok: false, why: `no orchestrator at ${orchestrator}` }

@@ -8,6 +8,5 @@ export function workflowKind(toml: string): WorkflowKind {
   return "fan-out"
 }
 
-export function orchestratorBin(kind: WorkflowKind): string {
-  return kind === "fan-out" ? "fan-out-orchestrator" : "lab-orchestrator"
-}
+// The one runner door: every kind spawns bin/orchestrator, which picks
+// the engine in-process (src/engine.ts) — the kind→bin mapping is gone.

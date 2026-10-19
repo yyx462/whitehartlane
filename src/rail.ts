@@ -340,15 +340,6 @@ export class Rail implements ShepPort {
     return resumes
   }
 
-  liveWorkflow(dir: string = this.taskDir): boolean {
-    try {
-      const raw = readFileSync(join(dir, "workflow.toml"), "utf8")
-      return /^\s*kind\s*=\s*"lab"\s*$/m.test(raw) || /^\s*live\s*=\s*true\s*$/m.test(raw)
-    } catch {
-      return false
-    }
-  }
-
   // The staged manifest, memoized — the run door stages workflow.toml
   // once, so engines re-reading it mid-loop (per grade, per report)
   // parse the same bytes every time. Throws like loadManifest until

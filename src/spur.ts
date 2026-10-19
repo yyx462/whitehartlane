@@ -19,7 +19,10 @@ export type Spur = {
 
 const VERBS = new Set<StepDoes>(["actor", "wave", "grade", "report", "gate"])
 
-const SCHEDULER = /fan-out-orchestrator|child_process|\bwhile\b|\bspawn\b|setInterval|setTimeout|\bscheduler\b/
+// A program that names a runner door as a string is trying to schedule
+// itself — the rail is the only scheduler (quoted forms only, so a
+// comment mentioning the orchestrator never refuses).
+const SCHEDULER = /fan-out-orchestrator|lab-orchestrator|["']orchestrator["']|child_process|\bwhile\b|\bspawn\b|setInterval|setTimeout|\bscheduler\b/
 
 export function assertProgram(source: string): void {
   if (SCHEDULER.test(source)) throw new Error("a program does not schedule")

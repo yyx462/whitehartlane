@@ -9,7 +9,6 @@ import { mkdtemp } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { paneLabeler, runIdFor } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { prepareRun } from "../src/run.ts"
 import { runCoworker } from "../src/coworker-run.ts"
@@ -30,7 +29,12 @@ test("a queued deny note flushes with a single-scoped label, and the trace carri
   const ledger = fakeLedger()
   const herdr = fakeHerdr()
   const rail = fakeRail(dir, herdr, ledger as never, { judge: () => 0, home: homedir() })
-  const scoped = paneLabeler(runIdFor(dir))("alpha")
+  // the rail's own label, not a recompute: runIdFor seeds on Date.now(),
+  // so an independent paneLabeler(runIdFor(dir)) call can straddle a
+  // millisecond boundary, script a label the rail never queries, and
+  // flake this test "none" under suite load — rail.scopedName is the
+  // exact string answerPermission reads (same pattern as rail.test.ts).
+  const scoped = rail.scopedName("alpha")
   herdr.phase[scoped] = "dialog"
   herdr.readFor = () => askFor("/definitely/not/a/root/x.txt")
 
@@ -159,7 +163,12 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
   // refuses every prompt (held): the deny guidance cannot land, exactly
   // the j-a532f9 race. The ladder must nudge, nudge, DEFER at the cap
   // (guidance queued), then die honestly on the second expiry.
-  const outside = join(import.meta.dirname, "perm-hardening.test.ts") // exists, covered by no root
+  // The wandering path lives under HOME, never under this checkout: the
+  // merge gate clones the head into a TMPDIR, and temp-outside-home is
+  // free scratch by design (j-ba18b7) — a checkout-local "uncovered"
+  // path stops being uncovered exactly where the gate tests, the ask
+  // flips to allow, no deny queues, and the defer never happens.
+  const outside = join(homedir(), "wandering-ask", "outside-roots.txt")
   let asked = false
   herdr.onPrompt = (name) => {
     if (!asked) {

@@ -1,6 +1,6 @@
 // Coworker (zen 6): panes that talk through the rail. This is the pure
 // half — member parsing, message parsing, and the relay plan. The body
-// (birth, prompt, retire, report) lives in bin/lab-orchestrator.
+// (birth, prompt, retire, report) lives in src/coworker-run.ts.
 // A worker never writes another worker: the plan only ever names
 // prompts the RAIL delivers.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
