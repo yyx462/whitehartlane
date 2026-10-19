@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFi
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
+import { chainOf, stepRecorder, type Chain } from "./orchestrator-chain.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import {
@@ -121,7 +122,9 @@ export type CycleDeps = {
   bookedWait?: (unitId: string) => boolean
   // ADR 0007: the manifest's finish-typed steps, when declared. Drives
   // wave gating and the done condition (check steps must finish too).
-  steps?: Step[]
+  // The chain object (src/orchestrator-chain.ts) — declared once here,
+  // asked by cycle's spawn gate and the done condition alike.
+  chain?: Chain
   // Issue #152/#150: per-unit grade binding compiled from [[stage]].
   // Absent (no stages) = every unit takes the task-level grade —
   // byte-identical to the pre-stage rail.
@@ -544,32 +547,17 @@ export function cycle(deps: CycleDeps): boolean {
   // ADR 0007 — waves gate spawning. A wave opens when every step of
   // every EARLIER wave finished done; a failed earlier step blocks the
   // downstream end-steps, which finish as blocked rows so the report
-  // never lies by omission.
-  if (deps.steps?.length) {
+  // never lies by omission. The chain owns the walk — cycle only asks.
+  if (deps.chain && deps.chain.steps.length > 0) {
     const failedIds = new Set(finished.failed)
-    const waveOrder: string[] = []
-    for (const s of deps.steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
-    const waveOf = new Map(deps.steps.map((s) => [s.id, s.wave] as const))
-    const ready = (unitId: string): { open: boolean; blockedBy?: string } => {
-      const w = waveOf.get(unitId)
-      if (w === undefined) return { open: true }
-      for (const prior of waveOrder.slice(0, waveOrder.indexOf(w))) {
-        for (const s of deps.steps!) {
-          if (s.wave !== prior) continue
-          if (failedIds.has(s.id)) return { open: false, blockedBy: s.id }
-          if (!finishedIds.has(s.id)) return { open: false }
-        }
-      }
-      return { open: true }
-    }
     const spawnable: typeof unfinished = []
     for (const unit of unfinished) {
-      const r = ready(unit.id)
-      if (r.open) spawnable.push(unit)
-      else if (r.blockedBy) {
+      const gate = deps.chain.gateOf(unit.id, finishedIds, failedIds)
+      if (gate.open) spawnable.push(unit)
+      else if (gate.blockedBy) {
         finish(unit.id, false, {
           unit: unit.id,
-          result: `wave blocked by failed ${r.blockedBy}`,
+          result: `wave blocked by failed ${gate.blockedBy}`,
           pass: false,
         }, "wave")
       }
@@ -626,22 +614,15 @@ export function cycle(deps: CycleDeps): boolean {
 
   const finalState = readState(deps.taskDir)
   const finalFinished = new Set([...finalState.done, ...finalState.failed])
+  const finalFailed = new Set(finalState.failed)
   if (deps.canary?.failed && deps.inFlight.size === 0) return true
   // ADR 0007: with steps declared, the run is done when every unit AND
-  // every check step AND every wake step finished — a pending gate or
+  // every non-unit step (check, wake, gate) finished — a pending gate or
   // child job keeps the rail alive, an UNREACHABLE one (an earlier wave
-  // failed) cannot, and must not.
-  const steps = deps.steps ?? []
-  const finalFailed = new Set(finalState.failed)
-  const waveOrder: string[] = []
-  for (const s of steps) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
-  const unreachable = (step: Step): boolean => {
-    const priors = waveOrder.slice(0, waveOrder.indexOf(step.wave))
-    return steps.some((other) => priors.includes(other.wave) && finalFailed.has(other.id))
-  }
-  const stepsFinished = steps
-    .filter((s) => s.finished_by === "check" || s.finished_by === "wake" || s.finished_by === "gate")
-    .every((s) => finalFinished.has(s.id) || unreachable(s))
+  // failed) cannot, and must not. The chain owns both questions.
+  const stepsFinished = deps.chain?.watched.every(
+    (s) => finalFinished.has(s.id) || deps.chain!.unreachable(s, finalFailed),
+  ) ?? true
   return (
     units.every((unit) => finalFinished.has(unit.id)) &&
     stepsFinished &&
@@ -751,6 +732,10 @@ export async function runOrchestrator(input: {
   if (stages?.length) {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromStages(stages) }
   }
+  // The chain object, declared once for the whole run: cycle's spawn
+  // gate, the done condition, and the driver's step walker all ask it
+  // — the wave order is walked by ONE owner (OPTIMUM §2 endgame).
+  const chain = chainOf(steps)
   const stagePlan = stages?.length ? gradePlanFromStages(stages) : undefined
   const unitModels = stages?.length ? modelPlanFromStages(stages) : undefined
   const where = manifest.report?.where ?? input.taskDir
@@ -840,7 +825,7 @@ export async function runOrchestrator(input: {
           timers.add(t)
         },
         bookedWait: input.bookedWait,
-        steps,
+        chain,
         stagePlan,
         unitModels,
         emit: (kind, payload) => {
@@ -881,10 +866,8 @@ export async function runOrchestrator(input: {
       }
       if (now() - started > deadlineMs) {
         log("orchestrator: deadline passed; settling the rest failed")
-        for (const [id, flight] of [...inFlight]) {
-          settle(input.taskDir, id, `deadline:${id}`, false, "deadline")
-          emit("unit.finished", { unit: id, pass: false, result: "deadline" })
-          rows.push({ unit: id, result: "deadline", pass: false })
+        for (const [id] of [...inFlight]) {
+          record(id, "deadline", false, "deadline")
           input.shep.retire(`w-${id}`)
           inFlight.delete(id)
         }
@@ -892,9 +875,7 @@ export async function runOrchestrator(input: {
         const units = loadUnitsFor(input.taskDir, loaded.hooks)
         for (const unit of units) {
           if (!state.done.includes(unit.id) && !state.failed.includes(unit.id)) {
-            settle(input.taskDir, unit.id, `deadline:${unit.id}`, false, "deadline — never started")
-            emit("unit.finished", { unit: unit.id, pass: false, result: "deadline" })
-            rows.push({ unit: unit.id, result: "deadline", pass: false })
+            record(unit.id, "deadline", false, "deadline — never started", "deadline")
           }
         }
         finished = true
@@ -969,17 +950,18 @@ export async function runOrchestrator(input: {
     }
   }
 
-  // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
-  // (unlike [gates] report detectors, which print "done" per ADR 0003).
-  // Frontier gates (every earlier wave finished) are asked at most once
-  // per gateCheckMs; a pass finished_by the gate into state and opens the
-  // downstream wave on the next run(). gatesPending feeds arm() so a
-  // waiting gate can never dead-sleep.
-  const gateCache = new Map<string, { at: number; pass: boolean }>()
-  let gatesPending = 0
-  const hasChecks = steps?.some((s) => s.finished_by === "check") ?? false
-  const waveOrder: string[] = []
-  for (const s of steps ?? []) if (!waveOrder.includes(s.wave)) waveOrder.push(s.wave)
+  // ── the chain's step machines: one walker, kind-specific executors ──
+  //
+  // Before: three machine loops (check polling, stage gates, wake
+  // levies) each hand-rolled the same read-state → frontier-walk →
+  // settle/emit/row ceremony, plus a private frontier() and two pending
+  // counters. Now ONE walker visits the unfinished frontier in chain
+  // order and executes each step BY ITS KIND; the executors keep only
+  // what is genuinely kind-specific (checks debounce, gates fire once,
+  // wakes book a child and read its receipt), and the finish ceremony
+  // is the recorder's (src/orchestrator-chain.ts): one settle card,
+  // one event, one report row.
+  const record = stepRecorder(input.taskDir, emit, rows)
   const stateSets = () => {
     const state = readState(input.taskDir)
     return {
@@ -987,47 +969,30 @@ export async function runOrchestrator(input: {
       failedIds: new Set<string>(state.failed) as Set<string>,
     }
   }
-  // a step's wave is on the frontier when every step of every earlier
-  // wave finished (and none failed) — shared by gates and wake levies
-  const frontier = (wave: string, finishedIds: Set<string>, failedIds: Set<string>): boolean => {
-    for (const prior of waveOrder.slice(0, waveOrder.indexOf(wave))) {
-      for (const s of steps ?? []) {
-        if (s.wave !== prior) continue
-        if (failedIds.has(s.id) || !finishedIds.has(s.id)) return false
-      }
+  const gateCache = new Map<string, { at: number; pass: boolean }>()
+  const stepPending = { checks: 0, wakes: 0 }
+
+  // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
+  // (unlike [gates] report detectors, which print "done" per ADR 0003).
+  // Frontier checks are asked at most once per gateCheckMs; a pass
+  // settles the gate into state and opens the downstream wave on the
+  // next run(). stepPending.checks feeds arm() so a waiting gate can never
+  // dead-sleep.
+  const execCheck = (step: Step): boolean => {
+    const cached = gateCache.get(step.id)
+    if (cached && !cached.pass && now() - cached.at < gateCheckMs) return false
+    let pass = false
+    try {
+      execSync(step.check!, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "ignore"] })
+      pass = true
+    } catch {
+      pass = false // not-yet — the debounce owns the retry
     }
+    gateCache.set(step.id, { at: now(), pass })
+    if (!pass) return false
+    record(step.id, "gate", true, "gate passed")
+    log(`gate ${step.id} passed — wave ${step.wave} can finish`)
     return true
-  }
-  const evaluateGates = (): number => {
-    let passed = 0
-    gatesPending = 0
-    if (!steps?.length || !hasChecks) return 0
-    const { finishedIds, failedIds } = stateSets()
-    for (const step of steps) {
-      if (step.finished_by !== "check" || finishedIds.has(step.id)) continue
-      // frontier only — earlier waves must be finished done
-      if (!frontier(step.wave, finishedIds, failedIds)) continue
-      gatesPending += 1
-      const cached = gateCache.get(step.id)
-      if (cached && !cached.pass && now() - cached.at < gateCheckMs) continue
-      let pass = false
-      try {
-        execSync(step.check!, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "ignore"] })
-        pass = true
-      } catch {
-        pass = false // not-yet — the debounce owns the retry
-      }
-      gateCache.set(step.id, { at: now(), pass })
-      if (pass) {
-        settle(input.taskDir, step.id, `gate:${step.id}`, true, "gate passed")
-        emit("unit.finished", { unit: step.id, pass: true, result: "gate passed" })
-        rows.push({ unit: step.id, result: "gate passed", pass: true })
-        log(`gate ${step.id} passed — wave ${step.wave} can finish`)
-        gatesPending -= 1
-        passed += 1
-      }
-    }
-    return passed
   }
 
   // Issue #152: stage gates — the rail ACTS (runs the stage's command)
@@ -1037,31 +1002,22 @@ export async function runOrchestrator(input: {
   // blocks the downstream stages honestly. The final grade stage is
   // exactly this shape — verify.sh fires once, at the end, never
   // mid-chain (#150).
-  const runStageGates = (): number => {
-    let acted = 0
-    const gateSteps = (steps ?? []).filter((s) => s.finished_by === "gate")
-    if (!gateSteps.length) return 0
-    const state = readState(input.taskDir)
-    const finishedIds = new Set<string>([...state.done, ...state.failed])
-    const failedIds = new Set<string>(state.failed)
-    for (const step of gateSteps) {
-      if (finishedIds.has(step.id)) continue
-      if (!frontier(step.wave, finishedIds, failedIds)) continue
-      let pass = false
-      let why = ""
-      try {
-        execSync(step.check!, { cwd: input.taskDir, timeout: 300_000, stdio: ["ignore", "ignore", "pipe"] })
-        pass = true
-      } catch (err) {
-        why = err instanceof Error ? err.message.split("\n")[0] : String(err)
-      }
-      settle(input.taskDir, step.id, `gate:${step.id}`, pass, pass ? "stage gate passed" : why)
-      emit("unit.finished", { unit: step.id, pass, result: pass ? "stage gate passed" : "stage gate failed" })
-      rows.push({ unit: step.id, result: pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`, pass })
-      log(`stage gate ${step.id} ${pass ? "passed — chain advances" : "FAILED — downstream blocked"}`)
-      acted += 1
+  const execGate = (step: Step): boolean => {
+    let pass = false
+    let why = ""
+    try {
+      execSync(step.check!, { cwd: input.taskDir, timeout: 300_000, stdio: ["ignore", "ignore", "pipe"] })
+      pass = true
+    } catch (err) {
+      why = err instanceof Error ? err.message.split("\n")[0] : String(err)
     }
-    return acted
+    record(
+      step.id, "gate", pass,
+      pass ? "stage gate passed" : why,
+      pass ? "stage gate passed" : `stage gate failed: ${why.slice(0, 120)}`,
+    )
+    log(`stage gate ${step.id} ${pass ? "passed — chain advances" : "FAILED — downstream blocked"}`)
+    return true
   }
 
   // ADR 0007 stage 3 — wake steps: the rail as levy. Each frontier wake
@@ -1069,9 +1025,8 @@ export async function runOrchestrator(input: {
   // paused or crashed parent re-nurses the same child, never a second
   // levy), and the step finishes on the child's wake.json — the receipt
   // colors it. An unreachable wake step (earlier wave failed) is never
-  // levied and cannot count against the run finishing.
-  let wakesPending = 0
-  const hasWakes = steps?.some((s) => s.finished_by === "wake") ?? false
+  // levied and cannot count against the run finishing. (A wake step
+  // with no levy port never reaches here — the run refuses at boot.)
   const watchChild = (jobDir: string): void => {
     if (watchedDirs.has(jobDir)) return
     watchedDirs.add(jobDir)
@@ -1081,65 +1036,76 @@ export async function runOrchestrator(input: {
       /* the arm() backstop covers it */
     }
   }
-  const nurseWakes = (): number => {
+  const execWake = (step: Step): boolean => {
+    let acted = false
+    let booking = readWakeBooking(input.taskDir, step.id)
+    if (!booking) {
+      const levy = input.levyChild?.(step.id, resolve(input.taskDir, step.folder ?? "."))
+      if (!levy) return false
+      if (!levy.ok) {
+        // deterministic refusal (missing manifest, policy) — an honest
+        // failed row, not a retry loop
+        record(step.id, "levy", false, `levy failed: ${levy.why}`)
+        log(`wake ${step.id}: levy failed — ${levy.why}`)
+        return true
+      }
+      const folder = resolve(input.taskDir, step.folder ?? ".")
+      booking = { jid: levy.jid, jobDir: levy.jobDir, folder, leviedAt: new Date().toISOString() }
+      writeWakeBooking(input.taskDir, step.id, booking)
+      emit("child.levied", { unit: step.id, jid: booking.jid, folder })
+      log(`wake ${step.id}: levied child job ${booking.jid} (${folder})`)
+      acted = true
+    }
+    watchChild(booking.jobDir)
+    const wake = readChildWake(booking.jobDir)
+    if (!wake) return acted
+    // A stage's own check (coworker/lab stages): the child's wake
+    // receipt says the exchange/experiment ENDED; the check says it
+    // ended WELL. Both must pass — a green receipt with a red check
+    // fails the stage honestly.
+    let pass = wake.outcome === "done"
+    let checkRow = ""
+    if (pass && step.check) {
+      try {
+        execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+        checkRow = " — stage check passed"
+      } catch (err) {
+        pass = false
+        const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]?.slice(0, 100) ?? ""
+        checkRow = ` — stage check failed: ${why}`
+      }
+    }
+    const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}${checkRow}`
+    record(step.id, "wake", pass, result.slice(0, 120), result)
+    log(`wake ${step.id}: child ${booking.jid} ${wake.outcome} — step ${pass ? "done" : "failed"}`)
+    if (!pass) {
+      input.shep.wake(step.id, "blocked", `child job ${booking.jid} ${wake.outcome}`)
+    }
+    return true
+  }
+
+  // kind-specific step execution — the walker dispatches on finished_by
+  const executors: Record<"check" | "gate" | "wake", (step: Step) => boolean> = {
+    check: execCheck,
+    gate: execGate,
+    wake: execWake,
+  }
+
+  // The ONE walker: every unfinished step on the chain's frontier, in
+  // declaration order, executed by its kind. stepPending feeds arm() so a
+  // debouncing check or a waiting child job can never dead-sleep.
+  const advance = (): number => {
     let acted = 0
-    wakesPending = 0
-    if (!steps?.length || !hasWakes || !input.levyChild) return 0
+    stepPending.checks = 0
+    stepPending.wakes = 0
+    if (chain.steps.length === 0) return 0
     const { finishedIds, failedIds } = stateSets()
-    for (const step of steps) {
-      if (step.finished_by !== "wake" || finishedIds.has(step.id)) continue
-      if (!frontier(step.wave, finishedIds, failedIds)) continue
-      wakesPending += 1
-      let booking = readWakeBooking(input.taskDir, step.id)
-      if (!booking) {
-        const folder = resolve(input.taskDir, step.folder ?? ".")
-        const outcome = input.levyChild(step.id, folder)
-        if (!outcome.ok) {
-          // deterministic refusal (missing manifest, policy) — an honest
-          // failed row, not a retry loop
-          settle(input.taskDir, step.id, `levy:${step.id}`, false, `levy failed: ${outcome.why}`)
-          emit("unit.finished", { unit: step.id, pass: false, result: `levy failed: ${outcome.why}` })
-          rows.push({ unit: step.id, result: `levy failed: ${outcome.why}`, pass: false })
-          log(`wake ${step.id}: levy failed — ${outcome.why}`)
-          wakesPending -= 1
-          acted += 1
-          continue
-        }
-        booking = { jid: outcome.jid, jobDir: outcome.jobDir, folder, leviedAt: new Date().toISOString() }
-        writeWakeBooking(input.taskDir, step.id, booking)
-        emit("child.levied", { unit: step.id, jid: booking.jid, folder })
-        log(`wake ${step.id}: levied child job ${booking.jid} (${folder})`)
-        acted += 1
-      }
-      watchChild(booking.jobDir)
-      const wake = readChildWake(booking.jobDir)
-      if (!wake) continue
-      // A stage's own check (coworker/lab stages): the child's wake
-      // receipt says the exchange/experiment ENDED; the check says it
-      // ended WELL. Both must pass — a green receipt with a red check
-      // fails the stage honestly.
-      let pass = wake.outcome === "done"
-      let checkRow = ""
-      if (pass && step.check) {
-        try {
-          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
-          checkRow = " — stage check passed"
-        } catch (err) {
-          pass = false
-          const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]?.slice(0, 100) ?? ""
-          checkRow = ` — stage check failed: ${why}`
-        }
-      }
-      const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}${checkRow}`
-      settle(input.taskDir, step.id, `wake:${step.id}`, pass, result.slice(0, 120))
-      emit("unit.finished", { unit: step.id, pass, result })
-      rows.push({ unit: step.id, result, pass })
-      wakesPending -= 1
-      log(`wake ${step.id}: child ${booking.jid} ${wake.outcome} — step ${pass ? "done" : "failed"}`)
-      if (!pass) {
-        input.shep.wake(step.id, "blocked", `child job ${booking.jid} ${wake.outcome}`)
-      }
-      acted += 1
+    for (const step of chain.watched) {
+      if (finishedIds.has(step.id)) continue
+      if (!chain.frontier(step.wave, finishedIds, failedIds)) continue
+      if (step.finished_by === "check") stepPending.checks += 1
+      if (step.finished_by === "wake" && input.levyChild) stepPending.wakes += 1
+      if (executors[step.finished_by](step)) acted += 1
     }
     return acted
   }
@@ -1163,8 +1129,7 @@ export async function runOrchestrator(input: {
       }
       waits.push(flight.lastChange + stallMs - now())
     }
-    if (gatesPending > 0) waits.push(gateCheckMs)
-    if (wakesPending > 0) waits.push(gateCheckMs)
+    if (stepPending.checks > 0 || stepPending.wakes > 0) waits.push(gateCheckMs)
     const ms = Math.max(1, Math.min(...waits))
     armed = setTimeout(() => {
       if (armed) timers.delete(armed)
@@ -1211,15 +1176,7 @@ export async function runOrchestrator(input: {
     for (const id of inFlight.keys()) watchPane(id)
     if (inFlight.size > 0) startLogPoller()
     else stopLogPoller()
-    if (nurseWakes() > 0) {
-      run()
-      continue
-    }
-    if (evaluateGates() > 0) {
-      run()
-      continue
-    }
-    if (runStageGates() > 0) {
+    if (advance() > 0) {
       run()
       continue
     }

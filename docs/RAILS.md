@@ -33,7 +33,13 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   a runner process goes through `spawnRunner`/`rebirthRunner`
   (`src/levy.ts`) — one door resolution, one rebirth ceremony. The
   fan-out engine (`runOrchestrator`) speaks the port the Rail
-  implements. Engines address workers by name only — every shep/herdr
+  implements and drives its chain through ONE object
+  (`src/orchestrator-chain.ts`): the wave order, the frontier
+  predicate, unreachability, and the step-finish ceremony (one settle
+  card, one event, one report row) live there, and check polling,
+  stage gates, and wake levies are kind-specific step executors one
+  walker dispatches — not three machines each hand-rolling the walk.
+  Engines address workers by name only — every shep/herdr
   call funnels through the Rail's injected runners, so the day panes
   become remote machines, the swap is one file and the engines do not
   change.
