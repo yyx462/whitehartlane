@@ -9,7 +9,6 @@ import { mkdtemp } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { paneLabeler, runIdFor } from "../src/orchestrator.ts"
 import { Rail } from "../src/rail.ts"
 import { prepareRun } from "../src/run.ts"
 import { runCoworker } from "../src/coworker-run.ts"
@@ -30,7 +29,12 @@ test("a queued deny note flushes with a single-scoped label, and the trace carri
   const ledger = fakeLedger()
   const herdr = fakeHerdr()
   const rail = fakeRail(dir, herdr, ledger as never, { judge: () => 0, home: homedir() })
-  const scoped = paneLabeler(runIdFor(dir))("alpha")
+  // the rail's own label, not a recompute: runIdFor seeds on Date.now(),
+  // so an independent paneLabeler(runIdFor(dir)) call can straddle a
+  // millisecond boundary, script a label the rail never queries, and
+  // flake this test "none" under suite load — rail.scopedName is the
+  // exact string answerPermission reads (same pattern as rail.test.ts).
+  const scoped = rail.scopedName("alpha")
   herdr.phase[scoped] = "dialog"
   herdr.readFor = () => askFor("/definitely/not/a/root/x.txt")
 
