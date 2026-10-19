@@ -16,7 +16,6 @@ import { runOrchestrator, worktreeChurnedSince } from "./orchestrator.ts"
 import { sanitizeRoots } from "./permission.ts"
 import type { Rail } from "./rail.ts"
 import type { Report } from "./report.ts"
-import { liveSpawnerSessionIds } from "./store.ts"
 import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
 
 export type EngineDeps = {
@@ -69,23 +68,10 @@ export function fanOutEngine(
   deps: EngineDeps = {},
 ): () => Promise<Report | null> {
   const ledger = rail.ledger
-  // Booked wait (ADR 0006): a pane session a live child spur names as
-  // its spawner is idle on purpose — memoized disk lookup, 10s TTL.
-  let spawnIdsAt = 0
-  let spawnIds = new Set<string>()
-  const spawnerSessions = () => {
-    if (Date.now() - spawnIdsAt > 10_000) {
-      spawnIds = liveSpawnerSessionIds()
-      spawnIdsAt = Date.now()
-    }
-    return spawnIds
-  }
-  const bookedWait = (unitId: string): boolean => {
-    if (!ledger) return false
-    const pane = ledger.job.panes.find((p) => p.label === rail.scopedName(`w-${unitId}`))
-    const sid = pane?.transcript?.session_id
-    return sid ? spawnerSessions().has(sid) : false
-  }
+  // Fan-out workers live in the task dir's tree — pre-seed it from the
+  // scope here, in the engine, so the DOOR never branches on kind
+  // (coworker/lab members carry their own per-sandbox seeds).
+  rail.writePermissions(rail.taskDir)
   return () => {
     // ADR 5: unfinished units of an earlier generation resume from the
     // pane ledger's booked session pointers.
@@ -117,7 +103,9 @@ export function fanOutEngine(
       drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
       deadlineMs,
       resumes,
-      bookedWait,
+      // Booked wait (ADR 0006), the rail's one spelling: a pane session
+      // a live child spur names as its spawner is idle on purpose.
+      bookedWait: (unitId) => rail.bookedWait(`w-${unitId}`),
       // ADR 0007 stage 3 — the rail as levy: wake steps spawn child
       // programs through the door's own admission; the durable
       // wake.json is the receipt the engine polls.

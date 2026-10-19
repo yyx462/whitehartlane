@@ -14,8 +14,8 @@
 // absorbed — M3: no cap, a soft continued ×N counter); fork delivers a
 // booked wake into a reborn levy pane (ADR 0006 §3 — the spawner seed
 // resumed from the checkpoint, the wake as the first prompt).
-import { execFileSync, spawn } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -26,12 +26,13 @@ import { defaultRunner, jsonAt } from "../src/runners.ts"
 import { forkLevy } from "../src/fork.ts"
 import { regradeJob } from "../src/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
+import { rebirthRunner, spawnRunner } from "../src/levy.ts"
+import { readState } from "../src/state.ts"
 import { seedSessionFile } from "../src/transcripts.ts"
 import { admitFork } from "../src/policy.ts"
 import {
   abortJob,
   appendEvent,
-  continueJob,
   eventsPath,
   failJob,
   findOrOpenSession,
@@ -96,8 +97,13 @@ function pidAlive(pid) {
 /** @param {JobRecord} job */
 function unitsOf(job) {
   try {
-    const state = JSON.parse(readFileSync(join(job.dir, "state.json"), "utf8"))
-    return { done: state.done?.length ?? 0, failed: state.failed?.length ?? 0 }
+    // the unit ledger (OPTIMUM §4) — one fold, both spellings: a
+    // pre-consolidation dir still wins its own state.json read
+    if (!existsSync(join(job.dir, "checkpoints.jsonl")) && !existsSync(join(job.dir, "state.json"))) {
+      return null
+    }
+    const settled = readState(job.dir)
+    return { done: settled.done.length, failed: settled.failed.length }
   } catch {
     return null
   }
@@ -237,27 +243,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       ready.job.spawner = spawner
       saveJob(ready.job)
     }
-    const orchestrator = process.env.AGENTIC_OS_ORCHESTRATOR ?? join(import.meta.dirname, "orchestrator")
-    if (!existsSync(orchestrator)) {
-      abortJob(ready.job, `no orchestrator at ${orchestrator}`, 0, "cli")
-      console.error(`run: no orchestrator at ${orchestrator}`)
+    const spawned = spawnRunner(ready.job, import.meta.dirname, {
+      extraEnv: verbose ? { AGENTIC_OS_VERBOSE: "1" } : undefined,
+    })
+    if (!spawned.ok) {
+      abortJob(ready.job, spawned.why, 0, "cli")
+      console.error(`run: ${spawned.why}`)
       process.exitCode = 1
       return
     }
-    const logFd = openSync(ready.log, "a")
-    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, ready.job.dir], {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: {
-        ...process.env,
-        AGENTIC_OS_SID: ready.job.sid,
-        AGENTIC_OS_JID: ready.job.id,
-        ...(verbose ? { AGENTIC_OS_VERBOSE: "1" } : {}),
-      },
-    })
-    child.unref()
-    ready.job.pid = child.pid
-    saveJob(ready.job)
     console.log(`job: ${ready.job.id}`)
     console.log(`workflow: ${ready.kind}`)
     if (ready.job.spur ?? ready.job.dag) {
@@ -452,22 +446,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       }
       break
     }
-    for (const pane of fresh.panes.filter((p) => p.died === undefined)) {
-      try {
-        execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
-      } catch {}
-      killPane(fresh, pane.label)
+    const reborn = rebirthRunner(fresh, import.meta.dirname)
+    if (!reborn.ok) {
+      console.error(`refresh: ${reborn.why}`)
+      process.exitCode = 1
+      return
     }
-    const orchestrator = join(import.meta.dirname, "orchestrator")
-    const logFd = openSync(join(fresh.dir, "orchestrator.log"), "a")
-    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, fresh.dir], {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, AGENTIC_OS_SID: fresh.sid, AGENTIC_OS_JID: fresh.id },
-    })
-    child.unref()
-    continueJob(fresh, child.pid)
-    console.log(`refreshed ${fresh.id} (pid ${child.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
+    console.log(`refreshed ${fresh.id} (pid ${reborn.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
     return
   }
 
@@ -527,22 +512,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
-    for (const pane of job.panes.filter((p) => p.died === undefined)) {
-      try {
-        execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
-      } catch {}
-      killPane(job, pane.label)
+    // one rebirth ceremony (straggler retire + fresh runner + booked
+    // continue) — the same verb `refresh` lands on after its drain
+    const reborn = rebirthRunner(job, import.meta.dirname)
+    if (!reborn.ok) {
+      console.error(`continue: ${reborn.why}`)
+      process.exitCode = 1
+      return
     }
-    const orchestrator = join(import.meta.dirname, "orchestrator")
-    const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
-    const child = spawn(process.execPath, ["--experimental-strip-types", orchestrator, job.dir], {
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, AGENTIC_OS_SID: job.sid, AGENTIC_OS_JID: job.id },
-    })
-    child.unref()
-    continueJob(job, child.pid)
-    console.log(`continued ${job.id} (pid ${child.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)
+    console.log(`continued ${job.id} (pid ${reborn.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)
     return
   }
 

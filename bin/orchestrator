@@ -27,12 +27,10 @@ try {
 } catch {
   // boot-dir kind stands: a staged program cannot carry garbage kind
 }
-// per-run opencode.json: fan-out workers live in the task dir's tree
-// and take the program's roots here; coworker/lab write per-worker
-// permissions inside their engines (roots included there)
-rail.writePermissions(rail.taskDir, kind === "fan-out" ? programRoots : [])
-// SIGINT aborts. SIGTERM: the coworker engine installs a drainHook
-// (ADR 5) via termDrains; the fan-out engine traps SIGTERM itself
-// (runOrchestrator's drain), so the rail must not double-trap it.
-rail.trapSignals(kind === "fan-out" ? {} : { termDrains: true })
+// The door is kind-blind from here (OPTIMUM §2): signals are one
+// protocol for every shape (SIGTERM drains through the engine's
+// registered hook — see rail.installDrain), and permission pre-seeds
+// belong to the engines (fan-out seeds the task dir in engine.ts;
+// coworker/lab seed per-member sandboxes themselves).
+rail.trapSignals()
 process.exit(await rail.run(engineFor(rail, kind, import.meta.dirname)))
