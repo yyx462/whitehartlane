@@ -75,6 +75,11 @@ test("admission refuses briefs naming existing paths no root covers (#51)", asyn
       'name = "t"',
       'worker_kind = "opencode"',
       "",
+      "[[stage]]",
+      'id = "work"',
+      'topology = "solo"',
+      'brief = "do the work described in task.txt"',
+      "",
     ].join("\n"),
   )
   // temp + nonexistent paths never count; an existing uncovered one does

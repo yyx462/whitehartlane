@@ -14,11 +14,10 @@ import {
   runGateDetector,
   runGrade,
   runSignalDetector,
-  runUnits,
 } from "../src/hooks.ts"
 import { RefusedError } from "../src/backpressure.ts"
 
-const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
+const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 
 async function copyExample(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "agentic-os-hooks-"))
@@ -30,7 +29,10 @@ test("the manifest names the workflow, worker kind, and hook commands", () => {
   const manifest = loadManifest(EXAMPLE)
   assert.equal(manifest.workflow.name, "three-lookups")
   assert.equal(manifest.workflow.worker_kind, "opencode")
-  assert.equal(manifest.hooks.units, "bash hooks/units.sh")
+  // ADR 0014: the units-hook quick-mint is retired — the workers are
+  // the stages; grade and counts remain the program's own hooks
+  assert.equal(manifest.hooks.units, undefined)
+  assert.equal(manifest.stages?.length, 1)
   assert.equal(manifest.hooks.grade, "bash hooks/grade.sh")
   assert.equal(manifest.hooks.counts, "bash hooks/counts.sh")
   assert.equal(manifest.report?.where, "units/")
@@ -79,24 +81,20 @@ test("a legacy dag_id key still resolves the spur_id, loudly (ADR 0009)", async 
   assert.deepEqual(both, [])
 })
 
-test("units prints one JSONL unit each, with its own brief", () => {
-  const manifest = loadManifest(EXAMPLE)
-  const units = runUnits(EXAMPLE, manifest)
+test("the workers are the stages — hooksFromDir derives units, a stage-less manifest refuses (ADR 0014)", async () => {
+  const { hooks } = hooksFromDir(EXAMPLE)
+  const units = hooks.units()
   assert.deepEqual(
     units.map((unit) => unit.id),
     ["france", "japan", "peru"],
   )
   assert.ok(units.every((unit) => unit.brief.length > 0))
-})
-
-test("a unit id that is not shep-safe is rejected", async () => {
   const dir = await copyExample()
   writeFileSync(
-    join(dir, "hooks", "units.sh"),
-    "#!/usr/bin/env bash\necho '{\"id\":\"Bad/Id\",\"brief\":\"x\"}'\n",
+    join(dir, "workflow.toml"),
+    readFileSync(join(dir, "workflow.toml"), "utf8").replace(/\n\[\[stage\]\][\s\S]*$/, "\n"),
   )
-  const manifest = loadManifest(dir)
-  assert.throws(() => runUnits(dir, manifest), HookError)
+  assert.throws(() => hooksFromDir(dir).hooks.units(), /\[\[stage\]\] entries/)
 })
 
 test("grade passes when the worker artifact exists and fails when it does not", async () => {
@@ -164,7 +162,8 @@ test("hooks are optional — omitted counts uses the built-in counter, omitted g
     { units: 2, passed: 1, failed: 1 },
   )
   assert.deepEqual(runGrade(dir, manifest, { id: "france", brief: "" }), { pass: true, row: "ok" })
-  assert.throws(() => runUnits(dir, manifest), /no units hook and no steps/)
+  // the workers survive the strip — they are the stages, never a hook
+  assert.equal(hooksFromDir(dir).hooks.units().length, 3)
 })
 
 test("hooksFromDir binds the manifest into the Hooks shape", async () => {
@@ -198,13 +197,6 @@ test('counts = "true" is refused at load — it prints nothing and aborts the ru
   const toml = join(dir, "workflow.toml")
   writeFileSync(toml, readFileSync(toml, "utf8").replace(/counts = "[^"]*"/, 'counts = "true"'))
   assert.throws(() => loadManifest(dir), /counts = "true" prints nothing.*issue #120, j-64e035/s)
-})
-
-test('units = "default" is refused — units has no built-in (issue #120)', async () => {
-  const dir = await copyExample()
-  const toml = join(dir, "workflow.toml")
-  writeFileSync(toml, readFileSync(toml, "utf8").replace(/units = "[^"]*"/, 'units = "default"'))
-  assert.throws(() => loadManifest(dir), /units has no built-in default/)
 })
 
 test("the manifest resolution chain prefers local, then env, then user, then builtin", async () => {
@@ -267,7 +259,6 @@ function detectorDir(): string {
       'worker_kind = "opencode"',
       "",
       "[hooks]",
-      'units = "node hooks/true.mjs"',
       'grade = "node hooks/true.mjs"',
       'counts = "node hooks/true.mjs"',
       "",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -44,6 +44,18 @@ test("run refuses a folder with no workflow.toml and books nothing", async () =>
   assert.equal(listJobs().length, 0)
 })
 
+test("run refuses a stage-less fan-out program — one authoring story (ADR 0014)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-nostages-"))
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    '[workflow]\nname = "bare"\nworker_kind = "opencode"\n',
+  )
+  const refused = prepareRun(dir)
+  assert.equal(refused.ok, false)
+  if (!refused.ok) assert.match(refused.why, /no \[\[stage\]\] entries/)
+  assert.equal(listJobs().filter((job) => job.task === "bare").length, 0)
+})
+
 test("run books a Job from the three-lookups manifest and rejects a second while it runs", async () => {
   const dir = await copyExample("agentic-os-run-")
   const first = runCli(dir)
@@ -64,7 +76,7 @@ test("run books a Job from the three-lookups manifest and rejects a second while
   assert.equal(job.state, "running")
   assert.equal(job.workflow, "fan-out")
   const hooked = readFileSync(join(job.dir, "workflow.toml"), "utf8")
-  assert.match(hooked, /units = "bash \//)
+  assert.match(hooked, /grade = "bash \//)
   const second = runCli(dir)
   assert.notEqual(second.status, 0)
   assert.match(second.stderr, /already running/)
@@ -223,15 +235,19 @@ test("run refuses a gate step with no [gates] detector and books nothing", async
   }
 })
 
-test("run books git-wave and stages its detectors as absolute paths", async () => {
-  const dir = join(import.meta.dirname, "..", "examples", "lab-spurs", "git-wave")
+test("run books a kind=lab program and stages its detectors as absolute paths", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-labtoml-"))
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  writeFileSync(join(dir, "workflow.toml"), 'kind = "lab"\n\n[workflow]\nname = "lab"\nworker_kind = "opencode"\n\n[detectors]\nsignal = "node hooks/signal.mjs"\n')
+  writeFileSync(join(dir, "hooks", "signal.mjs"), "process.exit(0)\n")
+  writeFileSync(join(dir, "actor.md"), "Tend the wave.\n")
+  writeFileSync(join(dir, "roots.txt"), "/abs/target\n")
   const booked = prepareRun(dir)
-  assert.equal(booked.ok, true)
+  assert.equal(booked.ok, true, booked.ok ? "" : booked.why)
   if (!booked.ok) return
   assert.equal(booked.kind, "lab")
-  const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
-  assert.match(staged, /signal = "node \//)
-  assert.match(staged, /await-review = "node \//)
+  assert.match(readFileSync(join(booked.job.dir, "workflow.toml"), "utf8"), /signal = "node \//)
+  assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n")
   const { abortJob } = await import("../src/store.ts")
   abortJob(booked.job, "test", 0, "cli")
 })

@@ -6,15 +6,13 @@ import { Rail, type RailLedger, type RunnerResult } from "../src/rail.ts"
 import type { PermissionJudge } from "../src/permission.ts"
 import type { JobRecord } from "../src/store.ts"
 
-export const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
+// The shared example program, in the one authoring story (ADR 0014):
+// examples/three-lookups (units-hook spelling) is a museum piece.
+export const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 
 export async function copyExample(prefix = "agentic-os-"): Promise<string> {
-  return copyExampleNamed("fan-out-spurs/three-lookups", prefix)
-}
-
-export async function copyExampleNamed(name: string, prefix = "agentic-os-"): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
-  cpSync(join(import.meta.dirname, "..", "examples", name), dir, { recursive: true })
+  cpSync(EXAMPLE, dir, { recursive: true })
   return dir
 }
 

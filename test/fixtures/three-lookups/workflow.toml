@@ -1,0 +1,27 @@
+# The classic example in the one authoring story (ADR 0014): same name,
+# workers, and grade/counts hooks as the retired units-hook original.
+
+[workflow]
+name = "three-lookups"
+worker_kind = "opencode"
+slots = 2
+
+[hooks]
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[[stage]]
+id = "lookups"
+topology = "fan-out"
+units = [
+  { id = "france", brief = "Look up the capital of France. Write the city name to result.md in your working directory (your cwd). One line, nothing else." },
+  { id = "japan", brief = "Look up the capital of Japan. Write the city name to result.md in your working directory (your cwd). One line, nothing else." },
+  { id = "peru", brief = "Look up the capital of Peru. Write the city name to result.md in your working directory (your cwd). One line, nothing else." },
+]
+
+[report]
+where = "units/"
+
+[layout]
+tab = "new"
+orchestrator = "left"

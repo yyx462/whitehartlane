@@ -393,7 +393,7 @@ run = "true"
       /run belongs to gate stages/,
     ],
     [
-      "steps and stages both",
+      "steps anywhere are retired (ADR 0014)",
       `[workflow]
 name = "x"
 worker_kind = "opencode"
@@ -402,13 +402,8 @@ worker_kind = "opencode"
 id = "s1"
 finished_by = "end"
 wave = "w1"
-
-[[stage]]
-id = "st"
-topology = "solo"
-brief = "b"
 `,
-      /not both/,
+      /\[\[step\]\] tables are retired/,
     ],
   ]
   for (const [name, toml, pattern] of cases) {
@@ -837,16 +832,10 @@ model = "prov/pin"
   assert.throws(() => loadManifest(dir), /no mind, no pin/)
 })
 
-// ── back-compat: no [[stage]], the units hook path is unchanged ────
-test("a units-hook workflow (no stages) task-grades every unit, exactly as before", async () => {
-  const dir = taskDir("backcompat")
-  writeFileSync(
-    join(dir, "units.sh"),
-    `#!/bin/sh
-echo '{"id":"u1","brief":"one"}'
-echo '{"id":"u2","brief":"two"}'
-`,
-  )
+// ── ADR 0014: the units-hook quick-mint is retired — refused, loudly ─
+test("a units-hook workflow (no stages) is refused — no silent legacy path", async () => {
+  const dir = taskDir("units-hook-retired")
+  writeFileSync(join(dir, "units.sh"), "#!/bin/sh\necho '{}\n")
   writeFileSync(
     join(dir, "workflow.toml"),
     `[workflow]
@@ -857,12 +846,8 @@ worker_kind = "opencode"
 units = "sh units.sh"
 `,
   )
+  assert.throws(() => loadManifest(dir), /hooks\.units is retired/)
   const shep = fakeShep()
-  const report = await run(dir, shep.port)
-  assert.equal(report.status, "done")
-  assert.deepEqual(shep.spawned.sort(), ["w-u1", "w-u2"])
-  // the default grade (always-pass) fired for BOTH units — the old
-  // contract, byte for byte
-  const stages2 = readCheckpoints(dir).map((c) => c.stage)
-  assert.ok(stages2.includes("grade:u1") && stages2.includes("grade:u2"))
+  await assert.rejects(() => run(dir, shep.port), /hooks\.units is retired/)
+  assert.deepEqual(shep.spawned, [])
 })

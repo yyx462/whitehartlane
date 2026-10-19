@@ -20,6 +20,11 @@ function program(): string {
       'name = "t"',
       'worker_kind = "opencode"',
       "",
+      "[[stage]]",
+      'id = "work"',
+      'topology = "solo"',
+      'brief = "do the thing"',
+      "",
     ].join("\n"),
   )
   return dir

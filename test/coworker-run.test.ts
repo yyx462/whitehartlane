@@ -22,7 +22,6 @@ async function coworkerDir(prefix: string): Promise<string> {
     'worker_kind = "opencode"',
     "",
     "[hooks]",
-    "units = \"true\"",
     'grade = "echo pass"',
     'counts = "printf \'{}\'"',
     "",
