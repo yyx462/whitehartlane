@@ -201,8 +201,15 @@ test("C02: a live booked pane anchors the split — no new tab, and the borrowed
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
-  const { openSession } = await import("../src/store.ts")
-  const session = openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
+  const { findOrOpenSession } = await import("../src/store.ts")
+  // Duplicate rule 1: ONE OS session per host conversation. A raw
+  // openSession here minted a SECOND ses_x binding (the courier test
+  // above already opened one), and forkLevy's findSessionByHost then
+  // picked between the two in readdir order — a coin flip over whose
+  // trace got the pane.born event: the C02 flake ("the trace names the
+  // anchor" ~50% on any head, clean master included). Reuse the one
+  // binding and the anchor lands on the session this test reads.
+  const { session } = findOrOpenSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
   const calls: string[] = []
   const reaped: string[] = []
   const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
@@ -235,8 +242,9 @@ test("C02: a dead booked pane scopes the fallback tab to the levy's workspace", 
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
-  const { openSession } = await import("../src/store.ts")
-  openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
+  const { findOrOpenSession } = await import("../src/store.ts")
+  // same rule as C02a: reuse the one ses_x binding, mint no duplicates
+  findOrOpenSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
   const tabs: string[] = []
   const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
   const herdrRun = (args: string[]): RunnerResult => {
