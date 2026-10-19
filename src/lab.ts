@@ -4,6 +4,18 @@
 // file is the scheduler's input — read, never executed. The engine
 // drives the Rail: births panes, grades, relays wave closes to the
 // actor, answers permission dialogs, and writes the report.
+//
+// ADR 5 parity (the redesign): the experiment OUTLIVES the process.
+// The engine's state is a fold over durable records, not process
+// memory — the pane ledger's bookings say who was born (and which
+// session each mind was), units/<id>/log.txt say who closed, and
+// protocol.json says what the actor asked for. Entering, the engine
+// re-joins that state instead of re-birthing blind: SIGTERM drains to
+// quiescence and parks (null report — the door books the pause), and
+// a continued lab resumes the actor's booked session (the one mind
+// that IS the experiment) and re-inhabits in-flight mocks from their
+// bookings. Fan-out and coworker have told this story since ADR 5;
+// the lab is the third telling, same shape.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
@@ -14,10 +26,58 @@ import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
 import { gradeCall } from "./live-grade.ts"
 import { actorBrief, paneName } from "./roles.ts"
 import { writeReport, type Report } from "./report.ts"
-import { waitChange, type Rail } from "./rail.ts"
+import { drainDeadline } from "./levy.ts"
+import { waitChange, type Rail, type RailLedger } from "./rail.ts"
 import { closes } from "./verbose.ts"
 
-export async function runLab(rail: Rail): Promise<Report | null> {
+const GRACE_MS = 15_000
+
+type PaneRec = RailLedger["job"]["panes"][number]
+
+// The entry fold: the pane ledger's LATEST booking per role, keyed by
+// the raw pane names this engine births ("actor", "mock-<id>"). Latest
+// wins; a booking without a session id still means "an earlier
+// generation birthed this" (the double-birth guard) — it just has no
+// conversation to resume, and the fresh brief is the fallback.
+export type LabBookings = {
+  actor?: { tool: string; session_id?: string }
+  mocks: Map<string, { tool: string; session_id?: string }>
+}
+
+export function labBookings(ledger: RailLedger | null): LabBookings {
+  const mocks = new Map<string, { tool: string; session_id?: string }>()
+  let actor: LabBookings["actor"]
+  const latest = new Map<string, PaneRec>()
+  for (const p of ledger?.job.panes ?? []) {
+    if (!p.unit || !p.transcript) continue
+    const prev = latest.get(p.unit)
+    if (!prev || p.born > prev.born) latest.set(p.unit, p)
+  }
+  for (const [unit, p] of latest) {
+    const pointer = {
+      tool: p.transcript.tool,
+      ...(p.transcript.session_id ? { session_id: p.transcript.session_id } : {}),
+    }
+    if (unit === "actor") actor = pointer
+    else if (unit.startsWith("mock-")) mocks.set(unit.slice("mock-".length), pointer)
+  }
+  return { actor, mocks }
+}
+
+// ONE flight record per mock, replacing the old born/mockPane pair:
+// carried = born of an EARLIER generation, no pane in this process
+// (its log markers still close it; nothing of it is running here).
+// spawnWave re-inhabits carried mocks when the wave names them again.
+type Flight = { spawnedAt: number; pane?: string; carried: boolean }
+
+export async function runLab(
+  rail: Rail,
+  opts: { graceMs?: number } = {},
+): Promise<Report | null> {
+  // the newborn/liveness grace (endOf's own dead-rule default; the
+  // drain-dead carry uses the same clock) — parameterized so tests
+  // drive it to 0
+  const graceMs = opts.graceMs ?? GRACE_MS
   const taskDir = rail.taskDir
   const log = rail.log
   let jobText = ""
@@ -78,8 +138,15 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   // never consumed).
   const actorPath = join(taskDir, "briefs", "actor.md")
   writeFileSync(actorPath, actorBrief(jobText))
-  const born = new Map<string, number>()
-  const mockPane = new Map<string, string>()
+  // the entry fold (ADR 5): who an earlier generation birthed, and
+  // which sessions they were. carried mocks have no pane here — the
+  // wave re-inhabits them when protocol.json names them again.
+  const bookings = labBookings(rail.ledger)
+  const flights = new Map<string, Flight>()
+  for (const [id, booking] of bookings.mocks) {
+    flights.set(id, { spawnedAt: Date.now(), carried: true })
+    if (booking.session_id) log(`continue: mock ${id} carries booked session ${booking.session_id}`)
+  }
   const closed = new Set<string>()
   const graded = new Map<string, { pass: boolean; row: string }>()
   const woke: string[] = []
@@ -99,9 +166,18 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     return endOf(logText, id, rail.paneAlive(paneName("mock", id)), Date.now() - spawnedAt)
   }
 
+  // the marker-only read: a carried mock has no pane in this process,
+  // so liveness proves nothing — only its log speaks.
+  function markerOf(id: string): string | null {
+    const logPath = join(taskDir, "units", id, "log.txt")
+    const logText = existsSync(logPath) ? readFileSync(logPath, "utf8") : ""
+    return endOf(logText, id, true, 0)
+  }
+
   function spawnWave(units: { id: string; brief: string }[]) {
     for (const unit of units) {
-      if (born.has(unit.id)) continue
+      const flight = flights.get(unit.id)
+      if (flight && !flight.carried) continue // this process birthed it already
       const dir = join(taskDir, "units", unit.id)
       mkdirSync(dir, { recursive: true })
       const briefPath = join(dir, "brief.md")
@@ -118,17 +194,37 @@ export async function runLab(rail: Rail): Promise<Report | null> {
         "",
         `Write what you generated to ${join(dir, "result.md")}`,
       ].join("\n"))
+      // an earlier generation already closed this unit (its log says
+      // so) — no pane: the marker alone settles it
+      if (markerOf(unit.id)) {
+        flights.set(unit.id, { spawnedAt: Date.now(), carried: true })
+        continue
+      }
       // the scope's roots (task dir + program roots) pre-seed the mock's
       // sandbox — same projection the real panes get
       rail.writePermissions(dir)
       const slot = rail.ensureRole(board, "mock", dir)
       board = slot.board
-      const ok = slot.pane ? rail.inhabitPane(name, kind, slot.pane, briefPath, dir) : false
+      const resumeId = flight?.carried ? bookings.mocks.get(unit.id)?.session_id : undefined
+      const ok = slot.pane
+        ? rail.inhabitPane(name, kind, slot.pane, briefPath, dir, undefined, undefined, Boolean(resumeId), resumeId)
+        : false
       if (slot.pane) rail.renamePane(slot.pane, name)
-      born.set(unit.id, Date.now())
-      if (slot.pane) mockPane.set(unit.id, slot.pane)
+      flights.set(unit.id, { spawnedAt: Date.now(), pane: slot.pane, carried: false })
+      if (ok) {
+        if (resumeId) {
+          // ADR 5: the parked generation's session continues — never a
+          // re-brief; one rail nudge says the run is back
+          rail.promptAgent(
+            name,
+            "[rail] The run was parked and has been continued. Your session resumed — finish the unit; when done, append the done line to your log exactly as your brief describes.",
+          )
+          log(`continue: mock ${name} resumed session ${resumeId}`)
+        } else {
+          rail.say("rail", `birth ${name}`)
+        }
+      }
       log(ok ? `name ${name} pane ${slot.pane}` : `mock ${name} failed to spawn`)
-      if (ok) rail.say("rail", `birth ${name}`)
     }
   }
 
@@ -156,8 +252,22 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   function birthActor() {
     const actor = rail.ensureRole(board, "actor", taskDir)
     board = actor.board
-    if (actor.pane && rail.inhabitPane("actor", "pi", actor.pane, actorPath, taskDir)) {
-      rail.renamePane(actor.pane, "actor")
+    const resumeId = bookings.actor?.session_id
+    const ok = actor.pane
+      ? rail.inhabitPane("actor", "pi", actor.pane, actorPath, taskDir, undefined, undefined, Boolean(resumeId), resumeId)
+      : false
+    if (actor.pane) rail.renamePane(actor.pane, "actor")
+    if (ok) {
+      if (resumeId) {
+        // the experiment's one mind continues its booked conversation:
+        // every wave it composed and every result it read is in the
+        // session — one nudge, never a re-brief
+        rail.promptAgent(
+          "actor",
+          '[rail] The run was parked and has been continued. You are still the actor; pick up exactly where you left off. The wave\'s panes are back — write the next protocol.json, or {"stop":true} to finish.',
+        )
+        log(`continue: actor resumes booked session ${resumeId}`)
+      }
       log(`name actor pane ${actor.pane}`)
       rail.say("rail", "birth actor")
     } else {
@@ -172,23 +282,96 @@ export async function runLab(rail: Rail): Promise<Report | null> {
   let actorBorn = !!spur ? false : true
   let openedWave = ""
   let promptedSpur = false
+  // the drain (ADR 5, the door is kind-blind): SIGTERM asks the engine
+  // for its boundary. Lab's boundary is quiescence — no mock in
+  // flight, the actor not mid-turn — bounded by the ceiling. A dead
+  // pane mid-drain stays OPEN (carried; its booked session resumes
+  // next generation), exactly as fan-out's drain leaves its units.
+  let draining = false
+  let parked = false
+  let drainUntil: number | null = null
+  rail.installDrain(() => {
+    if (draining || parked) return
+    draining = true
+    const ceiling =
+      Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || manifestEarly?.workflow?.drain_timeout_ms || 10 * 60_000
+    drainUntil = drainDeadline(taskDir, Date.now(), ceiling)
+    log(`lab: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
+  })
   const deadline = Date.now() + 2 * 60 * 60_000
   while (Date.now() < deadline) {
     const signal = detectors?.signal
       ? detectorCall("signal detector", () => runSignalDetector(taskDir, manifestEarly), { kind: "missing" })
       : readSignal(taskDir)
-    const ends = [...born].map(([id, at]) => {
-      let end = detectors?.end
-        ? detectorCall(`end detector ${id}`, () => runEndDetector(taskDir, manifestEarly, id), null)
-        : mockEnd(id, at)
+    const ends = [...flights].map(([id, flight]) => {
+      let end: string | null
+      if (detectors?.end) {
+        end = detectorCall(`end detector ${id}`, () => runEndDetector(taskDir, manifestEarly, id), null)
+      } else if (flight.carried) {
+        end = markerOf(id)
+      } else if (draining && Date.now() - flight.spawnedAt > graceMs && !rail.paneAlive(paneName("mock", id))) {
+        // draining: a dead mock is not a verdict — carry it open; the
+        // booked session resumes next generation
+        if (flight.pane) board = rail.dropPane(board, flight.pane)
+        flight.carried = true
+        log(`draining: mock ${id} pane died — carried open; its booked session resumes next generation`)
+        end = null
+      } else {
+        end = mockEnd(id, flight.spawnedAt)
+      }
       // liveness stays rail-owned: a dead pane is dead even under a
       // custom end detector, and herdr still names the blocked
-      if (!end && Date.now() - at > 15_000 && !rail.paneAlive(paneName("mock", id))) end = "dead"
-      if (!end && rail.agentStatus(paneName("mock", id)).includes('"agent_status":"blocked"')) {
+      if (!end && !flight.carried && Date.now() - flight.spawnedAt > graceMs && !rail.paneAlive(paneName("mock", id))) {
+        end = "dead"
+      }
+      if (!end && !flight.carried && rail.agentStatus(paneName("mock", id)).includes('"agent_status":"blocked"')) {
         end = "blocked"
       }
       return { id, end }
     })
+    // Privilege (zen 6, rail-owned): the sweep answers every blocked
+    // pane's dialog at the rail — this loop carries the consequence. A
+    // capped block (a deny pattern) finished_by the mock blocked,
+    // exactly as fan-out finished_by a capped unit; a non-dialog block
+    // simply stands as blocked in the report. The id joins `woke` only
+    // on a real cap, so a fresh dialog on the same pane is answered
+    // again next beat. The sweep runs while DRAINING too (fan-out
+    // parity: a dialog is the rail's business, never a boundary).
+    const sweep = rail.tickPrivilege()
+    for (const id of wakesFor(ends, woke)) {
+      const name = paneName("mock", id)
+      if (!sweep.capped.has(name)) {
+        if (sweep.answered.has(name)) log(`answered permission for ${name}`)
+        continue
+      }
+      woke.push(id)
+      const pane = flights.get(id)?.pane
+      closed.add(id)
+      finished.push({ unit: id, result: "blocked (deny cap)", pass: false })
+      if (pane) {
+        rail.closePane(pane)
+        rail.retire(name)
+        board = rail.dropPane(board, pane)
+      }
+      log(`mock ${name} hit the deny cap — finished blocked`)
+      rail.say("watcher", `${name} deny cap`)
+      rail.say("operator", `close ${name}`)
+    }
+    if (draining) {
+      // the actor may have finished while the drain ran — a stop is a
+      // terminal state, not a park: the report is the answer
+      if (signal.kind === "stop") break
+      // the boundary: no mock in flight (every pane-holding flight
+      // closed; carried ones run nothing) and the actor not mid-turn
+      const inFlight = ends.some((row) => row.end === null && !flights.get(row.id)?.carried)
+      const actorWorking = rail.agentStatus("actor").includes('"agent_status":"working"')
+      if ((!inFlight && !actorWorking) || (drainUntil !== null && Date.now() > drainUntil)) {
+        parked = true
+        break
+      }
+      await waitChange(taskDir, 5_000)
+      continue
+    }
     const gatesReady: string[] = []
     for (const step of gateSteps) {
       if (done.has(step.id) || !step.after.every((id) => done.has(id))) continue
@@ -231,12 +414,14 @@ export async function runLab(rail: Rail): Promise<Report | null> {
           done.add(action.id)
         } else if (action.do === "reopen") {
           for (const id of action.ids) done.delete(id)
-          born.clear()
-          mockPane.clear()
+          flights.clear()
           closed.clear()
           graded.clear()
           promptedSpur = false
           reopened = true
+          // a reopened experiment re-births FRESH (the old semantics):
+          // drop the reopened ids' bookings so spawnWave re-briefs
+          for (const id of action.ids) bookings.mocks.delete(id)
           rail.say("rail", `reopen ${action.ids.join(", ")}`)
         } else if (action.do === "report") {
           stopNow = true
@@ -247,33 +432,6 @@ export async function runLab(rail: Rail): Promise<Report | null> {
       if (signal.kind === "stop") break
       if (signal.kind === "wave") spawnWave(signal.wave.units)
     }
-    // Privilege (zen 6, rail-owned): the sweep answers every blocked
-    // pane's dialog at the rail — this loop carries the consequence. A
-    // capped block (a deny pattern) finished_by the mock blocked,
-    // exactly as fan-out finished_by a capped unit; a non-dialog block
-    // simply stands as blocked in the report. The id joins `woke` only
-    // on a real cap, so a fresh dialog on the same pane is answered
-    // again next beat.
-    const sweep = rail.tickPrivilege()
-    for (const id of wakesFor(ends, woke)) {
-      const name = paneName("mock", id)
-      if (!sweep.capped.has(name)) {
-        if (sweep.answered.has(name)) log(`answered permission for ${name}`)
-        continue
-      }
-      woke.push(id)
-      const pane = mockPane.get(id)
-      closed.add(id)
-      finished.push({ unit: id, result: "blocked (deny cap)", pass: false })
-      if (pane) {
-        rail.closePane(pane)
-        rail.retire(name)
-        board = rail.dropPane(board, pane)
-      }
-      log(`mock ${name} hit the deny cap — finished blocked`)
-      rail.say("watcher", `${name} deny cap`)
-      rail.say("operator", `close ${name}`)
-    }
     if (reopened) {
       // 5s beats, not 30s: a blocked mock's dialog is answered on the
       // next beat — the sweep's staleness is this backstop (j-b6067c)
@@ -283,7 +441,7 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     for (const row of ends) {
       if (!spur && gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
       if (!closes(row.end) || closed.has(row.id)) continue
-      const pane = mockPane.get(row.id)
+      const pane = flights.get(row.id)?.pane
       const name = paneName("mock", row.id)
       closed.add(row.id)
       finished.push({
@@ -307,7 +465,24 @@ export async function runLab(rail: Rail): Promise<Report | null> {
     }
     await waitChange(taskDir, 5_000)
   }
-  const finalEnds = [...born].map(([id, at]) => ({ id, end: mockEnd(id, at) }))
+  // ADR 5: parked — not a finish. No report; the pane ledger carries
+  // the bookings (the actor's and every in-flight mock's); a typed
+  // continue resumes them. The door books the pause.
+  if (parked) {
+    rail.drainHook = null
+    rail.retireAll()
+    rail.closeVerbose()
+    log("lab: parked — paused; the actor's and in-flight mocks' sessions stay booked — continue resumes them")
+    return null
+  }
+  const finalEnds = [...flights].map(([id, flight]) => ({
+    id,
+    end: detectors?.end
+      ? detectorCall(`end detector ${id}`, () => runEndDetector(taskDir, manifestEarly, id), null)
+      : flight.carried
+        ? markerOf(id)
+        : mockEnd(id, flight.spawnedAt),
+  }))
   const rows = spur
     ? [...finished, ...finalEnds
         .filter((row) => !closes(row.end))

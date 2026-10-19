@@ -190,9 +190,9 @@ export class Rail implements ShepPort {
   private readonly faultMemo = new Map<string, { at: number; hit: { id: string; type: string } | null }>()
   private verbosePath: string | null = null
   private verbosePane: string | null = null
-  // the drain hook (ADR 5): an engine that can drain registers here
-  // via installDrain (fan-out, coworker); a TERM with none registered
-  // aborts — sessions stay booked either way
+  // the drain hook (ADR 5): every engine drains — each registers here
+  // via installDrain (fan-out at runOrchestrator start, coworker at
+  // birth, lab at boot); sessions stay booked either way
   drainHook: (() => void) | null = null
   // permission sweep state (zen 6): asks per pane (display numbering),
   // deny-family answers per pane (cap spend — allows are free), asks
@@ -586,10 +586,15 @@ export class Rail implements ShepPort {
     // that keeps shared-cwd bookings straight
     const marker = dirname(briefPath)
     const sessionId = resumeSession ?? this.resolveLiveSession(kind, cwd, since, marker)
+    // the ledger's unit column carries the RAW name the engine birthed
+    // ("w-<id>", "mock-<id>", "actor", a member name) — the scoped
+    // label is p.label's job; duplicating it in p.unit hid the unit
+    // identity every ADR-5 resume fold keys on (lab's bookings, the
+    // fan-out resumes re-key in engine.ts)
     this.ledger?.attach(
       name,
       pane,
-      name,
+      rawName,
       { tool: kind, cwd, since, ...(sessionId ? { session_id: sessionId } : {}) } as TranscriptPointer,
       seed,
     )
@@ -806,8 +811,8 @@ export class Rail implements ShepPort {
 
   // The drain registration (ADR 5): an engine that can drain installs
   // its hook here — fan-out at runOrchestrator start, coworker at
-  // birth. The door stays kind-blind: it never decides signal
-  // semantics by shape.
+  // birth, lab at boot (every engine does; that is the parity). The
+  // door stays kind-blind: it never decides signal semantics by shape.
   installDrain(fn: () => void): void {
     this.drainHook = fn
   }
@@ -1197,9 +1202,10 @@ export class Rail implements ShepPort {
   // engine, then park on null, finish on a report, abort+exit-code on
   // a throw. Signals are KIND-BLIND (OPTIMUM §2): SIGINT always
   // aborts; SIGTERM drains through the engine's registered drain hook
-  // (installDrain — fan-out and coworker install one) and aborts when
-  // no engine did (lab) — sessions stay booked either way. The door
-  // never branches on shape to decide signal semantics.
+  // (installDrain — every engine installs one: fan-out at
+  // runOrchestrator start, coworker at birth, lab at boot). Sessions
+  // stay booked either way; the door never branches on shape to
+  // decide signal semantics.
 
   trapSignals(): void {
     process.on("SIGINT", () => {
