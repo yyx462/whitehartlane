@@ -25,11 +25,12 @@ paused | aborted | orphaned ── continue (typed) ─────────�
   even a SIGKILLed orchestrator leaves a resumable Job.
 - Pause and abort both retire panes. The difference is the checkpoint
   boundary, nothing else.
-- Settling is one ledger card (`done <id>` → `checkpoints.jsonl`, the
-  unit ledger — the task dir's only lifecycle store; settled is a fold
-  of the cards, never a second file). Unit quality is the grade hook's
-  job; the rail never judges content, and no unit dir is cleaned up by
-  the rail.
+- Settling is one ledger card (`done <id>` → a `unit.card` event on
+  the run's OS-disk trace, ADR 0013 — the unit ledger's only home;
+  settled is a fold of the cards, never a second file; the task dir
+  keeps only the delivery interface). Unit quality is the grade
+  hook's job; the rail never judges content, and no unit dir is
+  cleaned up by the rail.
 - The resumed agent is the verifier: its transcript already knows what
   it wrote.
 - Nothing auto-continues. A parked Job waits for a person.

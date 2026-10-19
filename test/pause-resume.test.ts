@@ -3,6 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+
+// the unit ledger rides the OS-disk trace (OPTIMUM §8) — cycle's
+// settles and state reads resolve a session there, so the suite needs
+// its own disk (the store test below re-homes itself in isolation)
+process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-pause-"))
+
 import {
   acquireUnits,
   continueBriefFor,

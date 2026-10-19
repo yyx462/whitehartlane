@@ -1215,8 +1215,9 @@ export async function runOrchestrator(input: {
   // broken hook, an infra story, never an answer story. The arm-e night
   // read 28 verifier-passes as fleet hazards; the parenthetical keeps
   // the stop legible AND excluded from answer pass-rates. Fault rows
-  // are derived from their rows' own prefixes — the stage ledger
-  // (checkpoints.jsonl) carries the same cards with timestamps.
+  // are derived from their rows' own prefixes — the unit ledger (the
+  // OS-disk trace's unit.card events, OPTIMUM §8) carries the same
+  // cards with timestamps.
   const isFaultRow = (row: ReportRow) =>
     row.result.startsWith("grade-fault:") || row.result.startsWith("grade error:")
   const faultCount = rows.filter(isFaultRow).length

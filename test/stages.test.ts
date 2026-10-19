@@ -10,6 +10,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
+import { readCheckpoints } from "../src/state.ts"
 import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, modelPlanFromStages, type Stage } from "../src/hooks.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-stages-"))
@@ -97,10 +98,12 @@ run = "bash hooks/grade.sh"
   const order = readFileSync(join(dir, "order.log"), "utf8").trim().split("\n")
   assert.deepEqual(order, ["install", "grade"])
   // the task verifier never fired mid-chain (#150's card would live here)
-  const cards = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
+  // — the ledger read goes through the seam: the cards ride the OS-disk
+  // trace now (OPTIMUM §8), the task dir keeps no card file
+  const cards = readCheckpoints(dir).map((c) => `${c.stage}:${c.status}`).join("\n")
   assert.ok(!cards.includes("grade:install"), "no grade card for the install unit")
-  assert.ok(cards.includes("check:install"), "the stage check has its own card")
-  assert.ok(cards.includes("gate:grade"), "the final gate has its card")
+  assert.ok(cards.includes("check:install:ok"), "the stage check has its own card")
+  assert.ok(cards.includes("gate:grade:ok"), "the final gate has its card")
   // every unit was a fresh worker (the split-is-dead invariant)
   assert.deepEqual(shep.spawned, ["w-install", "w-pipeline"])
 })
@@ -204,7 +207,7 @@ run = "bash verify.sh"
   assert.equal(report.status, "done")
   assert.deepEqual([...shep.spawned].sort(), ["w-merge", "w-shard-one", "w-shard-two"])
   // the fan-out units carry no task grade (the gate owns verification)
-  const cards = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
+  const cards = readCheckpoints(dir).map((c) => c.stage).join("\n")
   assert.ok(!cards.includes("grade:shard-one"))
 })
 
@@ -860,6 +863,6 @@ units = "sh units.sh"
   assert.deepEqual(shep.spawned.sort(), ["w-u1", "w-u2"])
   // the default grade (always-pass) fired for BOTH units — the old
   // contract, byte for byte
-  const cards = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
-  assert.ok(cards.includes("grade:u1") && cards.includes("grade:u2"))
+  const stages2 = readCheckpoints(dir).map((c) => c.stage)
+  assert.ok(stages2.includes("grade:u1") && stages2.includes("grade:u2"))
 })

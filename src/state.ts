@@ -1,24 +1,67 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
+import { appendEvent, createJob, findJobByDir, openSession, readEvents } from "./store.ts"
 
 export type Settled = { done: string[]; failed: string[] }
 
-// The unit ledger — the task dir's ONE lifecycle store (OPTIMUM §4,
-// state-store consolidation): append-only, one card per fact — the
-// zen-2 law the OS disk already lives by (events.jsonl is the trace,
-// job.json a projection). A card that carries `unit` SETTLES that
-// unit: ok → done, FAILED/grade-fault → failed; `info` observes and
-// never settles; the last settle card wins, so a regrade flips a unit
-// by APPENDING, never by rewriting. regrade (and any future resume
-// verb) finds the exact card that failed and re-enters THERE (#144).
+// The unit ledger — ONE store, the OS-disk trace (OPTIMUM §4 + §8's
+// fold): every card is a `unit.card` event on the task dir's owning
+// session trace (store.ts events.jsonl — zen 2's law: the trace is
+// the source, projections are derived). A card that carries `unit`
+// SETTLES that unit: ok → done, FAILED/grade-fault → failed; `info`
+// observes and never settles; the last settle card wins, so a regrade
+// flips a unit by APPENDING, never by rewriting. regrade (and any
+// future resume verb) finds the exact card that failed and re-enters
+// THERE (#144).
 //
-// state.json is deleted as a store. It survives one release as a
-// READ-ONLY spelling for pre-consolidation runs — their ledgers are
-// half-populated (stalled/deadline/spawn-fail settles never carded),
-// so for those dirs the file stays the truth and regrade still flips
-// it (flipLegacyState). New runs never write it.
+// The task dir keeps only the delivery interface (briefs, units.jsonl,
+// report, wake.json). It is NOT a store anymore: the task-dir
+// checkpoints.jsonl — a second carded spelling that merely mirrored
+// the trace — is retired (OPTIMUM §8, the events fold #162 named).
+// Both legacy spellings survive one release as READ-ONLY inputs for
+// pre-fold dirs: state.json still wins its own read wholesale (its
+// sibling ledger was half-populated), and a checkpoints.jsonl that
+// already exists folds BEFORE the trace cards (it is strictly older).
+// New runs never write either.
 export type CheckpointStatus = "ok" | "FAILED" | "grade-fault" | "info"
 export type Checkpoint = { ts: string; stage: string; status: CheckpointStatus; unit?: string; detail?: string }
+
+// The dir → trace join, ONE spelling, memoized per process. findJobByDir
+// is deterministic (oldest job owning the dir), so every process — the
+// orchestrator mid-run, a later regrade, a rerun's fresh booking —
+// resolves the SAME trace, and a rerun's cards fold in beside the
+// original run's exactly as they did when one file accumulated them.
+//
+// A jobless dir (the front door's in-process grading, fixtures) mints
+// its record at the FIRST CARD, never on a read: a dir that settles
+// units is a run, and runs leave records — jobless settles used to be
+// invisible to the OS disk. The mint races only if two processes write
+// a jobless dir's first cards concurrently; unreachable in production,
+// where every booked run owns its job before the engine starts.
+const traceCache = new Map<string, { sid: string; jid: string }>()
+
+function traceOf(taskDir: string, mint: boolean): { sid: string; jid: string } | null {
+  const hit = traceCache.get(taskDir)
+  if (hit) return hit
+  const job = findJobByDir(taskDir)
+  if (job) {
+    const found = { sid: job.sid, jid: job.id }
+    traceCache.set(taskDir, found)
+    return found
+  }
+  if (!mint) return null
+  const sess = openSession({ cwd: taskDir })
+  const job2 = createJob({
+    sid: sess.id,
+    stoodUpBy: "standalone",
+    workflow: "fan-out",
+    task: basename(taskDir),
+    dir: taskDir,
+  })
+  const minted = { sid: job2.sid, jid: job2.id }
+  traceCache.set(taskDir, minted)
+  return minted
+}
 
 export function checkpoint(
   taskDir: string,
@@ -27,26 +70,50 @@ export function checkpoint(
   detail?: string,
   unit?: string,
 ): void {
-  mkdirSync(taskDir, { recursive: true })
-  const entry: Checkpoint = { ts: new Date().toISOString(), stage, status }
-  if (unit) entry.unit = unit
-  if (detail) entry.detail = detail
-  appendFileSync(join(taskDir, "checkpoints.jsonl"), `${JSON.stringify(entry)}\n`)
+  const trace = traceOf(taskDir, true)!
+  appendEvent(trace.sid, {
+    actor: "rail",
+    kind: "unit.card",
+    jid: trace.jid,
+    dir: taskDir,
+    stage,
+    status,
+    ...(unit ? { unit } : {}),
+    ...(detail ? { detail } : {}),
+  })
 }
 
+// Card order = the dir's ledger order: a pre-fold file's cards (it is
+// strictly older than any trace card), then this dir's trace cards in
+// append order. The dir filter — not the jid — is the key: the ledger
+// belongs to the DIR (a rerun folds in beside the original run).
 export function readCheckpoints(taskDir: string): Checkpoint[] {
-  const path = join(taskDir, "checkpoints.jsonl")
-  if (!existsSync(path)) return []
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => {
+  const cards: Checkpoint[] = []
+  const legacy = join(taskDir, "checkpoints.jsonl")
+  if (existsSync(legacy)) {
+    for (const line of readFileSync(legacy, "utf8").split("\n")) {
+      if (!line.trim()) continue
       try {
-        return JSON.parse(line) as Checkpoint
+        cards.push(JSON.parse(line) as Checkpoint)
       } catch {
-        return { ts: "", stage: "unparsable", status: "info" as const, detail: line.slice(0, 80) }
+        cards.push({ ts: "", stage: "unparsable", status: "info", detail: line.slice(0, 80) })
       }
-    })
+    }
+  }
+  const trace = traceOf(taskDir, false)
+  if (trace) {
+    for (const e of readEvents(trace.sid)) {
+      if (e.kind !== "unit.card" || e.dir !== taskDir) continue
+      cards.push({
+        ts: e.ts,
+        stage: String(e.stage),
+        status: e.status as CheckpointStatus,
+        ...(e.unit !== undefined ? { unit: String(e.unit) } : {}),
+        ...(e.detail !== undefined ? { detail: String(e.detail) } : {}),
+      })
+    }
+  }
+  return cards
 }
 
 // One settle, one card — the only settle verb. stage names the act

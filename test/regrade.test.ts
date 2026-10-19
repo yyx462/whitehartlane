@@ -1,12 +1,12 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-regrade-"))
 
-import { homeRoot } from "../src/store.ts"
+import { homeRoot, findJobByDir, listJobs, readEvents } from "../src/store.ts"
 import { regradeJob } from "../src/resume.ts"
 import { readReport } from "../src/report.ts"
 import { checkpoint, readCheckpoints, readState, settle } from "../src/state.ts"
@@ -49,11 +49,7 @@ function stageJob(opts: {
   mkdirSync(unitDir, { recursive: true })
   if (opts.unitDone) writeFileSync(join(unitDir, "log.txt"), `working\ndone u1\n`)
   else writeFileSync(join(unitDir, "log.txt"), `working\n`)
-  if (opts.store === "ledger") {
-    // a post-consolidation dir: the unit ledger is the only store
-    checkpoint(taskDir, "unit:u1", "info", "worker output landed", "u1")
-    checkpoint(taskDir, "grade:u1", "FAILED", "exit 1", "u1")
-  } else {
+  if (opts.store !== "ledger") {
     writeFileSync(join(taskDir, "state.json"), JSON.stringify({ done: [], failed: ["u1"] }))
   }
   writeFileSync(
@@ -81,7 +77,13 @@ function stageJob(opts: {
       panes: [],
     }),
   )
+  if (opts.store === "ledger") ledgerCards(taskDir)
   return { sid, jid, taskDir }
+}
+
+function ledgerCards(taskDir: string): void {
+  checkpoint(taskDir, "unit:u1", "info", "worker output landed", "u1")
+  checkpoint(taskDir, "grade:u1", "FAILED", "exit 1", "u1")
 }
 
 test("regrade re-enters at the grade card: hook now passes, report flips, worker never re-runs", () => {
@@ -162,6 +164,46 @@ test("a legacy state.json wins its own read — its ledger is half-full", () => 
   settle(dir, "u1", "unit:u1", true, "found")
   writeFileSync(join(dir, "state.json"), JSON.stringify({ done: ["u1"], failed: ["u2"] }))
   assert.deepEqual(readState(dir), { done: ["u1"], failed: ["u2"] })
+})
+
+// ── the events fold (OPTIMUM §8: cards ride the OS-disk trace) ──────
+
+test("a card IS a trace event — the task dir keeps no ledger file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "whl-trace-"))
+  settle(dir, "u1", "unit:u1", true, "found")
+  // no second store is ever written: the dir holds the delivery
+  // interface only; the card lives on the session trace
+  assert.equal(existsSync(join(dir, "checkpoints.jsonl")), false)
+  const job = findJobByDir(dir)
+  assert.ok(job, "a dir that settles mints its job record")
+  const card = readEvents(job!.sid).find((e) => e.kind === "unit.card")
+  assert.ok(card)
+  assert.equal(card!.dir, dir)
+  assert.deepEqual(
+    { stage: card!.stage, status: card!.status, unit: card!.unit, detail: card!.detail },
+    { stage: "unit:u1", status: "ok", unit: "u1", detail: "found" },
+  )
+})
+
+test("reads never mint — a jobless dir's readState is empty and writes nothing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "whl-read-only-"))
+  const before = listJobs().length
+  assert.deepEqual(readState(dir), { done: [], failed: [] })
+  assert.equal(listJobs().length, before, "a read must not write the disk")
+})
+
+test("a pre-fold checkpoints.jsonl folds read-only, strictly before the trace's cards", () => {
+  const dir = mkdtempSync(join(tmpdir(), "whl-pre-fold-"))
+  writeFileSync(
+    join(dir, "checkpoints.jsonl"),
+    `${JSON.stringify({ ts: "2026-10-19T00:00:00.000Z", stage: "grade:u1", status: "FAILED", unit: "u1", detail: "exit 1" })}\n`,
+  )
+  // a post-fold card joins the same ledger (a regrade, say) — the file
+  // is never rewritten, it only folds first because it is older
+  settle(dir, "u2", "unit:u2", true, "found")
+  assert.deepEqual(readState(dir), { done: ["u2"], failed: ["u1"] })
+  const file = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
+  assert.ok(!file.includes("u2"), "the legacy file is never appended to")
 })
 
 test("regrade on a ledger-only dir flips by card; no state.json appears", () => {
