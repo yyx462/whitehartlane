@@ -5,7 +5,6 @@
 // layout all live on the Rail; the runner door picks this engine by
 // shape (src/engine.ts).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
 import { budgetAction, clearPending, nextModel, readModelsFile, writePending } from "./model-ladder.ts"
@@ -15,7 +14,7 @@ import { emptyBoard } from "./lanes.ts"
 import { drainDeadline } from "./orchestrator.ts"
 import { waitChange, type Rail } from "./rail.ts"
 import { writeReport, type Report } from "./report.ts"
-import { liveSpawnerSessionIds, writeWorkerPermissions } from "./store.ts"
+import { liveSpawnerSessionIds } from "./store.ts"
 
 // The door checkout root — where the operator's global models.local.toml
 // lives (layer 3 of the policy ladder).
@@ -98,9 +97,9 @@ export async function runCoworker(
     // pre-declared external roots ride the session-start config — the
     // dialogs for these paths never fire, so the sweep never spends
     // on them (the j-5b245e lesson: a vista reviewer died at the cap
-    // for paths every verdict allowed)
-    const extraRoots = (m.roots ?? []).map((r) => r.replace(/^~(?=\/|$)/, homedir()))
-    writeWorkerPermissions(dir, [taskDir, ...rail.programRoots, ...extraRoots])
+    // for paths every verdict allowed). The scope's roots ride too;
+    // member roots arrive tilde-form and expand inside.
+    rail.writePermissions(dir, m.roots ?? [])
     let brief = ""
     try {
       brief = readFileSync(join(taskDir, "members", `${m.name}.md`), "utf8")

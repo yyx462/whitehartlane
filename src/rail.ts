@@ -19,7 +19,7 @@ import { isProviderFault, parseModelRef } from "./model-ladder.ts"
 import { landMockUnit, loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
 import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
-import { decidePermission, escalateOnRepeat, PERMISSION_CAP, tunedPermissionJudge, type PermissionJudge } from "./permission.ts"
+import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "./permission.ts"
 import type { Report } from "./report.ts"
 import {
   abortJob as abortJobRec,
@@ -148,7 +148,11 @@ export class Rail implements ShepPort {
   readonly taskDir: string
   readonly log: (msg: string) => void
   readonly ledger: RailLedger | null
-  readonly programRoots: string[]
+  // the canonical path predicate's scope (OPTIMUM §5): the task dir
+  // plus the door's sanitized programRoots, constructed once — the
+  // dialog ladder, the pre-seed writes, and every roots consumer read
+  // from here; nobody assembles a root set of their own anymore
+  readonly scope: PathScope
   readonly mine = new Set<string>()
   private readonly workerModel: string | undefined
   private readonly shepRun: (args: string[]) => RunnerResult
@@ -201,11 +205,13 @@ export class Rail implements ShepPort {
     this.log = opts.log ?? ((msg) => console.log(`${new Date().toISOString()} ${msg}`))
     this.shepRun = opts.shepRunner ?? defaultRunner("shep")
     this.herdrRun = opts.herdrRunner ?? defaultRunner("herdr")
-    this.programRoots = opts.programRoots ?? []
     this.judge = opts.judge
     this.home = opts.home ?? homedir()
     this.ledger = opts.ledger !== undefined ? opts.ledger : this.openLedger(opts.argvDir ?? null, opts.workflow ?? "fan-out")
     this.taskDir = opts.argvDir ?? this.ledger?.job.dir ?? resolve(process.cwd())
+    // the scope is declared once, after the task dir exists — the doors'
+    // already-sanitized programRoots pass through declareScope unchanged
+    this.scope = declareScope([this.taskDir, ...(opts.programRoots ?? [])])
     this.workerModel = opts.workerModel !== undefined ? opts.workerModel : modelIn(this.taskDir)
     this.scopedFn = paneLabeler(runIdFor(this.taskDir))
   }
@@ -304,8 +310,12 @@ export class Rail implements ShepPort {
     return scoped
   }
 
+  // Pre-seed a worker sandbox's opencode.json from the scope (plus any
+  // runtime extras — member roots arrive here still tilde-form; the
+  // predicate's one expandHome spelling applies). The bins reach
+  // through with the program roots; engines pre-grant member sandboxes.
   writePermissions(dir: string = this.taskDir, extraRoots: string[] = []): void {
-    writeWorkerPermissions(dir, extraRoots)
+    writeWorkerPermissions(dir, [...this.scope.roots, ...extraRoots.map(expandHome)])
   }
 
   existingRows(): { unit: string; result: string; pass: boolean }[] | undefined {
@@ -791,44 +801,33 @@ export class Rail implements ShepPort {
   // persistence is the asserted need the judge may have missed. No
   // dialog ever waits for a person. Capped like every retry surface.
 
-  // Answer one worker's permission dialog, if it has one. Roots default
-  // to the pane's booked cwd plus the task dir and program roots;
-  // context defaults to the pane's booked brief. Returns the verdict:
+  // Answer one worker's permission dialog, if it has one. The scope
+  // (task dir + program roots) plus the pane's booked cwd IS the root
+  // set — assembled inside the predicate, never here; context defaults
+  // to the pane's booked brief. Returns the verdict:
   // "none" (no dialog), "allow", "deny", or "capped" (deny cap hit —
   // the caller finished_by or kills the worker. Allows are free: only a
   // deny pattern — wandering asks, or a hard-deny re-ask loop —
   // spends the cap).
-  answerPermission(
-    name: string,
-    opts: { roots?: string[]; context?: string } = {},
-  ): "allow" | "deny" | "none" | "capped" {
+  answerPermission(name: string): "allow" | "deny" | "none" | "capped" {
     const label = this.scopedName(name)
     const state = this.herdr("agent", "get", label).stdout
     if (!state.includes('"agent_status":"blocked"')) return "none"
-    return this.answerDialog(label, opts)
+    return this.answerDialog(label)
   }
 
   // The dialog answer itself, keyed by the SCOPED label (cwdOf/briefOf/
   // askedCount are label-keyed). Callers pre-check blocked.
-  private answerDialog(
-    label: string,
-    opts: { roots?: string[]; context?: string } = {},
-  ): "allow" | "deny" | "capped" {
+  private answerDialog(label: string): "allow" | "deny" | "capped" {
     const term = this.herdr("agent", "read", label).stdout
     const at = term.lastIndexOf("Permission required")
     const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
     const cwd = this.cwdOf.get(label) ?? this.taskDir
     const briefFile = this.briefOf.get(label)
     const context =
-      opts.context ?? (briefFile && existsSync(briefFile) ? readFileSync(briefFile, "utf8").slice(0, 2000) : undefined)
+      briefFile && existsSync(briefFile) ? readFileSync(briefFile, "utf8").slice(0, 2000) : undefined
     const raw = decidePermission(
-      {
-        question,
-        allowedRoots: opts.roots ?? [cwd, this.taskDir, ...this.programRoots].filter((r) => r.length > 0),
-        home: this.home,
-        cwd,
-        context,
-      },
+      { question, scope: this.scope, home: this.home, cwd, context },
       this.judge ?? tunedPermissionJudge(),
     )
     // Forensics first (issue #82): the ask itself belongs in the log —

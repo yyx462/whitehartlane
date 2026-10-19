@@ -15,7 +15,6 @@ import { gradeCall } from "./live-grade.ts"
 import { actorBrief, paneName } from "./roles.ts"
 import { writeReport, type Report } from "./report.ts"
 import { waitChange, type Rail } from "./rail.ts"
-import { writeWorkerPermissions } from "./store.ts"
 import { closes } from "./verbose.ts"
 
 export async function runLab(rail: Rail): Promise<Report | null> {
@@ -119,7 +118,9 @@ export async function runLab(rail: Rail): Promise<Report | null> {
         "",
         `Write what you generated to ${join(dir, "result.md")}`,
       ].join("\n"))
-      writeWorkerPermissions(dir, [taskDir, ...rail.programRoots])
+      // the scope's roots (task dir + program roots) pre-seed the mock's
+      // sandbox — same projection the real panes get
+      rail.writePermissions(dir)
       const slot = rail.ensureRole(board, "mock", dir)
       board = slot.board
       const ok = slot.pane ? rail.inhabitPane(name, kind, slot.pane, briefPath, dir) : false

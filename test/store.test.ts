@@ -61,6 +61,25 @@ test("a session without a host is an auto session (standalone runs)", () => {
   assert.ok(existsSync(join(homeRoot(), "sessions", session.id, "session.json")))
 })
 
+test("openSession re-opens a host conversation, never duplicates it (duplicate rule 1 at the write path)", () => {
+  // fork C02: two openSession calls with one host binding used to write
+  // two sessions; the fork's trace event then landed in whichever
+  // duplicate readdirSync listed first, and the sender's own read saw
+  // nothing — order-dependent green/red (gate refusals of #163).
+  const host = { tool: "opencode", session_id: "ses-dup" }
+  const first = openSession({ cwd: "/tmp/one", host })
+  const second = openSession({ cwd: "/tmp/two", host })
+  assert.equal(second.id, first.id, "re-opening a host conversation returns its session")
+  assert.equal(
+    listSessions().filter((s) => s.host?.session_id === "ses-dup").length,
+    1,
+    "one conversation, one session dir",
+  )
+  assert.equal(second.cwd, first.cwd, "the first binding stays the record")
+  appendEvent(second.id, { actor: "levy", kind: "pane.born", label: "fork-x" })
+  assert.ok(readEvents(first.id).some((e) => e.label === "fork-x"), "the trace lands where every reader looks")
+})
+
 test("shortIds do not collide", () => {
   const ids = new Set(Array.from({ length: 50 }, () => shortId("j")))
   assert.equal(ids.size, 50)
@@ -172,6 +191,9 @@ test("a model in workflow.toml lands in the project files, not the user pi dir",
   const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
   assert.equal(oc.model, "xai/grok-4.7")
   assert.equal(oc.permission.external_directory[`${skill}/**`], "allow")
+  // both spellings — the ladder's under() accepts the root itself, so
+  // the pre-seed projection does too (one grantRoot, no asymmetry)
+  assert.equal(oc.permission.external_directory[skill], "allow")
   const unit = join(dir, "units", "france")
   mkdirSync(unit, { recursive: true })
   writePiSettings(unit, "xai/grok-4.7")

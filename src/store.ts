@@ -5,10 +5,10 @@
 // line per fact), and jobs/<jid>/{job.json,run/}. job.json is a
 // projection of events; records are never deleted (zen 5: retired is a
 // state, not rm).
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { loadManifest } from "./hooks.ts"
-import { TEMP_ROOTS } from "./permission.ts"
+import { allowGlobs, grantRoot } from "./permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
 import { backoffBase, backoffMs, retries, sleepSync } from "./backoff.ts"
@@ -223,6 +223,17 @@ export function openSession(input: {
   worktree?: string
   host?: HostBinding
 }): SessionRecord {
+  // Duplicate rule 1 is enforced at the write path, not just the find
+  // path: re-opening an existing host conversation returns its session.
+  // A second record for one conversation is a state the trace can only
+  // resolve arbitrarily — fork C02 bound ses_x twice and
+  // findSessionByHost answered in readdirSync order, so the pane.born
+  // event landed in whichever duplicate listed first and the sender's
+  // own read saw nothing (the gate's 4 refusals of #163).
+  if (input.host) {
+    const found = findSessionByHost(input.host.tool, input.host.session_id)
+    if (found) return found
+  }
   const rec: SessionRecord = {
     id: shortId(input.host ? "s" : "auto"),
     created: new Date().toISOString(),
@@ -256,7 +267,15 @@ export function listSessions(): SessionRecord[] {
 // keyed on (tool, host session id) — a host chat resumed or restarted
 // reuses its OS session; a new chat gets a new one.
 export function findSessionByHost(tool: string, sessionId: string): SessionRecord | null {
-  return listSessions().find((s) => s.host?.tool === tool && s.host.session_id === sessionId) ?? null
+  // Disks written before duplicate rule 1 was enforced at the write
+  // path may still hold several sessions for one conversation; resolve
+  // them deterministically — the oldest binding is the original session,
+  // never whichever directory entry happens to list first.
+  return (
+    listSessions()
+      .filter((s) => s.host?.tool === tool && s.host.session_id === sessionId)
+      .sort((a, b) => (a.created < b.created ? -1 : a.created > b.created ? 1 : 0))[0] ?? null
+  )
 }
 
 export function findOrOpenSession(input: {
@@ -1117,7 +1136,8 @@ export function writeOpencodeModel(dir: string, model: string): void {
 // the next session start; the current dialog is cleared by the rail.
 // A degenerate root ("/", "") is refused: one temp allow must never
 // whitelist the whole disk for the next session (j-b6067c granted
-// "/**" by parent-stripping /tmp).
+// "/**" by parent-stripping /tmp). The glob spelling itself is the
+// predicate's (grantRoot) — one form-writer, not two.
 export function addWorkerRoot(runDir: string, root: string): void {
   if (root === "" || root === "/") return
   try {
@@ -1127,11 +1147,7 @@ export function addWorkerRoot(runDir: string, root: string): void {
       : {}
     cfg.permission ??= {}
     cfg.permission.external_directory ??= { "*": "ask" }
-    for (const form of new Set([root, realpathSync(root)])) {
-      if (form === "" || form === "/") continue
-      cfg.permission.external_directory[form] = "allow"
-      cfg.permission.external_directory[`${form}/**`] = "allow"
-    }
+    grantRoot(cfg.permission.external_directory, root)
     writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
   } catch {
     // permissions are best-effort; the dialog decision still applies
@@ -1139,25 +1155,16 @@ export function addWorkerRoot(runDir: string, root: string): void {
 }
 
 // Temp scratch is pre-seeded, not re-allowed beat after beat (j-b6067c:
-// five /tmp dialogs, one per 30s beat). The rail already treats temp as
-// no boundary (permission.ts TEMP_ROOTS) — the worker's own config says
-// so from session start, so a mktemp/git/pip write never prompts.
+// five /tmp dialogs, one per 30s beat). The ALLOWED SET is the
+// canonical predicate's projection (permission.ts allowGlobs) — this
+// writer owns only the file: temp scratch, the run's tree, and the
+// scope's roots ride along from session start, so a mktemp/git/pip
+// write never prompts.
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
-    const real = realpathSync(runDir)
-    const external = { "*": "ask" } as Record<string, string>
-    const roots = [runDir, real, ...TEMP_ROOTS, ...extraRoots]
-    for (const root of roots) {
-      try {
-        const forms = new Set([root, realpathSync(root)])
-        for (const form of forms) external[`${form}/**`] = "allow"
-      } catch {
-        external[`${root}/**`] = "allow"
-      }
-    }
     const config: Record<string, unknown> = {
       $schema: "https://opencode.ai/config.json",
-      permission: { external_directory: external },
+      permission: { external_directory: allowGlobs([runDir, ...extraRoots]) },
     }
     const model = modelIn(runDir)
     if (model) config.model = model

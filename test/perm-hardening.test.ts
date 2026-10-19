@@ -62,9 +62,12 @@ test("a queued deny note flushes with a single-scoped label, and the trace carri
 
 test("admission refuses briefs naming existing paths no root covers (#51)", async () => {
   const prog = await mkdtemp(join(tmpdir(), "adm-noroots-"))
-  // macOS tmpdir is /var/folders — temp scratch, always free. A real
-  // uncovered path: this test's own directory.
-  const elsewhere = import.meta.dirname
+  // The probe must be an existing path NO temp root covers. This
+  // suite's own directory is not a safe probe: the merge gate clones
+  // into $TMPDIR, where scopeCovers counts the checkout itself as
+  // temp scratch and the door would rightly admit. /Users/Shared
+  // exists on every macOS and is never temp and never a scope root.
+  const elsewhere = "/Users/Shared"
   writeFileSync(
     join(prog, "workflow.toml"),
     [
@@ -156,7 +159,14 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
   const dir = await coworkerDir("cw-defer-")
   const herdr = fakeHerdr()
   const ledger = fakeLedger()
-  const rail = fakeRail(dir, herdr, ledger as never, { judge: () => 0, home: homedir() })
+  // Home is planted INSIDE the temp tree. A probe at this suite's own
+  // checkout is not location-proof: the merge gate clones into $TMPDIR,
+  // where the probe sits outside home under temp — allowed on the spot,
+  // no deny guidance, no defer. Under a planted home the same temp path
+  // keeps its judged gray zone (the predicate's own carve-out), so the
+  // probe below is denied-unneeded in every checkout location.
+  const home = await mkdtemp(join(tmpdir(), "perm-home-"))
+  const rail = fakeRail(dir, herdr, ledger as never, { judge: () => 0, home })
 
   // alpha's brain: first turn ends on an OUTSIDE-roots dialog (denied,
   // judge at 0). The esc dismisses it to idle — but the pane then
@@ -167,8 +177,10 @@ test("a nudge-cap kill defers one beat while the deny guidance is still queued (
   // merge gate clones the head into a TMPDIR, and temp-outside-home is
   // free scratch by design (j-ba18b7) — a checkout-local "uncovered"
   // path stops being uncovered exactly where the gate tests, the ask
-  // flips to allow, no deny queues, and the defer never happens.
-  const outside = join(homedir(), "wandering-ask", "outside-roots.txt")
+  // flips to allow, no deny queues, and the defer never happens. HOME
+  // itself is the planted temp tree above, so the probe holds in every
+  // checkout location without touching the operator's real home.
+  const outside = join(home, "no-root-covers-this.txt") // under home, covered by no root
   let asked = false
   herdr.onPrompt = (name) => {
     if (!asked) {
