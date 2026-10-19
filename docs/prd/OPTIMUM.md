@@ -30,6 +30,16 @@
 > untouched, topo-tune re-proven directly, regate PASS 00:24, merged).
 > No same-cause strike ever billed (strikes.json {}); no ESCALATED
 > records; D3 unexercised.
+> Refit 5: 2026-10-20, over PRs #2–#174 (123 merged; +2 since refit 4:
+> #173 this file's refit-4 landing, #174 the relay events fold — §8
+> EXECUTED, the fourth loop iteration to land on its named target
+> (#167, #170, #172, #174), receipt 1 round / 0 strikes). Two infra
+> events, neither a strike (correctly, D4): #173's absorb refused
+> once ("evidence incomplete" — the refit lane's ≥2-PR-refs fence;
+> human-merged 01:48, loop continued), and iteration 4 died driver-
+> side (revive4's adopted fixer failed → DEAD-iter4; re-armed as
+> iteration 5 on the same target, landed clean). strikes.json {};
+> no ESCALATED records; D3 unexercised.
 
 ## L0 — the product thesis (one page)
 
@@ -58,9 +68,10 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 4: #172 executed the fold refit 3 had
-named — §5 converged when privilege's last private path spelling moved
-into the canonical predicate; no new axis appeared.
+The thesis held under refit 5: #174 executed the fold refit 4 picked —
+§8 converged when the ledger's cards retired onto the OS-disk trace
+the store already owned (one carded store, and it IS the trace); no
+new axis appeared.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
@@ -70,47 +81,56 @@ these may be the true optimum's home; treat as research, not refit.
 ## L1 — components
 
 Momentum table (`momentum.py`, 2026-10-20, 120-day window — whole-PR
-churn attribution, coarse v1: wide globs catch shared-surface PRs, so
-fix-density overcounts hub components; the pick rule is checkable and
-holds — the worst tops its own table AFTER receipted discounts):
+churn attribution, coarse v1: attribution uses component-owned globs
+only, test/ and docs/ excluded; §1's default globs match no file at
+all — see the gaps note below):
 
 | component | fix-density | oscillation | churn | runtime-loss | score |
 |---|---|---|---|---|---|
-| runner-dispatch | 72 | 0 | 39713 | — | 111.7 |
+| runner-dispatch | 73 | 0 | 40028 | — | 113.0 |
 | window | 27 | 0 | 16364 | — | 43.4 |
 | permissions | 13 | 0 | 10717 | — | 23.7 |
-| resume-parking | 3 | 0 | 1465 | — | 4.5 |
+| resume-parking | 4 | 0 | 1780 | — | 5.8 |
 | wake-ladder | 1 | 0 | 1153 | — | 2.2 |
 | model-pinning | 1 | 0 | 777 | — | 1.8 |
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-Refit 4's pick reads the table after the discounts, every one by
-receipt: rank 1 **runner-dispatch** (111.7) converged — its +1
-fix-density IS #172's fold deleting `engine.ts`'s private roots.txt
-reader (net-negative code: convergence churn, not sickness; a fixer
-sent there would patch inside #170's converged design, the one move
-the loop forbids); rank 2 **window** (43.4) unchanged since refit 3's
-churn read — follower-dominated, #172 touched nothing under `web/`;
-rank 3 **permissions** (23.7) converged THIS iteration (#172 closed
-slice 2, the closing slice is the +1 itself); rank 4 **resume-parking**
-converged (#162 one ledger, #170 the law reached the lab); rank 5
+Refit 5's pick reads the table after the discounts, every one by
+receipt: rank 1 **runner-dispatch** (113.0) converged — its +1 IS
+#174's seam discipline (the five readers NOT moving was the fold's own
+receipt; orchestrator.ts shifted 5 lines and held the interface while
+the store under it changed — convergence churn, not sickness); rank 2
+**window** (43.4) unchanged since refit 3's churn read — #174 touched
+nothing under `web/`; rank 3 **permissions** (23.7) converged at refit
+4 (#172); rank 4 **resume-parking** (5.8) — its +1 IS #174 closing the
+residual fold §4 had named (the three-stores cure completes under
+§8's mandate; the closing slice is the +1 itself); rank 5
 **wake-ladder** KEEP, no alternative known; rank 6 **model-pinning**
-WATCH with no new evidence (3793ad1 bumped `bin/pick-workflow`'s jev
-pin direct-to-master — config, not rail src). The pick is rank 7
-**relay** — honestly OFF-TABLE (0.0: sickness metrics cannot see a
-clean component's open mandate) and ON-BOOKS: the events fold #162
-named is the last un-gated known-simpler alternative the milestone
-forbids carrying. That is the discount chain's honest end: the table
-is running out of sick components, which is the loop winning.
+WATCH, no new evidence. Rank 7 **relay** (0.0) converged THIS
+iteration — #174 executed the events fold; it bills 0.0 to relay only
+through the attribution gap below. The pick is rank 8
+**program-grammar** — 0.0 on the table (narrow globs, and they match
+no code file) and now UN-GATED: §1's retirement debt was gated on
+levy migration, and the migration is evidence-complete this refit —
+the levy surface mints `[[stage]]` (the eval LEVY-CARD's required
+reading is docs/STAGES.md; the loop's own programs are stage chains),
+and the ops tree greps clean of `[[step]]`/units-hook authors. The
+milestone forbids carrying an un-gated known-simpler alternative; §1
+is the last one on the books.
 
 Attribution gaps (human note — the constitution is not refit's to
-edit): `src/lab*` AND `src/store*` match no component's globs (#170
-reached the table only via `rail.ts`/`engine.ts`; the coming fold's
-`store.ts` work will do the same) — runner-dispatch should own
-`src/lab*`, relay should own `src/store*` at the next constitution
-touch. And the shared `engine.ts` surface double-bills permissions
-work to runner-dispatch (again: #163, #172).
+edit): `src/lab*` and `src/store*` match no component's globs, and §1's
+defaults (`src/stage*`, `src/parse*`) match no FILE — the dialects
+parse inside `src/hooks.ts`, and the legacy lab path lives in
+`src/run.ts`/`src/lab.ts`/`src/spur.ts`, all unattributed. Proof by
+receipt: #174, the relay fold itself, bills its churn to
+resume-parking (state.ts) and runner-dispatch (orchestrator.ts) while
+store.ts lands on nobody. At the next constitution touch: relay should
+own `src/store*`, program-grammar should own `src/hooks.ts` +
+`src/run.ts` (the authoring dialects), runner-dispatch `src/lab*`. And
+the shared `engine.ts` surface still double-bills permissions work to
+runner-dispatch (#163, #172).
 
 ### 1. Program grammar
 - **Concept**: shape + hooks declared per stage; compiles to the
@@ -118,21 +138,31 @@ work to runner-dispatch (again: #163, #172).
 - **Trajectory**: #5 one DAG file, tick-only scheduler → ADR 0007
   #42/#43/#50 settle-typed steps → ADR 0009 dag→spur rename →
   units-hook quick-mint (arm-e era) coexisting → #153–#158 stages
-  (5 topologies, per-stage hooks, preamble, pins, manual).
+  (5 topologies, per-stage hooks, preamble, pins, manual) → refit 5
+  lifts the levy-migration gate on evidence: the levy surface authors
+  `[[stage]]` (the eval LEVY-CARD sends STAGES.md as required
+  reading), the loop's own programs are stage chains, and the ops
+  tree has zero `[[step]]`/units-hook authors left — the old
+  dialect's only residents are rail-internal (hooks.ts's raw
+  `[[step]]` tables + units-hook mint; run.ts/lab.ts/spur.ts's
+  ADR-0009 lab program path beside `[[stage]]`).
 - **Oscillation**: HIGH historically — three dialects for one concept;
   #150 (grade per unit) was the units-hook path's missing per-stage
   honesty. Resolved 2026-10-18: stages compile; steps+stages refused
-  together. Untouched by the loop so far (attribution 0 — grammar
-  globs are narrow and true).
-- **Simpler alternative**: the authoring surface is still three-shaped
-  (stages, steps, units-hook). Retire the units-hook mint and fold
-  `[[step]]` behind stages once levies migrate — and #167/#170 handed
-  §1 one more debt when §2 closed: the runners' dialect surface folds
-  into ONE authoring story here, now CONCRETE — `runLab` still carries
-  the legacy spur path beside `[[stage]]` (#170's body names it).
-- **Verdict**: KEEP (converged); the debt is stated and gated (levy
-  migration), the next convergence item after §8's fold lands. Next:
-  LEVY-BRIEF mints `[[stage]]`.
+  together. Zero attribution ever — the globs own no code file.
+- **Simpler alternative**: THE PICK, un-gated at refit 5. ONE
+  authoring story: retire the units-hook quick-mint and the raw
+  `[[step]]` tables in hooks.ts (one honest refusal pointing at
+  `[[stage]]` — refusal beats silence, the house manner); retire the
+  legacy lab program path (run.ts's prepareLabRun admitting
+  spur.mjs/dag.mjs, lab.ts's spur branch, spur.ts's step scheduler if
+  the stage executors leave it consumer-less); docs/STAGES.md is the
+  surviving manual. The steps+stages mutual refusal (issue #152)
+  becomes a one-way refusal.
+- **Verdict**: INVESTIGATE (refit 5's pick: NEXT-TARGET
+  program-grammar, cap 900 — blast set = the dialect owners
+  (hooks.ts, run.ts, lab.ts, spur.ts) + the chain seam as contingent
+  (orchestrator*, workflow-kind) + STAGES.md/RAILS.md/adr/prd + test/).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -157,7 +187,10 @@ work to runner-dispatch (again: #163, #172).
   with a live probe receipt) → #172 the door's last private path
   spelling deleted (`programRootsOf` = `declareScope(readRootsTxt(
   dir)).roots` — a pure fold onto §5's predicate; the table bills
-  this +1 to runner-dispatch; it is convergence churn).
+  this +1 to runner-dispatch; it is convergence churn) → #174 the
+  five readers held the seam (orchestrator.ts shifted 5 lines while
+  the card store under it changed — the reader NOT moving was the
+  fold's receipt).
 - **Oscillation**: RESOLVED. The old MED (split → rejoin-via-
   delegation) dissolved monotonically: #161→#164→#167→#170→#172
   share one direction (dispatch machinery deleted, engines kept),
@@ -167,9 +200,9 @@ work to runner-dispatch (again: #163, #172).
   door, one chain object, one walker, three executors, the lab shape
   honors the same drain/resume law as its siblings, and the door now
   holds no path knowledge at all.
-- **Verdict**: KEEP (converged at refit 3; #172 purified it further).
-  The residual dialect surface (legacy spur path inside runLab) is
-  §1's to retire.
+- **Verdict**: KEEP (converged at refit 3; #172/#174 purified it
+  further). The residual dialect surface (legacy spur path inside
+  runLab) is §1's to retire — iteration 6's target.
 
 ### 3. Wake ladder
 - **Concept**: one wake per commission; spool-first, per-rung trace.
@@ -193,19 +226,19 @@ work to runner-dispatch (again: #163, #172).
   #170 the law reaches the lab (booked sessions resumed via the
   pane-ledger fold — the same ledger, the third reader; the
   w-<id>→bare re-key fixed at the engine seam that owns the
-  convention, with a production-silently-broken receipt) → #172 read
-  the ledger untouched (the permissions slice stayed inside §5's
-  surface).
+  convention, with a production-silently-broken receipt) → #174 the
+  residual fold EXECUTED under §8's mandate (task-dir
+  `checkpoints.jsonl` retired onto the OS-disk events trace; §4's
+  card interface — checkpoint/settle/readState/readCheckpoints —
+  unchanged; ADR 0013).
 - **Oscillation**: LOW; deepening honesty throughout.
-- **Simpler alternative**: EXECUTED at the task-dir level. The
-  three-stores sickness (checkpoints cards + state.json + booked
-  sessions) is cured: one append-only ledger; booked sessions remain
-  as a different aggregate (the JOB's lifecycle — L0 "paused is
-  booked, not lost"), correctly not consolidated. ONE residual fold
-  remains — retire `checkpoints.jsonl` itself into the OS-disk
-  events trace — tracked under §8's mandate (this refit's pick),
-  not §4's.
-- **Verdict**: KEEP (converged).
+- **Simpler alternative**: EXECUTED at every level. The three-stores
+  sickness (checkpoints cards + state.json + booked sessions) is
+  cured whole: #162 one ledger, #174 one carded store — the events
+  trace itself. Booked sessions remain as a different aggregate (the
+  JOB's lifecycle — L0 "paused is booked, not lost"), correctly not
+  consolidated.
+- **Verdict**: KEEP (converged; receipts #162, #170, #174).
 
 ### 5. Permissions
 - **Concept**: privilege is rail-owned; ONE canonical path predicate
@@ -258,7 +291,7 @@ work to runner-dispatch (again: #163, #172).
   read refit 2 instructed: the loop-era churn is the SERVER mirroring
   rail-side redesigns (grade contract #145, unit ledger #162, scan
   perf #139) — follower churn, not window-intrinsic sickness; the
-  viewer-only line has held since #69. Refit 4: nothing new under
+  viewer-only line has held since #69. Refits 4–5: nothing new under
   `web/` — the read stands.
 - **Verdict**: KEEP. Stays #2 on the table (43.4) by follower churn;
   not a candidate until a window-INTRINSIC question appears.
@@ -268,27 +301,20 @@ work to runner-dispatch (again: #163, #172).
   deliveries outlive memory.
 - **Trajectory**: #10 born booked/fork/relay → #98 refusals speak →
   #122 transport retry → delegation #153+ → #164 one booked-wait
-  spelling (the dead member-nudge filter deleted with it) → **the
-  events fold, picked at refit 4**: #162 named it; #172's convergence
-  left it the LAST un-gated known-simpler alternative on the books.
-  The evidence on master: `checkpoints.jsonl` is a duplicate carded
-  store — `orchestrator.ts`'s own comment concedes the stage ledger
-  "carries the same cards with timestamps" the OS-disk trace already
-  holds, and `store.ts` owns that trace (`sessionDir(sid)/
-  events.jsonl`).
+  spelling (the dead member-nudge filter deleted with it) → **#174
+  the events fold, EXECUTED**: ONE carded store — every ledger card
+  is a `unit.card` event on the run's session trace (store.ts's
+  `events.jsonl`); the task-dir `checkpoints.jsonl` is retired; the
+  task dir keeps only the delivery interface. The seam held:
+  state.ts's card functions unchanged, the five readers untouched
+  (ADR 0013 is the design record; 261+/54−, one fixer round, zero
+  strikes, eval green (33,8)).
 - **Oscillation**: LOW.
-- **Simpler alternative**: THE PICK. Slice, stated: retire the
-  task-dir `checkpoints.jsonl` into the OS-disk `events.jsonl`; the
-  task dir keeps only the delivery interface. The seam is
-  `state.ts`'s card functions (`checkpoint`/`settle`/`readState`/
-  `readCheckpoints`): hold the interface and the five readers
-  (orchestrator, orchestrator-chain, front-door, rail, resume) stay
-  untouched — the tests that read the file directly (chain,
-  orchestrator, regrade, stages) do change.
-- **Verdict**: INVESTIGATE (refit 4's pick: NEXT-TARGET relay, cap
-  700 — widened from the 500 default for the cross-surface fold —
-  blast set = the store seam + the trace owner + the component's own
-  surface + the five readers as contingent + test/ + docs).
+- **Simpler alternative**: EXECUTED. The duplicate carded store is
+  gone; the trace was already there (#162 named it, refit 4 picked
+  it, #174 landed it).
+- **Verdict**: KEEP (converged at refit 5 — the third loop pick
+  closed on its named target: #167, #170, #172, #174).
 
 ## The loop (non-stop)
 
@@ -299,29 +325,34 @@ work to runner-dispatch (again: #163, #172).
    + ONE real ≤30-min bench task exercising the redesign.
 4. **Merge** → back to 1.
 
-Loop-v2 status (refit 4's read): three iterations landed GREEN — #167
-(iteration 1), #170 (iteration 2), #172 (iteration 3: receipt 1
-fixer round; one eval-red bounce root-caused as INFRA — the 18:18
-landing eval died inside zhipuai's 5-hour quota window ('已达到 5
-小时的使用上限') with no RESULT.md, the same eval had PASSed 5× that
-day, the fixer changed nothing and re-proved topo-tune directly GREEN
-(33,8); regate PASS 00:24, merged). strikes.json {} — no same-cause
-strike ever billed; D3 unexercised (a circuit breaker, not a KPI).
-#169 (operator amendment) made refit proposals effective as-written,
-which raises this file's duty: the discount chain and pick receipts
-above ARE the audit trail that keeps D2 honest — momentum.py's
-mechanical rank-1 echo (runner-dispatch, cap 900) was read and
-overridden BY RECEIPT, not by taste.
+Loop-v2 status (refit 5's read): four iterations landed GREEN — #167
+(iteration 1), #170 (iteration 2), #172 (iteration 3: one eval-red
+bounce root-caused INFRA — zhipuai's 5-hour quota window, re-proven
+direct, regate PASS), #174 (iteration 5: 1 round, 0 strikes, clean).
+Iteration 4 died driver-side (DEAD-iter4: driver death mid-flight,
+revive4's adopted fixer failed — never a gate-red round, never a
+strike; D4's boundary held). #173's absorb was refused once by the
+refit lane's evidence fence (body must cite ≥2 PR refs — this file's
+own authors must comply) and human-merged. strikes.json {} — no
+same-cause strike ever billed; D3 unexercised (a circuit breaker, not
+a KPI). #169 (operator amendment) made refit proposals effective
+as-written, which raises this file's duty: the discount chain and
+pick receipts above ARE the audit trail that keeps D2 honest —
+momentum.py's mechanical rank-1 echo (runner-dispatch, cap 900) was
+read and overridden BY RECEIPT, not by taste. Iteration 6 arms on
+refit 5's proposal (§1's dialect retirement) — the commissioning's
+MAX-6 budget ceiling; after it, a fresh commissioning (the milestone's
+remaining leg, the composite eval case, is a BUILD — and the eval
+lane itself is constitution: the operator points it at the new case).
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
-known-simpler alternative (§2 closed at refit 3; §5 closed at refit
-4; §8's fold is this refit's pick — the last un-gated one; §1's
-retirement debt stays GATED on levy migration; §6's one-transport
-question stays WATCH for want of new evidence); composite eval green.
-After §8: the composite eval case is the milestone's remaining
-unbuilt leg — and with every component converged-or-gated, a green
-eval case graduates the loop to the FULL benchmark pass.
+known-simpler alternative (§2 closed at refit 3; §5 at refit 4; §8 at
+refit 5 (#174); §1's retirement un-gated at refit 5 and PICKED —
+iteration 6's target; §6's one-transport question stays WATCH for
+want of new evidence); composite eval green. After §1: the composite
+eval case is the milestone's last unbuilt leg — a green eval case
+graduates the loop to the FULL benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -344,9 +375,9 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
 
 Target ≤30 min real; mock rehearsal = seconds. Still build-next —
 untouched by the loop so far (the loop's eval lane used topo-tune's
-real levy, joint target (33,8) green on #167, #170, and #172's
-re-proof). #170 makes the scout stage honest to bench: a
+real levy, joint target (33,8) green on #167, #170, #172's re-proof,
+and #174). #170 makes the scout stage honest to bench: a
 paused-and-continued lab now resumes rather than restarts, so the
-≤30-min budget survives human interference. #172 is eval-adjacent
-only in that the fixture's `roots.txt` rides the now-canonical
-predicate.
+≤30-min budget survives human interference. Sequencing held by refit
+5: §1's retirement (iteration 6) lands BEFORE the case is authored,
+so the case authors against the final one-dialect grammar.
