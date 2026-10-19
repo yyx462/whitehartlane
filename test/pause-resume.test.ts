@@ -7,12 +7,12 @@ import {
   acquireUnits,
   continueBriefFor,
   cycle,
-  drainDeadline,
   runOrchestrator,
   type CycleDeps,
   type ResumePointer,
   type ShepPort,
 } from "../src/orchestrator.ts"
+import { drainDeadline } from "../src/levy.ts"
 import { hooksFromDir } from "../src/hooks.ts"
 import { readState } from "../src/state.ts"
 import { copyExample } from "./util.ts"

@@ -6,6 +6,7 @@ import { withBackpressure } from "./backpressure.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import {
+  drainDeadline,
   readChildWake,
   readWakeBooking,
   writeWakeBooking,
@@ -45,6 +46,11 @@ export type ShepPort = {
   // Blocks until the pane is done, blocked, or the timeout hits.
   // Absent in tests: file growth and the deadline timer are enough.
   waitWorker?: (name: string, timeoutMs: number) => Promise<"woke" | "miss">
+  // The drain registration (ADR 5): the rail owns the SIGTERM trap
+  // (the door is kind-blind), so an engine that can drain hands its
+  // requestPause to the port. A port without the seam (tests) makes
+  // runOrchestrator trap SIGTERM itself.
+  installDrain?: (fn: () => void) => void
   // Privilege (zen 6, rail-owned): one sweep per cycle answers every
   // blocked pane's dialog at the rail — engines carry only the
   // consequence. answered = a dialog was answered (allow or deny — the
@@ -297,21 +303,6 @@ export function continueBriefFor(
     "",
     "Do not write anything else to that log. Do not do any other work.",
   ].join("\n")
-}
-
-// The drain ceiling (ADR 5): `pause --wait` writes a one-shot deadline
-// into the Job dir — read and cleared at the first drain. Anything
-// missing or unparsable falls back to now + the configured ceiling.
-export function drainDeadline(taskDir: string, nowMs: number, ceilingMs: number): number {
-  const path = join(taskDir, "drain.deadline")
-  try {
-    const at = Date.parse(readFileSync(path, "utf8").trim())
-    rmSync(path, { force: true })
-    if (Number.isFinite(at)) return at
-  } catch {
-    // no override file — the configured ceiling applies
-  }
-  return nowMs + ceilingMs
 }
 
 function logText(path: string): string {
@@ -671,7 +662,8 @@ export async function runOrchestrator(input: {
   canary?: boolean
   // Pause drain (ADR 5): the drain ceiling defaults to the manifest's
   // drain_timeout_ms, then the stall timeout. SIGTERM starts the drain
-  // unless trapSignals is false (tests drive the loop another way).
+  // unless trapSignals is false (tests drive the loop another way);
+  // with the port's installDrain seam the RAIL's trap delivers it.
   drainMs?: number
   trapSignals?: boolean
   resumes?: Map<string, ResumePointer>
@@ -918,8 +910,11 @@ export async function runOrchestrator(input: {
   }
 
   // SIGTERM is the drain (ADR 5): stop claiming, let in-flight units
-  // finish, then park. SIGINT stays an immediate stop (the bin books
-  // the abort); SIGKILL cannot be caught and is the abort verb's own.
+  // finish, then park. The RAIL owns the trap (the door is kind-blind)
+  // — register requestPause through the port's drain seam; a port
+  // without the seam (tests with fake sheps) traps SIGTERM itself.
+  // SIGINT stays an immediate stop (the bin books the abort); SIGKILL
+  // cannot be caught and is the abort verb's own.
   const requestPause = (): void => {
     if (finished || draining) return
     draining = true
@@ -928,7 +923,8 @@ export async function runOrchestrator(input: {
     enqueue("pause")
   }
   if (input.trapSignals !== false) {
-    process.on("SIGTERM", requestPause)
+    if (input.shep.installDrain) input.shep.installDrain(requestPause)
+    else process.on("SIGTERM", requestPause)
   }
 
   const watchFlights = (): void => {

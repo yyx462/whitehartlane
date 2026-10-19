@@ -30,6 +30,7 @@ import {
   finishJob as finishJobRec,
   jobRunDir,
   killPane,
+  liveSpawnerSessionIds,
   loadJob,
   modelIn,
   openSession,
@@ -189,8 +190,9 @@ export class Rail implements ShepPort {
   private readonly faultMemo = new Map<string, { at: number; hit: { id: string; type: string } | null }>()
   private verbosePath: string | null = null
   private verbosePane: string | null = null
-  // the drain hook a SIGTERM-running engine installs (ADR 5): the
-  // coworker engine parks on it; a door without one aborts on TERM
+  // the drain hook (ADR 5): an engine that can drain registers here
+  // via installDrain (fan-out, coworker); a TERM with none registered
+  // aborts — sessions stay booked either way
   drainHook: (() => void) | null = null
   // permission sweep state (zen 6): asks per pane (display numbering),
   // deny-family answers per pane (cap spend — allows are free), asks
@@ -762,8 +764,35 @@ export class Rail implements ShepPort {
     return (line ?? "pane-reap: ? remaining").trim()
   }
 
-  // Issue #123 — the engines' renew hook (ShepPort.renew): one write
-  // per cycle keeps the job's leadership claim fresh.
+  // Booked wait (ADR 0006), one spelling for every engine: a pane whose
+  // booked session a LIVE child spur names as its spawner is idle on
+  // purpose — fan-out units and coworker members both ask by name and
+  // the answer memoizes briefly (disk lookup, 10s TTL).
+  private spawnIdsAt = 0
+  private spawnIds = new Set<string>()
+  bookedWait(name: string): boolean {
+    if (!this.ledger) return false
+    const label = this.scopedName(name)
+    const panes = this.ledger.job.panes.filter((p) => p.label === label || p.unit === label)
+    const sid = panes[panes.length - 1]?.transcript?.session_id
+    if (!sid) return false
+    if (Date.now() - this.spawnIdsAt > 10_000) {
+      this.spawnIds = liveSpawnerSessionIds()
+      this.spawnIdsAt = Date.now()
+    }
+    return this.spawnIds.has(sid)
+  }
+
+  // The drain registration (ADR 5): an engine that can drain installs
+  // its hook here — fan-out at runOrchestrator start, coworker at
+  // birth. The door stays kind-blind: it never decides signal
+  // semantics by shape.
+  installDrain(fn: () => void): void {
+    this.drainHook = fn
+  }
+
+  // Issue #123 — one write per cycle keeps the job's leadership claim
+  // fresh (the engines' renew hook, ShepPort.renew).
   renew(): void {
     this.ledger?.renew()
   }
@@ -1145,23 +1174,22 @@ export class Rail implements ShepPort {
   //
   // One epilogue for every door (was copy-pasted per bin): run the
   // engine, then park on null, finish on a report, abort+exit-code on
-  // a throw. Signals: SIGINT always aborts; SIGTERM drains when the
-  // engine installs a drainHook (coworker) or aborts when the door
-  // asks for termDrains — a door whose ENGINE owns SIGTERM (fan-out's
-  // runOrchestrator traps it internally) passes nothing.
+  // a throw. Signals are KIND-BLIND (OPTIMUM §2): SIGINT always
+  // aborts; SIGTERM drains through the engine's registered drain hook
+  // (installDrain — fan-out and coworker install one) and aborts when
+  // no engine did (lab) — sessions stay booked either way. The door
+  // never branches on shape to decide signal semantics.
 
-  trapSignals(opts: { termDrains?: boolean } = {}): void {
+  trapSignals(): void {
     process.on("SIGINT", () => {
       this.ledger?.abort("signal SIGINT", this.mine.size)
       process.exit(0)
     })
-    if (opts.termDrains) {
-      process.on("SIGTERM", () => {
-        if (this.drainHook) return this.drainHook()
-        this.ledger?.abort("signal SIGTERM", this.mine.size)
-        process.exit(0)
-      })
-    }
+    process.on("SIGTERM", () => {
+      if (this.drainHook) return this.drainHook()
+      this.ledger?.abort("signal SIGTERM", this.mine.size)
+      process.exit(0)
+    })
   }
 
   async run(engine: () => Promise<Report | null>): Promise<number> {

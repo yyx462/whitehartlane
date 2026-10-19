@@ -11,10 +11,9 @@ import { budgetAction, clearPending, nextModel, readModelsFile, writePending } f
 import { chooseModel, remainingCandidates } from "./model-chooser.ts"
 import { runCounts } from "./hooks.ts"
 import { emptyBoard } from "./lanes.ts"
-import { drainDeadline } from "./orchestrator.ts"
+import { drainDeadline } from "./levy.ts"
 import { waitChange, type Rail } from "./rail.ts"
 import { writeReport, type Report } from "./report.ts"
-import { liveSpawnerSessionIds } from "./store.ts"
 
 // The door checkout root — where the operator's global models.local.toml
 // lives (layer 3 of the policy ladder).
@@ -219,25 +218,11 @@ export async function runCoworker(
   // a nudge-cap kill deferred because guidance was still queued — once
   // per member; the second expiry is honest death
   const deferred = new Set<string>()
-  // Booked wait (ADR 0006): a member whose booked session a running
-  // child spur names as its spawner is idle on purpose — the nudge
-  // clock stands down (and resets) while the child runs. Disk-derived
-  // set, memoized briefly.
-  let spawnIdsAt = 0
-  let spawnIds = new Set<string>()
-  const spawnerSessions = () => {
-    if (Date.now() - spawnIdsAt > 10_000) {
-      spawnIds = liveSpawnerSessionIds()
-      spawnIdsAt = Date.now()
-    }
-    return spawnIds
-  }
-  const memberBookedWait = (name: string) => {
-    if (!ledger) return false
-    const panes = ledger.job.panes.filter((p) => p.unit === name && p.transcript?.session_id)
-    const sid = panes[panes.length - 1]?.transcript?.session_id
-    return sid ? spawnerSessions().has(sid) : false
-  }
+  // Booked wait (ADR 0006), the rail's one spelling: a member whose
+  // booked session a running child spur names as its spawner is idle
+  // on purpose — the nudge clock stands down (and resets) while the
+  // child runs.
+  const memberBookedWait = (name: string) => rail.bookedWait(name)
   // refusal feedback: the quoted reasons a member's mail was refused,
   // for its nudges and — if it still stalls — its death record
   const refusalsOf = (member: string) => [...refusedDetail.values()].filter((d) => d.from === member)

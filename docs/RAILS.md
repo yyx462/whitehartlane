@@ -22,16 +22,26 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - **One Rail class (`src/rail.ts`).** The shared machinery every
   orchestrator runs on: the Job ledger, pane bookkeeping (birth,
   session booking, retire, the receipt), layout, the verbose lane,
-  and the permission sweep. `bin/orchestrator` is the one thin entry
-  that constructs one `Rail` and picks the engine by the staged
-  program's shape (`src/engine.ts`); the fan-out engine
-  (`runOrchestrator`) speaks the port the Rail implements. Engines
-  address workers by name only — every shep/herdr call funnels through
-  the Rail's injected runners, so the day panes become remote
-  machines, the swap is one file and the engines do not change.
+  the permission sweep, and the run envelope's shared verbs — the
+  booked-wait (`rail.bookedWait`, one spelling for fan-out units and
+  coworker members) and the drain registration (`installDrain`).
+  `bin/orchestrator` is the one thin entry that constructs one `Rail`
+  and picks the engine by the staged program's shape (`src/engine.ts`)
+  — kind-blind beyond that single pick: SIGTERM is one protocol for
+  every shape (the engine's registered drain hook, else abort;
+  sessions stay booked either way), and every verb that hands a Job to
+  a runner process goes through `spawnRunner`/`rebirthRunner`
+  (`src/levy.ts`) — one door resolution, one rebirth ceremony. The
+  fan-out engine (`runOrchestrator`) speaks the port the Rail
+  implements. Engines address workers by name only — every shep/herdr
+  call funnels through the Rail's injected runners, so the day panes
+  become remote machines, the swap is one file and the engines do not
+  change.
 - **The trace.** One `events.jsonl` per session, append-only, the
-  single source. `job.json`, `report.json`, `state.json` are
-  projections (`projectJob` rebuilds them from events). Event kinds:
+  single source. `job.json` and `report.json` are projections
+  (`projectJob` rebuilds them from events); the task dir's unit
+  lifecycle lives in its one append-only ledger
+  (`checkpoints.jsonl`). Event kinds:
   `route, admit, reject, job.born, job.orphaned, job.relaunched,
   pane.born, pane.died, reprompt, backpressure, unit.finished,
   job.retired, job.aborted, wake.consumed, fatal`.
