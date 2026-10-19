@@ -226,7 +226,7 @@ function book(
   if (existsSync(join(dir, "workflow.toml"))) {
     try {
       const manifest = loadManifest(dir)
-      const refusals = probeHooks(dir, manifest, kind)
+      const refusals = probeHooks(dir, manifest)
       if (refusals.length > 0) {
         appendEvent(session.id, { actor: "cli", kind: "reject", why: `hook probe: ${refusals[0]}`, workflow: kind })
         return { ok: false, why: `hook probe refused: ${refusals.join("; ")}`, code: 1 }
@@ -360,11 +360,13 @@ export function prepareRun(folder: string): RunReady | RunRefused {
   let slots = 2
   let task = basename(dir)
   let kind: WorkflowKind = "fan-out"
+  let stages: unknown
   try {
     kind = workflowKind(readFileSync(join(dir, "workflow.toml"), "utf8"))
     const manifest = loadManifest(dir)
     slots = manifest.workflow.slots ?? 2
     task = manifest.workflow.name
+    stages = manifest.stages
     // Admission smoke (#144): a grade hook that declares --check runs
     // ONCE here — a broken hook dies before the run, not two seconds
     // after the worker finishes. The arm-e night paid 4 full attempts
@@ -389,6 +391,16 @@ export function prepareRun(folder: string): RunReady | RunRefused {
     return {
       ok: false,
       why: `briefs name existing paths no root covers: ${uncovered.join(", ")} — add them to roots.txt (or drop them from the briefs)`,
+      code: 1,
+    }
+  }
+  // ADR 0014: a stage-less fan-out declares no workers (the units hook
+  // is refused at load) — refuse at the door, before anything is booked
+  // (coworker carries members, a lab its actor; neither needs stages).
+  if (kind === "fan-out" && !stages) {
+    return {
+      ok: false,
+      why: `no [[stage]] entries in ${join(dir, "workflow.toml")} — a fan-out program declares its workers as stages (docs/STAGES.md, ADR 0014)`,
       code: 1,
     }
   }

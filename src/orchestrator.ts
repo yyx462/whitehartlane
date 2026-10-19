@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "./backpressure.ts"
 import { chainOf, stepRecorder, type Chain } from "./orchestrator-chain.ts"
-import { HookError, hooksFromDir, loadManifest, resolvedLayout, runUnits, setHookRunNote, unitsFromSteps, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
 import { PERMISSION_CAP } from "./permission.ts"
 import {
   drainDeadline,
@@ -682,7 +682,8 @@ export async function runOrchestrator(input: {
   // plan (#150's binding). Gate stages are one-shot verdicts, not the
   // polling check steps of ADR 0007: a failed stage gate FAILS, and the
   // wave machinery finishes downstream units as blocked rows.
-  const steps = manifest.stages?.length ? stepsFromStages(manifest.stages) : manifest.steps
+  // ADR 0014: stages are the only authoring dialect.
+  const steps = manifest.stages ? stepsFromStages(manifest.stages) : undefined
   if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
     throw new HookError(
       "wake steps (and coworker stages, which delegate to a child program) need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)",
@@ -724,9 +725,6 @@ export async function runOrchestrator(input: {
       writeFileSync(childToml, toml)
       log(`${stage.topology} stage ${stage.id}: minted child program at ${childToml}`)
     }
-  }
-  if (steps?.length && !manifest.stages?.length) {
-    loaded.hooks = { ...loaded.hooks, units: () => unitsFromSteps(input.taskDir, steps) }
   }
   const stages = manifest.stages
   if (stages?.length) {

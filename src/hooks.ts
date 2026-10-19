@@ -50,10 +50,10 @@ export type Layout = {
 // signal that finished_by it: end (a worker's log), check (a command exits
 // 0 — nothing works on it), wake (a child job's receipt). Waves are
 // grouping, not steps; the report is the epilogue after the last wave.
+// ADR 0014: steps are the compilation target of [[stage]] ONLY — the
+// raw [[step]] dialect is refused at parse.
 export type Step = {
   id: string
-  // "gate" is synthesized-only: [[stage]] topology = "gate" compiles to
-  // a gate step; raw [[step]] tables still refuse it (their enum below)
   finished_by: "end" | "check" | "wake" | "gate"
   wave: string
   brief?: string
@@ -96,40 +96,6 @@ export type Stage = {
 // the task verifier; "none" = the stage declared no hook — the worker's
 // done is the unit's word, grading belongs to a later stage's gate.
 export type GradePlan = { grade: "task" | "check" | "none"; check?: string }
-
-function stepsFromRaw(raw: unknown): Step[] | undefined {
-  if (raw === undefined) return undefined
-  if (!Array.isArray(raw)) throw new HookError("steps must be an array of [[step]] tables")
-  const steps: Step[] = []
-  const seen = new Set<string>()
-  for (const entry of raw) {
-    const t = entry as Record<string, unknown>
-    const id = str(t.id, "step.id")
-    if (!SHEP_SAFE_ID.test(id)) throw new HookError(`step id is not shep-safe: ${id}`)
-    if (seen.has(id)) throw new HookError(`step repeats id ${id}`)
-    seen.add(id)
-    const finished_by = str(t.finished_by, `step ${id} finished_by`)
-    if (finished_by !== "end" && finished_by !== "check" && finished_by !== "wake") {
-      throw new HookError(`step ${id} finished_by must be end, check, or wake (ADR 0007): ${finished_by}`)
-    }
-    const wave = typeof t.wave === "string" && t.wave ? t.wave : "main"
-    const step: Step = { id, finished_by, wave }
-    if (finished_by === "check") {
-      step.check = str(t.check, `step ${id} check`)
-    } else {
-      if (t.check !== undefined) throw new HookError(`step ${id} is finished_by=${finished_by}: check belongs to check steps`)
-    }
-    if (finished_by === "wake") {
-      step.folder = str(t.folder, `step ${id} folder`)
-    } else {
-      if (t.folder !== undefined) throw new HookError(`step ${id} is finished_by=${finished_by}: folder belongs to wake steps`)
-    }
-    if (finished_by === "end" && typeof t.brief === "string" && t.brief) step.brief = t.brief
-    steps.push(step)
-  }
-  if (steps.length === 0) throw new HookError("steps table is empty — remove it or declare [[step]] entries")
-  return steps
-}
 
 function stagesFromRaw(raw: unknown): Stage[] | undefined {
   if (raw === undefined) return undefined
@@ -417,10 +383,11 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
+  // ADR 0014: hooks.units is refused at load, never set; the field stays
+  // for coworker-run's defense until slice 2 folds that file
   hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
   gates?: Record<string, string>
-  steps?: Step[]
   stages?: Stage[]
   report?: { where?: string }
   layout?: Partial<Layout>
@@ -611,19 +578,19 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     const cmd = optCmd(value, `gates.${id}`)
     if (cmd !== undefined) gates[id] = cmd
   }
-  const steps = stepsFromRaw(m.step)
   const stages = stagesFromRaw(m.stage)
-  // [[step]] and [[stage]] are two dialects of the same declaration —
-  // mixing them would make the chain ambiguous, so the rail refuses
-  if (steps?.length && stages?.length) {
-    throw new HookError("declare [[step]] or [[stage]], not both — steps are node-level topology, stages are the chain (issue #152)")
+  // ADR 0014 — one authoring story: [[step]] and the units-hook
+  // quick-mint are retired, refused with a pointer at [[stage]];
+  // issue #152's mutual refusal is now the one-way refusal.
+  if (m.step !== undefined) {
+    throw new HookError("[[step]] tables are retired — declare [[stage]] entries instead: the chain is stages, and topology (solo | fan-out | coworker | gate | lab) carries what finished_by used to spell (docs/STAGES.md, ADR 0014)")
+  }
+  if (hooks.units !== undefined) {
+    throw new HookError('hooks.units is retired — a program declares its workers as [[stage]] entries (solo brief / fan-out units), never mints them at runtime (docs/STAGES.md, ADR 0014)')
   }
   return {
     workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
     hooks: {
-      units: optHook(hooks.units, "hooks.units", {
-        refuseDefault: 'hooks.units has no built-in default — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
-      }),
       grade: optHook(hooks.grade, "hooks.grade"),
       counts: optHook(hooks.counts, "hooks.counts", {
         refuseNoop:
@@ -632,7 +599,6 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     gates: Object.keys(gates).length > 0 ? gates : undefined,
-    steps,
     stages,
     report: report.where ? { where: str(report.where, "report.where") } : {},
     layout: {
@@ -650,14 +616,15 @@ function str(value: unknown, field: string): string {
 }
 
 // Hooks are optional (issue #120): omitted means the built-in default —
-// counts counts the scorecard, grade always passes, units must come
-// from steps or a real hook. The explicit token "default" spells the
-// same thing for authors who want it visible. The shell no-ops are
-// refused for counts — /bin/true prints nothing, and a counts hook
-// that prints nothing is a deterministic report-time fatal that costs
-// the whole run (j-64e035: 79 minutes of work, then aborted).
+// counts counts the scorecard, grade always passes; the workers come
+// from [[stage]] (ADR 0014 — the units hook is refused at load). The
+// explicit token "default" spells the same thing for authors who want
+// it visible. The shell no-ops are refused for counts — /bin/true
+// prints nothing, and a counts hook that prints nothing is a
+// deterministic report-time fatal that costs the whole run (j-64e035:
+// 79 minutes of work, then aborted).
 const HOOK_NOOP_CMDS = new Set(["true", "false", ":"])
-function optHook(value: unknown, field: string, opts: { refuseNoop?: string; refuseDefault?: string } = {}): string | undefined {
+function optHook(value: unknown, field: string, opts: { refuseNoop?: string } = {}): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== "string" || value.length === 0) {
     throw new HookError(`workflow.toml is missing ${field}`)
@@ -698,61 +665,6 @@ function runHook(
 
 function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
-}
-
-// Steps define the units (ADR 0007): end-steps ARE the units, briefs
-// read from members/<id>.md unless the step names another path. Check
-// and wake steps are topology — never units.
-export function unitsFromSteps(taskDir: string, steps: Step[]): Unit[] {
-  const units: Unit[] = []
-  for (const step of steps) {
-    if (step.finished_by !== "end") continue
-    const briefPath = step.brief ?? join(taskDir, "members", `${step.id}.md`)
-    let brief: string
-    try {
-      brief = readFileSync(briefPath, "utf8")
-    } catch {
-      throw new HookError(`end step ${step.id} has no brief: ${briefPath} does not exist`)
-    }
-    units.push({ id: step.id, brief })
-  }
-  if (units.length === 0) throw new HookError("steps declare no end steps — nothing can run")
-  return units
-}
-
-export function runUnits(taskDir: string, manifest: Manifest): Unit[] {
-  if (manifest.hooks.units === undefined) {
-    throw new HookError(
-      "no units hook and no steps — a fan-out program must declare [[step]] entries or provide a units hook that prints one {\"id\",\"brief\"} JSON object per line",
-    )
-  }
-  const { stdout, status, stderr, ms } = runHook(manifest.hooks.units, taskDir)
-  note({ hook: "units", status, ms })
-  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || "units hook exited 75")
-  if (status !== 0) {
-    throw new HookError(`units hook exited ${status}: ${manifest.hooks.units}\n${stderr.split("\n")[0] ?? ""}`)
-  }
-  const units: Unit[] = []
-  const seen = new Set<string>()
-  const lines = stdout.split("\n")
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-    let parsed: { id?: unknown; brief?: unknown }
-    try {
-      parsed = JSON.parse(line)
-    } catch {
-      throw new HookError(`units hook line ${i + 1} is not JSON: ${line}`)
-    }
-    if (typeof parsed.id !== "string" || !SHEP_SAFE_ID.test(parsed.id)) {
-      throw new HookError(`units hook line ${i + 1} id is not shep-safe: ${parsed.id}`)
-    }
-    if (seen.has(parsed.id)) throw new HookError(`units hook repeats id ${parsed.id}`)
-    seen.add(parsed.id)
-    units.push({ id: parsed.id, brief: typeof parsed.brief === "string" ? parsed.brief : "" })
-  }
-  if (units.length === 0) throw new HookError("units hook produced no units")
-  return units
 }
 
 export function runGrade(taskDir: string, manifest: Manifest, unit: Unit): Grade {
@@ -885,7 +797,12 @@ export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifes
   return {
     manifest,
     hooks: {
-      units: () => runUnits(taskDir, manifest),
+      // ADR 0014: the workers are the stages; stage-less is a refusal
+      units: manifest.stages?.length
+        ? () => unitsFromStages(manifest.stages)
+        : () => {
+            throw new HookError("no [[stage]] entries — a program declares its workers as stages (docs/STAGES.md, ADR 0014)")
+          },
       grade: (unit) => runGrade(taskDir, manifest, unit),
       counts: (table) => runCounts(taskDir, manifest, table),
       workerKind: manifest.workflow.worker_kind,
@@ -906,7 +823,6 @@ export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifes
 export function probeHooks(
   taskDir: string,
   manifest: Manifest,
-  kind: "fan-out" | "lab" | "coworker",
 ): string[] {
   if (process.env.AGENTIC_OS_PROBE === "0") return []
   const refusals: string[] = []
@@ -945,43 +861,6 @@ export function probeHooks(
           refusals.push(
             `counts hook prints no JSON at probe (${stdout.slice(0, 80) || "empty stdout"}) — omit the line for the built-in counter, or use counts = "default" (issue #121)`,
           )
-        }
-      }
-    }
-    // units is only ever called by a fan-out program without steps —
-    // coworker has members, steps programs derive units from [[step]]
-    const unitsCmd = manifest.hooks.units
-    if (kind === "fan-out" && manifest.steps === undefined && unitsCmd !== undefined) {
-      let stdout = ""
-      let status = 0
-      try {
-        ;({ stdout, status } = runHook(unitsCmd, taskDir, { timeoutMs: probeTimeoutMs() }))
-      } catch (err) {
-        refusals.push(`units hook did not survive the probe: ${err instanceof Error ? err.message : String(err)}`)
-      }
-      if (status === 75) {
-        // the provider refused — provider-dependent, not grammar; skip
-      } else if (status !== 0) {
-        refusals.push(`units hook exited ${status} at probe: ${unitsCmd}`)
-      } else {
-        const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean)
-        if (lines.length === 0) {
-          refusals.push(
-            'units hook produced no units at probe — declare [[step]] entries, or provide a units hook that prints one {"id","brief"} JSON object per line',
-          )
-        } else {
-          for (let i = 0; i < lines.length; i++) {
-            try {
-              const parsed = JSON.parse(lines[i]) as { id?: unknown }
-              if (typeof parsed.id !== "string" || !SHEP_SAFE_ID.test(parsed.id)) {
-                refusals.push(`units hook line ${i + 1} id is not shep-safe at probe: ${JSON.stringify(parsed.id)}`)
-                break
-              }
-            } catch {
-              refusals.push(`units hook line ${i + 1} is not JSON at probe: ${lines[i].slice(0, 60)}`)
-              break
-            }
-          }
         }
       }
     }

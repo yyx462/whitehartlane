@@ -1,8 +1,8 @@
-// ADR 0007 stage 3 — wake steps: the rail as levy. The engine levies a
-// child job per frontier wake step (once — the booking on disk is the
-// guard), the step finishes on the child's wake.json (the receipt
-// colors it), a failed child blocks downstream waves, and a rail
-// spawner is never doorbelled — the durable wake IS the receipt.
+// ADR 0007 stage 3 — the rail as levy, in the one authoring story
+// (ADR 0014): a delegating lab stage compiles to a wake step whose
+// child the orchestrator mints under stages/<id>/ — levied once (the
+// booking on disk is the guard), finished by the child's wake.json
+// (the receipt colors it), a failed child blocks downstream waves.
 import assert from "node:assert/strict"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -10,7 +10,6 @@ import { join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
 import { finishJob, readEvents, type JobRecord } from "../src/store.ts"
-import { copyExampleNamed } from "./util.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-wake-steps-"))
 process.env.AGENTIC_OS_NOTIFY = "0"
@@ -79,8 +78,31 @@ function childWakes(dir: string, outcome: string, report?: string): void {
   )
 }
 
+// a solo work stage, then a delegating lab stage (wake step)
+function nestedStagesDir(prefix: string, extra = ""): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "nested-stages"
+worker_kind = "opencode"
+
+[[stage]]
+id = "g0"
+topology = "solo"
+brief = "warm up"
+
+[[stage]]
+id = "sub"
+topology = "lab"
+brief = "the experiment"
+${extra}`,
+  )
+  return dir
+}
+
 test("a wake step levies once and finishes done on the child's wake (ADR 0007 stage 3)", async () => {
-  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-once-")
+  const dir = nestedStagesDir("wake-once-")
   const shep = fakeShep()
   const levy = fakeLevy(dir)
   const engine = runOrchestrator({
@@ -97,7 +119,8 @@ test("a wake step levies once and finishes done on the child's wake (ADR 0007 st
   // exactly one levy for the wake step — never a second while it waits
   assert.equal(levy.levies.length, 1)
   assert.equal(levy.levies[0].unitId, "sub")
-  assert.ok(levy.levies[0].folder.endsWith(join("fan-out-spurs", "nested-wakes", "child")) || levy.levies[0].folder.endsWith("child"))
+  assert.ok(levy.levies[0].folder.endsWith(join("stages", "sub")), `folder is the minted child: ${levy.levies[0].folder}`)
+  assert.ok(existsSync(join(dir, "stages", "sub", "workflow.toml")), "the lab stage minted its child program")
   // the booking is durable on the task dir
   assert.ok(existsSync(join(dir, "wakes", "sub.json")))
   childWakes(dir, "done")
@@ -112,10 +135,13 @@ test("a wake step levies once and finishes done on the child's wake (ADR 0007 st
 })
 
 test("a failed child receipt fails the step and blocks downstream waves honestly", async () => {
-  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-fail-")
-  const wf = readFileSync(join(dir, "workflow.toml"), "utf8") +
-    '\n[[step]]\nid = "audit"\nfinished_by = "check"\ncheck = "true"\nwave = "w3"\n'
-  writeFileSync(join(dir, "workflow.toml"), wf)
+  // a failed child receipt blocks the downstream unit stage honestly
+  const dir = nestedStagesDir("wake-fail-", `
+[[stage]]
+id = "audit"
+topology = "fan-out"
+units = [{ id = "auditor", brief = "audit the experiment" }]
+`)
   const shep = fakeShep()
   const levy = fakeLevy(dir)
   const engine = runOrchestrator({
@@ -137,13 +163,14 @@ test("a failed child receipt fails the step and blocks downstream waves honestly
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
   assert.match(byUnit.sub, /child j-sub failed/)
-  // audit is unreachable — never asked, never counted against finishing
-  assert.equal(byUnit.audit, undefined)
+  // audit is unreachable — never spawned, never counted against finishing
+  assert.ok(!shep.spawned.includes("w-auditor"))
+  assert.match(byUnit.auditor, /wave blocked by failed sub/)
   assert.ok(shep.wakes.some((w) => w.label === "sub" && /child job j-sub failed/.test(w.detail)))
 })
 
 test("a refused levy is an honest failed row, not a retry loop", async () => {
-  const dir = await copyExampleNamed("fan-out-spurs/nested-wakes", "wake-refused-")
+  const dir = nestedStagesDir("wake-refused-")
   const shep = fakeShep()
   const report = await runOrchestrator({
     taskDir: dir,

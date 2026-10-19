@@ -160,7 +160,7 @@ test("listJobs spans sessions in creation order", async () => {
 test("materializeRunDir writes the per-run worker permission scope", async () => {
   const { materializeRunDir } = await import("../src/store.ts")
   const { realpathSync } = await import("node:fs")
-  const exampleSrc = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups", "workflow.toml")
+  const exampleSrc = join(import.meta.dirname, "fixtures", "three-lookups", "workflow.toml")
   const runDir = join(process.env.AGENTIC_OS_HOME!, "sessions", "perm-test", "jobs", "j-x", "run")
   materializeRunDir(runDir, "t", exampleSrc)
   const oc = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8"))
@@ -179,13 +179,13 @@ test("materializeRunDir writes the per-run worker permission scope", async () =>
   } finally {
     rmSync(tmpForm, { recursive: true, force: true })
   }
-  assert.ok(existsSync(join(runDir, "hooks", "units.sh")), "hooks copied")
+  assert.ok(existsSync(join(runDir, "hooks", "grade.sh")), "hooks copied")
 })
 
 test("a model in workflow.toml lands in the project files, not the user pi dir", async () => {
   const { writePiSettings, writeWorkerPermissions } = await import("../src/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-model-"))
-  writeFileSync(join(dir, "workflow.toml"), '[workflow]\nname = "t"\nworker_kind = "pi"\nmodel = "xai/grok-4.7"\n[hooks]\nunits = "u"\ngrade = "g"\ncounts = "c"\n')
+  writeFileSync(join(dir, "workflow.toml"), '[workflow]\nname = "t"\nworker_kind = "pi"\nmodel = "xai/grok-4.7"\n[hooks]\ncounts = "c"\n')
   const skill = mkdtempSync(join(tmpdir(), "agentic-os-skill-"))
   writeWorkerPermissions(dir, [skill])
   const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))

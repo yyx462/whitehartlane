@@ -7,6 +7,12 @@ is expressed — "split" is dead (a chain was always the workflow's job,
 never a node's: every unit is a fresh worker session; continuity is the
 shared task container, which the chain keeps identically).
 
+This is also the **only authoring story** (ADR 0014): `[[step]]`
+tables and `hooks.units` (the quick-mint planner hook) are RETIRED —
+refused at parse with a pointer here, as is a stage-less fan-out
+manifest. Workers are declared, never minted at runtime; `grade` and
+`counts` remain the program's own hooks.
+
 ```
 [workflow]
 name = "…"            ; worker_kind, model, slots, canary as ever

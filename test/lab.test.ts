@@ -21,7 +21,6 @@ async function labDir(prefix: string): Promise<string> {
     'worker_kind = "opencode"',
     "",
     "[hooks]",
-    "units = \"true\"",
     'grade = "g() { test -s units/$1/result.md && echo planted; }; g"',
     'counts = "printf \'{}\'"',
     "",

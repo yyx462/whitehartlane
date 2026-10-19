@@ -13,7 +13,7 @@ process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-door-"))
 import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
 import { readState } from "../src/state.ts"
 
-const EXAMPLE = join(import.meta.dirname, "..", "examples", "fan-out-spurs", "three-lookups")
+const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 
 async function copyExample(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "agentic-os-proj-"))

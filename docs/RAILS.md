@@ -137,9 +137,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 
 ## Hooks — the per-task surface a planner may write
 
-- `units` (decompose the task), `brief` (worker instructions),
-  `grade` (finish a unit), `report.where` + `counts` (named counts),
-  `slots` (per-task concurrency, default 2).
+- `grade` (finish a unit), `report.where` + `counts` (named counts),
+  `slots` (per-task concurrency, default 2). `units` is RETIRED
+  (ADR 0014): workers are `[[stage]]` entries, never a runtime mint.
 - Hook commands run as `sh -c "<command> '<argument>'"` — positional
   `$1` is only real inside a script FILE (`bash hooks/grade.sh` gets
   `$1`); an inline command (`grade = "test -s units/$1/result.md"`)
@@ -161,10 +161,11 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   in a lab program — `spur.mjs` (a legacy `dag.mjs` is read with a
   loud warning, ADR 0009); prints `done` when the step may finish. The
   run door refuses a gate step with no matching `[gates]` command —
-  nothing is booked. The current grammar is `[[step]]` with
-  `finished_by = "check"` — a command exits 0 and the step finishes
-  (ADR 0007); `[gates]` remains for legacy-shaped lab programs. Reopen,
-  retry, and the report still belong to `tick` and the rail.
+  nothing is booked. The rail-acted verdict of the current grammar is
+  a `[[stage]]` `topology = "gate"` (`run`, one-shot — ADR 0014
+  retired the `[[step]]` tables that polled); `[gates]` rides the
+  legacy lab path until that path's retirement lands. Reopen, retry,
+  and the report still belong to `tick` and the rail.
 - `roots.txt` — a program's named extra worker roots, one absolute
   path per line, staged beside the spur; the rail folds them into the
   per-run worker permissions. The rail knows no program's env names.
