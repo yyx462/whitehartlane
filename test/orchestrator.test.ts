@@ -882,3 +882,22 @@ test("a REAL answer fail still trips the canary — the immunity is for faults o
   const cps = readCheckpoints(dir)
   assert.ok(cps.some((c) => c.stage === "grade:france" && c.status === "FAILED"))
 })
+
+test("a failed spawn arms a near-term retry wake — never the stall ladder (#165, j-214576)", async () => {
+  const dir = await copyExample("orch-canary-stop-")
+  const shep = fakeShep({ spawnWorker: () => false })
+  const retries: { unit: string; attempts: number }[] = []
+  const d = deps(dir, shep.port, { onSpawnRetry: (unitId, attempts) => retries.push({ unit: unitId, attempts }) })
+  cycle(d)
+  const units = shep.spawned.length
+  assert.ok(units > 0, "units were attempted")
+  assert.deepEqual(retries.map((r) => r.attempts), Array(units).fill(1), "first failure arms a retry, not a block")
+  cycle(d)
+  assert.deepEqual(retries.slice(units).map((r) => r.attempts), Array(units).fill(2), "second failure re-arms")
+  cycle(d)
+  assert.deepEqual(retries.slice(2 * units).map((r) => r.attempts), [], "cap reached — no more arming")
+  assert.ok(
+    shep.wakes.filter((w) => w.kind === "blocked" && w.detail.includes("spawn failed 3 times")).length === units,
+    "every unit blocked honestly at the cap"
+  )
+})

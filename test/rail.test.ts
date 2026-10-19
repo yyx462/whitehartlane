@@ -52,6 +52,7 @@ function makeRail(opts: {
   judge?: (input: { path: string; ask: string; context?: string }) => number
   logs?: string[]
   failSub?: string
+  herdrRunner?: (args: string[]) => RunnerResult
 }) {
   const calls: Call[] = []
   const blocked = new Set(opts.blocked ?? [])
@@ -88,7 +89,7 @@ function makeRail(opts: {
     home: opts.home,
     log: opts.logs ? (msg) => opts.logs!.push(msg) : () => {},
     shepRunner,
-    herdrRunner,
+    herdrRunner: opts.herdrRunner ?? herdrRunner,
   })
   return {
     rail,
@@ -547,4 +548,41 @@ test("C03 regression: the fleet layout pre-splits nothing — no pane is born be
   const splits = one.calls.filter((c) => c.args[0] === "pane" && c.args[1] === "split")
   assert.equal(splits.length, 0, "v2 layout anchors the column on the tab root — the never-populated viewer lane must not return")
   assert.ok(one.calls.some((c) => c.args[0] === "tab" && c.args[1] === "create"), "the fleet tab itself opens")
+})
+
+test("an empty live-anchor list re-seeds the column from the fleet tab itself (#165, j-214576)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-reseed-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "do the thing", "utf8"))
+  const calls: { tool: string; args: string[] }[] = []
+  let splits = 0
+  const herdrRunner = (args: string[]): RunnerResult => {
+    calls.push({ tool: "herdr", args })
+    if (args[0] === "tab" && args[1] === "create")
+      return { status: 0, stdout: JSON.stringify({ result: { root_pane: { pane_id: "wX:root" }, tab: { tab_id: "wX:t9" } } }) }
+    if (args[0] === "pane" && args[1] === "split") {
+      splits++
+      return { status: 0, stdout: JSON.stringify({ result: { pane: { pane_id: splits === 1 ? "wX:w1" : "wX:w2" } } }) }
+    }
+    if (args[0] === "pane" && args[1] === "list")
+      return {
+        status: 0,
+        stdout: JSON.stringify({ result: { panes: [
+          { pane_id: "wK:stranger", tab_id: "wK:t1" }, // another tab's pane — must be skipped
+          { pane_id: "wX:stray", tab_id: "wX:t9" },    // ours, alive
+        ] } }),
+      }
+    return { status: 0, stdout: "" }
+  }
+  const one = makeRail({ taskDir, herdrRunner })
+  one.rail.setLayout({ tab: "new", orchestrator: "left" }, join(taskDir, "run"))
+  // stage 1's worker: born from the root (which closes) — the only live pane
+  assert.equal(one.rail.spawnWorker("alpha", "opencode", briefPath, taskDir), true)
+  // between stages the worker settles and is retired — live-anchor list empties
+  one.rail.retire("alpha")
+  // stage 2's worker must STILL be born: the column re-seeds inside our own tab
+  assert.equal(one.rail.spawnWorker("beta", "opencode", briefPath, taskDir), true)
+  assert.ok(calls.some((c) => c.tool === "herdr" && c.args[0] === "pane" && c.args[1] === "list"), "pane list consulted on empty anchors")
+  const seedSplit = calls.filter((c) => c.tool === "herdr" && c.args[0] === "pane" && c.args[1] === "split").at(-1)!
+  assert.ok(seedSplit.args.includes("wX:stray"), "re-seeded from a live pane in OUR fleet tab, not a stranger's")
 })
