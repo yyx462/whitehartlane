@@ -82,6 +82,17 @@
 > unexercised. The pick flips the streak: rank-1 runner-dispatch,
 > read and overridden BY RECEIPT six refits running, is PICKED for
 > the first time — narrowed by receipt to its one named residual.
+> Refit 10: 2026-10-20, over PRs #2–#188 (137 merged in momentum.py's
+> 120-day window; +2 since refit 9: #187 this file's refit-9 landing,
+> and #188 the member court — §2's named residual fold, commissioning
+> 2's iteration 4, armed by refit 9's NEXT-TARGET chained as-written,
+> GREEN 1 round / 0 strikes, 305+/119− (424 ≤ cap 800), all 4 files in
+> blast, npm test 444/444, topo-tune green (33,8)). The residual is
+> EXECUTED: §2 again holds no known-simpler alternative, and no
+> component on the table holds an open named residual — so the pick
+> moves, by the sequencing receipt five refits wrote, to the
+> milestone's last unbuilt leg: the composite eval case, ARMED as
+> c2-iter5. Zero strikes, no ESCALATED records; D3 unexercised.
 
 ## L0 — the product thesis (one page)
 
@@ -110,12 +121,15 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 9, and §1's three-slice run is its cleanest
-proof: #176 refused the retired spellings at the door, #183 deleted the
-engine, #185 converted the corpus — one authoring story, everywhere a
-program can be authored, pinned by a test (corpus.test.ts) so a future
-museum donation cannot land. The direction since #176 is one line; no
-new axis appeared; oscillation is 0 across the whole table.
+The thesis held under refit 10, and #188 is its tidiest proof yet:
+two engines (fan-out cycle, coworker member court), ONE beat type
+each, ONE bench walk (firstRuling, generic over the beat), ONE bailiff
+(closeMember/close — the only dead-record spelling in the tree). The
+direction since #176 is one line; no new axis appeared; oscillation is
+0 across the whole table. The grammar's retirement run (#176 refused,
+#183 deleted, #185 converted) plus the court folds (#181, #188) leave
+the L1 table with zero open residuals — the remaining work is not a
+redesign at all, but the exam this file has spec'd since refit 4.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
@@ -129,12 +143,11 @@ of these may be the true optimum's home; treat as research, not refit.
 
 Momentum table (`momentum.py`, 2026-10-20, 120-day window — whole-PR
 churn attribution, coarse v1; the attribution globs predate #180's
-package-by-feature move and now match almost nothing — see the gaps
-note below):
+package-by-feature move — see the gaps note below):
 
 | component | fix-density | oscillation | churn | runtime-loss | score |
 |---|---|---|---|---|---|
-| runner-dispatch | 79 | 0 | 44456 | — | 123.5 |
+| runner-dispatch | 80 | 0 | 44880 | — | 124.9 |
 | window | 27 | 0 | 16364 | — | 43.4 |
 | permissions | 13 | 0 | 10717 | — | 23.7 |
 | resume-parking | 5 | 0 | 2473 | — | 7.5 |
@@ -143,29 +156,26 @@ note below):
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-The table is BYTE-IDENTICAL to refit 8's — and that identity is a
-receipt, not a stall: #185 was 103 files, 1805 diff lines, and ZERO
-src files (authoring-side only, exactly as its blast set promised),
-so it bills to no component under the src-only globs. Refit 9's pick
-reads the table after the discounts, every one by receipt: rank 1
-**runner-dispatch** (123.5) — for the SEVENTH consecutive refit the
-arithmetic is the seam's echo (43465 at refit 7, +991 of #183 mis-
-billed whole through src/engines/lab.ts, +0 since) — but this refit
-PICKS it for the first time, because the component's own block now
-holds exactly ONE named residual and it lives in this seam:
-coworker-run.ts's hand-rolled nudge ladder, the bench's second
-customer (#181's stated next slice; the bench itself — benchOrder/
-applyRuling — sits one file over in src/engines/orchestrator.ts).
-Six reads overridden (refits 3–8), one pick narrowed by receipt: the
-echo churn is the seam's, and the residual is the seam's one open
-customer. Rank 2 **window** (43.4) unchanged since refit 3's churn
+Reading the table (refit 10): rank 1 **runner-dispatch** (124.9) —
+for the eighth consecutive refit the arithmetic tops the table, and
+for the seventh it is read and overridden BY RECEIPT. The churn
+column is a STOCK (Σ over the window; it can only grow), and its
+44456→44880 delta is exactly #188's 424 — the residual fold itself,
+billed legitimately through src/engines/coworker-run.ts +
+src/engines/orchestrator.ts (the one component whose stale flat glob
+`src/engine*` and the proposed re-path `src/engines/*` agree). The
+FLOW since #181 is two folds landing on their named targets; the
+residual refit 9 picked is EXECUTED, and no component holds an open
+named residual or a known-simpler alternative — the table has nothing
+left to pick. Rank 2 **window** (43.4) unchanged since refit 3's churn
 read — nothing under `web/` since. Rank 3 **permissions** (23.7)
 converged (#172). Rank 4 **resume-parking** (7.5) frozen. Rank 5
 **wake-ladder** KEEP. Rank 6 **model-pinning** WATCH. Rank 7 **relay**
-(0.0) converged (#174). Rank 8 **program-grammar** — 0.0 on the
-table forever (its globs own no code file) — is CLOSED at this refit:
-§1 converged on its named target (#185), the milestone's last gated
-alternative off the books.
+(0.0) converged (#174). Rank 8 **program-grammar** — 0.0 on the table
+forever (its globs own no code file) — CLOSED at refit 9 (#176, #183,
+#185; ADR 0014 EXECUTED), and now the home of the pick: not a re-open
+(the grammar needs no fix) but its graduation exercise — the composite
+eval case, armed as c2-iter5.
 
 Attribution gaps (human note — the constitution is not refit's to
 edit): #180's package-by-feature move made the flat globs structurally
@@ -180,12 +190,14 @@ ONLY because #178 predates the move (flat paths in its file list);
 src/engines/orchestrator.ts; #183 — the second — bills its whole 991
 through src/engines/lab.ts while its doors/* deletions (spur.ts
 wholesale!) bill nothing; #185 — the third — bills exactly zero
-(no src file in a 103-file PR; the table unchanged is the receipt).
-At the next constitution touch: re-path the globs onto the package
-layout — program-grammar should own `src/doors/{hooks,run,spur}.ts`,
-relay `src/adapters/store.ts`, resume-parking `src/core/state.ts`,
-permissions `src/core/permission.ts`, wake-ladder
-`src/adapters/wake*`, runner-dispatch `src/engines/*`.
+(no src file in a 103-file PR); #188 — the fourth — bills its whole
+424 through src/engines/* and is the first post-move PR whose billing
+is TRUE under both glob sets. At the next constitution touch: re-path
+the globs onto the package layout — program-grammar should own
+`src/doors/{hooks,run,spur}.ts`, relay `src/adapters/store.ts`,
+resume-parking `src/core/state.ts`, permissions
+`src/core/permission.ts`, wake-ladder `src/adapters/wake*`,
+runner-dispatch `src/engines/*`.
 
 ### 1. Program grammar
 - **Concept**: shape + hooks declared per stage; compiles to the
@@ -251,11 +263,17 @@ permissions `src/core/permission.ts`, wake-ladder
   sweep: a future museum donation cannot land. 369+/1436− across 103
   files, all in blast, 1805 ≤ cap 2500, 1 round / 0 strikes, npm test
   442/442, topo-tune green (33,8). ADR 0014 flips fully to EXECUTED.
+  → **c2-iter5 (refit 10's pick): the graduation exercise** — the
+  composite eval case (this file's own spec section), authored
+  against `[[stage]]` only, every topology exercised, zero src files
+  in the blast set BY DESIGN (see NEXT-TARGET: the scope fence is
+  the experiment).
 - **Oscillation**: RESOLVED — the whole three-slice run was monotone
   deletion: #176 (250+/650−), #183 (93+/898−), #185 (369+/1436−);
   zero reversal pairs across all three. Zero attribution ever — the
-  globs own no code file (#183's doors/* deletions and #185's whole
-  103 files both bill 0.0, the gaps note's receipts).
+  globs own no code file (#183's doors/* deletions, #185's whole 103
+  files, and the case's test-only tree all bill 0.0 — the gaps
+  note's receipts).
 - **Simpler alternative**: EXECUTED — the milestone's last GATED
   alternative closed by #185. One NEW finding on the books (recorded
   in ADR 0014, #185's PR body): the delegation boundary cannot carry
@@ -265,7 +283,8 @@ permissions `src/core/permission.ts`, wake-ladder
   should; if it becomes wanted, it is a declaration-capability
   question (an empty-quadrant entry), not a reversal of this one.
 - **Verdict**: KEEP (converged at refit 9 — receipts #176, #183,
-  #185; ADR 0014 EXECUTED).
+  #185; ADR 0014 EXECUTED — and its graduation exercise, the
+  composite eval case, is armed as c2-iter5).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -327,30 +346,53 @@ permissions `src/core/permission.ts`, wake-ladder
   NOT this component's work — §1's engine retirement mis-billed
   here through src/engines/lab.ts (its only attribution-eligible
   file; +991 churn, +1 fix-density, both §1's substance) → #185:
-  not this component's work either (zero src files; bills nothing).
-  The seam echoes, it does not sicken — and it holds ONE open
-  customer: coworker-run.ts's nudge ladder.
-- **Oscillation**: RESOLVED. Zero reversal pairs — EIGHT slices on
-  one line (#161→#164→#167→#170→#172→#176→#181, plus the seam-echo
-  billings #183/#185). But refit 6's "simpler alternative: NONE
-  LEFT" was FALSIFIED: #178/#179 minted one (a new observation verb
-  + a new settle lane made a bench-shaped replacement visible) and
-  #181 landed it. Lesson carried into every future "none left": the
-  claim is about the CURRENT seam's shape, not about the component.
-- **Simpler alternative**: ONE named residual, UNGATED, now ARMED
-  (refit 9's pick, c2-iter4): coworker-run.ts's nudge ladder is the
-  bench's second customer (#181's stated next slice). Live on master:
-  src/engines/coworker-run.ts (565 lines) hand-rolls its member
-  stall court — the `nudged` map, the 2-nudge cap, the deferred kill
-  at queued guidance, the bespoke dead-record close — one file over
-  from the bench it predates (benchOrder/applyRuling in
-  src/engines/orchestrator.ts), pinned by test/coworker-run.test.ts
-  ("tests drive the nudge ladder in milliseconds"). Extension-shaped
-  (a fold onto the landed bench), not a reversal; the sequencing
-  constraint (AFTER §1's museum slice, which carried the milestone's
-  gate) is DISCHARGED by #185.
-- **Verdict**: KEEP (the replacement landed; the residual is a fold,
-  not a sickness — and it is now the loop's armed line).
+  not this component's work either (zero src files; bills nothing)
+  → **#188 the member court — the residual fold, EXECUTED** (c2-iter4,
+  armed by refit 9's NEXT-TARGET chained as-written; landed GREEN
+  1 round / 0 strikes, 305+/119− = 424 ≤ cap 800, 4 files all in
+  blast, npm test 444/444): coworker-run.ts's hand-rolled member
+  stall court — the bench's second customer, #181's own stated next
+  slice — folds onto the flight bench. ONE typed **MemberBeat** per
+  member per beat (privilege/liveness/stall evidence; `booked` +
+  `pendingNote` lazy getters — #181's law: only the judges that pay
+  read the disk). ONE bench algorithm: `firstRuling` exported from
+  orchestrator.ts, the Judge generic over the beat — the ordered
+  court privilege → liveness → stall is walked by the same function
+  `cycle()` seats for fan-out flights; two engines, one algorithm.
+  ONE bailiff: **`closeMember` is the only dead-record spelling**
+  (dead + deadWhy + ledger wake + log + watcher say) — the deny cap,
+  spent transport retries, the nudge cap, AND the model ladder's
+  three death sites all close through it; the model-ladder deaths
+  never woke the levy before (log-only) — now every death does.
+  DELETED from coworker-run.ts: the `nudged` map, the deferred set,
+  the stoodDown set (ONE MemberFlight record, reset by respawn —
+  a respawned member faces a fresh ladder, test-pinned), the
+  interleaved stall guard, the pane-death loop, the deny-cap block,
+  five bespoke dead-record closes. Precedence receipt: liveness now
+  OUTRANKS stall — issue #122's law (pane death is transport, never
+  an answer) taken to the bench; the old order could nudge a dead
+  pane in a one-beat race; pinned: "a pane that dies mid-ladder is
+  a transport close — the ladder never fires again". Booked wait
+  stands down as a judge (ADR 0006; #164's one spelling
+  `rail.bookedWait`), not a private set. The drain still parks
+  before the court sits; docs/RAILS.md documents both courts. The
+  bench's customer count after #188: TWO seated (fan-out `cycle()`,
+  coworker member court) — no third on the books: the lab's close
+  ceremony is marker-driven (endOf's dead-rule + log markers, #170's
+  one resume nudge), not a booked-flight stall court; if evidence
+  ever names it a fold, that is a NEW receipt reopening this block,
+  not an armed one.
+- **Oscillation**: RESOLVED. Zero reversal pairs — the line runs
+  EIGHT authored slices (#161→#164→#167→#170→#172→#176→#181→#188)
+  plus two echo billings (#183/#185, §1's substance). Refit 6's
+  falsified "none left" lesson stays carried: the claim below is
+  about the CURRENT seam's shape, not about the component.
+- **Simpler alternative**: NONE LEFT ON THE BOOKS. The ONE named
+  residual (coworker-run.ts's nudge ladder — #181's stated next
+  slice, refit 9's pick) is EXECUTED by #188. The bench is the
+  simpler alternative and both its customers are seated.
+- **Verdict**: KEEP (converged again at refit 10 — receipts #161–#176's
+  line, the bench #181, the fold #188).
 
 ### 3. Wake ladder
 - **Concept**: one wake per commission; spool-first, per-rung trace.
@@ -360,9 +402,11 @@ permissions `src/core/permission.ts`, wake-ladder
   workers leave the stall ladder's jurisdiction, #166) → #178/ADR
   0015: `WakeBooking.parentUnit` + `spawnerSession` make the wait-for
   DAG receipt-backed; `waitingOnLiveChild` folds dangling edges to
-  "not a wait"; declared follow-up — the event-driven wake
-  (`herdr agent wait --until idle`) so the settle fires on the
-  transition instead of the next beat.
+  "not a wait"; #188 deepens the ledger reach: EVERY member death now
+  wakes the levy through closeMember's ledger emit (the model
+  ladder's three death sites were log-only before). Declared
+  follow-up — the event-driven wake (`herdr agent wait --until idle`)
+  so the settle fires on the transition instead of the next beat.
 - **Oscillation**: LOW (one softening: in-band → spool-first).
 - **Simpler alternative**: none known (the event-wake follow-up is a
   declared platform upgrade, not a reversal).
@@ -415,7 +459,7 @@ permissions `src/core/permission.ts`, wake-ladder
   dir)).roots`) holding zero path knowledge; the loud hard-deny strip
   moved INTO the canonical predicate (`sanitizeRoots` internal,
   pinned through `declareScope`, warning at every construction site —
-  the door's included); tests re-pinned at the new seam. Refits 4–9:
+  the door's included); tests re-pinned at the new seam. Refits 4–10:
   not one new touch (fix-density 13 frozen since #172).
 - **Oscillation**: LOW-MED historically — the fix-density was the
   symptom; both slices landed without reversal (the 12→13 delta is
@@ -432,16 +476,21 @@ permissions `src/core/permission.ts`, wake-ladder
 - **Trajectory**: CLI --model flag → #101 sandbox-config (opencode
   dropped the flag; panes died) → #136 router → #159 seam pins →
   3793ad1 (direct-to-master, no PR): `bin/pick-workflow` jev pin
-  1.13→1.14 — config churn only, no rail src, no attribution.
+  1.13→1.14 — config churn only, no rail src, no attribution → #188
+  receipt (c2-iter4's watch item, discharged): the fold's file
+  imports the jev model-ladder seam (budgetAction/nextModel) and the
+  fold touched none of it; no pane-path pin evidence surfaced — the
+  block stays WATCH on the same warrant as before.
 - **Oscillation**: HIGH historically (3 transport changes in ~2 weeks);
   #159 settles authoring; pane-path vs CLI-path asymmetry remains.
 - **Simpler alternative**: ONE pin transport — directional only; it
   becomes a milestone violation the moment new evidence arrives, and
-  none has (#159 is the last rail touch; the loop never followed).
-  Watch item for c2-iter4: the armed fold's file
-  (src/engines/coworker-run.ts) imports the jev model-ladder seam
-  (budgetAction/nextModel) — if the fold surfaces pane-path pin
-  evidence, this block re-opens on receipt, not on taste.
+  none has (#159 is the last rail touch; the loop never followed;
+  #188's fold closed its watch item clean). Next watch surface: the
+  composite case's analyze stage DECLARES per-unit pins ("cheap
+  models here") — authoring that stage is the next place pane-path
+  pin evidence could arrive; if it does, this block re-opens on
+  receipt, not on taste.
 - **Verdict**: WATCH.
 
 ### 7. Window
@@ -454,7 +503,7 @@ permissions `src/core/permission.ts`, wake-ladder
   read refit 2 instructed: the loop-era churn is the SERVER mirroring
   rail-side redesigns (grade contract #145, unit ledger #162, scan
   perf #139) — follower churn, not window-intrinsic sickness; the
-  viewer-only line has held since #69. Refits 4–9: nothing new under
+  viewer-only line has held since #69. Refits 4–10: nothing new under
   `web/` — the read stands. ADR 0014 exempts the viewer's own
   `[[step]]` manifest renderer deliberately (it renders HISTORICAL
   run dirs with its own parser — history-keeping, not authoring).
@@ -492,7 +541,7 @@ permissions `src/core/permission.ts`, wake-ladder
    + ONE real ≤30-min bench task exercising the redesign.
 4. **Merge** → back to 1.
 
-Loop-v2 status (refit 9's read): EIGHT loop-era slices landed GREEN —
+Loop-v2 status (refit 10's read): NINE loop-era slices landed GREEN —
 #167 (c1-iter1), #170 (c1-iter2), #172 (c1-iter3: one eval-red bounce
 root-caused INFRA — zhipuai's 5-hour quota window, re-proven direct,
 regate PASS), #174 (c1-iter5: 1 round, 0 strikes, clean), #176
@@ -506,37 +555,43 @@ NEXT-TARGET chained as-written, landed 1805 ≤ 2500 (369+/1436−), 1
 round, 0 strikes, 442/442, green (33,8); the driver died at
 commissioning and revive3 hand-landed it — the fixer survived, the
 gate ran clean, D4's boundary held: never a gate-red round, never a
-strike). Iteration 4 of commissioning 1 died driver-side (DEAD-iter4).
-Commissioning 1's MAX-6 budget consumed; commissioning 2 (pin
-335bbca) has THREE clean iterations banked (budget 3/6), and this
-refit (c2-iter3's) arms §2's residual fold for c2-iter4. Every refit
-PR absorbed except one (#173's absorb was refused once by the refit
-lane's evidence fence — body must cite ≥2 PR refs, this file's own
-authors must comply — and human-merged; #175, #177, #182, #184
-absorbed clean, #184 in 44s). No strikes file exists — no same-cause
-strike ever billed; D3 unexercised (a circuit breaker, not a KPI).
-#169 (operator amendment) made refit proposals effective as-written,
-which raises this file's duty: the discount chain and pick receipts
-above ARE the audit trail that keeps D2 honest — momentum.py's
-mechanical rank-1 echo (runner-dispatch) was read and overridden BY
-RECEIPT, not by taste, SIX refits running (3–8); refit 9 is the
-first to PICK the rank-1, and the receipt narrows the pick to the
-component's one named residual (the echo churn is the seam's; the
-residual is the seam's one open customer — the same narrowing, now
-pointing AT the pick instead of away from it).
+strike), #188 (c2-iter4: the member court — armed by refit 9's
+NEXT-TARGET chained as-written, landed 424 ≤ 800 (305+/119−), 1
+round, 0 strikes, 444/444, green (33,8)). Iteration 4 of
+commissioning 1 died driver-side (DEAD-iter4). Commissioning 1's
+MAX-6 budget consumed; commissioning 2 (pin 335bbca) has FOUR clean
+iterations banked (budget 4/6 — c2-iter5 fits with one to spare), and
+this refit (c2-iter4's) arms the composite eval case for c2-iter5 —
+the first loop pick that is not a component redesign but the
+milestone's exam. Every refit PR absorbed except one (#173's absorb
+was refused once by the refit lane's evidence fence — body must cite
+≥2 PR refs, this file's own authors must comply — and human-merged;
+#175, #177, #182, #184 absorbed clean, #184 in 44s; #187 merged
+20:45 and became this file's refit-9 state). No strikes file exists
+— no same-cause strike ever billed; D3 unexercised (a circuit
+breaker, not a KPI). #169 (operator amendment) made refit proposals
+effective as-written, which raises this file's duty: the discount
+chain and pick receipts above ARE the audit trail that keeps D2
+honest — momentum.py's mechanical rank-1 echo (runner-dispatch) was
+read and overridden BY RECEIPT, not by taste, SEVEN refits running
+(3–8, 10); refit 9 is the only pick of the rank-1, and it landed
+(#188); refit 10's override is the last one the milestone needs: the
+table holds no open residual anywhere, and the sequencing receipt
+five refits wrote ("after the residual fold: a green eval case")
+names the pick.
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
 known-simpler alternative (§1 CLOSED at refit 9 — #176 slice 1, #183
 the engine half, #185 the museum, ADR 0014 EXECUTED; §2 closed at
-refit 3, re-opened by #178/#179, closed again by #181 — its ONE
-UNGATED residual fold armed as c2-iter4; §5 at refit 4; §8 at refit
-5 (#174); §6's one-transport question stays WATCH for want of new
-evidence); composite eval green — NOT YET: the transfer-window-v2
-case is the milestone's last unbuilt leg, and its crib (a converted,
-corpus.test.ts-pinned stage-chain corpus demonstrating every
-topology) landed with #185. After the residual fold: a green eval
-case graduates the loop to the FULL benchmark pass.
+refit 3, re-opened by #178/#179, closed again by #181, and its one
+named residual EXECUTED by #188 at refit 10 — the bench seats both
+its customers; §5 at refit 4; §8 at refit 5 (#174); §6's
+one-transport question stays WATCH for want of new evidence — #188
+discharged its watch item clean); composite eval green — NOT YET,
+and now the ONLY leg: the transfer-window-v2 case, ARMED as
+c2-iter5's pick. A green case graduates the loop to the FULL
+benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -557,22 +612,32 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
                                  output schema valid — hard fails
 ```
 
-Target ≤30 min real; mock rehearsal = seconds. Still build-next —
-untouched by the loop so far (the loop's eval lane used topo-tune's
-real levy, joint target (33,8) green on #167, #170, #172's re-proof,
-#174, #176, #181, #183, and #185). #170 makes the scout stage honest
-to bench: a paused-and-continued lab now resumes rather than restarts,
-so the ≤30-min budget survives human interference; #178's platform
-pen gives the case's lab stage a status-first settle lane if it
-wants it (declared, not assumed); #183 removed the last engine-side
-dialect and #185 converted the corpus, so the case authors against
-`[[stage]]` only — with a converted, pinned example corpus to crib
-from (every topology demonstrated: solo smoke, fan-out+preamble
-staged-waves, gate waves/two-signoffs, coworker nested/hand-off, lab
-with inline detectors git-wave/trivia-bench), not museum pieces.
-Sequencing held by refits 5–9 and extended one step: §1's retirement
-(#176, #183, #185) landed BEFORE the case is authored; the residual
-fold (c2-iter4) lands before it too — the case's `negotiate` stage
-is a coworker exchange, and it should author against the bench-owned
-close ceremony, not a hand-rolled nudge ladder that is about to be
-folded away underneath it.
+Target ≤30 min real; mock rehearsal = seconds. ARMED as c2-iter5
+(refit 10's pick) — untouched by the loop until now (the loop's eval
+lane used topo-tune's real levy, joint target (33,8) green on #167,
+#170, #172's re-proof, #174, #176, #181, #183, #185, and #188).
+#170 makes the scout stage honest to bench: a paused-and-continued
+lab now resumes rather than restarts, so the ≤30-min budget survives
+human interference; #178's platform pen gives the case's lab stage a
+status-first settle lane if it wants it (declared, not assumed);
+#183 removed the last engine-side dialect and #185 converted the
+corpus, so the case authors against `[[stage]]` only — with a
+converted, pinned example corpus to crib from (every topology
+demonstrated: solo smoke, fan-out+preamble staged-waves, gate waves/
+two-signoffs, coworker nested/hand-off, lab with inline detectors
+git-wave/trivia-bench), not museum pieces. Sequencing held by refits
+5–10 and is now FULLY DISCHARGED: §1's retirement (#176, #183, #185)
+landed BEFORE the case is authored; the residual fold (#188) landed
+before it too — the case's `negotiate` stage authors against the
+bench-owned close ceremony (#188's member court + RAILS.md's
+two-court documentation), not a hand-rolled nudge ladder. The blast
+set is test/+docs/ only BY DESIGN: the case must author with zero
+src changes — that is the grammar's proof, and the scope fence is
+the experiment (if the declaration cannot express the case, the
+fixer strikes on scope and D3 converts the impossibility into
+ESCALATED evidence; the next refit re-opens §1 on that receipt, not
+on a silent src patch). The REAL ≤30-min bench run is ops-side (the
+driver's eval lane, as topo-tune is); the rail-repo deliverable is
+the case itself: the workflow.toml, the fixture generator, verify.sh,
+the mock rehearsal, corpus.test.ts's automatic pin over the new
+tree, and the README rubric.
