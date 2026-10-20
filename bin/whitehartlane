@@ -20,16 +20,16 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { prepareRun, spawnerFromArgs } from "../src/run.ts"
-import { refreshWait } from "../src/refresh.ts"
-import { defaultRunner, jsonAt } from "../src/runners.ts"
-import { forkLevy } from "../src/fork.ts"
-import { regradeJob } from "../src/resume.ts"
-import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/levy-pane.ts"
-import { rebirthRunner, spawnRunner } from "../src/levy.ts"
-import { readState } from "../src/state.ts"
-import { seedSessionFile } from "../src/transcripts.ts"
-import { admitFork } from "../src/policy.ts"
+import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
+import { refreshWait } from "../src/doors/refresh.ts"
+import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
+import { forkLevy } from "../src/adapters/fork.ts"
+import { regradeJob } from "../src/doors/resume.ts"
+import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/adapters/levy-pane.ts"
+import { rebirthRunner, spawnRunner } from "../src/adapters/levy.ts"
+import { readState } from "../src/core/state.ts"
+import { seedSessionFile } from "../src/adapters/transcripts.ts"
+import { admitFork } from "../src/jev/policy.ts"
 import {
   abortJob,
   appendEvent,
@@ -47,8 +47,8 @@ import {
   readEvents,
   saveJob,
   wakeAudit,
-} from "../src/store.ts"
-import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/promote.ts"
+} from "../src/adapters/store.ts"
+import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
 
 // "90s", "2m", "1h", "5000" (ms) — the pause --wait one-shot ceiling.
 function parseDuration(raw) {

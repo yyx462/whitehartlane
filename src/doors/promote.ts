@@ -3,7 +3,7 @@
 // The human runs it. A clean Job is not permission to publish.
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { appendEvent, saveJob, type JobRecord } from "./store.ts"
+import { appendEvent, saveJob, type JobRecord } from "../adapters/store.ts"
 
 export type Finding = { check: string; detail: string }
 

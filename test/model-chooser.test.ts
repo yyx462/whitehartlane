@@ -10,7 +10,7 @@ import {
   chooseModel,
   parseChooser,
   remainingCandidates,
-} from "../src/model-chooser.ts"
+} from "../src/jev/model-chooser.ts"
 
 const ORDER = [
   "zhipuai-coding-plan/glm-5.3",

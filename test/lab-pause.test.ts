@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { labBookings, runLab } from "../src/lab.ts"
+import { labBookings, runLab } from "../src/engines/lab.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 
 // ADR 5 parity for the lab engine: SIGTERM drains to quiescence and

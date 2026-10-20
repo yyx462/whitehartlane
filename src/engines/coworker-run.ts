@@ -7,17 +7,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
-import { budgetAction, clearPending, nextModel, readModelsFile, writePending } from "./model-ladder.ts"
-import { chooseModel, remainingCandidates } from "./model-chooser.ts"
-import { runCounts } from "./hooks.ts"
-import { emptyBoard } from "./lanes.ts"
-import { drainDeadline } from "./levy.ts"
-import { waitChange, type Rail } from "./rail.ts"
-import { writeReport, type Report } from "./report.ts"
+import { budgetAction, clearPending, nextModel, readModelsFile, writePending } from "../jev/model-ladder.ts"
+import { chooseModel, remainingCandidates } from "../jev/model-chooser.ts"
+import { runCounts } from "../doors/hooks.ts"
+import { emptyBoard } from "../core/lanes.ts"
+import { drainDeadline } from "../adapters/levy.ts"
+import { waitChange, type Rail } from "../adapters/rail.ts"
+import { writeReport, type Report } from "../core/report.ts"
 
 // The door checkout root — where the operator's global models.local.toml
 // lives (layer 3 of the policy ladder).
-const DOOR_ROOT = join(import.meta.dirname, "..")
+const DOOR_ROOT = join(import.meta.dirname, "..", "..")
 
 export async function runCoworker(
   rail: Rail,

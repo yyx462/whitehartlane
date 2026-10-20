@@ -10,8 +10,8 @@ import test from "node:test"
 // ledger records it mints
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-door-"))
 
-import { fanOutShepPlan, show, standUp } from "../src/front-door.ts"
-import { readState } from "../src/state.ts"
+import { fanOutShepPlan, show, standUp } from "../src/doors/front-door.ts"
+import { readState } from "../src/core/state.ts"
 
 const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 

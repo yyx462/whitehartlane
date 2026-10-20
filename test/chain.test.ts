@@ -13,9 +13,9 @@ import test from "node:test"
 // resolve a session there, so they need their own disk
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-chain-"))
 
-import { chainOf, stepRecorder } from "../src/orchestrator-chain.ts"
-import { readCheckpoints } from "../src/state.ts"
-import type { Step } from "../src/hooks.ts"
+import { chainOf, stepRecorder } from "../src/core/orchestrator-chain.ts"
+import { readCheckpoints } from "../src/core/state.ts"
+import type { Step } from "../src/doors/hooks.ts"
 
 const stepsOf = (rows: [id: string, by: Step["finished_by"], wave: string][]): Step[] =>
   rows.map(([id, finished_by, wave]) => ({ id, finished_by, wave }))

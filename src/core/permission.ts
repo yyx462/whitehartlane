@@ -22,8 +22,8 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
-import { jevNoulQ } from "./jev.ts"
+import { loadPrompt, loadThreshold } from "../jev/jev-prompts.ts"
+import { jevNoulQ } from "../jev/jev.ts"
 
 // The deny cap every rail surface shares: a worker may be DENIED this
 // many dialogs before its blocking is the worker's, not the dialog's.

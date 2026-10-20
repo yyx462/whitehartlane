@@ -1,4 +1,4 @@
-import { appendEvent, readEvents, type OsEvent } from "./store.ts"
+import { appendEvent, readEvents, type OsEvent } from "../adapters/store.ts"
 
 export type EndName = "done" | "blocked" | "dead" | "silent"
 

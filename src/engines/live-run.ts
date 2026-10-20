@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { protocolPath, type Wave } from "./protocol.ts"
+import { protocolPath, type Wave } from "../core/protocol.ts"
 
 export type LiveSignal = { kind: "missing" } | { kind: "partial" } | { kind: "stop" } | { kind: "wave"; wave: Wave }
 

@@ -11,7 +11,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { homeRoot } from "./store.ts"
-import { SPOOL_STALE_MS } from "../plugin/opencode-wake.js"
+import { SPOOL_STALE_MS } from "../../plugin/opencode-wake.js"
 
 export type SpoolRow = {
   at: string

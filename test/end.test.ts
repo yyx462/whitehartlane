@@ -6,8 +6,8 @@ import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-end-"))
 
-const { readEvents } = await import("../src/store.ts")
-const { nameEnd, recordEnd } = await import("../src/end.ts")
+const { readEvents } = await import("../src/adapters/store.ts")
+const { nameEnd, recordEnd } = await import("../src/core/end.ts")
 
 const sid = "s-end"
 const jid = "j-end"

@@ -16,11 +16,11 @@ import {
   worktreeChurnedSince,
   type CycleDeps,
   type ShepPort,
-} from "../src/orchestrator.ts"
-import { RefusedError } from "../src/backpressure.ts"
-import { HookError } from "../src/hooks.ts"
-import { hooksFromDir } from "../src/hooks.ts"
-import { readCheckpoints, readState, settle } from "../src/state.ts"
+} from "../src/engines/orchestrator.ts"
+import { RefusedError } from "../src/core/backpressure.ts"
+import { HookError } from "../src/doors/hooks.ts"
+import { hooksFromDir } from "../src/doors/hooks.ts"
+import { readCheckpoints, readState, settle } from "../src/core/state.ts"
 
 import { copyExample } from "./util.ts"
 
@@ -655,7 +655,7 @@ test("runOrchestrator stops at the deadline, finished_by the rest failed, and wa
 
 test("the manifest layout section resolves with defaults and rejects bad values", async () => {
   const dir = await copyExample("orch-layout-")
-  const { loadManifest, resolvedLayout } = await import("../src/hooks.ts")
+  const { loadManifest, resolvedLayout } = await import("../src/doors/hooks.ts")
   const original = readFileSync(join(dir, "workflow.toml"), "utf8")
 
   const flipped = original

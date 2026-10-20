@@ -8,8 +8,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { levyPaneOf, registerLevyPane } from "../src/levy-pane.ts"
-import { createJob, readEvents, wakeFirstMate } from "../src/store.ts"
+import { levyPaneOf, registerLevyPane } from "../src/adapters/levy-pane.ts"
+import { createJob, readEvents, wakeFirstMate } from "../src/adapters/store.ts"
 
 const HOME = mkdtempSync(join(tmpdir(), "aos-ladder-"))
 process.env.AGENTIC_OS_HOME = HOME

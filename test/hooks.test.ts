@@ -14,8 +14,8 @@ import {
   runGateDetector,
   runGrade,
   runSignalDetector,
-} from "../src/hooks.ts"
-import { RefusedError } from "../src/backpressure.ts"
+} from "../src/doors/hooks.ts"
+import { RefusedError } from "../src/core/backpressure.ts"
 
 const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 

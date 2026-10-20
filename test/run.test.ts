@@ -8,8 +8,8 @@ import { copyExample } from "./util.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-run-"))
 
-const { prepareRun } = await import("../src/run.ts")
-const { listJobs } = await import("../src/store.ts")
+const { prepareRun } = await import("../src/doors/run.ts")
+const { listJobs } = await import("../src/adapters/store.ts")
 
 const bin = join(import.meta.dirname, "..", "bin", "whitehartlane")
 const stub = join(process.env.AGENTIC_OS_HOME, "engine-stub.mjs")
@@ -83,8 +83,8 @@ test("run books a Job from the three-lookups manifest and rejects a second while
 })
 
 test("a second Job does not see the first Job's progress", async () => {
-  const { prepareRun } = await import("../src/run.ts")
-  const { abortJob } = await import("../src/store.ts")
+  const { prepareRun } = await import("../src/doors/run.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   const dir = await copyExample("agentic-os-run-fresh-")
   const first = prepareRun(dir)
   assert.equal(first.ok, true)
@@ -119,7 +119,7 @@ test("run books a lab Job from one spur file and stages it", async () => {
   assert.match(staged, /written by whitehartlane/)
   assert.match(staged, /name = "tiny-lab"/)
   assert.equal(existsSync(join(dir, "workflow.toml")), false)
-  const { abortJob } = await import("../src/store.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(booked.job, "test", 0, "cli")
 })
 
@@ -142,7 +142,7 @@ test("a legacy dag.mjs still admits, loudly (ADR 0009)", async () => {
     "legacy export const dag — rename to export const spur",
   ])
   assert.equal(existsSync(join(booked.job.dir, "dag.mjs")), true)
-  const { abortJob } = await import("../src/store.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(booked.job, "test", 0, "cli")
   // a legacy file name with the new export inside: only the file warning
   const dir2 = mkdtempSync(join(tmpdir(), "agentic-os-legacy2-"))
@@ -178,7 +178,7 @@ test("a folder holding both spur.mjs and dag.mjs is refused, not guessed (ADR 00
     explicit.warnings.filter((w) => !w.startsWith("no project.json")),
     [],
   )
-  const { abortJob } = await import("../src/store.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(explicit.job, "test", 0, "cli")
   assert.equal(listJobs().filter((job) => job.task === "x").length, 1)
 })
@@ -202,7 +202,7 @@ test("run stages a program's roots.txt beside the spur", async () => {
   assert.equal(booked.ok, true)
   if (!booked.ok) return
   assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n/abs/prototypes\n")
-  const { abortJob } = await import("../src/store.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(booked.job, "test", 0, "cli")
 })
 
@@ -230,7 +230,7 @@ test("run refuses a gate step with no [gates] detector and books nothing", async
   if (booked.ok) {
     const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
     assert.match(staged, /\[gates\]/)
-    const { abortJob } = await import("../src/store.ts")
+    const { abortJob } = await import("../src/adapters/store.ts")
     abortJob(booked.job, "test", 0, "cli")
   }
 })
@@ -248,6 +248,6 @@ test("run books a kind=lab program and stages its detectors as absolute paths", 
   assert.equal(booked.kind, "lab")
   assert.match(readFileSync(join(booked.job.dir, "workflow.toml"), "utf8"), /signal = "node \//)
   assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n")
-  const { abortJob } = await import("../src/store.ts")
+  const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(booked.job, "test", 0, "cli")
 })

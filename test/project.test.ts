@@ -6,8 +6,8 @@ import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-project-"))
 
-const { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf } = await import("../src/project.ts")
-const { createJob, findOrOpenSession, projectJob, readEvents } = await import("../src/store.ts")
+const { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf } = await import("../src/doors/project.ts")
+const { createJob, findOrOpenSession, projectJob, readEvents } = await import("../src/adapters/store.ts")
 
 function programFolder(name = "prog"): string {
   const dir = join(mkdtempSync(join(tmpdir(), "agentic-os-prog-")), name)

@@ -7,8 +7,8 @@
 // purpose: this file has no extension, so Node will not type-strip it.
 // Usage: bin/orchestrator <taskDir>
 import { resolve } from "node:path"
-import { engineFor, programRootsOf, stagedKind } from "../src/engine.ts"
-import { Rail } from "../src/rail.ts"
+import { engineFor, programRootsOf, stagedKind } from "../src/engines/engine.ts"
+import { Rail } from "../src/adapters/rail.ts"
 
 const argvDir = process.argv[2] ? resolve(process.argv[2]) : null
 const programRoots = programRootsOf(argvDir ?? process.cwd())

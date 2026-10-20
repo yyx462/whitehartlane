@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { RefusedError, withBackpressure } from "../src/backpressure.ts"
+import { RefusedError, withBackpressure } from "../src/core/backpressure.ts"
 
 test("withBackpressure retries refusals with visible lines and events, then succeeds", () => {
   const logs: string[] = []

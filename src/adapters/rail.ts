@@ -15,12 +15,12 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
-import { isProviderFault, parseModelRef } from "./model-ladder.ts"
-import { landMockUnit, loadManifest, type Layout, type Manifest } from "./hooks.ts"
-import { drop, note, place, type Board } from "./lanes.ts"
-import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "./orchestrator.ts"
-import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "./permission.ts"
-import type { Report } from "./report.ts"
+import { isProviderFault, parseModelRef } from "../jev/model-ladder.ts"
+import { landMockUnit, loadManifest, type Layout, type Manifest } from "../doors/hooks.ts"
+import { drop, note, place, type Board } from "../core/lanes.ts"
+import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "../engines/orchestrator.ts"
+import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "../core/permission.ts"
+import type { Report } from "../core/report.ts"
 import {
   abortJob as abortJobRec,
   addWorkerRoot,
@@ -49,12 +49,12 @@ import {
   type SeedPointer,
   type TranscriptPointer,
 } from "./store.ts"
-import { readState } from "./state.ts"
+import { readState } from "../core/state.ts"
 import { resolveOpencode, resolvePi } from "./transcripts.ts"
-import { defaultRunner, jsonAt, type RunnerResult } from "./runners.ts"
-import { beat, note as sayOnce, verboseOn } from "./verbose.ts"
+import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
+import { beat, note as sayOnce, verboseOn } from "../core/verbose.ts"
 
-export type { RunnerResult } from "./runners.ts"
+export type { RunnerResult } from "../doors/runners.ts"
 
 // The Job ledger surface the Rail needs (zen 2/5). Bookkeeping must
 // never break the rail: every call is best-effort, and a run without
@@ -83,7 +83,7 @@ export type RailLedger = {
 function doorRev(): string {
   try {
     const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: join(import.meta.dirname, ".."),
+      cwd: join(import.meta.dirname, "..", ".."),
       encoding: "utf8",
       timeout: 5_000,
     })

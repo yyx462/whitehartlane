@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { extractReportPath, parseWakeList } from "../src/wake-reader.ts"
-import { nextRetryAction } from "../src/front-door.ts"
+import { extractReportPath, parseWakeList } from "../src/adapters/wake-reader.ts"
+import { nextRetryAction } from "../src/doors/front-door.ts"
 
 test("parseWakeList reads TSV rows and skips the header and summary", () => {
   const text = [

@@ -8,10 +8,10 @@ import test from "node:test"
 // §8) — this suite drives full runs, so it needs its own disk
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-engine-"))
 
-import { engineFor, programRootsOf, stagedKind } from "../src/engine.ts"
-import { declareScope } from "../src/permission.ts"
-import type { Rail } from "../src/rail.ts"
-import type { Report } from "../src/report.ts"
+import { engineFor, programRootsOf, stagedKind } from "../src/engines/engine.ts"
+import { declareScope } from "../src/core/permission.ts"
+import type { Rail } from "../src/adapters/rail.ts"
+import type { Report } from "../src/core/report.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 
 const dirOf = (toml?: string): string => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { actorBrief } from "../src/roles.ts"
+import { actorBrief } from "../src/core/roles.ts"
 
 test("the actor brief is the program's own text — no OS-injected target", () => {
   const brief = actorBrief("Read the target skill. Do not edit it.")

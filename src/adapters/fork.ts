@@ -8,9 +8,9 @@ import { dirname, join, resolve } from "node:path"
 import { spawn } from "node:child_process"
 import type { JobRecord, SeedPointer } from "./store.ts"
 import { appendEvent, findOrOpenSession } from "./store.ts"
-import { admitFork } from "./policy.ts"
+import { admitFork } from "../jev/policy.ts"
 import { seedSessionFile, repointOpencodeSession } from "./transcripts.ts"
-import { defaultRunner, jsonAt, type RunnerResult } from "./runners.ts"
+import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
 
 // Issue #127 — the deterministic walk: from a vanished path, the
 // nearest surviving ancestor. $HOME itself is deliberately too vague

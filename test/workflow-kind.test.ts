@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { workflowKind } from "../src/workflow-kind.ts"
+import { workflowKind } from "../src/core/workflow-kind.ts"
 
 test("lab is its own workflow, not a flag inside fan-out", () => {
   assert.equal(workflowKind('kind = "lab"\n'), "lab")

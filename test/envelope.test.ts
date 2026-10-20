@@ -12,9 +12,9 @@ import { join } from "node:path"
 import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-envelope-"))
-const store = await import("../src/store.ts")
-const { spawnRunner, rebirthRunner, runnerDoor } = await import("../src/levy.ts")
-const { Rail } = await import("../src/rail.ts")
+const store = await import("../src/adapters/store.ts")
+const { spawnRunner, rebirthRunner, runnerDoor } = await import("../src/adapters/levy.ts")
+const { Rail } = await import("../src/adapters/rail.ts")
 
 function stubDoor(home: string): string {
   const stub = join(home, "stub-orchestrator.mjs")

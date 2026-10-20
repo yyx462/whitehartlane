@@ -11,7 +11,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import plugin, { digest } from "../plugin/opencode-wake.js"
-import { spoolDirOf } from "../src/wake-spool.ts"
+import { spoolDirOf } from "../src/adapters/wake-spool.ts"
 
 const HOME = mkdtempSync(join(tmpdir(), "aos-wake-v2-"))
 process.env.AGENTIC_OS_HOME = HOME

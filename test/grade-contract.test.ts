@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { gradeSmoke, loadManifest, runGrade } from "../src/hooks.ts"
+import { gradeSmoke, loadManifest, runGrade } from "../src/doors/hooks.ts"
 
 // #144 — the grade contract: an empty-verdict failure is an infra fault,
 // never an answer fault. One immediate retry, then a label no report can

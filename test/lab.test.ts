@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { runLab } from "../src/lab.ts"
+import { runLab } from "../src/engines/lab.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 
 // The lab engine, driven end to end over scripted agents: the actor

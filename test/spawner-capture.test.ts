@@ -5,7 +5,7 @@
 // no registry staleness.
 import assert from "node:assert/strict"
 import test from "node:test"
-import { spawnerFromArgs } from "../src/run.ts"
+import { spawnerFromArgs } from "../src/doors/run.ts"
 
 test("spawnerFromArgs: --from books the levy; the pane rides along from --pane or HERDR_PANE_ID", () => {
   assert.equal(spawnerFromArgs(["run", "folder"]), null, "no --from — no levy booked")

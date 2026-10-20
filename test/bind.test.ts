@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { bindWorktree, findGwtRoot, liveWorktrees, parseGwtPath, slugFor } from "../src/bind.ts"
-import { createJob, findOrOpenSession } from "../src/store.ts"
+import { bindWorktree, findGwtRoot, liveWorktrees, parseGwtPath, slugFor } from "../src/adapters/bind.ts"
+import { createJob, findOrOpenSession } from "../src/adapters/store.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-bind-"))
 

@@ -1,10 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
-import { expandHome, scopeCovers, scopeFromDir } from "./permission.ts"
+import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
 import { loadSpurFile, type Spur } from "./spur.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
-import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
-import { admitAnotherJob, admitFanOut } from "./policy.ts"
+import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
+import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
 import { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf, type SpurIdentity } from "./project.ts"
 import {
   appendEvent,
@@ -14,7 +14,7 @@ import {
   listJobs,
   type JobRecord,
   type SpawnerPointer,
-} from "./store.ts"
+} from "../adapters/store.ts"
 
 // ADR 0006: --from <tool>:<session-id> books the spawning levy as the
 // checkpoint — the Job will wake it exactly once at the end. Run from

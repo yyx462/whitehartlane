@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { birthWave, protocolPath } from "../src/protocol.ts"
+import { birthWave, protocolPath } from "../src/core/protocol.ts"
 
 function jobDir(): string {
   return mkdtempSync(join(tmpdir(), "agentic-os-protocol-"))

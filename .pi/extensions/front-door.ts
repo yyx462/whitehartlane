@@ -11,15 +11,15 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { nextRetryAction, show } from "../../src/front-door.ts"
+import { nextRetryAction, show } from "../../src/doors/front-door.ts"
 import {
   appendEvent,
   findOrOpenSession,
   listJobs,
   openSession,
   type SessionRecord,
-} from "../../src/store.ts"
-import { extractReportPath, parseWakeList } from "../../src/wake-reader.ts"
+} from "../../src/adapters/store.ts"
+import { extractReportPath, parseWakeList } from "../../src/adapters/wake-reader.ts"
 
 const POLL_MS = 10_000
 const execFileP = promisify(execFile)

@@ -13,7 +13,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { landGate, loadThreshold, type GateId } from "./jev-prompts.ts"
 import { jevChoiceQAsync, jevNoulQAsync } from "./jev.ts"
-import { permissionJudgeState } from "./permission.ts"
+import { permissionJudgeState } from "../core/permission.ts"
 
 export type GateKind = "noul" | "choice"
 
@@ -70,7 +70,7 @@ export type RunReport = {
   why_not?: string
 }
 
-const defaultRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "jev-tuner", "gates")
+const defaultRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "jev-tuner", "gates")
 
 // call-time resolution: tests point the tuner at a tmp gates dir
 export function gatesRoot(): string {

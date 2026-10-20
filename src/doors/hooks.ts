@@ -4,10 +4,10 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
-import { RefusedError } from "./backpressure.ts"
-import { parseSignal, type LiveSignal } from "./live-run.ts"
+import { RefusedError } from "../core/backpressure.ts"
+import { parseSignal, type LiveSignal } from "../engines/live-run.ts"
 
-const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 export type Unit = { id: string; brief: string }
 

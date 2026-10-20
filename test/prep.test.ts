@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { compactedPi, traceContext, writeRunContext } from "../src/prep.ts"
+import { compactedPi, traceContext, writeRunContext } from "../src/doors/prep.ts"
 
 test("compacted view keeps the summary and drops what it replaced", () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-prep-"))

@@ -9,9 +9,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
-import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
-import { readCheckpoints } from "../src/state.ts"
-import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, modelPlanFromStages, type Stage } from "../src/hooks.ts"
+import { runOrchestrator, type ShepPort } from "../src/engines/orchestrator.ts"
+import { readCheckpoints } from "../src/core/state.ts"
+import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, modelPlanFromStages, type Stage } from "../src/doors/hooks.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-stages-"))
 process.env.AGENTIC_OS_NOTIFY = "0"

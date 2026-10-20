@@ -9,9 +9,9 @@ import { mkdtemp } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { Rail } from "../src/rail.ts"
-import { prepareRun } from "../src/run.ts"
-import { runCoworker } from "../src/coworker-run.ts"
+import { Rail } from "../src/adapters/rail.ts"
+import { prepareRun } from "../src/doors/run.ts"
+import { runCoworker } from "../src/engines/coworker-run.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-perm-hard-"))

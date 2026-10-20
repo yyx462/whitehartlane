@@ -2,9 +2,9 @@ import { cpSync } from "node:fs"
 import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Rail, type RailLedger, type RunnerResult } from "../src/rail.ts"
-import type { PermissionJudge } from "../src/permission.ts"
-import type { JobRecord } from "../src/store.ts"
+import { Rail, type RailLedger, type RunnerResult } from "../src/adapters/rail.ts"
+import type { PermissionJudge } from "../src/core/permission.ts"
+import type { JobRecord } from "../src/adapters/store.ts"
 
 // The shared example program, in the one authoring story (ADR 0014):
 // examples/three-lookups (units-hook spelling) is a museum piece.

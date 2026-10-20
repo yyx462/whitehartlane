@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { CountRow } from "./hooks.ts"
+import type { CountRow } from "../doors/hooks.ts"
 
 export type Report = {
   kind: "report"

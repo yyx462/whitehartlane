@@ -18,17 +18,17 @@
 // the lab is the third telling, same shape.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { withBackpressure } from "./backpressure.ts"
-import { loadSpurFile, tick } from "./spur.ts"
-import { runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "./hooks.ts"
-import { emptyBoard } from "./lanes.ts"
+import { withBackpressure } from "../core/backpressure.ts"
+import { loadSpurFile, tick } from "../doors/spur.ts"
+import { runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../doors/hooks.ts"
+import { emptyBoard } from "../core/lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
-import { gradeCall } from "./live-grade.ts"
-import { actorBrief, paneName } from "./roles.ts"
-import { writeReport, type Report } from "./report.ts"
-import { drainDeadline } from "./levy.ts"
-import { waitChange, type Rail, type RailLedger } from "./rail.ts"
-import { closes } from "./verbose.ts"
+import { gradeCall } from "../core/live-grade.ts"
+import { actorBrief, paneName } from "../core/roles.ts"
+import { writeReport, type Report } from "../core/report.ts"
+import { drainDeadline } from "../adapters/levy.ts"
+import { waitChange, type Rail, type RailLedger } from "../adapters/rail.ts"
+import { closes } from "../core/verbose.ts"
 
 const GRACE_MS = 15_000
 

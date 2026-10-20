@@ -8,10 +8,10 @@ import test from "node:test"
 // state reads resolve a session there, so the suite needs its own disk
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-cd-"))
 
-import { cycle, probeDeliverable, type CycleDeps, type ShepPort } from "../src/orchestrator.ts"
-import { hooksFromDir } from "../src/hooks.ts"
-import { readCheckpoints, readState } from "../src/state.ts"
-import { readWakeBooking, waitEdges, waitingOnLiveChild, writeWakeBooking } from "../src/levy.ts"
+import { cycle, probeDeliverable, type CycleDeps, type ShepPort } from "../src/engines/orchestrator.ts"
+import { hooksFromDir } from "../src/doors/hooks.ts"
+import { readCheckpoints, readState } from "../src/core/state.ts"
+import { readWakeBooking, waitEdges, waitingOnLiveChild, writeWakeBooking } from "../src/adapters/levy.ts"
 
 import { copyExample } from "./util.ts"
 

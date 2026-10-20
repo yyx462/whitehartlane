@@ -11,7 +11,7 @@ import {
   readRootsTxt,
   scopeCovers,
   scopeFromDir,
-} from "../src/permission.ts"
+} from "../src/core/permission.ts"
 
 // the judge branch reads the landed threshold; point at an empty tmp
 // dir so the compiled default (0.5) applies, whatever has been landed

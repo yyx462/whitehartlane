@@ -13,8 +13,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { rowsBeyond, digest } from "../plugin/opencode-wake.js"
-import { appendSpoolWake, spoolAlive, spoolDirOf } from "../src/wake-spool.ts"
-import { createJob, readEvents, wakeFirstMate } from "../src/store.ts"
+import { appendSpoolWake, spoolAlive, spoolDirOf } from "../src/adapters/wake-spool.ts"
+import { createJob, readEvents, wakeFirstMate } from "../src/adapters/store.ts"
 
 const HOME = mkdtempSync(join(tmpdir(), "aos-spool-"))
 process.env.AGENTIC_OS_HOME = HOME

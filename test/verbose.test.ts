@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { beat, closes, note, verboseOn } from "../src/verbose.ts"
+import { beat, closes, note, verboseOn } from "../src/core/verbose.ts"
 
 test("verbose is on from the template or the flag, and a repeat state writes nothing", () => {
   assert.equal(verboseOn("verbose = true\n"), true)

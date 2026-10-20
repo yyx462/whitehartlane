@@ -11,7 +11,7 @@
 // finish was settle+emit+rows four different ways. The chain is
 // declared once; the machines become kind-specific executors that
 // ASK it (the walker lives in orchestrator.ts, next to the engines).
-import type { Step } from "./hooks.ts"
+import type { Step } from "../doors/hooks.ts"
 import { settle } from "./state.ts"
 import type { ReportRow } from "./report.ts"
 

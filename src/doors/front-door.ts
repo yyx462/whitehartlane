@@ -1,9 +1,9 @@
 import { hooksFromDir, type Hooks, type Manifest, type Unit } from "./hooks.ts"
-import { writeReport, type Report } from "./report.ts"
-import { settle, writeUnitsSnapshot } from "./state.ts"
+import { writeReport, type Report } from "../core/report.ts"
+import { settle, writeUnitsSnapshot } from "../core/state.ts"
 
 export type { Grade, Hooks, Unit } from "./hooks.ts"
-export type { Report } from "./report.ts"
+export type { Report } from "../core/report.ts"
 
 export type Judgment = {
   workflow: "fan-out" | "direct"

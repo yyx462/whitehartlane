@@ -2,10 +2,10 @@ import { execSync, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, watch, writeFileSync, type FSWatcher } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { withBackpressure } from "./backpressure.ts"
-import { chainOf, stepRecorder, type Chain } from "./orchestrator-chain.ts"
-import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "./hooks.ts"
-import { PERMISSION_CAP } from "./permission.ts"
+import { withBackpressure } from "../core/backpressure.ts"
+import { chainOf, stepRecorder, type Chain } from "../core/orchestrator-chain.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
+import { PERMISSION_CAP } from "../core/permission.ts"
 import {
   drainDeadline,
   readChildWake,
@@ -13,10 +13,10 @@ import {
   waitingOnLiveChild,
   writeWakeBooking,
   type LevyOutcome,
-} from "./levy.ts"
-import { writeReport, type Report, type ReportRow } from "./report.ts"
-import { findJobByDir } from "./store.ts"
-import { checkpoint, readState, settle, writeUnitsSnapshot } from "./state.ts"
+} from "../adapters/levy.ts"
+import { writeReport, type Report, type ReportRow } from "../core/report.ts"
+import { findJobByDir } from "../adapters/store.ts"
+import { checkpoint, readState, settle, writeUnitsSnapshot } from "../core/state.ts"
 
 export type AgentStatus = "working" | "idle" | "blocked" | "unknown"
 

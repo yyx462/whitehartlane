@@ -30,7 +30,7 @@ const {
   renewLeaseOf,
   leaseExpired,
   LEASE_TTL_MS,
-} = await import("../src/store.ts")
+} = await import("../src/adapters/store.ts")
 
 test("the home root honors AGENTIC_OS_HOME", () => {
   assert.equal(homeRoot(), process.env.AGENTIC_OS_HOME)
@@ -158,7 +158,7 @@ test("listJobs spans sessions in creation order", async () => {
 })
 
 test("materializeRunDir writes the per-run worker permission scope", async () => {
-  const { materializeRunDir } = await import("../src/store.ts")
+  const { materializeRunDir } = await import("../src/adapters/store.ts")
   const { realpathSync } = await import("node:fs")
   const exampleSrc = join(import.meta.dirname, "fixtures", "three-lookups", "workflow.toml")
   const runDir = join(process.env.AGENTIC_OS_HOME!, "sessions", "perm-test", "jobs", "j-x", "run")
@@ -183,7 +183,7 @@ test("materializeRunDir writes the per-run worker permission scope", async () =>
 })
 
 test("a model in workflow.toml lands in the project files, not the user pi dir", async () => {
-  const { writePiSettings, writeWorkerPermissions } = await import("../src/store.ts")
+  const { writePiSettings, writeWorkerPermissions } = await import("../src/adapters/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-model-"))
   writeFileSync(join(dir, "workflow.toml"), '[workflow]\nname = "t"\nworker_kind = "pi"\nmodel = "xai/grok-4.7"\n[hooks]\ncounts = "c"\n')
   const skill = mkdtempSync(join(tmpdir(), "agentic-os-skill-"))
@@ -254,7 +254,7 @@ test("cleanup: the temp home is disposable", () => {
 })
 
 test("worker configs pre-seed temp scratch so a /tmp write never prompts (j-b6067c)", async () => {
-  const { writeWorkerPermissions } = await import("../src/store.ts")
+  const { writeWorkerPermissions } = await import("../src/adapters/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-tempseed-"))
   writeWorkerPermissions(dir)
   const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
@@ -264,7 +264,7 @@ test("worker configs pre-seed temp scratch so a /tmp write never prompts (j-b606
 })
 
 test("addWorkerRoot refuses degenerate roots — no /, no empty key (j-b6067c)", async () => {
-  const { addWorkerRoot, writeWorkerPermissions } = await import("../src/store.ts")
+  const { addWorkerRoot, writeWorkerPermissions } = await import("../src/adapters/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-degen-"))
   writeWorkerPermissions(dir)
   const before = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")) as {

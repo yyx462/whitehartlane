@@ -10,13 +10,13 @@ import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
 import { runCoworker } from "./coworker-run.ts"
-import { levyChildProgram } from "./levy.ts"
+import { levyChildProgram } from "../adapters/levy.ts"
 import { runLab } from "./lab.ts"
 import { runOrchestrator, worktreeChurnedSince } from "./orchestrator.ts"
-import { declareScope, readRootsTxt } from "./permission.ts"
-import type { Rail } from "./rail.ts"
-import type { Report } from "./report.ts"
-import { workflowKind, type WorkflowKind } from "./workflow-kind.ts"
+import { declareScope, readRootsTxt } from "../core/permission.ts"
+import type { Rail } from "../adapters/rail.ts"
+import type { Report } from "../core/report.ts"
+import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 
 export type EngineDeps = {
   // injectable so tests exercise the dispatch without spawning panes

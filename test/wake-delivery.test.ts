@@ -19,7 +19,7 @@ import {
   liveSpawnerSessionIds,
   readEvents,
   wakeFirstMate,
-} from "../src/store.ts"
+} from "../src/adapters/store.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-deliver-"))
 process.env.AGENTIC_OS_NOTIFY = "0"

@@ -7,10 +7,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { DatabaseSync } from "node:sqlite"
-import { forkPrompt, forkSeedOf } from "../src/fork.ts"
-import { createJob } from "../src/store.ts"
-import { seedSessionFile } from "../src/transcripts.ts"
-import { admitFork } from "../src/policy.ts"
+import { forkPrompt, forkSeedOf } from "../src/adapters/fork.ts"
+import { createJob } from "../src/adapters/store.ts"
+import { seedSessionFile } from "../src/adapters/transcripts.ts"
+import { admitFork } from "../src/jev/policy.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-forkcli-"))
 const piRoot = mkdtempSync(join(tmpdir(), "aos-forkpi-"))
