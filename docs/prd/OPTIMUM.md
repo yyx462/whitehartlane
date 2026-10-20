@@ -93,6 +93,22 @@
 > moves, by the sequencing receipt five refits wrote, to the
 > milestone's last unbuilt leg: the composite eval case, ARMED as
 > c2-iter5. Zero strikes, no ESCALATED records; D3 unexercised.
+> Refit 11: 2026-10-20, over PRs #2–#190 (131 merged; +2 since refit
+> 10: #189 this file's refit-10 landing, and #190 c2-iter5 — the
+> composite eval case transfer-window-v2, AUTHORED whole: +682/−0
+> across 17 files, all in blast (test/+docs only, zero src BY DESIGN),
+> 682 ≤ cap 900, GREEN 1 round / 0 strikes, topo-tune green (33,8),
+> npm test 447/447, merged + pulled 23:17). The scope fence was the
+> experiment and it YIELDED: the case parsed, minted, compiled, and
+> pinned with zero src changes — and the real run surfaced the one
+> seam the fence was built to catch (receipt j-5c1861: the coworker
+> child mint omits `kind`, so the door refuses the minted child as a
+> stage-less fan-out). #190 receipted the seam in its PR body instead
+> of silently patching src outside its blast — D3's evidence branch,
+> exercised by the fixer's own discipline rather than by a strike.
+> Zero strikes, no ESCALATED records; the strike path stays
+> unexercised (a circuit breaker, not a KPI). The seam is ARMED as
+> c2-iter6 — commissioning 2's last budget slot (5/6 consumed).
 
 ## L0 — the product thesis (one page)
 
@@ -121,15 +137,16 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 10, and #188 is its tidiest proof yet:
-two engines (fan-out cycle, coworker member court), ONE beat type
-each, ONE bench walk (firstRuling, generic over the beat), ONE bailiff
-(closeMember/close — the only dead-record spelling in the tree). The
-direction since #176 is one line; no new axis appeared; oscillation is
-0 across the whole table. The grammar's retirement run (#176 refused,
-#183 deleted, #185 converted) plus the court folds (#181, #188) leave
-the L1 table with zero open residuals — the remaining work is not a
-redesign at all, but the exam this file has spec'd since refit 4.
+The thesis held under refit 11, and #190 is its capstone: the
+composite case — five topologies, one chain — authored against
+`[[stage]]` alone, 682 lines of pure declaration (fixtures, hooks,
+rehearsal, rubric), zero src files. The grammar needed no new syntax
+to express the exam this file spec'd since refit 4; and what the exam
+surfaced was not a grammar gap at all but one engine emission seam —
+the coworker child mint dropping `kind` (§2's block, this refit's
+pick), exactly the separation the thesis claims: the declaration was
+sound, the dispatch was not. The direction since #176 is one line; no
+new axis appeared; oscillation is 0 across the whole table.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
@@ -156,26 +173,28 @@ package-by-feature move — see the gaps note below):
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-Reading the table (refit 10): rank 1 **runner-dispatch** (124.9) —
-for the eighth consecutive refit the arithmetic tops the table, and
-for the seventh it is read and overridden BY RECEIPT. The churn
-column is a STOCK (Σ over the window; it can only grow), and its
-44456→44880 delta is exactly #188's 424 — the residual fold itself,
-billed legitimately through src/engines/coworker-run.ts +
-src/engines/orchestrator.ts (the one component whose stale flat glob
-`src/engine*` and the proposed re-path `src/engines/*` agree). The
-FLOW since #181 is two folds landing on their named targets; the
-residual refit 9 picked is EXECUTED, and no component holds an open
-named residual or a known-simpler alternative — the table has nothing
-left to pick. Rank 2 **window** (43.4) unchanged since refit 3's churn
+Reading the table (refit 11): rank 1 **runner-dispatch** (124.9) —
+for the NINTH consecutive refit the arithmetic tops the table, and
+this refit is the SECOND time it is picked BY RECEIPT (refit 9: #188's
+named residual; refit 11: #190's seam): #189 (docs-only, 1 file) and
+#190 (test/e2e-only, 17 files, zero src) changed no component's code,
+so the table is byte-identical to refit 10's — the churn stock froze,
+correctly — but the case's real run put a LIVE defect receipt on the
+component's own file: the coworker child mint
+(`src/engines/orchestrator.ts:1068`) omits `kind`, the door refuses
+the minted child (j-5c1861). The stock read stands (the churn is
+converged work, not sickness); the pick rides the fresh receipt, not
+the stock. Rank 2 **window** (43.4) unchanged since refit 3's churn
 read — nothing under `web/` since. Rank 3 **permissions** (23.7)
 converged (#172). Rank 4 **resume-parking** (7.5) frozen. Rank 5
-**wake-ladder** KEEP. Rank 6 **model-pinning** WATCH. Rank 7 **relay**
-(0.0) converged (#174). Rank 8 **program-grammar** — 0.0 on the table
-forever (its globs own no code file) — CLOSED at refit 9 (#176, #183,
-#185; ADR 0014 EXECUTED), and now the home of the pick: not a re-open
-(the grammar needs no fix) but its graduation exercise — the composite
-eval case, armed as c2-iter5.
+**wake-ladder** KEEP. Rank 6 **model-pinning** WATCH (its watch
+surface is now AUTHORED — #190's analyze stage declares per-unit
+pins; evidence can only arrive at the real run). Rank 7 **relay**
+(0.0) converged (#174). Rank 8 **program-grammar** — 0.0 forever
+(its globs own no code file) — CLOSED at refit 9 (#176, #183, #185;
+ADR 0014 EXECUTED), and its graduation exercise is now AUTHORED
+(#190, zero src: the grammar's proof held) with the one finding the
+exam surfaced filed where its fix lives — §2.
 
 Attribution gaps (human note — the constitution is not refit's to
 edit): #180's package-by-feature move made the flat globs structurally
@@ -192,7 +211,10 @@ through src/engines/lab.ts while its doors/* deletions (spur.ts
 wholesale!) bill nothing; #185 — the third — bills exactly zero
 (no src file in a 103-file PR); #188 — the fourth — bills its whole
 424 through src/engines/* and is the first post-move PR whose billing
-is TRUE under both glob sets. At the next constitution touch: re-path
+is TRUE under both glob sets; #189 (docs-only, 1 file) and #190
+(test/e2e-only, 17 files, zero src) bill 0.0 to everyone — correctly:
+no code file exists in either diff to bill. At the next constitution
+touch: re-path
 the globs onto the package layout — program-grammar should own
 `src/doors/{hooks,run,spur}.ts`, relay `src/adapters/store.ts`,
 resume-parking `src/core/state.ts`, permissions
@@ -263,28 +285,58 @@ runner-dispatch `src/engines/*`.
   sweep: a future museum donation cannot land. 369+/1436− across 103
   files, all in blast, 1805 ≤ cap 2500, 1 round / 0 strikes, npm test
   442/442, topo-tune green (33,8). ADR 0014 flips fully to EXECUTED.
-  → **c2-iter5 (refit 10's pick): the graduation exercise** — the
-  composite eval case (this file's own spec section), authored
-  against `[[stage]]` only, every topology exercised, zero src files
-  in the blast set BY DESIGN (see NEXT-TARGET: the scope fence is
-  the experiment).
+  → **#190 — the case AUTHORED, the rail-side leg EXECUTED** (c2-iter5,
+  armed by refit 10's NEXT-TARGET chained as-written; landed GREEN
+  1 round / 0 strikes, 682+/0− across 17 files, all in blast, 682 ≤
+  cap 900, topo-tune green (33,8), npm test 447/447): gen-universe.py
+  — a deterministic offline player universe (fixed LCG seed, no
+  network): 96 messy CSV players + data/window.json (cap £60m,
+  coverage 1/3/3/2, fit 1.0); workflow.toml — the five-stage chain
+  exactly as this file's spec block (ingest solo check=jq; analyze
+  fan-out 3 analysts, preamble + per-unit glm-5.3-flash pins — §6's
+  watch surface, now authored; negotiate coworker DOF(initiates)+
+  capologist; scout lab, INLINE end detector; grade gate verify.sh);
+  hooks/ — check-ingest, check-shards (jq per shard), accept-plan/
+  accept-scout (the OUT-of-child delivery fold: wake booking → parent
+  data/), verify.sh (budget arithmetic EXACT, coverage, no duplicate
+  players, output schema, squad fees vs universe, probe fit — hard
+  fails); rehearse.test.ts — the mock rehearsal, seconds and zero
+  tokens: the REAL orchestrator walks the REAL toml (waves, checks,
+  mint, levies, bookings, gate) with scripted minds at the test
+  suite's own fake seams, and the negative run proves verify.sh
+  CHECKS — one doctored fee, schema-clean, arithmetic-exact, dies at
+  the gate with FAIL universe; corpus.test.ts auto-pins the new tree;
+  README rubric row + section; run-battery.sh opt-in (TW2=1); STAGES.md
+  documents the delegated-delivery fold. **The scope fence was the
+  experiment, and it yielded its receipt**: the declaration expressed
+  the case whole — zero scope strikes, zero src files — so D3's
+  impossibility branch never fired and §1 does NOT re-open; what the
+  REAL run surfaced (receipt j-5c1861, 2026-10-20: the coworker child
+  mint omits `kind`, the door refuses the minted child as a stage-less
+  fan-out) is an ENGINE emission seam, not a grammar gap. #190's body
+  said "§1 re-opens on this receipt"; this refit reads the receipt's
+  substance — the fix touches zero grammar-owned surface and one
+  engine file (`src/engines/orchestrator.ts:1068`) — and files it
+  under §2 as the armed pick. The grammar itself needs nothing: the
+  strongest KEEP there is.
 - **Oscillation**: RESOLVED — the whole three-slice run was monotone
   deletion: #176 (250+/650−), #183 (93+/898−), #185 (369+/1436−);
-  zero reversal pairs across all three. Zero attribution ever — the
-  globs own no code file (#183's doors/* deletions, #185's whole 103
-  files, and the case's test-only tree all bill 0.0 — the gaps
-  note's receipts).
+  zero reversal pairs across all three; #190 pure addition (682+/0−,
+  zero src). Zero attribution ever — the globs own no code file
+  (#183's doors/* deletions, #185's whole 103 files, #190's 17-file
+  test/docs tree all bill 0.0 — the gaps note's receipts).
 - **Simpler alternative**: EXECUTED — the milestone's last GATED
-  alternative closed by #185. One NEW finding on the books (recorded
-  in ADR 0014, #185's PR body): the delegation boundary cannot carry
-  task-level detector/hook files — inbox-zero's world-sourced signal,
-  human veto, and reject-requeue rode files a minted child cannot
-  hold. Research, not a sickness: no design on the books claims it
-  should; if it becomes wanted, it is a declaration-capability
-  question (an empty-quadrant entry), not a reversal of this one.
+  alternative closed by #185; the graduation case authored whole
+  against what remains (#190) with zero src changes — the "one
+  authoring story" claim now carries its exam receipt. One NEW
+  finding on the books from the real run (the mint-kind seam — §2's
+  armed pick) plus the earlier delegation-boundary finding (recorded
+  in ADR 0014, #185's PR body: task-level detector/hook files cannot
+  ride a minted child). Both are engine/emission questions, not
+  grammar regressions; the empty-quadrant listing holds them.
 - **Verdict**: KEEP (converged at refit 9 — receipts #176, #183,
-  #185; ADR 0014 EXECUTED — and its graduation exercise, the
-  composite eval case, is armed as c2-iter5).
+  #185; ADR 0014 EXECUTED — and its graduation exercise AUTHORED
+  whole at refit 11 by #190, zero src: the grammar needed nothing).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -381,18 +433,41 @@ runner-dispatch `src/engines/*`.
   ceremony is marker-driven (endOf's dead-rule + log markers, #170's
   one resume nudge), not a booked-flight stall court; if evidence
   ever names it a fold, that is a NEW receipt reopening this block,
-  not an armed one.
+  not an armed one. One arrived at refit 11, from the exam, not from
+  the lab → **#190's receipt — the mint-kind seam, ARMED as c2-iter6**
+  (this refit's pick): the composite case's REAL run died at the door
+  (j-5c1861, 2026-10-20: "no [[stage]] entries in
+  …/stages/child-run/workflow.toml") — the coworker child mint
+  (`src/engines/orchestrator.ts:1068`) writes `kind = "lab"` for labs
+  and NOTHING for coworker stages, so the door (`src/doors/run.ts:261`
+  defaults the kind to fan-out; `:296–302` refuses stage-less
+  fan-outs — correctly, per #176's own refusal) classifies the minted
+  child as a stage-less fan-out and refuses it. The lab mint carries
+  the marker and is pinned (`test/stages.test.ts:614`,
+  `^kind = "lab"$`); the coworker mint was NEVER pinned — exactly how
+  the seam survived #176's door. The door needs nothing
+  (`src/core/workflow-kind.ts:5` already accepts `"coworker"`); the
+  fix is the mint's one line plus the pin the lab mint already has.
+  #190 receipted this in its PR body rather than silently patching
+  src outside its test/+docs blast — the scope fence teaching, and
+  the fixer obeying, exactly as D3 intended evidence to arrive.
 - **Oscillation**: RESOLVED. Zero reversal pairs — the line runs
-  EIGHT authored slices (#161→#164→#167→#170→#172→#176→#181→#188)
-  plus two echo billings (#183/#185, §1's substance). Refit 6's
-  falsified "none left" lesson stays carried: the claim below is
-  about the CURRENT seam's shape, not about the component.
-- **Simpler alternative**: NONE LEFT ON THE BOOKS. The ONE named
-  residual (coworker-run.ts's nudge ladder — #181's stated next
-  slice, refit 9's pick) is EXECUTED by #188. The bench is the
-  simpler alternative and both its customers are seated.
-- **Verdict**: KEEP (converged again at refit 10 — receipts #161–#176's
-  line, the bench #181, the fold #188).
+  NINE authored slices (#161→#164→#167→#170→#172→#176→#181→#188,
+  plus the mint-kind fold armed as c2-iter6) plus two echo billings
+  (#183/#185, §1's substance). Refit 6's falsified "none left"
+  lesson stays carried: the claim below is about the CURRENT seam's
+  shape, not about the component — and #190 just proved the lesson
+  again: a block declared residual-free at refit 10 grew one by
+  receipt at refit 11 without ever being wrong in between.
+- **Simpler alternative**: ONE named residual, ARMED — the mint-kind
+  fold (#190's receipt, c2-iter6): emit `kind = "coworker"` at the
+  mint, pin it where the lab pin lives. Everything else on the books
+  is EXECUTED (#188 closed the last); the bench is the simpler
+  alternative and both its customers are seated.
+- **Verdict**: KEEP (converged at refit 10 — receipts #161–#176's
+  line, the bench #181, the fold #188 — with the mint seam armed as
+  c2-iter6, picked BY RECEIPT for the second time in the component's
+  history).
 
 ### 3. Wake ladder
 - **Concept**: one wake per commission; spool-first, per-rung trace.
@@ -486,10 +561,11 @@ runner-dispatch `src/engines/*`.
 - **Simpler alternative**: ONE pin transport — directional only; it
   becomes a milestone violation the moment new evidence arrives, and
   none has (#159 is the last rail touch; the loop never followed;
-  #188's fold closed its watch item clean). Next watch surface: the
-  composite case's analyze stage DECLARES per-unit pins ("cheap
-  models here") — authoring that stage is the next place pane-path
-  pin evidence could arrive; if it does, this block re-opens on
+  #188's fold closed its watch item clean). The watch surface is now
+  AUTHORED: #190's analyze stage declares per-unit pins
+  (glm-5.3-flash per analyst) — but the rehearsal seats scripted
+  minds, so no pane-path evidence has arrived yet; the real ≤30-min
+  run is the next place it could. If it does, this block re-opens on
   receipt, not on taste.
 - **Verdict**: WATCH.
 
@@ -541,7 +617,7 @@ runner-dispatch `src/engines/*`.
    + ONE real ≤30-min bench task exercising the redesign.
 4. **Merge** → back to 1.
 
-Loop-v2 status (refit 10's read): NINE loop-era slices landed GREEN —
+Loop-v2 status (refit 11's read): TEN loop-era slices landed GREEN —
 #167 (c1-iter1), #170 (c1-iter2), #172 (c1-iter3: one eval-red bounce
 root-caused INFRA — zhipuai's 5-hour quota window, re-proven direct,
 regate PASS), #174 (c1-iter5: 1 round, 0 strikes, clean), #176
@@ -557,41 +633,51 @@ commissioning and revive3 hand-landed it — the fixer survived, the
 gate ran clean, D4's boundary held: never a gate-red round, never a
 strike), #188 (c2-iter4: the member court — armed by refit 9's
 NEXT-TARGET chained as-written, landed 424 ≤ 800 (305+/119−), 1
-round, 0 strikes, 444/444, green (33,8)). Iteration 4 of
-commissioning 1 died driver-side (DEAD-iter4). Commissioning 1's
-MAX-6 budget consumed; commissioning 2 (pin 335bbca) has FOUR clean
-iterations banked (budget 4/6 — c2-iter5 fits with one to spare), and
-this refit (c2-iter4's) arms the composite eval case for c2-iter5 —
-the first loop pick that is not a component redesign but the
-milestone's exam. Every refit PR absorbed except one (#173's absorb
-was refused once by the refit lane's evidence fence — body must cite
-≥2 PR refs, this file's own authors must comply — and human-merged;
-#175, #177, #182, #184 absorbed clean, #184 in 44s; #187 merged
-20:45 and became this file's refit-9 state). No strikes file exists
-— no same-cause strike ever billed; D3 unexercised (a circuit
-breaker, not a KPI). #169 (operator amendment) made refit proposals
-effective as-written, which raises this file's duty: the discount
-chain and pick receipts above ARE the audit trail that keeps D2
-honest — momentum.py's mechanical rank-1 echo (runner-dispatch) was
-read and overridden BY RECEIPT, not by taste, SEVEN refits running
-(3–8, 10); refit 9 is the only pick of the rank-1, and it landed
-(#188); refit 10's override is the last one the milestone needs: the
-table holds no open residual anywhere, and the sequencing receipt
-five refits wrote ("after the residual fold: a green eval case")
-names the pick.
+round, 0 strikes, 444/444, green (33,8)), #190 (c2-iter5: the
+composite eval case — armed by refit 10's NEXT-TARGET chained
+as-written, landed 682 ≤ 900 (682+/0−, zero src), 1 round, 0
+strikes, 447/447, green (33,8); the first loop pick that was not a
+component redesign but the milestone's exam — and the exam returned
+a seam receipt, armed below). Iteration 4 of commissioning 1 died
+driver-side (DEAD-iter4). Commissioning 1's MAX-6 budget consumed;
+commissioning 2 (pin 335bbca) has FIVE clean iterations banked
+(budget 5/6) — c2-iter6 is the LAST slot, and this refit arms it:
+the mint-kind fold, one line plus a pin. After c2-iter6 lands (or
+terminally fails), BUDGET-OUT closes commissioning 2 for the human;
+graduation — the real ≤30-min run of the case — is ops-side (the
+driver's eval lane), then the FULL benchmark pass. Every refit PR
+absorbed except one (#173's absorb was refused once by the refit
+lane's evidence fence — body must cite ≥2 PR refs, this file's own
+authors must comply — and human-merged; #175, #177, #182, #184, and
+#189 absorbed clean, #184 in 44s; #189 became this file's refit-10
+state). No strikes file exists — no same-cause strike ever billed;
+D3's strike path unexercised (a circuit breaker, not a KPI), though
+its EVIDENCE branch was exercised at refit 11 the honest way: #190
+receipted a seam in its PR body instead of striking on scope. #169
+(operator amendment) made refit proposals effective as-written, which
+raises this file's duty: the discount chain and pick receipts above
+ARE the audit trail that keeps D2 honest — momentum.py's mechanical
+rank-1 echo (runner-dispatch) was read and overridden BY RECEIPT, not
+by taste, SEVEN refits running (3–8, 10), and PICKED twice (9: #188's
+named residual, landed; 11: #190's seam receipt, armed as c2-iter6)
+— the pick always rides a named defect in the component's own files,
+never the churn stock.
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
 known-simpler alternative (§1 CLOSED at refit 9 — #176 slice 1, #183
-the engine half, #185 the museum, ADR 0014 EXECUTED; §2 closed at
-refit 3, re-opened by #178/#179, closed again by #181, and its one
-named residual EXECUTED by #188 at refit 10 — the bench seats both
-its customers; §5 at refit 4; §8 at refit 5 (#174); §6's
-one-transport question stays WATCH for want of new evidence — #188
-discharged its watch item clean); composite eval green — NOT YET,
-and now the ONLY leg: the transfer-window-v2 case, ARMED as
-c2-iter5's pick. A green case graduates the loop to the FULL
-benchmark pass.
+the engine half, #185 the museum, ADR 0014 EXECUTED — and its
+graduation case AUTHORED at refit 11 (#190, zero src); §2 closed at
+refit 3, re-opened by #178/#179, closed again by #181, residual
+EXECUTED by #188, one NEW residual by receipt (#190's seam) ARMED as
+c2-iter6 — the bench seats both its customers; §5 at refit 4; §8 at
+refit 5 (#174); §6's one-transport question stays WATCH for want of
+new evidence — its watch surface is authored (#190's per-unit pins),
+evidence can only arrive at the real run); composite eval — the case
+AUTHORED (#190, rail-side leg DONE), GREEN pending ONE receipted
+seam: the real run dies at the coworker mint (j-5c1861) until
+c2-iter6 folds it; then graduation = the ops-side real ≤30-min run,
+and a green case graduates the loop to the FULL benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -612,32 +698,19 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
                                  output schema valid — hard fails
 ```
 
-Target ≤30 min real; mock rehearsal = seconds. ARMED as c2-iter5
-(refit 10's pick) — untouched by the loop until now (the loop's eval
-lane used topo-tune's real levy, joint target (33,8) green on #167,
-#170, #172's re-proof, #174, #176, #181, #183, #185, and #188).
-#170 makes the scout stage honest to bench: a paused-and-continued
-lab now resumes rather than restarts, so the ≤30-min budget survives
-human interference; #178's platform pen gives the case's lab stage a
-status-first settle lane if it wants it (declared, not assumed);
-#183 removed the last engine-side dialect and #185 converted the
-corpus, so the case authors against `[[stage]]` only — with a
-converted, pinned example corpus to crib from (every topology
-demonstrated: solo smoke, fan-out+preamble staged-waves, gate waves/
-two-signoffs, coworker nested/hand-off, lab with inline detectors
-git-wave/trivia-bench), not museum pieces. Sequencing held by refits
-5–10 and is now FULLY DISCHARGED: §1's retirement (#176, #183, #185)
-landed BEFORE the case is authored; the residual fold (#188) landed
-before it too — the case's `negotiate` stage authors against the
-bench-owned close ceremony (#188's member court + RAILS.md's
-two-court documentation), not a hand-rolled nudge ladder. The blast
-set is test/+docs/ only BY DESIGN: the case must author with zero
-src changes — that is the grammar's proof, and the scope fence is
-the experiment (if the declaration cannot express the case, the
-fixer strikes on scope and D3 converts the impossibility into
-ESCALATED evidence; the next refit re-opens §1 on that receipt, not
-on a silent src patch). The REAL ≤30-min bench run is ops-side (the
-driver's eval lane, as topo-tune is); the rail-repo deliverable is
-the case itself: the workflow.toml, the fixture generator, verify.sh,
-the mock rehearsal, corpus.test.ts's automatic pin over the new
-tree, and the README rubric.
+Target ≤30 min real; mock rehearsal = seconds. LANDED as c2-iter5
+(**#190**, 2026-10-20 — 682+/0− across 17 files, zero src: the
+grammar's proof held; receipts #176/#183/#185 for the dialect it
+authors in, #188 for the member court the negotiate stage rides,
+#181 for the bench). The rehearsal seats both delegated stages
+through the test suite's fake seams — GREEN, seconds, zero tokens;
+the REAL ≤30-min bench run is ops-side (the driver's eval lane, as
+topo-tune is), and it is now gated on ONE receipted seam, ARMED as
+c2-iter6: the coworker child mint omits `kind` and the door —
+correctly — refuses the minted child (j-5c1861; §2's block carries
+the file:line receipts). The scope fence discharged its duty whole:
+the declaration expressed the case with zero src changes, the
+impossibility branch never fired, and the seam arrived as EVIDENCE
+(#190's PR body), not as a silent src patch — fold it at the mint,
+pin it where the lab pin lives, and the case is runnable real. After
+a green real run: the FULL benchmark pass, a fresh commissioning.
