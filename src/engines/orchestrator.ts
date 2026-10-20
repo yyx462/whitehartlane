@@ -421,6 +421,12 @@ function resumeSpawn(
 // rungs and COMPOSE THE BENCH — the pen judge sits only in a
 // status-first court, the stall judge leaves when fallback_ladder is
 // switched off or a drain owns the run.
+//
+// The bench is the rail's, not this engine's: the protocol below
+// (Ruling, Judge, holdCourt) is the shared law, and the coworker
+// engine seats its own court on it (src/engines/coworker-run.ts — the
+// second customer of #181, which folded that engine's hand-rolled
+// nudge ladder and bespoke dead-record close onto this bench).
 
 // One beat: everything a judge may ask about one flight, gathered
 // once, in the open. waited/booked are LAZY (getters) — the wait-DAG
@@ -474,7 +480,11 @@ export type Ruling =
   | { kind: "none" }
 
 export type JudgeSeat = "marker" | "liveness" | "privilege" | "grace" | "pen" | "stall"
-export type Judge = (beat: Beat) => Ruling
+// Generic over the beat: every court observes its own subject (the
+// fan-out Beat above, the coworker MemberBeat one engine over) — the
+// protocol (a typed beat, ordered judges, one bailiff) is what is
+// shared, never the observation's shape.
+export type Judge<B = Beat> = (beat: B) => Ruling
 
 // The seating — composed once per cycle from the declared mode. This
 // IS the precedence: marker beats liveness beats privilege beats
@@ -491,6 +501,19 @@ export function benchOrder(mode: {
   if (mode.settleMode === "status-first") seats.push("pen")
   if (mode.fallbackLadder !== false && !mode.draining) seats.push("stall")
   return seats
+}
+
+// The bench's ONE algorithm, shared by every court that seats it:
+// judges in precedence order, the FIRST ruling wins. Each engine keeps
+// its own loop and its own bailiff — the walk is the law, never the
+// ceremony's body. Pure given the bench.
+export function firstRuling<B>(bench: Judge<B>[], beat: B): Ruling {
+  let ruling: Ruling = { kind: "none" }
+  for (const judge of bench) {
+    ruling = judge(beat)
+    if (ruling.kind !== "none") return ruling
+  }
+  return ruling
 }
 
 export function cycle(deps: CycleDeps): boolean {
@@ -865,12 +888,7 @@ export function cycle(deps: CycleDeps): boolean {
 
   for (const [id, flight] of [...deps.inFlight]) {
     const beat = observe(id, flight, sweep)
-    let ruling: Ruling = { kind: "none" }
-    for (const judge of bench) {
-      ruling = judge(beat)
-      if (ruling.kind !== "none") break
-    }
-    applyRuling(beat, ruling)
+    applyRuling(beat, firstRuling(bench, beat))
   }
 
   const finished = readState(deps.taskDir)
