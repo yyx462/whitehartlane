@@ -18,7 +18,7 @@ import { writeReport, type Report, type ReportRow } from "../core/report.ts"
 import { findJobByDir } from "../adapters/store.ts"
 import { checkpoint, readState, settle, writeUnitsSnapshot } from "../core/state.ts"
 
-export type AgentStatus = "working" | "idle" | "blocked" | "unknown"
+export type { AgentStatus } from "../ports/agent-host.ts"
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
