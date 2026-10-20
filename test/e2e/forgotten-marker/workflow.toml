@@ -1,0 +1,14 @@
+[workflow]
+name = "e2e-forgotten-marker"
+spur_id = "e2e-forgotten-marker"
+worker_kind = "opencode"
+settle_mode = "status-first"
+fallback_ladder = false
+
+[hooks]
+units = "bash hooks/units.sh"
+grade = "bash hooks/grade.sh"
+counts = "bash hooks/counts.sh"
+
+[report]
+where = "units/"

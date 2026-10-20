@@ -725,6 +725,18 @@ export class Rail implements ShepPort {
     return this.agentState(name).includes('"agent_status":"working"')
   }
 
+  // completion-detection: the pane's own verdict, parsed once — the
+  // status-first settle lane keys on idle ("done" folds to idle: both
+  // mean the turn ended); anything else is unknown = the fallback
+  // ladder. agentState returns raw `agent get` stdout.
+  workerStatus(name: string): "working" | "idle" | "blocked" | "unknown" {
+    const st = this.agentState(name)
+    if (st.includes('"agent_status":"working"')) return "working"
+    if (st.includes('"agent_status":"blocked"')) return "blocked"
+    if (st.includes('"agent_status":"idle"') || st.includes('"agent_status":"done"')) return "idle"
+    return "unknown"
+  }
+
   paneBlocked(name: string): boolean {
     return this.agentState(name).includes('"agent_status":"blocked"')
   }
