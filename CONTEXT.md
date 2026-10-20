@@ -214,3 +214,15 @@ _Avoid_: notification, ping
 **Receipt**:
 The Job's finish line: panes of that Job remaining = 0. Session, binding, and Job record remain. Merge and delete are separate commands.
 _Avoid_: cleanup done, scorched earth
+
+**Platform pen**:
+The rail's completion write for status-first runs (ADR 0015): an idle pane with a present deliverable settles with no marker at all — the card carries `trigger: "idle+grade"`. The worker's own `done` marker (the worker pen) demotes to the fallback lane for status-blind panes; the `blocked` marker survives in both modes as the worker's escape hatch.
+_Avoid_: auto-done, magic completion
+
+**Evidence reprompt**:
+The idle-with-no-deliverable nudge (ADR 0015): the note QUOTES the failing protocol check and names the required artifact — never a bare re-brief or a plea. Hard cap 8; past the cap the unit ends stalled-with-evidence with the check quoted on the trace.
+_Avoid_: nag, poke
+
+**Wait edge**:
+One edge of the wait-for DAG: a wake receipt's `parentUnit` → its levied child `jid`. Live = the child's `wake.json` has not landed; a dangling edge folds to "not a wait". Acyclic by birth (every levy mints a fresh child job) — no cycle machinery exists.
+_Avoid_: dependency, blocking link

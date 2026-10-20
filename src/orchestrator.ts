@@ -10,10 +10,12 @@ import {
   drainDeadline,
   readChildWake,
   readWakeBooking,
+  waitingOnLiveChild,
   writeWakeBooking,
   type LevyOutcome,
 } from "./levy.ts"
 import { writeReport, type Report, type ReportRow } from "./report.ts"
+import { findJobByDir } from "./store.ts"
 import { checkpoint, readState, settle, writeUnitsSnapshot } from "./state.ts"
 
 export type ShepPort = {
@@ -39,6 +41,12 @@ export type ShepPort = {
   // long bash call writes neither log lines nor file churn for minutes
   // while being fully alive — herdr's agent_status is the only witness.
   agentWorking?: (name: string) => boolean
+  // completion-detection: the pane's full verdict, once per beat. The
+  // status-first settle lane keys on "idle" (a turn that ended — "done"
+  // folds there); "unknown" = the pane speaks no status grammar and the
+  // unit rides the fallback ladder. Absent = unknown (old ports,
+  // byte-identical).
+  workerStatus?: (name: string) => "working" | "idle" | "blocked" | "unknown"
   reprompt: (name: string, briefPath: string) => boolean
   retire: (name: string) => void
   retireAll: () => void
@@ -86,6 +94,12 @@ export type Flight = {
   spawnedAt: number
   reprompted: boolean
   worktree: string
+  // completion-detection (status-first lane): evidence reprompts sent
+  // at idle with a missing deliverable (capped), and whether the pane
+  // has been seen working since the last attempt — an idle pane that
+  // never worked is the brief-grace lane's customer, not ours.
+  settleAttempts: number
+  workedSinceAttempt: boolean
 }
 
 export type CycleDeps = {
@@ -120,6 +134,16 @@ export type CycleDeps = {
   // Booked wait (ADR 0006): true while a live child spur names this
   // unit's pane session as its spawner — the stall clock stands down.
   bookedWait?: (unitId: string) => boolean
+  // completion-detection: "status-first" arms the platform pen — an
+  // idle pane with a present deliverable settles with no marker (the
+  // iter-4 lesson). Absent = "marker" = byte-identical to the
+  // worker-pen protocol.
+  settleMode?: "marker" | "status-first"
+  // The passive stall ladder (log-quiet + tree-frozen + unbooked →
+  // stalled). false suppresses the stalled verdict entirely — for the
+  // status-first trial window, so the old killer cannot murder a
+  // working agent mid-verdict. Absent = ladder on (the fallback).
+  fallbackLadder?: boolean
   // ADR 0007: the manifest's finish-typed steps, when declared. Drives
   // wave gating and the done condition (check steps must finish too).
   // The chain object (src/orchestrator-chain.ts) — declared once here,
@@ -156,6 +180,11 @@ const DEFAULT_GATE_CHECK_MS = 30_000
 const RETRY_CAP = 3
 // #165: spawn retries ride THIS, not the stall ladder
 const SPAWN_RETRY_MS = 30_000
+// completion-detection: evidence reprompts at idle with a missing
+// deliverable — hard cap so a wrong protocol check costs 8 bounded
+// reprompts and one honest human verdict, never an infinite loop
+// (the Claude Code #55754 lesson).
+const SETTLE_ATTEMPT_CAP = 8
 const SHEP_LABEL_MAX = 32
 
 // Worktree churn as a stall heartbeat (j-3520f7): a worker whose log is
@@ -258,7 +287,7 @@ export function acquireUnits(
   })
 }
 
-export function briefFor(unit: Unit, taskDir: string, worktree?: string): string {
+export function briefFor(unit: Unit, taskDir: string, worktree?: string, settleMode?: "marker" | "status-first"): string {
   const paths = unitPaths(taskDir, unit.id)
   const where = worktree
     ? [
@@ -270,19 +299,58 @@ export function briefFor(unit: Unit, taskDir: string, worktree?: string): string
         "",
         `Write your deliverable to ${paths.resultPath} unless the brief above says otherwise.`,
       ]
+  // status-first: completion is the platform's pen — the rail settles
+  // on the deliverable itself, so the closing contract asks for the
+  // artifact and a plain stop. The blocked escape hatch stays in BOTH
+  // modes: it is the worker's other pen, and it is cheap.
+  const closing =
+    settleMode === "status-first"
+      ? [
+          "When you finish the work, simply stop — the rail settles this unit on",
+          `your deliverable at ${paths.resultPath} (the file must exist and be non-empty).`,
+          "",
+          "If you cannot proceed, append exactly this line to the log file",
+          `${paths.logPath} :`,
+          `blocked ${unit.id}: <one line saying why>`,
+          "",
+          "Do not write anything else to that log. Do not do any other work.",
+        ]
+      : [
+          "When you finish the work, append exactly this line to the log file",
+          `${paths.logPath} :`,
+          `done ${unit.id}`,
+          "",
+          "If you cannot proceed, append exactly this line to the same file and stop:",
+          `blocked ${unit.id}: <one line saying why>`,
+          "",
+          "Do not write anything else to that log. Do not do any other work.",
+        ]
+  return [...where, "", unit.brief, "", ...closing].join("\n")
+}
+
+// The protocol probe (completion-detection): does the deliverable the
+// brief promised exist, with shape? SHAPE ONLY — semantics belong to
+// the stage gate; this must never judge quality (a wrong check must
+// cost 8 bounded reprompts, never a wrong verdict).
+export function probeDeliverable(taskDir: string, unitId: string): { ok: boolean; detail: string } {
+  const p = unitPaths(taskDir, unitId).resultPath
+  if (!existsSync(p)) return { ok: false, detail: `deliverable missing: ${p}` }
+  const size = readFileSync(p).length
+  if (size === 0) return { ok: false, detail: `deliverable empty: ${p}` }
+  return { ok: true, detail: `deliverable present: ${p} (${size}B)` }
+}
+
+// The evidence reprompt (not a plea): quotes the failing check and
+// names the required artifact, so the agent can resolve the tension
+// between its brief and the grade in one turn.
+function evidenceBrief(unitId: string, why: string, resultPath: string): string {
   return [
-    ...where,
+    `Your unit ${unitId} stopped without its deliverable.`,
     "",
-    unit.brief,
+    `The check said: ${why}`,
     "",
-    "When you finish the work, append exactly this line to the log file",
-    `${paths.logPath} :`,
-    `done ${unit.id}`,
-    "",
-    "If you cannot proceed, append exactly this line to the same file and stop:",
-    `blocked ${unit.id}: <one line saying why>`,
-    "",
-    "Do not write anything else to that log. Do not do any other work.",
+    `Write your deliverable to ${resultPath} (non-empty), then simply stop.`,
+    "Do not write anything to the log file — the rail settles on the deliverable itself.",
   ].join("\n")
 }
 
@@ -366,8 +434,9 @@ export function cycle(deps: CycleDeps): boolean {
     faultsCanary = true,
     fault = false,
     detail?: string,
+    trigger?: string,
   ): void => {
-    settle(deps.taskDir, id, `${stage}:${id}`, pass, detail ?? row.result, fault)
+    settle(deps.taskDir, id, `${stage}:${id}`, pass, detail ?? row.result, fault, trigger)
     deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
     if (faultsCanary && deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
@@ -466,6 +535,11 @@ export function cycle(deps: CycleDeps): boolean {
         deps.shep.wake(id, "blocked", "pane not live in herdr")
       }
     } else {
+      // completion-detection: the pane's own verdict, observed once
+      // per beat (a working pane is progress evidence the idle-settle
+      // keys on). The privilege sweep below still owns dialogs.
+      const paneStatus = deps.shep.workerStatus?.(`w-${id}`) ?? "unknown"
+      if (paneStatus === "working") flight.workedSinceAttempt = true
       // Privilege (zen 6): a permission dialog is not a stall. Ask the
       // port to answer it first; only an unanswered pane (verdict
       // "none") falls through to the grace/stall/growth ladder. A
@@ -488,7 +562,11 @@ export function cycle(deps: CycleDeps): boolean {
         !existsSync(flight.logPath) &&
         !flight.reprompted &&
         now() - flight.spawnedAt > briefGraceMs &&
-        !deps.shep.agentWorking?.(`w-${id}`)
+        !deps.shep.agentWorking?.(`w-${id}`) &&
+        // status-first: an idle pane with no log is the idle-settle's
+        // customer — its evidence reprompt carries the probe; a bare
+        // re-brief says nothing the agent can act on
+        (deps.settleMode !== "status-first" || paneStatus !== "idle")
       ) {
         // The agent started but the brief never landed (a startup race shep
         // cannot see). Submit it once more; the stall timer is the backstop.
@@ -506,7 +584,76 @@ export function cycle(deps: CycleDeps): boolean {
           deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
         }
       } else if (
+        deps.settleMode === "status-first" &&
+        paneStatus === "idle" &&
+        (flight.settleAttempts === 0 || flight.workedSinceAttempt)
+      ) {
+        // completion-detection — the platform pen. The turn ended and
+        // no marker came (the iter-4 lesson: finished-but-silent used
+        // to ride the stall clock into a wrong verdict). Ask the DAG
+        // first, then the deliverable; the Clerk writes completion —
+        // the agent's memory is never load-bearing. A pane idle since
+        // its first attempt without working since belongs to the
+        // grace lane, not this one (workedSinceAttempt gates it).
+        if (deps.bookedWait?.(id) || waitingOnLiveChild(deps.taskDir, id)) {
+          flight.lastChange = now() // waiting by design — a live child owns this silence
+        } else {
+          const probe = probeDeliverable(deps.taskDir, id)
+          deps.emit?.("unit.grade", {
+            unit: id,
+            status: probe.ok ? "ok" : "fail",
+            detail: probe.detail,
+            trigger: "idle",
+          })
+          if (probe.ok) {
+            finish(
+              id,
+              true,
+              { unit: id, result: "settled on idle+grade", pass: true },
+              "settle",
+              true,
+              false,
+              "platform pen: deliverable present, marker never seen",
+              "idle+grade",
+            )
+            deps.shep.retire(`w-${id}`)
+            deps.inFlight.delete(id)
+            deps.attempts.delete(id)
+          } else {
+            flight.settleAttempts += 1
+            flight.workedSinceAttempt = false
+            if (flight.settleAttempts > SETTLE_ATTEMPT_CAP) {
+              finish(
+                id,
+                false,
+                { unit: id, result: "stalled", pass: false },
+                "settle",
+                true,
+                false,
+                `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts — ${probe.detail}`,
+                "idle+grade",
+              )
+              deps.shep.retire(`w-${id}`)
+              deps.inFlight.delete(id)
+              deps.attempts.delete(id)
+              deps.shep.wake(id, "blocked", `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts: ${probe.detail}`)
+            } else {
+              const note = join(unitDir(deps.taskDir, id), `reprompt-${flight.settleAttempts}.md`)
+              writeFileSync(note, evidenceBrief(id, probe.detail, unitPaths(deps.taskDir, id).resultPath))
+              deps.shep.reprompt(`w-${id}`, note)
+              flight.lastChange = now()
+              deps.emit?.("reprompt", {
+                unit: id,
+                reason: "idle grade fail",
+                attempt: flight.settleAttempts,
+                evidence: probe.detail,
+              })
+            }
+          }
+        }
+      } else if (
         !deps.draining &&
+        deps.fallbackLadder !== false &&
         size === flight.lastSize &&
         now() - flight.lastChange > stallMs
       ) {
@@ -570,7 +717,7 @@ export function cycle(deps: CycleDeps): boolean {
       const unit = unfinished.shift()!
       const paths = unitPaths(deps.taskDir, unit.id)
       mkdirSync(paths.dir, { recursive: true })
-      writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir, deps.worktree))
+      writeFileSync(paths.briefPath, briefFor(unit, deps.taskDir, deps.worktree, deps.settleMode))
       const resume = deps.resumes?.get(unit.id)
       const ok = resume
         ? resumeSpawn(deps, unit, resume, paths)
@@ -592,6 +739,8 @@ export function cycle(deps: CycleDeps): boolean {
         spawnedAt: now(),
         reprompted: false,
         worktree: deps.worktree ?? paths.dir,
+        settleAttempts: 0,
+        workedSinceAttempt: false,
       })
     } else {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
@@ -663,6 +812,13 @@ export async function runOrchestrator(input: {
   // live child spur names the pane's session as its spawner, the wait
   // is booked and the stall stands down.
   bookedWait?: (unitId: string) => boolean
+  // completion-detection: "status-first" arms the platform pen (idle +
+  // present deliverable settles, no marker). Absent = manifest's
+  // workflow.settle_mode, absent that = "marker" (byte-identical).
+  settleMode?: "marker" | "status-first"
+  // Suppress the passive stall ladder (the status-first trial window —
+  // the old killer must not fire while the new lane is being proven).
+  fallbackLadder?: boolean
   // ADR 0007 stage 3 — wake steps: the rail levies a whole child
   // program per wake step and finishes the step on the child's wake
   // (the receipt colors it). The bin wires the real levy; tests inject
@@ -740,6 +896,8 @@ export async function runOrchestrator(input: {
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
   const stallMs = input.stallMs ?? DEFAULT_STALL_MS
+  const settleMode = input.settleMode ?? manifest.workflow.settle_mode ?? "marker"
+  const fallbackLadder = input.fallbackLadder ?? manifest.workflow.fallback_ladder ?? true
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
   const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
   const logPollMs = input.logPollMs ?? LOG_POLL_MS
@@ -822,7 +980,15 @@ export async function runOrchestrator(input: {
           }, SPAWN_RETRY_MS)
           timers.add(t)
         },
-        bookedWait: input.bookedWait,
+        bookedWait:
+          input.bookedWait ??
+          (settleMode === "status-first"
+            ? // the receipt-backed wait-for DAG: a live child (no
+              // wake.json yet) owns the parent's silence
+              (unitId: string) => waitingOnLiveChild(input.taskDir, unitId)
+            : undefined),
+        settleMode,
+        fallbackLadder,
         chain,
         stagePlan,
         unitModels,
@@ -1048,7 +1214,18 @@ export async function runOrchestrator(input: {
         return true
       }
       const folder = resolve(input.taskDir, step.folder ?? ".")
-      booking = { jid: levy.jid, jobDir: levy.jobDir, folder, leviedAt: new Date().toISOString() }
+      booking = {
+        jid: levy.jid,
+        jobDir: levy.jobDir,
+        folder,
+        leviedAt: new Date().toISOString(),
+        // completion-detection: the DAG fields — the receipt names its
+        // own parent (the waiting step) and the parent job's session
+        // (the registered-pane registry key), so the wait-for graph
+        // builds from receipt contents alone
+        parentUnit: step.id,
+        spawnerSession: findJobByDir(input.taskDir)?.sid,
+      }
       writeWakeBooking(input.taskDir, step.id, booking)
       emit("child.levied", { unit: step.id, jid: booking.jid, folder })
       log(`wake ${step.id}: levied child job ${booking.jid} (${folder})`)

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { prepareRun } from "./run.ts"
 import { abortJob, continueJob, killPane, saveJob, type JobRecord } from "./store.ts"
@@ -119,6 +119,48 @@ export type WakeBooking = {
   jobDir: string
   folder: string
   leviedAt: string
+  // completion-detection: the receipt is self-contained — parentUnit
+  // names the waiting step in THIS program (the wait-for DAG's edge
+  // source); spawnerSession is the parent job's session (the
+  // registered-pane registry key). Optional so pre-fold bookings still
+  // fold (their parent is derivable from the receipt's location).
+  parentUnit?: string
+  spawnerSession?: string
+}
+
+// The wait-for DAG, built from receipts alone (completion-detection):
+// every booking under wakes/ contributes one edge parentUnit → jid.
+// A booking without parentUnit (pre-fold) contributes nothing — the
+// graph is by birth acyclic (every levy mints a fresh child job), so
+// there is no cycle machinery; a dangling jid folds to "not live".
+export type WaitEdge = { parentUnit: string; jid: string; jobDir: string }
+
+export function waitEdges(taskDir: string): WaitEdge[] {
+  const dir = join(taskDir, "wakes")
+  if (!existsSync(dir)) return []
+  const edges: WaitEdge[] = []
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json")) continue
+    try {
+      const b = JSON.parse(readFileSync(join(dir, f), "utf8")) as WakeBooking
+      if (b.parentUnit && b.jid && b.jobDir) {
+        edges.push({ parentUnit: b.parentUnit, jid: b.jid, jobDir: b.jobDir })
+      }
+    } catch {
+      // an unparsable booking is not an edge
+    }
+  }
+  return edges
+}
+
+// Is this parent still waiting on a LIVE child? Live = the child has
+// not yet written its wake.json (the receipt the parent polls); a
+// dangling booking (child dir gone, or its wake already read) is NOT
+// a wait.
+export function waitingOnLiveChild(taskDir: string, parentUnit: string): boolean {
+  return waitEdges(taskDir).some(
+    (e) => e.parentUnit === parentUnit && existsSync(e.jobDir) && !existsSync(join(e.jobDir, "wake.json")),
+  )
 }
 
 // The levy is durable on the parent's task dir: a paused or crashed

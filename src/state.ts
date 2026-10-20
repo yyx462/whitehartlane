@@ -24,7 +24,7 @@ export type Settled = { done: string[]; failed: string[] }
 // already exists folds BEFORE the trace cards (it is strictly older).
 // New runs never write either.
 export type CheckpointStatus = "ok" | "FAILED" | "grade-fault" | "info"
-export type Checkpoint = { ts: string; stage: string; status: CheckpointStatus; unit?: string; detail?: string }
+export type Checkpoint = { ts: string; stage: string; status: CheckpointStatus; unit?: string; detail?: string; trigger?: string }
 
 // The dir → trace join, ONE spelling, memoized per process. findJobByDir
 // is deterministic (oldest job owning the dir), so every process — the
@@ -69,6 +69,7 @@ export function checkpoint(
   status: CheckpointStatus,
   detail?: string,
   unit?: string,
+  trigger?: string,
 ): void {
   const trace = traceOf(taskDir, true)!
   appendEvent(trace.sid, {
@@ -80,6 +81,7 @@ export function checkpoint(
     status,
     ...(unit ? { unit } : {}),
     ...(detail ? { detail } : {}),
+    ...(trigger ? { trigger } : {}),
   })
 }
 
@@ -110,6 +112,7 @@ export function readCheckpoints(taskDir: string): Checkpoint[] {
         status: e.status as CheckpointStatus,
         ...(e.unit !== undefined ? { unit: String(e.unit) } : {}),
         ...(e.detail !== undefined ? { detail: String(e.detail) } : {}),
+        ...(e.trigger !== undefined ? { trigger: String(e.trigger) } : {}),
       })
     }
   }
@@ -127,8 +130,9 @@ export function settle(
   pass: boolean,
   detail?: string,
   fault = false,
+  trigger?: string,
 ): void {
-  checkpoint(taskDir, stage, pass ? "ok" : fault ? "grade-fault" : "FAILED", detail, unit)
+  checkpoint(taskDir, stage, pass ? "ok" : fault ? "grade-fault" : "FAILED", detail, unit, trigger)
 }
 
 export function writeUnitsSnapshot(

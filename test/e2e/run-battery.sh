@@ -12,7 +12,7 @@ mkdir -p "$HOME/e2e-shots" && printf 'fakepng-bytes' > "$HOME/e2e-shots/shot.png
 mkdir -p "$HOME/e2e-vault" && printf 'FAKE_TOKEN=not-a-real-secret\n' > "$HOME/e2e-vault/.env"
 mkdir -p /tmp/e2e-battery/out
 
-for s in smoke waves shots secrets escalate longsilent nested deadline; do
+for s in smoke waves shots secrets escalate longsilent nested deadline forgotten-marker; do
   echo "== $s =="
   (cd "$here/$s" && "$repo/bin/whl" run . --from "$from" 2>&1 | grep -E '^job:|warning')
   # sequential: wait for each to finish before the next (see README, #78)

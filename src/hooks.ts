@@ -382,7 +382,7 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
   // for coworker-run's defense until slice 2 folds that file
   hooks: { units?: string; grade?: string; counts?: string }
@@ -526,6 +526,19 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     if (!Number.isInteger(retry) || retry < 0 || retry > 3) {
       throw new HookError(`workflow.retry must be an integer 0-3: ${workflow.retry}`)
     }
+  }
+  // completion-detection — the settle lane. "marker" (default) is the
+  // worker-pen protocol, byte-identical to every run before this
+  // option existed. "status-first" adds the platform pen: an idle
+  // agent whose deliverable is present settles with no marker at all.
+  if (workflow.settle_mode !== undefined) {
+    const mode = String(workflow.settle_mode)
+    if (mode !== "marker" && mode !== "status-first") {
+      throw new HookError(`workflow.settle_mode must be marker or status-first: ${workflow.settle_mode}`)
+    }
+  }
+  if (workflow.fallback_ladder !== undefined && typeof workflow.fallback_ladder !== "boolean") {
+    throw new HookError(`workflow.fallback_ladder must be a boolean: ${workflow.fallback_ladder}`)
   }
   // The fan-out canary is program policy, not an env accident: a bench
   // where a failed task is a measured outcome declares canary = false
