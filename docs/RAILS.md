@@ -40,15 +40,24 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   card, one event, one report row) live there, and check polling,
   stage gates, and wake levies are kind-specific step executors one
   walker dispatches — not three machines each hand-rolling the walk.
-  Flight supervision is the same shape (the flight bench): each beat
-  observes ONE typed Beat per in-flight unit, an ordered bench of
-  judges (marker, liveness, privilege, brief-grace, the platform pen,
-  the stall ladder) returns the first ruling, and one bailiff applies
-  it — one close ceremony (settle card + retire + wake) instead of a
-  rung ladder hand-rolling it per verdict. The completion-mode flags
-  (`settle_mode`, `fallback_ladder`) compose the bench — the pen
+  Flight supervision is the same shape (the flight bench), seated by
+  BOTH engines: each beat observes ONE typed beat per in-flight
+  subject, an ordered bench of judges returns the first ruling, and
+  one bailiff applies it. The fan-out court seats marker, liveness,
+  privilege, brief-grace, the platform pen, the stall ladder — one
+  close ceremony (settle card + retire + wake) instead of a rung
+  ladder hand-rolling it per verdict; its completion-mode flags
+  (`settle_mode`, `fallback_ladder`) compose the seating — the pen
   judge sits only in a status-first court, and `fallback_ladder =
-  false` or a drain unseats the stall judge.
+  false` or a drain unseats the stall judge. The coworker engine's
+  member court (coworker-run.ts, the bench's second customer) seats
+  privilege, liveness (with the transport retry — a dead member pane
+  respawns from its booked session before any stall verdict may
+  fire), and the nudge ladder as its stall judge; every member death
+  — the deny cap, a spent transport retry, the nudge cap, the model
+  ladder's exhaustion — flows through the bailiff's ONE dead-record
+  close, and a drain parks before that court sits (nudges and dead
+  checks stand down while members end their turns).
   Engines address workers by name only — every shep/herdr
   call funnels through the Rail's injected runners, so the day panes
   become remote machines, the swap is one file and the engines do not

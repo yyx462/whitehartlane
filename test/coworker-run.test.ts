@@ -350,3 +350,53 @@ test("retry = 0 disarms the respawn — first death is final (policy, not reflex
   assert.match(exchange!.result, /alpha pane died(?! after)/, "no retries were spent")
   assert.equal(report!.table.find((row) => row.unit === "retries"), undefined)
 })
+
+// ── the member court: the flight bench's second customer ───────────
+// The fold's own law, pinned: the seating is privilege → liveness →
+// stall (firstRuling, orchestrator.ts), so a dead pane is a transport
+// question — never a silent one — and a respawn restarts the ladder.
+
+test("the member court: a pane that dies mid-ladder is a transport close — the ladder never fires again", async () => {
+  const dir = await coworkerDir("coworker-court-death-")
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace('name = "test-coworker"', 'name = "test-coworker"\nretry = 0'))
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let nudges = 0
+  herdr.onPrompt = (name, text, later) => {
+    if (!name.startsWith("alpha")) return
+    if (text.includes("waits on you")) {
+      nudges += 1
+      // dies after the FIRST nudge: the ladder is mid-flight, one
+      // nudge spent, when the pane disappears
+      if (nudges === 1) later(() => { herdr.phase[name] = "dead" })
+    }
+  }
+  const report = await runCoworker(rail, { graceMs: 0, stallMs: 100, beatMs: 10 })
+  assert.equal(nudges, 1, "no second nudge — the pane is dead, not silent: liveness outranks the stall judge")
+  assert.equal(report?.status, "failed")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /alpha pane died(?! after)/, "the transport verdict closed it, never a stall one")
+})
+
+test("a mid-ladder respawn restarts the nudge ladder fresh — the flight state resets with the pane", async () => {
+  const dir = await coworkerDir("coworker-court-respawn-")
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let nudges = 0
+  herdr.onPrompt = (name, text, later) => {
+    if (!name.startsWith("alpha")) return
+    if (text.includes("waits on you")) {
+      nudges += 1
+      if (nudges === 1) later(() => { herdr.phase[name] = "dead" })
+    }
+  }
+  const report = await runCoworker(rail, { graceMs: 0, stallMs: 100, beatMs: 10 })
+  // one nudge, the pane died, the transport retry respawned it — and
+  // the respawned member faces a FRESH ladder (a transport fault is
+  // not silence): two more nudges, then the honest stall close
+  assert.equal(nudges, 3, "1 nudge pre-death + a fresh 2-nudge budget post-respawn")
+  const exchange = report?.table.find((row) => row.unit === "exchange")
+  assert.match(exchange!.result, /alpha stalled past the nudge cap/)
+  assert.match(report!.table.find((row) => row.unit === "retries")!.result, /alpha×1/)
+})

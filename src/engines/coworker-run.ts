@@ -3,7 +3,9 @@
 // message files as prompts to the named pane, ends on stop or the
 // cap, then reports. The privilege sweep, pane bookkeeping, and
 // layout all live on the Rail; the runner door picks this engine by
-// shape (src/engine.ts).
+// shape (src/engine.ts). Member supervision is the flight bench's
+// member court (below) — the second customer of #181's bench, folded
+// onto it from a hand-rolled nudge/stall ladder.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
@@ -14,6 +16,10 @@ import { emptyBoard } from "../core/lanes.ts"
 import { drainDeadline } from "../adapters/levy.ts"
 import { waitChange, type Rail } from "../adapters/rail.ts"
 import { writeReport, type Report } from "../core/report.ts"
+// the flight bench's protocol (#181) — this engine's member court is
+// its second customer (OPTIMUM §2's one named residual, folded)
+import { firstRuling, type Judge, type Ruling } from "./orchestrator.ts"
+import type { AgentStatus } from "../ports/agent-host.ts"
 
 // The door checkout root — where the operator's global models.local.toml
 // lives (layer 3 of the policy ladder).
@@ -183,10 +189,11 @@ export async function runCoworker(
     if (slot.pane && ok) rail.renamePane(slot.pane, m.name)
     if (!ok) return false
     bornAt.set(m.name, Date.now())
-    // a respawned session already carries its brief — never re-brief it
+    // a respawned session already carries its brief — never re-brief
+    // it, and the stall ladder starts fresh (a transport fault is not
+    // silence)
     prompted.add(m.name)
-    nudged.delete(m.name)
-    stoodDown.delete(m.name)
+    flightOf.set(m.name, freshFlight())
     const attempt = retriesUsed.get(m.name) ?? 1
     rail.promptAgent(
       m.name,
@@ -195,7 +202,7 @@ export async function runCoworker(
     rail.say("rail", `respawn ${m.name} (transport retry ${attempt}/${retryCap})`)
     return true
   }
-  // the stall guard's clock and the loop's beat — parameterized so
+  // the stall judge's clock and the loop's beat — parameterized so
   // tests drive the nudge ladder in milliseconds
   const stallMs = opts.stallMs ?? 120_000
   const beatMs = opts.beatMs ?? 5_000
@@ -214,15 +221,6 @@ export async function runCoworker(
   // nudge, then a second, then the member is dead. A silent member
   // must never stall the exchange forever.
   const ballOn = { name: members.find((m) => m.initiates)?.name, since: Date.now() }
-  const nudged = new Map<string, number>()
-  // a nudge-cap kill deferred because guidance was still queued — once
-  // per member; the second expiry is honest death
-  const deferred = new Set<string>()
-  // Booked wait (ADR 0006), the rail's one spelling: a member whose
-  // booked session a running child spur names as its spawner is idle
-  // on purpose — the nudge clock stands down (and resets) while the
-  // child runs.
-  const memberBookedWait = (name: string) => rail.bookedWait(name)
   // refusal feedback: the quoted reasons a member's mail was refused,
   // for its nudges and — if it still stalls — its death record
   const refusalsOf = (member: string) => [...refusedDetail.values()].filter((d) => d.from === member)
@@ -242,7 +240,192 @@ export async function runCoworker(
     const n = refusalsOf(member).length
     return n > 0 ? ` — ${n} message file(s) refused by the relay: ${refusalList(member)}` : ""
   }
-  const stoodDown = new Set<string>()
+  // ── the member court: the flight bench's second customer ───────────
+  //
+  // #181's bench (orchestrator.ts) seated for members: ONE typed beat
+  // per member per beat, judges in precedence order (firstRuling is
+  // the one walk), ONE bailiff — the hand-rolled nudge ladder, the
+  // deferred kill, and the bespoke dead-record closes are gone (the
+  // OPTIMUM §2 residual, folded).
+  const memberOf = (name: string) => members.find((m) => m.name === name)!
+
+  // the member's ladder state — was three collections (the nudged
+  // map, the deferred set, the stoodDown set)
+  type MemberFlight = { nudged: number; deferred: boolean; stoodDown: boolean }
+  const freshFlight = (): MemberFlight => ({ nudged: 0, deferred: false, stoodDown: false })
+  const flightOf = new Map<string, MemberFlight>()
+  for (const m of members) flightOf.set(m.name, freshFlight())
+
+  // ONE observation per member per beat; no judge reads the rail or
+  // fs directly. booked/pendingNote are LAZY (disk reads — only the
+  // judges that need them pay, the #181 law).
+  type MemberBeat = {
+    id: string
+    alive: boolean
+    pastGrace: boolean
+    status: AgentStatus
+    holdsBall: boolean
+    silentFor: number
+    flight: MemberFlight
+    capped: boolean
+    answered: boolean
+    retriesLeft: boolean
+    booked: boolean
+    pendingNote: boolean
+  }
+  const memberBeat = (name: string, swept: { answered: Set<string>; capped: Set<string> }): MemberBeat => ({
+    id: name,
+    alive: rail.paneAlive(name),
+    pastGrace: Date.now() - (bornAt.get(name) ?? 0) > graceMs,
+    status: rail.workerStatus(name),
+    holdsBall: ballOn.name === name,
+    silentFor: ballOn.name === name ? Date.now() - ballOn.since : 0,
+    flight: flightOf.get(name) ?? freshFlight(),
+    capped: swept.capped.has(name),
+    answered: swept.answered.has(name),
+    retriesLeft: (retriesUsed.get(name) ?? 0) < retryCap,
+    get booked() {
+      return rail.bookedWait(name)
+    },
+    get pendingNote() {
+      return rail.hasPendingNote(name)
+    },
+  })
+
+  // the bailiff's close — ONE dead-record ceremony for every death on
+  // this court (deny cap, spent transport retry, nudge cap, model
+  // exhaustion; was hand-rolled at five sites): a "failed" never
+  // arrives without its reason (j-5b245e), and the levy always learns
+  // why (the wake).
+  const closeMember = (name: string, reason: string): void => {
+    dead.push(name)
+    deadWhy.set(name, reason)
+    ledger?.emit("wake", { why: `member ${reason}` })
+    log(`member ${reason} — ending`)
+    rail.say("watcher", `${name} dead`)
+  }
+
+  // privilege: a capped member is dead; an answered dialog on the ball
+  // holder is progress — permission churn must not eat the nudge
+  // budget while the member talks to the rail (j-a532f9).
+  const privilegeJudge: Judge<MemberBeat> = (b) => {
+    if (b.capped) {
+      return {
+        kind: "close",
+        stage: "member",
+        pass: false,
+        row: { unit: b.id, result: `${b.id} blocked past the deny cap`, pass: false },
+      }
+    }
+    if (b.answered && b.holdsBall) {
+      return { kind: "defer", why: "an injected verdict is progress" }
+    }
+    return { kind: "none" }
+  }
+
+  // liveness: a pane gone past the newborn grace is a TRANSPORT fault
+  // (issue #122), never an answer — respawn from the booked session
+  // while retries remain, only a spent cap closes. Liveness outranks
+  // the stall ladder: a dead pane is malfunctioning, not silent, so
+  // no nudge may race the respawn.
+  const livenessJudge: Judge<MemberBeat> = (b) => {
+    if (b.alive || !b.pastGrace) return { kind: "none" }
+    const spent = retriesUsed.get(b.id) ?? 0
+    if (spent < retryCap && respawnMember(memberOf(b.id))) {
+      retriesUsed.set(b.id, spent + 1)
+      ledger?.emit("retry", { member: b.id, attempt: spent + 1, why: "pane died" })
+      log(`member ${b.id} pane died — respawned from booked session (transport retry ${spent + 1}/${retryCap})`)
+      return { kind: "defer", why: "transport retry — respawned from the booked session" }
+    }
+    return {
+      kind: "close",
+      stage: "member",
+      pass: false,
+      row: {
+        unit: b.id,
+        result: `${b.id} pane died${spent > 0 ? ` after ${spent} transport retry(ies)` : ""}`,
+        pass: false,
+      },
+    }
+  }
+
+  // stall — the nudge ladder. Only the ball holder is judged: working
+  // defers, a booked wait stands the clock down (ADR 0006), two
+  // nudges (refusals quoted at their sender), one guidance-deferred
+  // kill (j-a532f9), then the honest close.
+  const NUDGE_CAP = 2
+  const stallJudge: Judge<MemberBeat> = (b) => {
+    if (!b.holdsBall) return { kind: "none" }
+    if (b.status === "working") return { kind: "defer", why: "agent working" }
+    if (b.silentFor <= stallMs) return { kind: "none" }
+    if (b.booked) {
+      if (!b.flight.stoodDown) {
+        b.flight.stoodDown = true
+        log(`booked wait ${b.id}: a live child spur holds it — nudges stand down`)
+      }
+      return { kind: "defer", why: "booked wait — a live child holds this member" }
+    }
+    const used = b.flight.nudged
+    if (used < NUDGE_CAP) {
+      b.flight.nudged = used + 1
+      return {
+        kind: "reprompt",
+        note:
+          (used === 0
+            ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
+            : `Second and final nudge, ${b.id}: the exchange waits on you. Act now or the job ends unresolved.`) + refusalQuote(b.id),
+        event: ["reprompt", { member: b.id, nudge: used + 1 }],
+      }
+    }
+    if (b.pendingNote && !b.flight.deferred) {
+      // the guidance is still queued — the kill raced the message that
+      // could save the member (j-a532f9). Defer death one beat, flush
+      // now; the second expiry is honest death.
+      b.flight.deferred = true
+      rail.flushPendingNotes()
+      log(`member ${b.id} at the nudge cap — guidance still queued, deferring one beat`)
+      return {
+        kind: "defer",
+        why: "guidance still queued — death deferred one beat",
+        event: ["reprompt", { member: b.id, deferred: true }],
+      }
+    }
+    return {
+      kind: "close",
+      stage: "member",
+      pass: false,
+      row: { unit: b.id, result: `${b.id} stalled past the nudge cap${refusalSuffix(b.id)}`, pass: false },
+    }
+  }
+
+  // the seating — the precedence IS the design (pinned in
+  // test/coworker-run.test.ts, the way benchOrder's is).
+  const memberBench: Judge<MemberBeat>[] = [privilegeJudge, livenessJudge, stallJudge]
+
+  // the bailiff: close = the one dead record; defer/reprompt = the
+  // ball's clock resets (only the holder's silence is the exchange's)
+  // and the event books; none leaves everything as the beat found it —
+  // the relay's deliveries own the ball's moves.
+  const applyMemberRuling = (beat: MemberBeat, ruling: Ruling): void => {
+    switch (ruling.kind) {
+      case "close":
+        closeMember(beat.id, ruling.row.result)
+        return
+      case "carry":
+        return // a drain parks before this court sits — kept for the protocol
+      case "defer":
+        if (ballOn.name === beat.id) ballOn.since = Date.now()
+        if (ruling.event) ledger?.emit(ruling.event[0], ruling.event[1])
+        return
+      case "reprompt":
+        rail.promptAgent(beat.id, ruling.note)
+        if (ballOn.name === beat.id) ballOn.since = Date.now()
+        if (ruling.event) ledger?.emit(ruling.event[0], ruling.event[1])
+        return
+      case "none":
+        return
+    }
+  }
   let ended: "stop" | "cap" | "deadline" | "dead" | "paused" | null = null
   let draining = false
   let drainUntil: number | null = null
@@ -331,25 +514,22 @@ export async function runCoworker(
     }
     // the permission half of JEV (zen 6, rail-owned): a blocked member
     // is a question, and the rail's sweep answers it — every pane the
-    // rail holds, this loop's members and anything else alike. This
-    // loop only carries the consequence: a capped member is dead and
-    // ends the exchange. No dialog ever waits for a person.
+    // rail holds, this loop's members and anything else alike, one
+    // sweep per beat. No dialog ever waits for a person; the court
+    // below carries the consequence.
     const sweep = rail.tickPrivilege()
-    const answered = new Set<string>()
+    // the member court sits: one beat per living member, privilege →
+    // liveness → stall, the first ruling wins, the bailiff applies.
+    // Every death on this engine — the deny cap, a spent transport
+    // retry, the nudge cap — closes through the bailiff's one record.
     for (const m of members) {
       if (dead.includes(m.name)) continue
-      if (sweep.answered.has(m.name)) answered.add(m.name)
-      if (sweep.capped.has(m.name)) {
-        dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} blocked past the deny cap`)
-        ledger?.emit("wake", { why: `member ${m.name} blocked past the deny cap` })
-        log(`member ${m.name} hit the deny cap — ending`)
-      }
+      const beat = memberBeat(m.name, sweep)
+      applyMemberRuling(beat, firstRuling(memberBench, beat))
     }
-    // a dialog the rail just answered is progress: the stall clock
-    // resets, or permission churn eats the whole nudge budget while
-    // the member is talking to the rail, not idling (j-a532f9)
-    if (ballOn.name && answered.has(ballOn.name)) ballOn.since = Date.now()
+    // the provider-fault lane (the jev model ladder) — not a stall
+    // question, so it rides its own block: its clock resets and its
+    // deaths flow through the bailiff's close, never a hand-rolled one.
     const policy = readModelsFile(taskDir, toml, DOOR_ROOT)
     for (const m of members) {
       if (dead.includes(m.name)) continue
@@ -371,8 +551,7 @@ export async function runCoworker(
         continue
       }
       if (action.kind === "exhausted") {
-        dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a provider fault and the model ladder is empty`)
+        closeMember(m.name, `${m.name} hit a provider fault and the model ladder is empty`)
         log(`member ${m.name} out of candidates — no next model in the ladder`)
         break
       }
@@ -395,8 +574,7 @@ export async function runCoworker(
       deadModels.set(m.name, deadSet)
       const remaining = remainingCandidates(policy.order, deadSet)
       if (remaining.length === 0) {
-        dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        closeMember(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
         log(`member ${m.name} out of candidates — every candidate model failed`)
         break
       }
@@ -417,8 +595,7 @@ export async function runCoworker(
       }
       if (!to) to = nextModel(remaining, m.model)
       if (!to) {
-        dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
+        closeMember(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
         log(`member ${m.name} out of candidates — no next model among [${remaining.join(", ")}]`)
         break
       }
@@ -432,74 +609,6 @@ export async function runCoworker(
       rail.promptAgent(m.name, `[rail] Your provider refused another turn. The model for this session is now ${to}. Continue exactly where you left off.`)
       if (ballOn.name === m.name) ballOn.since = Date.now()
       log(`model switch ${m.name}: -> ${to} (inside the live session)`)
-    }
-    // the stall guard: whoever holds the ball and idles too long gets
-    // nudged — twice, then the exchange ends. Working resets the clock.
-    if (ballOn.name && !dead.includes(ballOn.name)) {
-      if (rail.workerStatus(ballOn.name) === "working") {
-        ballOn.since = Date.now()
-      } else if (Date.now() - ballOn.since > stallMs && memberBookedWait(ballOn.name)) {
-        // booked wait: a live child spur holds this member — stand the
-        // nudge clock down without spending a nudge (ADR 0006)
-        if (!stoodDown.has(ballOn.name)) {
-          stoodDown.add(ballOn.name)
-          log(`booked wait ${ballOn.name}: a live child spur holds it — nudges stand down`)
-        }
-        ballOn.since = Date.now()
-      } else if (Date.now() - ballOn.since > stallMs) {
-        const used = nudged.get(ballOn.name) ?? 0
-        if (used < 2) {
-          nudged.set(ballOn.name, used + 1)
-          rail.promptAgent(
-            ballOn.name,
-            (used === 0
-              ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
-              : `Second and final nudge, ${ballOn.name}: the exchange waits on you. Act now or the job ends unresolved.`) + refusalQuote(ballOn.name),
-          )
-          ballOn.since = Date.now()
-          log(`nudge ${ballOn.name} (${used + 1}/2)`)
-          ledger?.emit("reprompt", { member: ballOn.name, nudge: used + 1 })
-        } else if (rail.hasPendingNote(ballOn.name) && !deferred.has(ballOn.name)) {
-          // the guidance is still queued — a blocked pane refused it and
-          // the kill raced the message that could save the member
-          // (j-a532f9: dead 5s after the deny, note undelivered).
-          // Defer death one beat and try to flush now; the second
-          // expiry is honest death.
-          deferred.add(ballOn.name)
-          ballOn.since = Date.now()
-          rail.flushPendingNotes()
-          log(`member ${ballOn.name} at the nudge cap — guidance still queued, deferring one beat`)
-          ledger?.emit("reprompt", { member: ballOn.name, deferred: true })
-        } else {
-          const reason = `${ballOn.name} stalled past the nudge cap${refusalSuffix(ballOn.name)}`
-          dead.push(ballOn.name)
-          deadWhy.set(ballOn.name, reason)
-          ledger?.emit("wake", { why: `member ${reason}` })
-          log(`member ${reason} — ending`)
-        }
-      }
-    }
-    for (const m of members) {
-      if (dead.includes(m.name)) continue
-      if (!rail.paneAlive(m.name) && Date.now() - (bornAt.get(m.name) ?? 0) > graceMs) {
-        // transport class (issue #122): the pane is gone — crash, kill,
-        // browned-out TTY. Not the member's answer; respawn it from the
-        // booked session while retries remain, and only then is the
-        // death honest.
-        const used = retriesUsed.get(m.name) ?? 0
-        if (used < retryCap && respawnMember(m)) {
-          retriesUsed.set(m.name, used + 1)
-          ledger?.emit("retry", { member: m.name, attempt: used + 1, why: "pane died" })
-          log(`member ${m.name} pane died — respawned from booked session (transport retry ${used + 1}/${retryCap})`)
-          continue
-        }
-        const spent = retriesUsed.get(m.name) ?? 0
-        dead.push(m.name)
-        deadWhy.set(m.name, `${m.name} pane died${spent > 0 ? ` after ${spent} transport retry(ies)` : ""}`)
-        ledger?.emit("wake", { why: `member ${m.name} is dead` })
-        log(`member ${m.name} is dead — ending the exchange`)
-        rail.say("watcher", `${m.name} dead`)
-      }
     }
     if (dead.length > 0) {
       ended = "dead"
