@@ -24,12 +24,12 @@
 > breaker, not a KPI).
 > Refit 4: 2026-10-20, over PRs #2–#172 (122 merged; +2 since refit 3:
 > #171 this file's refit-3 landing, #172 permissions slice 2 — the
-> third loop-v2 iteration, GREEN the hard way: the 18:18 landing eval
-> died red inside zhipuai's 5-hour quota window with no RESULT.md, the
-> fixer's bounce record root-caused it as INFRA with the branch
-> untouched, topo-tune re-proven directly, regate PASS 00:24, merged).
-> No same-cause strike ever billed (strikes.json {}); no ESCALATED
-> records; D3 unexercised.
+> third loop-v2 iteration to land on its named target, GREEN the hard
+> way: the 18:18 landing eval died red inside zhipuai's 5-hour quota
+> window with no RESULT.md, the fixer's bounce record root-caused it as
+> INFRA with the branch untouched, topo-tune re-proven directly,
+> regate PASS 00:24, merged). No same-cause strike ever billed
+> (strikes.json {}); no ESCALATED records; D3 unexercised.
 > Refit 5: 2026-10-20, over PRs #2–#174 (123 merged; +2 since refit 4:
 > #173 this file's refit-4 landing, #174 the relay events fold — §8
 > EXECUTED, the fourth loop iteration to land on its named target
@@ -69,6 +69,19 @@
 > + examples/*-spurs, ~2.3k lines) is #183's own stated next slice and
 > ADR 0014's flip condition — armed here as slice 3. Zero strikes, no
 > ESCALATED records; D3 unexercised.
+> Refit 9: 2026-10-20, over PRs #2–#185 (130 merged; +2 since refit 8:
+> #184 this file's refit-8 landing, absorbed clean in 44s; #185
+> program-grammar slice 3 — the museum conversion, c2-iter3, armed by
+> refit 8's NEXT-TARGET chained as-written). #185 landed GREEN the
+> revive way: the driver died at commissioning (19:35, no obituary)
+> while the fixer survived; revive3 hand-landed the PR — gate PASS
+> 20:37, topo-tune green (33,8), merged + pulled — 369+/1436− across
+> 103 files, all in blast, 1805 ≤ cap 2500, 1 round / 0 strikes, npm
+> test 442/442 (440 + 2 new corpus tests). ADR 0014 flips fully to
+> EXECUTED: §1 is CLOSED. Zero strikes, no ESCALATED records; D3
+> unexercised. The pick flips the streak: rank-1 runner-dispatch,
+> read and overridden BY RECEIPT six refits running, is PICKED for
+> the first time — narrowed by receipt to its one named residual.
 
 ## L0 — the product thesis (one page)
 
@@ -97,16 +110,20 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 8: #183 deleted the dialect's engine
-whole — the direction since #176 is one line (one authoring story;
-ceremony in the platform, never the brief), and the loop's chained
-proposal landed it green. No new axis appeared; oscillation is 0
-across the whole table.
+The thesis held under refit 9, and §1's three-slice run is its cleanest
+proof: #176 refused the retired spellings at the door, #183 deleted the
+engine, #185 converted the corpus — one authoring story, everywhere a
+program can be authored, pinned by a test (corpus.test.ts) so a future
+museum donation cannot land. The direction since #176 is one line; no
+new axis appeared; oscillation is 0 across the whole table.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
-composer; hot-reload of a running chain; multi-tenant doors. Any of
-these may be the true optimum's home; treat as research, not refit.
+composer; hot-reload of a running chain; multi-tenant doors; task-level
+detectors/veto/requeue riding a DELEGATED child (the inbox-zero
+semantics — #185's new finding, recorded in ADR 0014: a minted child
+carries no hooks folder; today the declaration cannot express it). Any
+of these may be the true optimum's home; treat as research, not refit.
 
 ## L1 — components
 
@@ -126,31 +143,29 @@ note below):
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-Refit 8's pick reads the table after the discounts, every one by
-receipt: rank 1 **runner-dispatch** (123.5) overridden BY RECEIPT for
-the SIXTH consecutive refit — the arithmetic is exact: 43465 (refit
-7) + 991 (#183) = 44456, and #183 is §1's engine retirement mis-
-billed WHOLE through its one attribution-eligible file
-(src/engines/lab.ts; its src/doors/{spur,run,hooks}.ts touches bill
-0.0 — the gaps note's predicted mis-bill, the second post-#180
-receipt after #181). The churn is the SEAM's echo, not a sickness:
-seven slices on one line, zero reversal pairs. Rank 2 **window**
-(43.4) unchanged since refit 3's churn read — nothing under `web/`
-since. Rank 3 **permissions** (23.7) converged (#172). Rank 4
-**resume-parking** (7.5) frozen. Rank 5 **wake-ladder** KEEP. Rank 6
-**model-pinning** WATCH. Rank 7 **relay** (0.0) converged (#174).
-The pick is rank 8 **program-grammar** — 0.0 on the table (its globs
-own no code file) and ONE SLICE from closed: #183 deleted the
-dialect's engine (GREEN) and named its own next slice — the museum
-conversion — which is also ADR 0014's flip condition ("flips fully
-to EXECUTED when the museum lands", live on master today). The
-museum is fully INERT (every retired spelling it holds is refused at
-the door or at load — #183's refusal tests are the receipts) yet
-still in-tree: test/e2e's ten retired-spelling programs (incl.
-#178's hooks/units-shaped forgotten-marker) + the four
-examples/*-spurs dirs, ~2.3k lines. It carries the milestone's gate;
-the milestone forbids carrying a known-simpler alternative. Slice 3,
-cap 2500, ZERO src in the blast (authoring-side only).
+The table is BYTE-IDENTICAL to refit 8's — and that identity is a
+receipt, not a stall: #185 was 103 files, 1805 diff lines, and ZERO
+src files (authoring-side only, exactly as its blast set promised),
+so it bills to no component under the src-only globs. Refit 9's pick
+reads the table after the discounts, every one by receipt: rank 1
+**runner-dispatch** (123.5) — for the SEVENTH consecutive refit the
+arithmetic is the seam's echo (43465 at refit 7, +991 of #183 mis-
+billed whole through src/engines/lab.ts, +0 since) — but this refit
+PICKS it for the first time, because the component's own block now
+holds exactly ONE named residual and it lives in this seam:
+coworker-run.ts's hand-rolled nudge ladder, the bench's second
+customer (#181's stated next slice; the bench itself — benchOrder/
+applyRuling — sits one file over in src/engines/orchestrator.ts).
+Six reads overridden (refits 3–8), one pick narrowed by receipt: the
+echo churn is the seam's, and the residual is the seam's one open
+customer. Rank 2 **window** (43.4) unchanged since refit 3's churn
+read — nothing under `web/` since. Rank 3 **permissions** (23.7)
+converged (#172). Rank 4 **resume-parking** (7.5) frozen. Rank 5
+**wake-ladder** KEEP. Rank 6 **model-pinning** WATCH. Rank 7 **relay**
+(0.0) converged (#174). Rank 8 **program-grammar** — 0.0 on the
+table forever (its globs own no code file) — is CLOSED at this refit:
+§1 converged on its named target (#185), the milestone's last gated
+alternative off the books.
 
 Attribution gaps (human note — the constitution is not refit's to
 edit): #180's package-by-feature move made the flat globs structurally
@@ -164,12 +179,13 @@ ONLY because #178 predates the move (flat paths in its file list);
 #181 — the first post-move PR — could bill only through
 src/engines/orchestrator.ts; #183 — the second — bills its whole 991
 through src/engines/lab.ts while its doors/* deletions (spur.ts
-wholesale!) bill nothing. At the next constitution touch: re-path
-the globs onto the package layout — program-grammar should own
-`src/doors/{hooks,run,spur}.ts`, relay `src/adapters/store.ts`,
-resume-parking `src/core/state.ts`, permissions
-`src/core/permission.ts`, wake-ladder `src/adapters/wake*`,
-runner-dispatch `src/engines/*`.
+wholesale!) bill nothing; #185 — the third — bills exactly zero
+(no src file in a 103-file PR; the table unchanged is the receipt).
+At the next constitution touch: re-path the globs onto the package
+layout — program-grammar should own `src/doors/{hooks,run,spur}.ts`,
+relay `src/adapters/store.ts`, resume-parking `src/core/state.ts`,
+permissions `src/core/permission.ts`, wake-ladder
+`src/adapters/wake*`, runner-dispatch `src/engines/*`.
 
 ### 1. Program grammar
 - **Concept**: shape + hooks declared per stage; compiles to the
@@ -203,35 +219,53 @@ runner-dispatch `src/engines/*`.
   the lab engine runs only its workflow.toml shape, the shape a lab
   stage mints as its child, wake-steps.test.ts's demonstrated
   path); the `[gates]` detector table refused at load pointing at
-  `topology = "gate"` + `run` (stages bind verify.sh — #150).
-  GREEN 1 round / 0 strikes, 991 ≤ cap 1000 (93+/898−), topo-tune
-  green (33,8). The MUSEUM remains in-tree, fully inert — #183's
-  own stated next slice, ADR 0014's flip condition.
-- **Oscillation**: HIGH historically — three dialects for one concept;
-  #150 (grade per unit) was the units-hook path's missing per-stage
-  honesty. Resolving monotonically: #176 deleted dialect code (−650),
-  #183 deleted the engine (−898), zero reversal pairs across both.
-  Zero attribution ever — the globs own no code file (and #183's
-  doors/* deletions bill 0.0, the gaps note's receipt).
-- **Simpler alternative**: slice 3 — the museum conversion (#183's
-  stated next slice, verbatim in its PR body; ADR 0014's flip
-  condition, verbatim in its status): test/e2e's ten retired-spelling
-  programs (incl. #178's hooks/units-shaped forgotten-marker) + the
-  four examples/*-spurs dirs convert to `[[stage]]` chains;
-  run-battery.sh re-points at them; ADR 0014 flips fully to
-  EXECUTED. Authoring-side ONLY — zero src files in the blast: every
-  retired spelling is already refused at the door or at load
-  (#183's refusal tests in run.test.ts/hooks.test.ts are the
-  receipts); if the conversion appears to need src, that is a NEW
-  finding and out of this slice's scope by design.
-- **Verdict**: INVESTIGATE (refit 8's pick: NEXT-TARGET
-  program-grammar slice 3, cap 2500 — blast set = test/e2e/ +
-  examples/ + test/ + docs/adr/0014-one-authoring-dialect.md +
-  STAGES.md/RAILS.md, ZERO src. Cap receipt: the museum's whole
-  converting mass is 2348 lines (examples 1913 + test/e2e 435);
-  conversions net-shrink (deletions dominate; #183's own shape was
-  93+/898−), but refit 6's cap-1000 for engine+museum STARVED
-  exactly this half — the engine alone ate 991. Not re-starved).
+  `topology = "gate"` + `run` (stages bind verify.sh — #150) →
+  **#185 slice 3 — the museum conversion, EXECUTED** (c2-iter3,
+  armed by refit 8's NEXT-TARGET chained as-written; hand-landed by
+  revive3 after the driver died at commissioning — the fixer
+  survived, the gate did not flinch): test/e2e's ten retired-spelling
+  programs are `[[stage]]` chains (worker briefs inline; the units.sh
+  JSON wrappers and their "follow the log protocol" boilerplate
+  deleted — the rail's briefFor owns that contract; the [[step]]
+  writer/check/warmup/wake shapes became solo + gate + coworker
+  stages; nested/child/ deleted — the rail mints the child now;
+  run-battery.sh's scenario dirs kept their names, the README
+  rubric rewritten to the stage spelling); the chain-shaped examples
+  converted (staged-waves solo→gate→fan-out; two-signoffs' end/check/
+  check → two gate stages; nested-wakes a coworker stage; hand-off's
+  three-rail wake chain ONE rail — draft solo + review coworker{check,
+  publish}; git-wave a lab stage with an INLINE end detector — a
+  delegated child carries no hooks folder; trivia-bench a lab stage
+  with the actor grading its own rounds); museum pieces with no
+  honest stage spelling DELETED, not faked (lab-program — its shape
+  IS the lab stage; inbox-zero; three-lookups — its living form is
+  test/fixtures/three-lookups, #176, test/util.ts's EXAMPLE; the four
+  screenshot-era coworker shells that never had member briefs);
+  pure exchanges stay members-shaped BY THE DOOR'S OWN RECEIPT
+  (src/doors/run.ts's fan-out-only refusal, #176: "coworker carries
+  members, a lab its actor; neither needs stages" — one dialect per
+  SHAPE, not one shape for everything); **test/corpus.test.ts pins
+  the corpus** — every workflow.toml under examples/ + test/e2e/
+  parses through loadManifest (the door's own refusals fire on
+  parse), fan-out-shaped ⇒ declares stages, and a spur.mjs/dag.mjs
+  sweep: a future museum donation cannot land. 369+/1436− across 103
+  files, all in blast, 1805 ≤ cap 2500, 1 round / 0 strikes, npm test
+  442/442, topo-tune green (33,8). ADR 0014 flips fully to EXECUTED.
+- **Oscillation**: RESOLVED — the whole three-slice run was monotone
+  deletion: #176 (250+/650−), #183 (93+/898−), #185 (369+/1436−);
+  zero reversal pairs across all three. Zero attribution ever — the
+  globs own no code file (#183's doors/* deletions and #185's whole
+  103 files both bill 0.0, the gaps note's receipts).
+- **Simpler alternative**: EXECUTED — the milestone's last GATED
+  alternative closed by #185. One NEW finding on the books (recorded
+  in ADR 0014, #185's PR body): the delegation boundary cannot carry
+  task-level detector/hook files — inbox-zero's world-sourced signal,
+  human veto, and reject-requeue rode files a minted child cannot
+  hold. Research, not a sickness: no design on the books claims it
+  should; if it becomes wanted, it is a declaration-capability
+  question (an empty-quadrant entry), not a reversal of this one.
+- **Verdict**: KEEP (converged at refit 9 — receipts #176, #183,
+  #185; ADR 0014 EXECUTED).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -292,25 +326,31 @@ runner-dispatch `src/engines/*`.
   card read `undefined:<id>` — now `unit:<id>`, pinned) → #183:
   NOT this component's work — §1's engine retirement mis-billed
   here through src/engines/lab.ts (its only attribution-eligible
-  file; +991 churn, +1 fix-density, both §1's substance); the seam
-  echoes, it does not sicken.
-- **Oscillation**: RESOLVED. Zero reversal pairs — now SEVEN slices
-  on one line (#161→#164→#167→#170→#172→#176→#181; the middle three
-  clean-sweep and loop PRs share the direction). But refit 6's
-  "simpler alternative: NONE LEFT" was FALSIFIED: #178/#179 minted
-  one (a new observation verb + a new settle lane made a bench-shaped
-  replacement visible) and #181 landed it. Lesson carried into every
-  future "none left": the claim is about the CURRENT seam's shape,
-  not about the component.
-- **Simpler alternative**: one named residual, UNGATED —
-  coworker-run.ts's nudge ladder is the bench's second customer
-  (#181's stated next slice; confirmed present at
-  src/engines/coworker-run.ts, the budget/model-ladder seam);
-  extension-shaped (a fold onto the landed bench), not a reversal.
-  Sequenced AFTER §1's museum slice (refit 8's pick), which carries
-  the milestone's gate.
+  file; +991 churn, +1 fix-density, both §1's substance) → #185:
+  not this component's work either (zero src files; bills nothing).
+  The seam echoes, it does not sicken — and it holds ONE open
+  customer: coworker-run.ts's nudge ladder.
+- **Oscillation**: RESOLVED. Zero reversal pairs — EIGHT slices on
+  one line (#161→#164→#167→#170→#172→#176→#181, plus the seam-echo
+  billings #183/#185). But refit 6's "simpler alternative: NONE
+  LEFT" was FALSIFIED: #178/#179 minted one (a new observation verb
+  + a new settle lane made a bench-shaped replacement visible) and
+  #181 landed it. Lesson carried into every future "none left": the
+  claim is about the CURRENT seam's shape, not about the component.
+- **Simpler alternative**: ONE named residual, UNGATED, now ARMED
+  (refit 9's pick, c2-iter4): coworker-run.ts's nudge ladder is the
+  bench's second customer (#181's stated next slice). Live on master:
+  src/engines/coworker-run.ts (565 lines) hand-rolls its member
+  stall court — the `nudged` map, the 2-nudge cap, the deferred kill
+  at queued guidance, the bespoke dead-record close — one file over
+  from the bench it predates (benchOrder/applyRuling in
+  src/engines/orchestrator.ts), pinned by test/coworker-run.test.ts
+  ("tests drive the nudge ladder in milliseconds"). Extension-shaped
+  (a fold onto the landed bench), not a reversal; the sequencing
+  constraint (AFTER §1's museum slice, which carried the milestone's
+  gate) is DISCHARGED by #185.
 - **Verdict**: KEEP (the replacement landed; the residual is a fold,
-  not a sickness).
+  not a sickness — and it is now the loop's armed line).
 
 ### 3. Wake ladder
 - **Concept**: one wake per commission; spool-first, per-rung trace.
@@ -375,7 +415,7 @@ runner-dispatch `src/engines/*`.
   dir)).roots`) holding zero path knowledge; the loud hard-deny strip
   moved INTO the canonical predicate (`sanitizeRoots` internal,
   pinned through `declareScope`, warning at every construction site —
-  the door's included); tests re-pinned at the new seam. Refits 4–7:
+  the door's included); tests re-pinned at the new seam. Refits 4–9:
   not one new touch (fix-density 13 frozen since #172).
 - **Oscillation**: LOW-MED historically — the fix-density was the
   symptom; both slices landed without reversal (the 12→13 delta is
@@ -398,6 +438,10 @@ runner-dispatch `src/engines/*`.
 - **Simpler alternative**: ONE pin transport — directional only; it
   becomes a milestone violation the moment new evidence arrives, and
   none has (#159 is the last rail touch; the loop never followed).
+  Watch item for c2-iter4: the armed fold's file
+  (src/engines/coworker-run.ts) imports the jev model-ladder seam
+  (budgetAction/nextModel) — if the fold surfaces pane-path pin
+  evidence, this block re-opens on receipt, not on taste.
 - **Verdict**: WATCH.
 
 ### 7. Window
@@ -410,7 +454,7 @@ runner-dispatch `src/engines/*`.
   read refit 2 instructed: the loop-era churn is the SERVER mirroring
   rail-side redesigns (grade contract #145, unit ledger #162, scan
   perf #139) — follower churn, not window-intrinsic sickness; the
-  viewer-only line has held since #69. Refits 4–7: nothing new under
+  viewer-only line has held since #69. Refits 4–9: nothing new under
   `web/` — the read stands. ADR 0014 exempts the viewer's own
   `[[step]]` manifest renderer deliberately (it renders HISTORICAL
   run dirs with its own parser — history-keeping, not authoring).
@@ -448,7 +492,7 @@ runner-dispatch `src/engines/*`.
    + ONE real ≤30-min bench task exercising the redesign.
 4. **Merge** → back to 1.
 
-Loop-v2 status (refit 7's read): SEVEN loop-era slices landed GREEN —
+Loop-v2 status (refit 9's read): EIGHT loop-era slices landed GREEN —
 #167 (c1-iter1), #170 (c1-iter2), #172 (c1-iter3: one eval-red bounce
 root-caused INFRA — zhipuai's 5-hour quota window, re-proven direct,
 regate PASS), #174 (c1-iter5: 1 round, 0 strikes, clean), #176
@@ -457,39 +501,42 @@ regate PASS), #174 (c1-iter5: 1 round, 0 strikes, clean), #176
 the joint target), #183 (c2-iter2: program-grammar slice 2's engine
 half — armed by refit 7's NEXT-TARGET chained AS-WRITTEN under the
 amended D1, landed 991 ≤ 1000 (93+/898−), 1 round, 0 strikes, green
-(33,8)). Iteration 4 of commissioning 1 died driver-side (DEAD-iter4;
-D4's boundary held — never a gate-red round, never a strike).
+(33,8)), #185 (c2-iter3: the museum conversion — armed by refit 8's
+NEXT-TARGET chained as-written, landed 1805 ≤ 2500 (369+/1436−), 1
+round, 0 strikes, 442/442, green (33,8); the driver died at
+commissioning and revive3 hand-landed it — the fixer survived, the
+gate ran clean, D4's boundary held: never a gate-red round, never a
+strike). Iteration 4 of commissioning 1 died driver-side (DEAD-iter4).
 Commissioning 1's MAX-6 budget consumed; commissioning 2 (pin
-335bbca) has two clean iterations banked, and this refit (c2-iter2's)
-arms §1's museum slice for c2-iter3. Every refit PR absorbed except
-one (#173's absorb was refused once by the refit lane's evidence
-fence — body must cite ≥2 PR refs, this file's own authors must
-comply — and human-merged; #175, #177, #182 absorbed clean, #182 in
-38s). No strikes file exists — no same-cause strike ever billed; D3
-unexercised (a circuit breaker, not a KPI). #169 (operator
-amendment) made refit proposals effective as-written, which raises
-this file's duty: the discount chain and pick receipts above ARE the
-audit trail that keeps D2 honest — momentum.py's mechanical rank-1
-echo (runner-dispatch) has now been read and overridden BY RECEIPT,
-not by taste, SIX refits running (3, 4, 5, 6, 7, 8). The one time
-the seed itself chained straight through (c2-open, → #181), the
-receipt-read lives in §2's block: what landed was real, green, and
-monotone — the echo is not wrong because the churn is fake; it is
-wrong because the churn is the SEAM's, and §1's open alternative
-carries the milestone's gate.
+335bbca) has THREE clean iterations banked (budget 3/6), and this
+refit (c2-iter3's) arms §2's residual fold for c2-iter4. Every refit
+PR absorbed except one (#173's absorb was refused once by the refit
+lane's evidence fence — body must cite ≥2 PR refs, this file's own
+authors must comply — and human-merged; #175, #177, #182, #184
+absorbed clean, #184 in 44s). No strikes file exists — no same-cause
+strike ever billed; D3 unexercised (a circuit breaker, not a KPI).
+#169 (operator amendment) made refit proposals effective as-written,
+which raises this file's duty: the discount chain and pick receipts
+above ARE the audit trail that keeps D2 honest — momentum.py's
+mechanical rank-1 echo (runner-dispatch) was read and overridden BY
+RECEIPT, not by taste, SIX refits running (3–8); refit 9 is the
+first to PICK the rank-1, and the receipt narrows the pick to the
+component's one named residual (the echo churn is the seam's; the
+residual is the seam's one open customer — the same narrowing, now
+pointing AT the pick instead of away from it).
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
-known-simpler alternative (§2 closed at refit 3, RE-OPENED by
-#178/#179, CLOSED AGAIN by #181 — one UNGATED residual fold named,
-sequenced after §1 completes; §5 at refit 4; §8 at refit 5 (#174);
-§1 one slice from closed — #176 slice 1, #183 the engine half, the
-museum conversion armed as commissioning 2's iteration 3, the LAST
-gated alternative on the books; §6's one-transport question stays
-WATCH for want of new evidence); composite eval green. After the
-museum slice: the composite eval case is the milestone's last
-unbuilt leg — a green eval case graduates the loop to the FULL
-benchmark pass.
+known-simpler alternative (§1 CLOSED at refit 9 — #176 slice 1, #183
+the engine half, #185 the museum, ADR 0014 EXECUTED; §2 closed at
+refit 3, re-opened by #178/#179, closed again by #181 — its ONE
+UNGATED residual fold armed as c2-iter4; §5 at refit 4; §8 at refit
+5 (#174); §6's one-transport question stays WATCH for want of new
+evidence); composite eval green — NOT YET: the transfer-window-v2
+case is the milestone's last unbuilt leg, and its crib (a converted,
+corpus.test.ts-pinned stage-chain corpus demonstrating every
+topology) landed with #185. After the residual fold: a green eval
+case graduates the loop to the FULL benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -513,14 +560,19 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
 Target ≤30 min real; mock rehearsal = seconds. Still build-next —
 untouched by the loop so far (the loop's eval lane used topo-tune's
 real levy, joint target (33,8) green on #167, #170, #172's re-proof,
-#174, #176, #181, and #183). #170 makes the scout stage honest to
-bench: a paused-and-continued lab now resumes rather than restarts,
+#174, #176, #181, #183, and #185). #170 makes the scout stage honest
+to bench: a paused-and-continued lab now resumes rather than restarts,
 so the ≤30-min budget survives human interference; #178's platform
 pen gives the case's lab stage a status-first settle lane if it
 wants it (declared, not assumed); #183 removed the last engine-side
-dialect, so the case authors against `[[stage]]` only. Sequencing
-held by refits 5–8: §1's retirement (slice 1 landed #176; the
-engine half #183; the museum slice armed as c2-iter3) lands BEFORE
-the case is authored, so the case authors against the final
-one-dialect grammar — with a converted stage-chain example corpus to
-crib from, not museum pieces.
+dialect and #185 converted the corpus, so the case authors against
+`[[stage]]` only — with a converted, pinned example corpus to crib
+from (every topology demonstrated: solo smoke, fan-out+preamble
+staged-waves, gate waves/two-signoffs, coworker nested/hand-off, lab
+with inline detectors git-wave/trivia-bench), not museum pieces.
+Sequencing held by refits 5–9 and extended one step: §1's retirement
+(#176, #183, #185) landed BEFORE the case is authored; the residual
+fold (c2-iter4) lands before it too — the case's `negotiate` stage
+is a coworker exchange, and it should author against the bench-owned
+close ceremony, not a hand-rolled nudge ladder that is about to be
+folded away underneath it.
