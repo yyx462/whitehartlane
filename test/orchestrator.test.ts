@@ -40,7 +40,9 @@ function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {})
       return fn ? fn(name, kind, briefPath, cwd) : true
     },
     paneAlive: (overrides.paneAlive as ShepPort["paneAlive"]) ?? (() => true),
-    agentWorking: (overrides.agentWorking as ShepPort["agentWorking"]) ?? (() => false),
+    workerStatus:
+      (overrides.workerStatus as ShepPort["workerStatus"] | undefined) ??
+      (() => "unknown" as const),
     reprompt: (name, briefPath) => {
       reprompts.push(name)
       const fn = overrides.reprompt as ShepPort["reprompt"] | undefined
@@ -275,7 +277,7 @@ test("a working agent outlives a quiet log and a quiet tree (j-964391)", async (
   const dir = await copyExample("orch-agent-working-")
   let clock = 0
   let working = true
-  const { port, wakes } = fakeShep({ agentWorking: (name) => working && name === "w-france" })
+  const { port, wakes } = fakeShep({ workerStatus: (name) => (working && name === "w-france" ? "working" : "unknown") })
   const base = deps(dir, port, { stallMs: 1000, now: () => clock })
   cycle(base)
 
@@ -371,7 +373,7 @@ test("a working worker is not grace-reprompted — the heartbeat defers until id
   const dir = await copyExample("orch-grace-working-")
   let clock = 0
   let working = true
-  const { port, reprompts } = fakeShep({ agentWorking: () => working })
+  const { port, reprompts } = fakeShep({ workerStatus: () => (working ? "working" : "unknown") })
   const base = deps(dir, port, { briefGraceMs: 60_000, now: () => clock })
 
   cycle(base)

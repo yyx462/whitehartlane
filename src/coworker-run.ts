@@ -267,9 +267,7 @@ export async function runCoworker(
       // ADR 5: no new deliveries; a member mid-turn ends its turn.
       // Permission asks, nudges, and dead checks stand down — the
       // park is taking over, bounded by the drain ceiling.
-      const anyWorking = members.some((m) =>
-        rail.agentStatus(m.name).includes('"agent_status":"working"'),
-      )
+      const anyWorking = members.some((m) => rail.workerStatus(m.name) === "working")
       if (!anyWorking || (drainUntil !== null && Date.now() > drainUntil)) {
         ended = "paused"
         break
@@ -305,8 +303,7 @@ export async function runCoworker(
     const plan = relayPlan(messages, delivered, CAP)
     for (const r of plan.relays) {
       // a working member takes mail on a later beat — never mid-turn
-      const state = rail.agentStatus(r.to)
-      if (state.includes('"agent_status":"working"')) continue
+      if (rail.workerStatus(r.to) === "working") continue
       let text = `[relay] from ${r.from}:\n\n${r.body}`
       if (!prompted.has(r.to)) {
         text = combineFirstPrompt(readFileSync(join(taskDir, "briefs", `${r.to}.md`), "utf8"), r.from, r.body)
@@ -357,7 +354,7 @@ export async function runCoworker(
     for (const m of members) {
       if (dead.includes(m.name)) continue
       if (switchedAwaitingTurn.has(m.name)) {
-        if (rail.agentStatus(m.name).includes('"agent_status":"working"')) switchedAwaitingTurn.delete(m.name)
+        if (rail.workerStatus(m.name) === "working") switchedAwaitingTurn.delete(m.name)
         else continue
       }
       const sid = bookedSessionOf(m.name)
@@ -439,8 +436,7 @@ export async function runCoworker(
     // the stall guard: whoever holds the ball and idles too long gets
     // nudged — twice, then the exchange ends. Working resets the clock.
     if (ballOn.name && !dead.includes(ballOn.name)) {
-      const st = rail.agentStatus(ballOn.name)
-      if (st.includes('"agent_status":"working"')) {
+      if (rail.workerStatus(ballOn.name) === "working") {
         ballOn.since = Date.now()
       } else if (Date.now() - ballOn.since > stallMs && memberBookedWait(ballOn.name)) {
         // booked wait: a live child spur holds this member — stand the
