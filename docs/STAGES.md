@@ -155,6 +155,22 @@ lab's brief                → stages/<id>/actor.md
 coworker/lab child program → stages/<id>/workflow.toml
 ```
 
+## Delivery across delegated stages
+
+The storage paths above carry delivery INTO a coworker/lab child: the
+child is staged from `stages/<id>/` at the levy (the frontier), so
+whatever earlier stages wrote under `stages/<id>/data/` rides along
+(fixed briefs, dynamic delivery — write there, the child reads `data/`).
+Delivery OUT of a child rides the stage's `check`: it runs in the
+parent after the wake receipt and resolves the child's job dir through
+the durable booking the wake machinery owns (`wakes/<id>.json`), so the
+child's artifacts land in the parent's `data/` — where a later gate can
+judge them. The worked receipt is the composite case
+(`test/e2e/transfer-window-v2/`): analysts shard into
+`stages/negotiate/data/`, the exchange's accept check lands `plan.json`
+in `data/` and `stages/scout/data/`, and the final gate's verify.sh
+judges everything parent-side.
+
 ## Dry-run
 
 `worker_kind = "mock"`: no pane, no agent. The unit's done line lands
