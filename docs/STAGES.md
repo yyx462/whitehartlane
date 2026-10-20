@@ -10,8 +10,9 @@ shared task container, which the chain keeps identically).
 This is also the **only authoring story** (ADR 0014): `[[step]]`
 tables and `hooks.units` (the quick-mint planner hook) are RETIRED —
 refused at parse with a pointer here, as is a stage-less fan-out
-manifest. Workers are declared, never minted at runtime; `grade` and
-`counts` remain the program's own hooks.
+manifest, the spur step file (`spur.mjs`/`dag.mjs`) at the run door,
+and the `[gates]` detector table. Workers are declared, never minted
+at runtime; `grade` and `counts` remain the program's own hooks.
 
 ```
 [workflow]

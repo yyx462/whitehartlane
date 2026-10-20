@@ -1,7 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
-import { basename, dirname, join, resolve } from "node:path"
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { basename, join, resolve } from "node:path"
 import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
-import { loadSpurFile, type Spur } from "./spur.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
@@ -73,7 +72,6 @@ export function stageRun(source: string, store: string): void {
     manifest.hooks.counts,
     manifest.detectors?.signal,
     manifest.detectors?.end,
-    ...Object.values(manifest.gates ?? {}),
   ]
   for (const cmd of cmds) {
     if (cmd) raw = raw.replaceAll(cmd, absolutize(cmd, source))
@@ -91,7 +89,7 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "spur.mjs", "dag.mjs", "roots.txt", "project.json"]) {
+  for (const name of ["actor.md", "task.txt", "roots.txt", "project.json"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
@@ -102,53 +100,6 @@ function copyBeside(source: string, store: string): void {
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
-}
-
-export type SpurFile = { path: string; legacy: boolean }
-
-// The run door resolves the program file (ADR 0009): spur.mjs is the
-// spelling; a legacy dag.mjs still admits the program (the `legacy`
-// flag turns into a loud warning at the door); a folder holding BOTH
-// spellings is refused — an ambiguous program books nothing.
-export function spurFileOf(input: string): SpurFile | null {
-  const resolved = resolve(input)
-  if (!existsSync(resolved)) return null
-  if (statSync(resolved).isFile()) {
-    const base = basename(resolved)
-    if (base === "spur.mjs") return { path: resolved, legacy: false }
-    if (base === "dag.mjs") {
-      if (existsSync(join(dirname(resolved), "spur.mjs"))) {
-        throw new Error("ambiguous program: both spur.mjs and dag.mjs")
-      }
-      return { path: resolved, legacy: true }
-    }
-    return null
-  }
-  const spur = join(resolved, "spur.mjs")
-  const legacy = join(resolved, "dag.mjs")
-  if (existsSync(spur) && existsSync(legacy)) {
-    throw new Error("ambiguous program: both spur.mjs and dag.mjs")
-  }
-  if (existsSync(spur)) return { path: spur, legacy: false }
-  if (existsSync(legacy)) return { path: legacy, legacy: true }
-  return null
-}
-
-function defaultManifest(spur: Spur): string {
-  const name = spur.name.replaceAll('"', "")
-  return [
-    "# written by whitehartlane: a spur-only program names steps; the OS supplies the hooks",
-    "[workflow]",
-    `name = "${name}"`,
-    'worker_kind = "opencode"',
-    "",
-    "# hooks are optional (issue #120): omitted counts uses the built-in",
-    '# counter — add counts = "default" to say it out loud. Never write',
-    '# counts = "true": it prints nothing and aborts the run at report',
-    "# time (j-64e035). A units hook is only needed by fan-out programs",
-    "# without steps.",
-    "",
-  ].join("\n")
 }
 
 function book(
@@ -198,15 +149,7 @@ function book(
       try {
         return readFileSync(join(dir, "workflow.toml"), "utf8")
       } catch {
-        try {
-          return readFileSync(join(dir, "spur.mjs"), "utf8")
-        } catch {
-          try {
-            return readFileSync(join(dir, "dag.mjs"), "utf8")
-          } catch {
-            return task
-          }
-        }
+        return task
       }
     })(),
   })
@@ -232,7 +175,7 @@ function book(
         return { ok: false, why: `hook probe refused: ${refusals.join("; ")}`, code: 1 }
       }
     } catch (err) {
-      // prepareRun/prepareLabRun already surface manifest faults; one
+      // prepareRun already surfaces manifest faults; one
       // that slips through to here is a door refusal, never a pass
       return { ok: false, why: err instanceof Error ? err.message : String(err), code: 1 }
     }
@@ -256,18 +199,6 @@ function book(
   stage(job.dir)
   appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })
   return { ok: true, job, log: join(job.dir, "orchestrator.log"), trace: eventsPath(session.id), kind, warnings }
-}
-
-function stageSpur(spur: Spur, dir: string, toml: boolean): (store: string) => void {
-  return (store) => {
-    if (toml) {
-      stageRun(dir, store)
-      return
-    }
-    mkdirSync(store, { recursive: true })
-    writeFileSync(join(store, "workflow.toml"), defaultManifest(spur))
-    copyBeside(dir, store)
-  }
 }
 
 // Issue #51: a program whose briefs name paths no root covers is a
@@ -305,55 +236,23 @@ function uncoveredBriefPaths(source: string): string[] {
   return [...uncovered]
 }
 
-// the lab path: a program file was found, the spur graph drives the run
-function prepareLabRun(spurFile: SpurFile): RunReady | RunRefused {
-  const warnings: string[] = []
-  // ADR 0009: a legacy dag.mjs still admits — loudly
-  if (spurFile.legacy) warnings.push("legacy dag.mjs — rename to spur.mjs")
-  const dir = dirname(spurFile.path)
-  let spur: Spur
-  try {
-    spur = loadSpurFile(spurFile.path, (message) => warnings.push(message))
-  } catch (err) {
-    const why = err instanceof Error ? err.message : String(err)
-    return { ok: false, why, code: 1 }
-  }
-  let slots = 2
-  let task = spur.name
-  const toml = existsSync(join(dir, "workflow.toml"))
-  let gates: Record<string, string> | undefined
-  if (toml) {
-    try {
-      const manifest = loadManifest(dir)
-      slots = manifest.workflow.slots ?? 2
-      task = manifest.workflow.name
-      gates = manifest.gates
-    } catch (err) {
-      const why = err instanceof HookError ? err.message : err instanceof Error ? err.message : String(err)
-      return { ok: false, why, code: 1 }
-    }
-  }
-  for (const step of spur.steps.filter((s) => s.does === "gate")) {
-    if (!gates?.[step.id]) {
-      return {
-        ok: false,
-        why: `gate step ${step.id} needs a [gates] ${step.id} detector command in workflow.toml`,
-        code: 1,
-      }
-    }
-  }
-  return book(dir, "lab", task, slots, stageSpur(spur, dir, toml), warnings)
-}
-
 export function prepareRun(folder: string): RunReady | RunRefused {
-  let spurFile: SpurFile | null = null
-  try {
-    spurFile = spurFileOf(folder)
-  } catch (err) {
-    return { ok: false, why: err instanceof Error ? err.message : String(err), code: 1 }
-  }
-  if (spurFile) return prepareLabRun(spurFile)
   const dir = resolve(folder)
+  // ADR 0014 slice 2: the spur step file no longer admits. Refusal
+  // beats silence — the door names the fix (a stage chain), whether the
+  // retired file is named directly or sits in the folder.
+  const retiredStepFile =
+    basename(dir) === "spur.mjs" ||
+    basename(dir) === "dag.mjs" ||
+    existsSync(join(dir, "spur.mjs")) ||
+    existsSync(join(dir, "dag.mjs"))
+  if (retiredStepFile) {
+    return {
+      ok: false,
+      why: 'the spur step file is retired (ADR 0014) — a program is workflow.toml with [[stage]] entries; the experiment is a stage with topology = "lab" (docs/STAGES.md)',
+      code: 1,
+    }
+  }
   if (!existsSync(join(dir, "workflow.toml"))) {
     return { ok: false, why: `no workflow.toml in ${dir}`, code: 1 }
   }

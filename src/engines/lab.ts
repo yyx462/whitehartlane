@@ -1,9 +1,10 @@
 // The lab engine (moved out of bin/lab-orchestrator so tests can reach
 // it — the bin is only the door). A professor pane, then student panes.
-// A lab program is one spur file; when it is staged beside the run, the
-// file is the scheduler's input — read, never executed. The engine
-// drives the Rail: births panes, grades, relays wave closes to the
-// actor, answers permission dialogs, and writes the report.
+// A lab program is a workflow.toml (kind = "lab") — the shape a lab
+// STAGE mints as its child under stages/<id>/ (ADR 0014: the only lab
+// there is; the spur step file no longer admits). The engine drives
+// the Rail: births panes, grades, relays wave closes to the actor,
+// answers permission dialogs, and writes the report.
 //
 // ADR 5 parity (the redesign): the experiment OUTLIVES the process.
 // The engine's state is a fold over durable records, not process
@@ -19,8 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { withBackpressure } from "../core/backpressure.ts"
-import { loadSpurFile, tick } from "../doors/spur.ts"
-import { runCounts, runEndDetector, runGateDetector, runGrade, runSignalDetector } from "../doors/hooks.ts"
+import { runCounts, runEndDetector, runGrade, runSignalDetector } from "../doors/hooks.ts"
 import { emptyBoard } from "../core/lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
 import { gradeCall } from "../core/live-grade.ts"
@@ -82,22 +82,6 @@ export async function runLab(
   const log = rail.log
   let jobText = ""
   try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
-  // A lab program is one spur file (ADR 0009; a staged legacy dag.mjs
-  // from an older run still reads). When it is staged beside this run,
-  // the file is the scheduler's input: tick() decides every birth,
-  // grade, prompt, and reopen. No second scheduler exists — the file
-  // is read, never executed.
-  const spur = (() => {
-    try {
-      return loadSpurFile(join(taskDir, "spur.mjs"))
-    } catch {
-      try {
-        return loadSpurFile(join(taskDir, "dag.mjs"))
-      } catch {
-        return null
-      }
-    }
-  })()
   // Detectors: the program's say in what a wave or an end is. Absent,
   // the OS defaults (protocol.json, log.txt) run — a detector may
   // slow or fail, never kill the rail: refusal retries, deterministic
@@ -110,11 +94,6 @@ export async function runLab(
     }
   })()
   const detectors = manifestEarly?.detectors
-  const gateSteps = spur ? spur.steps.filter((s) => s.does === "gate") : []
-  const gateMissed = gateSteps.filter((s) => !manifestEarly?.gates?.[s.id])
-  if (gateMissed.length > 0) {
-    throw new Error(`gate step ${gateMissed.map((s) => s.id).join(", ")} has no [gates] detector — refusing`)
-  }
   const saidDetectorFailure = new Set<string>()
   function detectorCall<T>(what: string, fn: () => T, fallback: T): T {
     try {
@@ -150,7 +129,6 @@ export async function runLab(
   const closed = new Set<string>()
   const graded = new Map<string, { pass: boolean; row: string }>()
   const woke: string[] = []
-  const finished: { unit: string; result: string; pass: boolean }[] = []
   let prompted = ""
   const kind = (() => {
     try {
@@ -275,13 +253,8 @@ export async function runLab(
     }
   }
 
-  // spur drives the actor's birth; a workflow.toml lab births it here
-  if (!spur) birthActor()
+  birthActor()
 
-  const done = new Set<string>()
-  let actorBorn = !!spur ? false : true
-  let openedWave = ""
-  let promptedSpur = false
   // the drain (ADR 5, the door is kind-blind): SIGTERM asks the engine
   // for its boundary. Lab's boundary is quiescence — no mock in
   // flight, the actor not mid-turn — bounded by the ceiling. A dead
@@ -347,7 +320,6 @@ export async function runLab(
       woke.push(id)
       const pane = flights.get(id)?.pane
       closed.add(id)
-      finished.push({ unit: id, result: "blocked (deny cap)", pass: false })
       if (pane) {
         rail.closePane(pane)
         rail.retire(name)
@@ -372,83 +344,14 @@ export async function runLab(
       await waitChange(taskDir, 5_000)
       continue
     }
-    const gatesReady: string[] = []
-    for (const step of gateSteps) {
-      if (done.has(step.id) || !step.after.every((id) => done.has(id))) continue
-      const ready = detectorCall(`gate ${step.id}`, () => runGateDetector(taskDir, manifestEarly, step.id), false)
-      if (ready) {
-        gatesReady.push(step.id)
-        rail.say("rail", `gate ${step.id} ready`)
-      }
-    }
-    let stopNow = false
-    let reopened = false
-    if (spur) {
-      const waveKey = signal.kind === "wave" ? signal.wave.units.map((unit) => unit.id).join(",") : ""
-      const actions = tick(spur, {
-        done: [...done],
-        actorBorn,
-        signal: signal.kind,
-        waveKey,
-        openedWave,
-        ends,
-        graded: [...graded.keys()],
-        prompted: promptedSpur,
-        gatesReady,
-      })
-      for (const action of actions) {
-        if (action.do === "birth-actor") {
-          birthActor()
-          actorBorn = true
-        } else if (action.do === "birth-wave") {
-          if (signal.kind === "wave") {
-            spawnWave(signal.wave.units)
-            openedWave = waveKey
-          }
-        } else if (action.do === "grade") {
-          gradeUnit(action.id)
-        } else if (action.do === "prompt-actor") {
-          promptActor(ends)
-          promptedSpur = true
-        } else if (action.do === "finish") {
-          done.add(action.id)
-        } else if (action.do === "reopen") {
-          for (const id of action.ids) done.delete(id)
-          flights.clear()
-          closed.clear()
-          graded.clear()
-          promptedSpur = false
-          reopened = true
-          // a reopened experiment re-births FRESH (the old semantics):
-          // drop the reopened ids' bookings so spawnWave re-briefs
-          for (const id of action.ids) bookings.mocks.delete(id)
-          rail.say("rail", `reopen ${action.ids.join(", ")}`)
-        } else if (action.do === "report") {
-          stopNow = true
-        }
-      }
-      if (stopNow || signal.kind === "stop") break
-    } else {
-      if (signal.kind === "stop") break
-      if (signal.kind === "wave") spawnWave(signal.wave.units)
-    }
-    if (reopened) {
-      // 5s beats, not 30s: a blocked mock's dialog is answered on the
-      // next beat — the sweep's staleness is this backstop (j-b6067c)
-      await waitChange(taskDir, 5_000)
-      continue
-    }
+    if (signal.kind === "stop") break
+    if (signal.kind === "wave") spawnWave(signal.wave.units)
     for (const row of ends) {
-      if (!spur && gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
+      if (gradeCall(row.end, graded.has(row.id))) gradeUnit(row.id)
       if (!closes(row.end) || closed.has(row.id)) continue
       const pane = flights.get(row.id)?.pane
       const name = paneName("mock", row.id)
       closed.add(row.id)
-      finished.push({
-        unit: row.id,
-        result: graded.get(row.id)?.row ?? row.end ?? "open",
-        pass: graded.has(row.id) ? graded.get(row.id)!.pass : row.end === "done",
-      })
       if (pane) {
         rail.closePane(pane)
         rail.retire(name)
@@ -456,7 +359,7 @@ export async function runLab(
       }
       rail.say("operator", `close ${name}`)
     }
-    if (!spur && waveClosed(ends)) {
+    if (waveClosed(ends)) {
       const mark = ends.map((row) => row.end).join(",")
       if (prompted !== mark) {
         prompted = mark
@@ -483,14 +386,10 @@ export async function runLab(
         ? markerOf(id)
         : mockEnd(id, flight.spawnedAt),
   }))
-  const rows = spur
-    ? [...finished, ...finalEnds
-        .filter((row) => !closes(row.end))
-        .map((row) => ({ unit: row.id, result: row.end ?? "open", pass: row.end === "done" }))]
-    : finalEnds.map((row) => {
-        const grade = graded.get(row.id)
-        return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
-      })
+  const rows = finalEnds.map((row) => {
+    const grade = graded.get(row.id)
+    return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
+  })
   const stopped = readSignal(taskDir).kind === "stop"
   const report = writeReport(
     taskDir,

@@ -163,21 +163,16 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   rail, never kill it. A signal detector NAMES the wave: like
   `protocol.json`, it keeps saying the current wave until a new one
   replaces it — going silent once the work is done leaves the wave
-  unable to close (tick finishes a wave only on a beat that still
-  names it). Absent, the OS defaults run: `protocol.json` and the unit
+  unable to close (the engine finishes a wave only on a beat that
+  still names it). Absent, the OS defaults run: `protocol.json` and the unit
   `log.txt`. Pane liveness stays rail-owned either way: a dead pane is
   dead even under a custom end detector.
-- `gates` — the legacy lab spell: one command per `does: "gate"` step
-  in a lab program — `spur.mjs` (a legacy `dag.mjs` is read with a
-  loud warning, ADR 0009); prints `done` when the step may finish. The
-  run door refuses a gate step with no matching `[gates]` command —
-  nothing is booked. The rail-acted verdict of the current grammar is
-  a `[[stage]]` `topology = "gate"` (`run`, one-shot — ADR 0014
-  retired the `[[step]]` tables that polled); `[gates]` rides the
-  legacy lab path until that path's retirement lands. Reopen, retry,
-  and the report still belong to `tick` and the rail.
+- `gates` — RETIRED (ADR 0014 slice 2, with the spur step file it
+  served): a `[gates]` table is refused at load with a pointer here.
+  The rail-acted verdict of the one grammar is a `[[stage]]` with
+  `topology = "gate"` and `run` (one-shot).
 - `roots.txt` — a program's named extra worker roots, one absolute
-  path per line, staged beside the spur; the rail folds them into the
+  path per line, staged beside the program; the rail folds them into the
   per-run worker permissions. The rail knows no program's env names.
 - Named as command strings in `workflow.toml`. A path may be absolute.
   A `hooks/` folder beside the toml is a copy convention, not the
