@@ -384,10 +384,9 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
-  // for coworker-run's defense until slice 2 folds that file
+  // only for coworker-run's legacy-toml warning (that file's concern)
   hooks: { units?: string; grade?: string; counts?: string }
   detectors?: { signal?: string; end?: string }
-  gates?: Record<string, string>
   stages?: Stage[]
   report?: { where?: string }
   layout?: Partial<Layout>
@@ -485,7 +484,6 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   const report = m.report ?? {}
   const layoutRaw = m.layout ?? {}
   const detectorsRaw = m.detectors ?? {}
-  const gatesRaw = m.gates ?? {}
   const tab = layoutRaw.tab
   const side = layoutRaw.orchestrator
   if (tab !== undefined && tab !== "same" && tab !== "new") {
@@ -586,11 +584,6 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   const end = optCmd(detectorsRaw.end, "detectors.end")
   if (signal !== undefined) detectors.signal = signal
   if (end !== undefined) detectors.end = end
-  const gates: Record<string, string> = {}
-  for (const [id, value] of Object.entries(gatesRaw)) {
-    const cmd = optCmd(value, `gates.${id}`)
-    if (cmd !== undefined) gates[id] = cmd
-  }
   const stages = stagesFromRaw(m.stage)
   // ADR 0014 — one authoring story: [[step]] and the units-hook
   // quick-mint are retired, refused with a pointer at [[stage]];
@@ -600,6 +593,9 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
   }
   if (hooks.units !== undefined) {
     throw new HookError('hooks.units is retired — a program declares its workers as [[stage]] entries (solo brief / fan-out units), never mints them at runtime (docs/STAGES.md, ADR 0014)')
+  }
+  if (m.gates !== undefined) {
+    throw new HookError('[gates] detectors are retired with the spur step file they served — the rail-acted verdict is a [[stage]] with topology = "gate" and run (docs/STAGES.md, ADR 0014)')
   }
   return {
     workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
@@ -611,7 +607,6 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       }),
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
-    gates: Object.keys(gates).length > 0 ? gates : undefined,
     stages,
     report: report.where ? { where: str(report.where, "report.where") } : {},
     layout: {
@@ -794,15 +789,6 @@ export function runEndDetector(taskDir: string, manifest: Manifest, unitId: stri
   if (line === "") return null
   if (line === "done" || line === "blocked" || line === "dead") return line
   throw new HookError(`end detector must print done, blocked, dead, or nothing: ${line.slice(0, 60)}`)
-}
-
-export function runGateDetector(taskDir: string, manifest: Manifest, gateId: string): boolean {
-  const cmd = manifest.gates?.[gateId]
-  if (!cmd) throw new HookError(`no [gates] ${gateId} detector in workflow.toml`)
-  const { stdout, status, stderr } = runHook(cmd, taskDir)
-  if (status === 75) throw new RefusedError(stderr.split("\n")[0]?.trim() || `gate ${gateId} exited 75`)
-  if (status !== 0) throw new HookError(`gate ${gateId} detector exited ${status}: ${cmd}`)
-  return stdout.split("\n")[0]?.trim() === "done"
 }
 
 export function hooksFromDir(taskDir: string): { hooks: Hooks; manifest: Manifest } {

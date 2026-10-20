@@ -11,7 +11,6 @@ import {
   resolveManifestPath,
   runCounts,
   runEndDetector,
-  runGateDetector,
   runGrade,
   runSignalDetector,
 } from "../src/doors/hooks.ts"
@@ -266,15 +265,11 @@ function detectorDir(): string {
       'signal = "node hooks/signal.mjs"',
       'end = "node hooks/end.mjs"',
       "",
-      "[gates]",
-      "await-review = \"node hooks/gate.mjs\"",
-      "",
     ].join("\n"),
   )
   writeFileSync(join(dir, "hooks", "true.mjs"), "process.exit(0)\n")
   writeFileSync(join(dir, "hooks", "signal.mjs"), "process.stdout.write(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
   writeFileSync(join(dir, "hooks", "end.mjs"), "console.log(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
-  writeFileSync(join(dir, "hooks", "gate.mjs"), "console.log(process.env.DETECT_OUT ?? '')\nprocess.exit(Number(process.env.DETECT_STATUS ?? 0))\n")
   return dir
 }
 
@@ -294,13 +289,17 @@ function detect<T>(env: Record<string, string>, fn: () => T): T | Error {
   }
 }
 
-test("the manifest names detectors and gates, or neither", () => {
+test("the manifest names detectors; [gates] is retired, refused at load (ADR 0014)", () => {
   const manifest = loadManifest(detectorDir())
   assert.equal(manifest.detectors?.signal, "node hooks/signal.mjs")
   assert.equal(manifest.detectors?.end, "node hooks/end.mjs")
-  assert.deepEqual(manifest.gates, { "await-review": "node hooks/gate.mjs" })
   assert.equal(loadManifest(EXAMPLE).detectors, undefined)
-  assert.equal(loadManifest(EXAMPLE).gates, undefined)
+  const gated = mkdtempSync(join(tmpdir(), "agentic-os-gates-"))
+  writeFileSync(
+    join(gated, "workflow.toml"),
+    '[workflow]\nname = "gated"\nworker_kind = "opencode"\n\n[gates]\nreview = "true"\n',
+  )
+  assert.throws(() => loadManifest(gated), /\[gates\] detectors are retired/)
 })
 
 test("a signal detector prints the wave or the stop, like protocol.json would", () => {
@@ -319,7 +318,6 @@ test("refusal from any detector is a RefusedError the rail can retry", () => {
   const manifest = loadManifest(dir)
   assert.ok(detect(detectEnv("", 75), () => runSignalDetector(dir, manifest)) instanceof RefusedError)
   assert.ok(detect(detectEnv("", 75), () => runEndDetector(dir, manifest, "u1")) instanceof RefusedError)
-  assert.ok(detect(detectEnv("", 75), () => runGateDetector(dir, manifest, "await-review")) instanceof RefusedError)
 })
 
 test("an end detector prints done, blocked, dead, or nothing", () => {
@@ -329,13 +327,4 @@ test("an end detector prints done, blocked, dead, or nothing", () => {
   assert.equal(detect(detectEnv("blocked"), () => runEndDetector(dir, manifest, "u1")), "blocked")
   assert.equal(detect(detectEnv(""), () => runEndDetector(dir, manifest, "u1")), null)
   assert.ok(detect(detectEnv("banana"), () => runEndDetector(dir, manifest, "u1")) instanceof HookError)
-})
-
-test("a gate detector is ready only when it prints done", () => {
-  const dir = detectorDir()
-  const manifest = loadManifest(dir)
-  assert.equal(detect(detectEnv("done"), () => runGateDetector(dir, manifest, "await-review")), true)
-  assert.equal(detect(detectEnv(""), () => runGateDetector(dir, manifest, "await-review")), false)
-  assert.equal(detect(detectEnv("pending"), () => runGateDetector(dir, manifest, "await-review")), false)
-  assert.ok(detect({}, () => runGateDetector(dir, manifest, "unknown-gate")) instanceof HookError)
 })

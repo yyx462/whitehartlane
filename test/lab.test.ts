@@ -82,18 +82,3 @@ test("the lab engine runs a wave: actor names it, the mock plants it, the actor 
   assert.ok(ledger.attached.some((label) => label.includes("mock-flag")))
   assert.ok(ledger.attached.some((label) => label.includes("actor")))
 })
-
-test("the lab engine throws on a gate step with no detector", async () => {
-  const dir = await labDir("lab-gate-")
-  writeFileSync(join(dir, "spur.mjs"), [
-    "export const spur = {",
-    '  name: "gated",',
-    "  steps: [",
-    '    { id: "open", does: "gate" },',
-    "  ],",
-    "}",
-    "",
-  ].join("\n"))
-  const rail = fakeRail(dir, fakeHerdr(), null)
-  await assert.rejects(() => runLab(rail), /gate step open/)
-})
