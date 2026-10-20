@@ -124,7 +124,7 @@ test("transfer-window-v2 rehearses green: five topologies, one chain, verify.sh 
   assert.ok(readFileSync(join(dir, "stages", "scout", "actor.md"), "utf8").includes("chief scout"))
   // delivery OUT rode the accept checks (bookings -> parent data/)
   assert.ok(readFileSync(join(dir, "data", "plan.json"), "utf8").length > 0)
-  assert.ok(readFileSync(join(dir, "data", "scout-verdict.json"), "utf8").includes('"fit": 1.0'))
+  assert.equal(JSON.parse(readFileSync(join(dir, "data", "scout-verdict.json"), "utf8")).fit, 1.0)
   // and the gate's own verdict line, straight from the horse's mouth
   const v = execFileSync("bash", ["hooks/verify.sh"], { cwd: dir, encoding: "utf8" }).trim()
   assert.match(v, /^PASS squad=9 spent=49660\/60000, coverage\/fees\/probes exact$/)
