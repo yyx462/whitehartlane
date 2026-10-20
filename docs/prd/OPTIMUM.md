@@ -59,6 +59,16 @@
 > it; this refit re-arms slice 2 with the blast set re-pathed onto
 > #180's package layout. No strikes file exists (none ever billed);
 > no ESCALATED records; D3 unexercised (a circuit breaker, not a KPI).
+> Refit 8: 2026-10-20, over PRs #2–#183 (129 merged; +2 since refit 7:
+> #182 this file's refit-7 landing, absorbed clean in 38s; #183
+> program-grammar slice 2's ENGINE half — spur.ts deleted whole, the
+> run door refuses spur.mjs/dag.mjs, lab's spur branch and the [gates]
+> detector gone — GREEN 1 round / 0 strikes, 991 ≤ cap 1000 (93+/898−),
+> topo-tune green (33,8); armed by refit 7's NEXT-TARGET chained
+> as-written, the amended D1 working end to end). The MUSEUM (test/e2e/
+> + examples/*-spurs, ~2.3k lines) is #183's own stated next slice and
+> ADR 0014's flip condition — armed here as slice 3. Zero strikes, no
+> ESCALATED records; D3 unexercised.
 
 ## L0 — the product thesis (one page)
 
@@ -87,14 +97,11 @@ The rail is **mechanism hosting declarations**. Consequences:
 7. **A mind's pin is its nearest declaration** (unit → stage →
    workflow), and pins are declarations, not strategies (#159).
 
-The thesis held under refit 7: everything since #176 moved one
-direction — ceremony moved OUT of briefs INTO the platform (ADR 0015:
-the platform asks the harness for status, never the agent's memory;
-#179: liveness is one verb; #181: the close ceremony is the bench's
-bailiff, never a rung's private spelling), and #180's package-by-
-feature move re-plumbed the rail's insides without touching one
-declaration surface. No new axis appeared; oscillation is 0 across
-the whole table.
+The thesis held under refit 8: #183 deleted the dialect's engine
+whole — the direction since #176 is one line (one authoring story;
+ceremony in the platform, never the brief), and the loop's chained
+proposal landed it green. No new axis appeared; oscillation is 0
+across the whole table.
 
 Empty quadrants (never explored — the fit cannot see them, so they are
 listed instead): remote/multi-machine workers; a visual program
@@ -110,7 +117,7 @@ note below):
 
 | component | fix-density | oscillation | churn | runtime-loss | score |
 |---|---|---|---|---|---|
-| runner-dispatch | 78 | 0 | 43465 | — | 121.5 |
+| runner-dispatch | 79 | 0 | 44456 | — | 123.5 |
 | window | 27 | 0 | 16364 | — | 43.4 |
 | permissions | 13 | 0 | 10717 | — | 23.7 |
 | resume-parking | 5 | 0 | 2473 | — | 7.5 |
@@ -119,35 +126,31 @@ note below):
 | relay | 0 | 0 | 0 | — | 0.0 |
 | program-grammar | 0 | 0 | 0 | — | 0.0 |
 
-Refit 7's pick reads the table after the discounts, every one by
-receipt: rank 1 **runner-dispatch** (121.5) overridden BY RECEIPT for
-the FIFTH consecutive refit — the arithmetic is exact: 40928 (refit
-6) + 693 (#178) + 89 (#179) + 1006 (#180) + 749 (#181) = 43465, every
-PR since #176 billing WHOLE through the seam though the substance
-spans five packages (settle cards, a liveness verb, a file move, a
-supervision redesign); #180's 1006 is a FILE MOVE (package-by-feature
-— churn, not sickness); #181's 749 is ONE attribution-eligible file
-(src/engines/orchestrator.ts — docs/ and test/ are excluded from
-attribution) and the replacement it carried LANDED green —
-convergence churn, the seam holding again, and §2's block records
-what actually happened to refit 6's "NONE LEFT" claim. Rank 2
-**window** (43.4) unchanged since refit 3's churn read — nothing
-under `web/` since. Rank 3 **permissions** (23.7) converged (#172).
-Rank 4 **resume-parking** (7.5) — its 5th PR is #178's state.ts
-settle cards, follower churn on a converged surface. Rank 5
-**wake-ladder** KEEP. Rank 6 **model-pinning** WATCH. Rank 7
-**relay** (0.0) converged (#174). The pick is rank 8
-**program-grammar** — 0.0 on the table (its globs own no code file)
-and HALF-EXECUTED: ADR 0014 reads "slice 2 pending" on master TODAY;
-spur.ts is still 238 deletable lines; run.ts still admits
-spur.mjs/dag.mjs (run.ts:109–130); the museum is still in-tree
-(examples/{chain,coworker,fan-out,lab}-spurs + test/e2e/* — #178 even
-ADDED a piece: the hooks/units-shaped forgotten-marker fixture,
-driving the rail below the parser). It is the LAST gated
-known-simpler alternative on the books; the milestone forbids
-carrying it; #181 deliberately preserved the lab end-fold for it
-(its own stated next slice). Slice 2, cap 1000, blast re-pathed onto
-the package layout.
+Refit 8's pick reads the table after the discounts, every one by
+receipt: rank 1 **runner-dispatch** (123.5) overridden BY RECEIPT for
+the SIXTH consecutive refit — the arithmetic is exact: 43465 (refit
+7) + 991 (#183) = 44456, and #183 is §1's engine retirement mis-
+billed WHOLE through its one attribution-eligible file
+(src/engines/lab.ts; its src/doors/{spur,run,hooks}.ts touches bill
+0.0 — the gaps note's predicted mis-bill, the second post-#180
+receipt after #181). The churn is the SEAM's echo, not a sickness:
+seven slices on one line, zero reversal pairs. Rank 2 **window**
+(43.4) unchanged since refit 3's churn read — nothing under `web/`
+since. Rank 3 **permissions** (23.7) converged (#172). Rank 4
+**resume-parking** (7.5) frozen. Rank 5 **wake-ladder** KEEP. Rank 6
+**model-pinning** WATCH. Rank 7 **relay** (0.0) converged (#174).
+The pick is rank 8 **program-grammar** — 0.0 on the table (its globs
+own no code file) and ONE SLICE from closed: #183 deleted the
+dialect's engine (GREEN) and named its own next slice — the museum
+conversion — which is also ADR 0014's flip condition ("flips fully
+to EXECUTED when the museum lands", live on master today). The
+museum is fully INERT (every retired spelling it holds is refused at
+the door or at load — #183's refusal tests are the receipts) yet
+still in-tree: test/e2e's ten retired-spelling programs (incl.
+#178's hooks/units-shaped forgotten-marker) + the four
+examples/*-spurs dirs, ~2.3k lines. It carries the milestone's gate;
+the milestone forbids carrying a known-simpler alternative. Slice 3,
+cap 2500, ZERO src in the blast (authoring-side only).
 
 Attribution gaps (human note — the constitution is not refit's to
 edit): #180's package-by-feature move made the flat globs structurally
@@ -159,7 +162,9 @@ rail, levy, wake) and `src/ports/*` bill 0.0 to everyone from #181
 on. Proof by receipt: #178's state.ts work bills to resume-parking
 ONLY because #178 predates the move (flat paths in its file list);
 #181 — the first post-move PR — could bill only through
-src/engines/orchestrator.ts. At the next constitution touch: re-path
+src/engines/orchestrator.ts; #183 — the second — bills its whole 991
+through src/engines/lab.ts while its doors/* deletions (spur.ts
+wholesale!) bill nothing. At the next constitution touch: re-path
 the globs onto the package layout — program-grammar should own
 `src/doors/{hooks,run,spur}.ts`, relay `src/adapters/store.ts`,
 resume-parking `src/core/state.ts`, permissions
@@ -186,32 +191,47 @@ runner-dispatch `src/engines/*`.
   commissioning 1 minutes later; commissioning 2 opened on the
   driver's mechanical seed instead (runner-dispatch → #181), which
   landed while DELIBERATELY preserving the lab end-fold (#181's
-  stated next slice: "the lab's end-fold belongs to §1 slice 2").
+  stated next slice: "the lab's end-fold belongs to §1 slice 2") →
+  **#183 slice 2's ENGINE half, EXECUTED** (c2-iter2, armed by
+  refit 7's NEXT-TARGET chained as-written — the amended D1 working
+  end to end): `src/doors/spur.ts` deleted WHOLE (238 lines — the
+  ADR-0009 step scheduler; every consumer gone); the run door
+  refuses `spur.mjs`/`dag.mjs` (named directly or folder-held)
+  naming the fix (a `[[stage]]` chain; the experiment is
+  `topology = "lab"`); lab.ts's spur branch deleted (tick loop, gate
+  steps, reopen machinery, the write-only `finished` accumulator —
+  the lab engine runs only its workflow.toml shape, the shape a lab
+  stage mints as its child, wake-steps.test.ts's demonstrated
+  path); the `[gates]` detector table refused at load pointing at
+  `topology = "gate"` + `run` (stages bind verify.sh — #150).
+  GREEN 1 round / 0 strikes, 991 ≤ cap 1000 (93+/898−), topo-tune
+  green (33,8). The MUSEUM remains in-tree, fully inert — #183's
+  own stated next slice, ADR 0014's flip condition.
 - **Oscillation**: HIGH historically — three dialects for one concept;
   #150 (grade per unit) was the units-hook path's missing per-stage
-  honesty. Resolving monotonically: #176 deleted dialect code (−650)
-  with zero reversal pairs. Zero attribution ever — the globs own no
-  code file.
-- **Simpler alternative**: slice 2 — the named second half (ADR 0014
-  §3, re-pathed by refit 7 onto #180's layout): run.ts `prepareLabRun`
-  stops admitting spur.mjs/dag.mjs (run.ts:109–130); lab.ts's spur
-  branch goes (the lab stage chain drives the actor, as
-  wake-steps.test.ts already demonstrates); spur.ts's ADR-0009 step
-  scheduler is deleted whole (238 lines — stage executors leave it
-  consumer-less); `[gates]` detector plumbing retires with the step
-  gates it served (stages bind verify.sh — #150); the e2e battery
-  (museum pieces — `[[step]]`/`hooks.units`/`[report]`-shaped, plus
-  #178's forgotten-marker, hooks/units-shaped and driving the rail
-  below the parser) converts to stage chains; `examples/`-spurs
-  retire with them. docs/STAGES.md is the surviving manual; ADR 0014
-  flips to executed.
-- **Verdict**: INVESTIGATE (refit 7's pick: NEXT-TARGET
-  program-grammar slice 2, cap 1000 — blast set = the dialect owners
-  (src/doors/spur.ts, src/doors/run.ts, src/doors/hooks.ts,
-  src/engines/lab.ts) + the chain seam as contingent
-  (src/engines/orchestrator*, src/core/orchestrator-chain*,
-  src/core/workflow-kind*) + examples/ + test/e2e/ +
-  STAGES.md/RAILS.md/adr 0014/prd + test/).
+  honesty. Resolving monotonically: #176 deleted dialect code (−650),
+  #183 deleted the engine (−898), zero reversal pairs across both.
+  Zero attribution ever — the globs own no code file (and #183's
+  doors/* deletions bill 0.0, the gaps note's receipt).
+- **Simpler alternative**: slice 3 — the museum conversion (#183's
+  stated next slice, verbatim in its PR body; ADR 0014's flip
+  condition, verbatim in its status): test/e2e's ten retired-spelling
+  programs (incl. #178's hooks/units-shaped forgotten-marker) + the
+  four examples/*-spurs dirs convert to `[[stage]]` chains;
+  run-battery.sh re-points at them; ADR 0014 flips fully to
+  EXECUTED. Authoring-side ONLY — zero src files in the blast: every
+  retired spelling is already refused at the door or at load
+  (#183's refusal tests in run.test.ts/hooks.test.ts are the
+  receipts); if the conversion appears to need src, that is a NEW
+  finding and out of this slice's scope by design.
+- **Verdict**: INVESTIGATE (refit 8's pick: NEXT-TARGET
+  program-grammar slice 3, cap 2500 — blast set = test/e2e/ +
+  examples/ + test/ + docs/adr/0014-one-authoring-dialect.md +
+  STAGES.md/RAILS.md, ZERO src. Cap receipt: the museum's whole
+  converting mass is 2348 lines (examples 1913 + test/e2e 435);
+  conversions net-shrink (deletions dominate; #183's own shape was
+  93+/898−), but refit 6's cap-1000 for engine+museum STARVED
+  exactly this half — the engine alone ate 991. Not re-starved).
 
 ### 2. Runner dispatch
 - **Concept**: ONE kind-blind door; the engine is picked once,
@@ -269,7 +289,11 @@ runner-dispatch `src/engines/*`.
   pen). Deleted: the ~240-line interleaved cascade, `faultUnits` (a
   write-only set dead since the #145/#162 era), the cross-rung mode
   guards; one honest bug fixed under the bench (the capped close
-  card read `undefined:<id>` — now `unit:<id>`, pinned).
+  card read `undefined:<id>` — now `unit:<id>`, pinned) → #183:
+  NOT this component's work — §1's engine retirement mis-billed
+  here through src/engines/lab.ts (its only attribution-eligible
+  file; +991 churn, +1 fix-density, both §1's substance); the seam
+  echoes, it does not sicken.
 - **Oscillation**: RESOLVED. Zero reversal pairs — now SEVEN slices
   on one line (#161→#164→#167→#170→#172→#176→#181; the middle three
   clean-sweep and loop PRs share the direction). But refit 6's
@@ -280,9 +304,11 @@ runner-dispatch `src/engines/*`.
   not about the component.
 - **Simpler alternative**: one named residual, UNGATED —
   coworker-run.ts's nudge ladder is the bench's second customer
-  (#181's stated next slice); extension-shaped (a fold onto the
-  landed bench), not a reversal. Sequenced AFTER §1 slice 2, which
-  carries the milestone's gate.
+  (#181's stated next slice; confirmed present at
+  src/engines/coworker-run.ts, the budget/model-ladder seam);
+  extension-shaped (a fold onto the landed bench), not a reversal.
+  Sequenced AFTER §1's museum slice (refit 8's pick), which carries
+  the milestone's gate.
 - **Verdict**: KEEP (the replacement landed; the residual is a fold,
   not a sickness).
 
@@ -428,38 +454,42 @@ root-caused INFRA — zhipuai's 5-hour quota window, re-proven direct,
 regate PASS), #174 (c1-iter5: 1 round, 0 strikes, clean), #176
 (c1-iter6: cap 900 = diff exactly, topo-tune green (33,8)), #181
 (c2-iter1: the flight bench — 1 round, 0 strikes, 749 ≤ 900, green on
-the joint target). Iteration 4 of commissioning 1 died driver-side
-(DEAD-iter4; D4's boundary held — never a gate-red round, never a
-strike). Commissioning 1's MAX-6 budget consumed (iters 1, 2, 3,
-4-dead, 5, 6); commissioning 2 opened 18:02 (pin 335bbca) on
-momentum.py's mechanical seed — runner-dispatch cap 900 — which #181
-answered green; this refit (c2-iter1's) re-arms §1 slice 2 for
-c2-iter2. Every refit PR absorbed except one (#173's absorb was
-refused once by the refit lane's evidence fence — body must cite ≥2
-PR refs, this file's own authors must comply — and human-merged;
-#175, #177 absorbed clean). No strikes file exists — no same-cause
-strike ever billed; D3 unexercised (a circuit breaker, not a KPI).
-#169 (operator amendment) made refit proposals effective as-written,
-which raises this file's duty: the discount chain and pick receipts
-above ARE the audit trail that keeps D2 honest — momentum.py's
-mechanical rank-1 echo (runner-dispatch) has now been read and
-overridden BY RECEIPT, not by taste, FIVE refits running (3, 4, 5, 6,
-7). The one time the seed itself chained straight through (c2-open,
-→ #181), the receipt-read lives in §2's block: what landed was real,
-green, and monotone — the echo is not wrong because the churn is
-fake; it is wrong because the churn is the SEAM's, and §1's open
-alternative carries the milestone's gate.
+the joint target), #183 (c2-iter2: program-grammar slice 2's engine
+half — armed by refit 7's NEXT-TARGET chained AS-WRITTEN under the
+amended D1, landed 991 ≤ 1000 (93+/898−), 1 round, 0 strikes, green
+(33,8)). Iteration 4 of commissioning 1 died driver-side (DEAD-iter4;
+D4's boundary held — never a gate-red round, never a strike).
+Commissioning 1's MAX-6 budget consumed; commissioning 2 (pin
+335bbca) has two clean iterations banked, and this refit (c2-iter2's)
+arms §1's museum slice for c2-iter3. Every refit PR absorbed except
+one (#173's absorb was refused once by the refit lane's evidence
+fence — body must cite ≥2 PR refs, this file's own authors must
+comply — and human-merged; #175, #177, #182 absorbed clean, #182 in
+38s). No strikes file exists — no same-cause strike ever billed; D3
+unexercised (a circuit breaker, not a KPI). #169 (operator
+amendment) made refit proposals effective as-written, which raises
+this file's duty: the discount chain and pick receipts above ARE the
+audit trail that keeps D2 honest — momentum.py's mechanical rank-1
+echo (runner-dispatch) has now been read and overridden BY RECEIPT,
+not by taste, SIX refits running (3, 4, 5, 6, 7, 8). The one time
+the seed itself chained straight through (c2-open, → #181), the
+receipt-read lives in §2's block: what landed was real, green, and
+monotone — the echo is not wrong because the churn is fake; it is
+wrong because the churn is the SEAM's, and §1's open alternative
+carries the milestone's gate.
 
 **Milestone (falsifiable)**: no component with unresolved reversal
 (✓ — oscillation 0 across the table); no component with a
 known-simpler alternative (§2 closed at refit 3, RE-OPENED by
-#178/#179, CLOSED AGAIN by #181 — one UNGATED residual fold named;
-§5 at refit 4; §8 at refit 5 (#174); §1 HALF-closed at #176 — slice
-2 is armed as commissioning 2's iteration 2, the LAST gated
-alternative on the books; §6's one-transport question stays WATCH
-for want of new evidence); composite eval green. After §1 slice 2:
-the composite eval case is the milestone's last unbuilt leg — a
-green eval case graduates the loop to the FULL benchmark pass.
+#178/#179, CLOSED AGAIN by #181 — one UNGATED residual fold named,
+sequenced after §1 completes; §5 at refit 4; §8 at refit 5 (#174);
+§1 one slice from closed — #176 slice 1, #183 the engine half, the
+museum conversion armed as commissioning 2's iteration 3, the LAST
+gated alternative on the books; §6's one-transport question stays
+WATCH for want of new evidence); composite eval green. After the
+museum slice: the composite eval case is the milestone's last
+unbuilt leg — a green eval case graduates the loop to the FULL
+benchmark pass.
 
 ## The composite eval case — transfer-window-v2 (spec)
 
@@ -483,11 +513,14 @@ a verify.sh that CHECKS rather than vibes. Exercises every topology:
 Target ≤30 min real; mock rehearsal = seconds. Still build-next —
 untouched by the loop so far (the loop's eval lane used topo-tune's
 real levy, joint target (33,8) green on #167, #170, #172's re-proof,
-#174, #176, and #181). #170 makes the scout stage honest to bench: a
-paused-and-continued lab now resumes rather than restarts, so the
-≤30-min budget survives human interference; #178's platform pen gives
-the case's lab stage a status-first settle lane if it wants it
-(declared, not assumed). Sequencing held by refits 5–7: §1's
-retirement (slice 1 landed #176; slice 2 armed here) lands BEFORE the
-case is authored, so the case authors against the final one-dialect
-grammar.
+#174, #176, #181, and #183). #170 makes the scout stage honest to
+bench: a paused-and-continued lab now resumes rather than restarts,
+so the ≤30-min budget survives human interference; #178's platform
+pen gives the case's lab stage a status-first settle lane if it
+wants it (declared, not assumed); #183 removed the last engine-side
+dialect, so the case authors against `[[stage]]` only. Sequencing
+held by refits 5–8: §1's retirement (slice 1 landed #176; the
+engine half #183; the museum slice armed as c2-iter3) lands BEFORE
+the case is authored, so the case authors against the final
+one-dialect grammar — with a converted stage-chain example corpus to
+crib from, not museum pieces.
