@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { combineFirstPrompt, memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/coworker.ts"
+import { combineFirstPrompt, memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/engines/coworker.ts"
 
 test("members parse from [members.<name>] with model, seed, and initiates", () => {
   const toml = [

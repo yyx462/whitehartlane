@@ -3,7 +3,7 @@ import test from "node:test"
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_PROMPTS, landGate, loadOptions, loadPrompt, loadThreshold, promptFile } from "../src/jev-prompts.ts"
+import { DEFAULT_PROMPTS, landGate, loadOptions, loadPrompt, loadThreshold, promptFile } from "../src/jev/jev-prompts.ts"
 
 const tmp = mkdtempSync(join(tmpdir(), "aos-jp-"))
 process.env.AGENTIC_OS_JEV_PROMPTS_DIR = tmp

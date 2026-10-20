@@ -8,8 +8,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { backoffBase, backoffMs, drawJitter, retries, sleepSync } from "../src/backoff.ts"
-import { createJob, wakeAudit, wakeFirstMate, type JobRecord } from "../src/store.ts"
+import { backoffBase, backoffMs, drawJitter, retries, sleepSync } from "../src/adapters/backoff.ts"
+import { createJob, wakeAudit, wakeFirstMate, type JobRecord } from "../src/adapters/store.ts"
 import { fakeHerdr, fakeRail, type FakeHerdr } from "./util.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-brown-"))

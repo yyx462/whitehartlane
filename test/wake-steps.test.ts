@@ -8,8 +8,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { runOrchestrator, type ShepPort } from "../src/orchestrator.ts"
-import { finishJob, readEvents, type JobRecord } from "../src/store.ts"
+import { runOrchestrator, type ShepPort } from "../src/engines/orchestrator.ts"
+import { finishJob, readEvents, type JobRecord } from "../src/adapters/store.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-wake-steps-"))
 process.env.AGENTIC_OS_NOTIFY = "0"

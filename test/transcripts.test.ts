@@ -21,7 +21,7 @@ process.env.OPENCODE_BIN = ocBin
 // a fixture opencode sqlite db (primary path) — absent until the db test
 process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
 
-const { piEncodeCwd, resolvePi, resolveOpencode, resolveTranscript } = await import("../src/transcripts.ts")
+const { piEncodeCwd, resolvePi, resolveOpencode, resolveTranscript } = await import("../src/adapters/transcripts.ts")
 
 test("pi cwd encoding matches pi's real directory names (no leading dash)", () => {
   assert.equal(piEncodeCwd("/Users/dev/x"), "Users-dev-x")
@@ -165,7 +165,7 @@ test("opencode session_v2 is the live table — a post-migration session resolve
   assert.equal(hit?.id, "ses_v2_levy", "the newest session lives only in session_v2")
   assert.equal(resolveOpencode({ tool: "opencode", cwd: "/tmp/units/v2", since: "2026-10-13T00:00:00.000Z" }), null)
 
-  const { opencodeSessionExists, seedSessionFile } = await import("../src/transcripts.ts")
+  const { opencodeSessionExists, seedSessionFile } = await import("../src/adapters/transcripts.ts")
   assert.equal(opencodeSessionExists("ses_v2_levy"), true, "the fork seed check sees v2 rows")
   assert.equal(opencodeSessionExists("ses_legacy"), true, "legacy rows stay visible")
   assert.equal(opencodeSessionExists("ses_missing"), false)
@@ -186,7 +186,7 @@ test("an install without session_v2 still resolves through legacy session", asyn
   process.env.OPENCODE_DB = dbPath
   const hit = resolveOpencode({ tool: "opencode", cwd: "/tmp/units/old", since: "2026-09-30T05:00:00.000Z" })
   assert.equal(hit?.id, "ses_old_install")
-  const { opencodeSessionExists } = await import("../src/transcripts.ts")
+  const { opencodeSessionExists } = await import("../src/adapters/transcripts.ts")
   assert.equal(opencodeSessionExists("ses_old_install"), true)
   process.env.OPENCODE_DB = join(root, "no-such-db.sqlite")
 })
@@ -213,7 +213,7 @@ test("opencodeSessionTitle reads the live session_v2 title (the parent-pane guar
   db.close()
   const prev = process.env.OPENCODE_DB
   process.env.OPENCODE_DB = dbPath
-  const { opencodeSessionTitle } = await import("../src/transcripts.ts")
+  const { opencodeSessionTitle } = await import("../src/adapters/transcripts.ts")
   try {
     assert.equal(opencodeSessionTitle("ses_t"), "the p10 pipeline plan")
     assert.equal(opencodeSessionTitle("ses_unknown"), null, "unknown session — no title, the guard stands down")

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { paneName } from "../src/roles.ts"
+import { paneName } from "../src/core/roles.ts"
 
 test("a pane has a role name, and a mock without an id fails", () => {
   assert.equal(paneName("orchestrator"), "orchestrator")

@@ -7,8 +7,8 @@
 // state, not rm).
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
-import { loadManifest } from "./hooks.ts"
-import { allowGlobs, grantRoot } from "./permission.ts"
+import { loadManifest } from "../doors/hooks.ts"
+import { allowGlobs, grantRoot } from "../core/permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
 import { backoffBase, backoffMs, retries, sleepSync } from "./backoff.ts"

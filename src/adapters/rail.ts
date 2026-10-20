@@ -14,13 +14,12 @@ import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
-import { isProviderFault, parseModelRef } from "./model-ladder.ts"
-import { landMockUnit, loadManifest, type Layout, type Manifest } from "./hooks.ts"
-import { drop, note, place, type Board } from "./lanes.ts"
-import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "./orchestrator.ts"
-import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "./permission.ts"
-import type { Report } from "./report.ts"
+import { isProviderFault, parseModelRef } from "../jev/model-ladder.ts"
+import { landMockUnit, loadManifest, type Layout, type Manifest } from "../doors/hooks.ts"
+import { drop, note, place, type Board } from "../core/lanes.ts"
+import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "../engines/orchestrator.ts"
+import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "../core/permission.ts"
+import type { Report } from "../core/report.ts"
 import {
   abortJob as abortJobRec,
   addWorkerRoot,
@@ -40,21 +39,22 @@ import {
   acquireLease,
   saveJob,
   setPaneSession,
-  splitModel,
-  writeOpencodeModel,
-  writePiSettings,
   writeWorkerPermissions,
   type JobRecord,
   type Receipt,
   type SeedPointer,
   type TranscriptPointer,
 } from "./store.ts"
-import { readState } from "./state.ts"
+import { readState } from "../core/state.ts"
 import { resolveOpencode, resolvePi } from "./transcripts.ts"
-import { defaultRunner, jsonAt, type RunnerResult } from "./runners.ts"
-import { beat, note as sayOnce, verboseOn } from "./verbose.ts"
+import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
+import { HerdrTransport } from "./herdr-transport.ts"
+import { OpenCodeHost, parseAgentStatus } from "./opencode-host.ts"
+import type { AgentHost } from "../ports/agent-host.ts"
+import type { Transport } from "../ports/transport.ts"
+import { beat, note as sayOnce, verboseOn } from "../core/verbose.ts"
 
-export type { RunnerResult } from "./runners.ts"
+export type { RunnerResult } from "../doors/runners.ts"
 
 // The Job ledger surface the Rail needs (zen 2/5). Bookkeeping must
 // never break the rail: every call is best-effort, and a run without
@@ -83,7 +83,7 @@ export type RailLedger = {
 function doorRev(): string {
   try {
     const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: join(import.meta.dirname, ".."),
+      cwd: join(import.meta.dirname, "..", ".."),
       encoding: "utf8",
       timeout: 5_000,
     })
@@ -106,6 +106,12 @@ export type RailOpts = {
   // through these; swap them and the panes become anything
   shepRunner?: (args: string[]) => RunnerResult
   herdrRunner?: (args: string[]) => RunnerResult
+  // the plugin slots (the migration seam, formalized): a Transport
+  // answers "how panes are addressed" (default: herdr CLI); an
+  // AgentHost answers "what runs inside one" (default: opencode/pi).
+  // Swap either and the rail does not change.
+  transport?: Transport
+  host?: AgentHost
   ledger?: RailLedger | null
   judge?: PermissionJudge
   // the home tree dialogs normalize against (default: the real one);
@@ -142,7 +148,6 @@ export function waitChange(dir: string, ms: number): Promise<void> {
   })
 }
 
-const START_TIMEOUT_MS = 60_000
 const WORKER_SHARE = 0.5
 
 export class Rail implements ShepPort {
@@ -158,6 +163,8 @@ export class Rail implements ShepPort {
   private readonly workerModel: string | undefined
   private readonly shepRun: (args: string[]) => RunnerResult
   private readonly herdrRun: (args: string[]) => RunnerResult
+  private readonly transport: Transport
+  private readonly host: AgentHost
   private readonly judge: PermissionJudge | undefined
   // the home tree dialog paths normalize against (j-2b508e: a path
   // shown without its /Users/<who> prefix is the same ask as the full
@@ -207,6 +214,11 @@ export class Rail implements ShepPort {
     this.log = opts.log ?? ((msg) => console.log(`${new Date().toISOString()} ${msg}`))
     this.shepRun = opts.shepRunner ?? defaultRunner("shep")
     this.herdrRun = opts.herdrRunner ?? defaultRunner("herdr")
+    // the plugin slots, wired: transport addresses panes, the host is
+    // the agent CLI that occupies one — Rail keeps the ledger, the
+    // sweep, and the layout policy above both
+    this.transport = opts.transport ?? new HerdrTransport(this.herdrRun, this.log)
+    this.host = opts.host ?? new OpenCodeHost(this.transport, this.log)
     this.judge = opts.judge
     this.home = opts.home ?? homedir()
     this.ledger = opts.ledger !== undefined ? opts.ledger : this.openLedger(opts.argvDir ?? null, opts.workflow ?? "fan-out")
@@ -368,30 +380,14 @@ export class Rail implements ShepPort {
     return this.shepRun(args)
   }
 
-  private herdr(...args: string[]): RunnerResult {
-    const r = this.herdrRun(args)
-    // a failing ACTION call is a real finding — log it, so a silent
-    // CLI exit never hides behind a blocked sweep. Failing reads
-    // (agent get/read/wait) are how the rail probes pane state; they
-    // stay quiet or every beat would spam on each dead pane.
-    if (r.status !== 0 && !(args[0] === "agent" && ["get", "read", "wait"].includes(args[1] ?? ""))) {
-      this.log(`herdr ${args.slice(0, 3).join(" ")}${args.length > 3 ? " …" : ""} → rc=${r.status}`)
-    }
-    return r
-  }
-
   private agentState(name: string): string {
-    return this.herdr("agent", "get", this.scopedFn(name)).stdout
+    return this.transport.exec(["agent", "get", this.scopedFn(name)]).stdout
   }
 
   // -- fleet tab layout --------------------------------------------------------
 
   private splitPane(fromPane: string, direction: string, cwd: string, ratio: number): string | null {
-    const r = this.herdr(
-      "pane", "split", "--pane", fromPane, "--direction", direction,
-      "--ratio", String(ratio), "--cwd", cwd, "--no-focus",
-    )
-    return jsonAt(r.stdout, (d) => (d as { result?: { pane?: { pane_id?: string } } }).result?.pane?.pane_id ?? null)
+    return this.transport.splitPane(fromPane, direction, cwd, ratio)
   }
 
   private openFleetTab(dir: string): void {
@@ -404,23 +400,20 @@ export class Rail implements ShepPort {
     // (j-5701b2: levy in wK, fleet tab opened in wJ where nobody looked).
     const spawnerPane = this.ledger?.job.spawner?.pane
     const ws = spawnerPane?.includes(":") ? spawnerPane.split(":")[0] : null
-    const create = (scoped: boolean) =>
-      this.herdr("tab", "create", "--label", label, "--cwd", dir, "--no-focus", ...(scoped && ws ? ["--workspace", ws] : []))
-    let r = create(true)
-    let root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
-    if (!root && ws) {
+    const created = (scoped: boolean) => this.transport.tabCreate(label, dir, scoped ? ws : null)
+    let r = created(true)
+    if (!r.root && ws) {
       // a stale/unknown workspace id must not cost the layout — retry unscoped
       this.log(`fleet tab in workspace ${ws} unavailable (rc=${r.status}) — retrying unscoped`)
-      r = create(false)
-      root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
+      r = created(false)
     }
-    if (!root) {
+    if (!r.root) {
       this.log(`fleet tab unavailable (rc=${r.status}) — falling back to same-tab layout`)
       this.layout = { ...this.layout, tab: "same" }
       return
     }
-    this.fleetRoot = root
-    this.fleetTab = jsonAt(r.stdout, (d) => (d as { result?: { tab?: { tab_id?: string } } }).result?.tab?.tab_id ?? null)
+    this.fleetRoot = r.root
+    this.fleetTab = r.tab
     this.log(`fleet tab ${label} opened (workers anchor on the tab root — no viewer lane)`)
     // v2 layout (2026-10-17): no reserved viewer lane. The old layout
     // pre-split a 50-50 "orchestrator viewer" pane that no code ever
@@ -428,7 +421,7 @@ export class Rail implements ShepPort {
     // a stuck pane. The worker column anchors on the tab root itself:
     // the first worker splits it downward and takes over (splitForWorker).
     this.viewerPane = null
-    this.colPane = root
+    this.colPane = r.root
   }
 
   // Split a pane for the next worker in the fleet tab's column: the
@@ -441,7 +434,7 @@ export class Rail implements ShepPort {
       // the unit cwd deterministically (no cd race); the empty head
       // closes and the worker takes the column.
       const pane = this.splitPane(this.colPane!, "down", cwd, 0.5)
-      if (pane) this.herdr("pane", "close", this.colPane!)
+      if (pane) this.transport.exec("pane", "close", this.colPane!)
       this.colUsed = true
       return pane
     }
@@ -460,7 +453,7 @@ export class Rail implements ShepPort {
     // pane in OUR tab can seed the new column. Splitting a stranger in
     // our own house is honest; a stage dying because cleanup ran between
     // stages is not.
-    const listed = this.herdr("pane", "list")
+    const listed = this.transport.exec("pane", "list")
     const seed = jsonAt(listed.stdout, (d) => {
       const panes = (d as { result?: { panes?: Array<{ pane_id?: string; tab_id?: string }> } }).result?.panes ?? []
       return panes.find((p) => p.tab_id === this.fleetTab && p.pane_id)?.pane_id ?? null
@@ -513,70 +506,25 @@ export class Rail implements ShepPort {
   ): boolean {
     const since = new Date().toISOString()
     const name = this.scopedName(rawName)
-    // the brownout guard's first half (ADR 0010): births stagger — a
-    // random pause before the pane is touched, so a batch of spurs
-    // asking for panes in the same second arrives as a queue instead
-    // of a stampede (the 2026-10-12 09:51 storm). AGENTIC_OS_BIRTH_
-    // JITTER_MS bounds it; 0 disarms.
-    const staggerBound = jitterBound("AGENTIC_OS_BIRTH_JITTER_MS", 1_500)
-    const stagger = drawJitter(staggerBound)
-    if (stagger > 0) {
-      this.log(`birth stagger: ${name} waits ${stagger}ms (bound ${staggerBound}ms)`)
-      sleepSync(stagger)
-    }
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
     const rec = this.shep("record", pane, name)
     if (rec.status !== 0) {
       // an unrecorded split pane would leak as a bare shell — close it
-      this.herdr("pane", "close", pane)
+      this.transport.exec("pane", "close", pane)
       this.ledger?.emit("reject", { label: name, why: "record failed" })
       this.log(`record failed for ${name} on pane ${pane} — pane closed`)
       return false
     }
-    const tail: string[] = []
-    if (model && kind === "pi") {
-      writePiSettings(cwd, model)
-      const { provider, id } = splitModel(model)
-      tail.push("--approve", "--provider", provider, "--model", id)
-    } else if (model && kind === "opencode") {
-      // the root command dropped --model in the 2026-10 upgrade — a
-      // passed flag crashes the TUI at birth (j-37bdc0: three start
-      // timeouts, run dead). The pin rides the sandbox opencode.json
-      // instead, symmetric with pi's settings write above.
-      writeOpencodeModel(cwd, model)
-    }
-    if (resumeSession) tail.push("--session", resumeSession)
-    const startArgs = tail.length ? ["--", ...tail] : []
-    // the brownout guard's second half (ADR 0010): a refused start is
-    // not death — knock again with growing pauses. The storm's spawns
-    // failed once and the members died with zero retry; brownouts last
-    // seconds. AGENTIC_OS_START_TRIES / _BACKOFF_MS tune it.
-    const tries = retries("AGENTIC_OS_START_TRIES", 3)
-    const backoffStartBase = backoffBase("AGENTIC_OS_START_BACKOFF_MS", 5_000)
-    let start: ReturnType<Rail["herdr"]> | null = null
-    for (let attempt = 1; attempt <= tries; attempt++) {
-      start = this.herdr("agent", "start", name, "--kind", kind, "--pane", pane, "--timeout", String(START_TIMEOUT_MS), ...startArgs)
-      if (start.status === 0) break
-      this.log(`agent start failed for ${name} (rc=${start.status}, attempt ${attempt}/${tries})`)
-      if (attempt < tries) {
-        const pause = backoffMs(backoffStartBase, attempt)
-        this.log(`agent start retry for ${name} in ${pause}ms (herdr brownout guard)`)
-        sleepSync(pause)
-      }
-    }
-    if (start.status !== 0) {
+    // the agent CLI's birth belongs to the HOST: the model pin (each
+    // CLI's own settings file), the brownout guard (stagger + start
+    // retry, ADR 0010), and the brief delivery. Rail keeps only the
+    // ledger bookkeeping around it.
+    const ok = this.host.inhabit(name, pane, { kind, briefPath, cwd, model, hold, resumeSession })
+    if (!ok) {
       this.shep("retire", name)
       this.ledger?.emit("reject", { label: name, why: "agent start failed" })
-      this.log(`agent start failed for ${name} (rc=${start.status}) after ${tries} attempt(s) — ghost cleared`)
       return false
-    }
-    if (!hold) {
-      const brief = readFileSync(briefPath, "utf8")
-      const prompt = this.herdr("agent", "prompt", name, brief)
-      if (prompt.status !== 0) {
-        this.log(`brief submission failed for ${name} — the grace reprompt will retry`)
-      }
     }
     this.mine.add(name)
     this.workers.add(name)
@@ -717,32 +665,21 @@ export class Rail implements ShepPort {
   }
 
   paneAlive(name: string): boolean {
-    return this.herdr("agent", "get", this.scopedFn(name)).status === 0
+    return this.transport.exec("agent", "get", this.scopedFn(name)).status === 0
   }
 
-  // ONE parser for herdr's `agent get` stdout — every status question
-  // in the rail goes through it (the liveness consolidation: the four
-  // former spellings — agentWorking, paneBlocked, the raw agentStatus
-  // greps — are deleted; one verb, workerStatus, answers all of them).
-  private parseStatus(stdout: string): AgentStatus {
-    if (stdout.includes('"agent_status":"working"')) return "working"
-    if (stdout.includes('"agent_status":"blocked"')) return "blocked"
-    if (stdout.includes('"agent_status":"idle"') || stdout.includes('"agent_status":"done"')) return "idle"
-    return "unknown"
-  }
-
-  // completion-detection: the pane's own verdict, parsed once — the
-  // status-first settle lane keys on idle ("done" folds to idle: both
-  // mean the turn ended); anything else is unknown = the fallback
-  // ladder.
+  // completion-detection: the pane's own verdict — delegated to the
+  // host, which owns the agent_status grammar (ONE parser lives
+  // there; "done" folds to idle, anything else is unknown = the
+  // fallback ladder).
   workerStatus(name: string): AgentStatus {
-    return this.parseStatus(this.agentState(name))
+    return this.host.status(this.scopedFn(name))
   }
 
   reprompt(name: string, briefPath: string): boolean {
     try {
       const brief = readFileSync(briefPath, "utf8")
-      const r = this.herdr("agent", "prompt", this.scopedFn(name), brief)
+      const r = this.transport.exec("agent", "prompt", this.scopedFn(name), brief)
       if (r.status === 0) this.log(`reprompted ${this.scopedFn(name)} (brief re-submitted)`)
       return r.status === 0
     } catch {
@@ -779,7 +716,7 @@ export class Rail implements ShepPort {
     // orchestrator's own chrome — leftover fan-out-* tabs told the user
     // nothing about whose they were. Parked runs re-open it on continue.
     if (this.fleetTab) {
-      this.herdr("tab", "close", this.fleetTab)
+      this.transport.exec("tab", "close", this.fleetTab)
       this.log(`fleet tab ${this.fleetTab} closed`)
       this.fleetTab = null
     }
@@ -876,15 +813,15 @@ export class Rail implements ShepPort {
   // spends the cap).
   answerPermission(name: string): "allow" | "deny" | "none" | "capped" {
     const label = this.scopedName(name)
-    const state = this.herdr("agent", "get", label).stdout
-    if (this.parseStatus(state) !== "blocked") return "none"
+    const state = this.transport.exec("agent", "get", label).stdout
+    if (parseAgentStatus(state) !== "blocked") return "none"
     return this.answerDialog(label)
   }
 
   // The dialog answer itself, keyed by the SCOPED label (cwdOf/briefOf/
   // askedCount are label-keyed). Callers pre-check blocked.
   private answerDialog(label: string): "allow" | "deny" | "capped" {
-    const term = this.herdr("agent", "read", label).stdout
+    const term = this.transport.exec("agent", "read", label).stdout
     const at = term.lastIndexOf("Permission required")
     const question = at >= 0 ? term.slice(at, at + 2000) : term.slice(-2000)
     const cwd = this.cwdOf.get(label) ?? this.taskDir
@@ -913,21 +850,21 @@ export class Rail implements ShepPort {
       // disk, so the path itself is the grant (j-b6067c: /tmp -> /**).
       const parent = verdict.path.replace(/\/[^/]*$/, "")
       addWorkerRoot(cwd, parent === "" || parent === "/" ? verdict.path : parent)
-      this.herdr("agent", "send-keys", label, "enter")
+      this.transport.exec("agent", "send-keys", label, "enter")
     } else {
-      this.herdr("agent", "send-keys", label, "esc")
+      this.transport.exec("agent", "send-keys", label, "esc")
       // Delivery verification (issue #82): a verdict the pane cannot
       // consume strands the worker — the deny's "ask again" promise
       // can never be kept and the stall clock eats a productive pane
       // (j-8aceed). Re-check the dialog; if it survived the first esc,
       // re-send and log loudly so the postmortem sees the strand.
-      const stillUp = this.herdr("agent", "read", label).stdout.lastIndexOf("Permission required") >= 0
+      const stillUp = this.transport.exec("agent", "read", label).stdout.lastIndexOf("Permission required") >= 0
       if (stillUp) {
-        this.herdr("agent", "send-keys", label, "esc")
+        this.transport.exec("agent", "send-keys", label, "esc")
         this.log(`permission ${label}: dialog SURVIVED esc — re-sent esc; pane may need manual attach`)
       }
       const note = `[permission] ${verdict.message}`
-      const rc = this.herdr("agent", "prompt", label, note)
+      const rc = this.transport.exec("agent", "prompt", label, note)
       if (rc.status !== 0) this.pendingNote.set(label, note)
       this.denyCount.set(label, (this.denyCount.get(label) ?? 0) + 1)
     }
@@ -953,10 +890,10 @@ export class Rail implements ShepPort {
   flushPendingNotes(): number {
     let flushed = 0
     for (const [held, note] of this.pendingNote) {
-      const st = this.herdr("agent", "get", held).stdout
-      const ps = this.parseStatus(st)
+      const st = this.transport.exec("agent", "get", held).stdout
+      const ps = parseAgentStatus(st)
       if (ps === "blocked" || ps === "working") continue
-      if (this.herdr("agent", "prompt", held, note).status === 0) {
+      if (this.transport.exec("agent", "prompt", held, note).status === 0) {
         this.pendingNote.delete(held)
         this.log(`injected queued note into ${held}`)
         flushed++
@@ -988,8 +925,8 @@ export class Rail implements ShepPort {
     const answered = new Set<string>()
     const capped = new Set<string>()
     for (const label of [...this.mine]) {
-      const st = this.herdr("agent", "get", label).stdout
-      if (this.parseStatus(st) !== "blocked") continue
+      const st = this.transport.exec("agent", "get", label).stdout
+      if (parseAgentStatus(st) !== "blocked") continue
       const verdict = this.answerDialog(label)
       const name = this.unscopedOf.get(label) ?? label
       answered.add(name)
@@ -997,7 +934,7 @@ export class Rail implements ShepPort {
       capped.add(name)
       if (this.workers.has(label)) continue
       const pane = this.paneOf.get(label)
-      if (pane) this.herdr("pane", "close", pane)
+      if (pane) this.transport.exec("pane", "close", pane)
       this.shep("retire", label)
       this.mine.delete(label)
       this.log(`untracked pane ${label} hit the deny cap — retired by the sweep`)
@@ -1010,7 +947,7 @@ export class Rail implements ShepPort {
 
   // Engines prompt panes by name; the runner behind it is the seam.
   promptAgent(name: string, text: string): RunnerResult {
-    return this.herdr("agent", "prompt", this.scopedFn(name), text)
+    return this.host.prompt(this.scopedFn(name), text)
   }
 
   // Latest session message whose error.type is a provider budget fault.
@@ -1058,11 +995,11 @@ export class Rail implements ShepPort {
   }
 
   renamePane(pane: string, name: string): void {
-    this.herdr("pane", "rename", pane, name)
+    this.transport.renamePane(pane, name)
   }
 
   closePane(pane: string): void {
-    this.herdr("pane", "close", pane)
+    this.transport.closePane(pane)
   }
 
   // A held member mints its session on its first prompt — book it
@@ -1080,7 +1017,7 @@ export class Rail implements ShepPort {
   }
 
   layoutOf(pane: string): { area: { width: number; height: number }; panes: { pane_id: string; rect: { x: number; y: number; width: number; height: number } }[] } | null {
-    const r = this.herdr("pane", "layout", "--pane", pane)
+    const r = this.transport.exec("pane", "layout", "--pane", pane)
     return jsonAt(r.stdout, (d) => (d as { result?: { layout?: never } }).result?.layout ?? null)
   }
 
@@ -1101,7 +1038,7 @@ export class Rail implements ShepPort {
         if (Math.abs(delta) < 2) continue
         const amount = Math.min(0.4, Math.abs(delta) / total)
         const dir = axis === "x" ? (delta > 0 ? "left" : "right") : (delta > 0 ? "up" : "down")
-        this.herdr("pane", "resize", "--pane", ids[i + 1]!, "--direction", dir, "--amount", String(amount))
+        this.transport.exec("pane", "resize", "--pane", ids[i + 1]!, "--direction", dir, "--amount", String(amount))
         moved = true
         break
       }
@@ -1110,12 +1047,12 @@ export class Rail implements ShepPort {
   }
 
   openShell(dir: string, label: string): string | null {
-    const r = this.herdr("tab", "create", "--label", label.slice(0, 40), "--cwd", dir, "--no-focus")
+    const r = this.transport.exec("tab", "create", "--label", label.slice(0, 40), "--cwd", dir, "--no-focus")
     const root = jsonAt(r.stdout, (d) => (d as { result?: { root_pane?: { pane_id?: string } } }).result?.root_pane?.pane_id ?? null)
     if (!root) return null
     const shell = this.splitPane(root, "right", dir, 0.5)
     if (!shell) return null
-    this.herdr("pane", "close", root)
+    this.transport.exec("pane", "close", root)
     return shell
   }
 
@@ -1188,7 +1125,7 @@ export class Rail implements ShepPort {
     }
     this.verbosePath = path
     this.verbosePane = pane
-    this.herdr("pane", "rename", pane, "verbose")
+    this.transport.exec("pane", "rename", pane, "verbose")
     const child = spawn("herdr", ["pane", "run", pane, "tail", "-n", "+1", "-F", path], {
       detached: true,
       stdio: "ignore",
@@ -1199,7 +1136,7 @@ export class Rail implements ShepPort {
   }
 
   closeVerbose(): void {
-    if (this.verbosePane) this.herdr("pane", "close", this.verbosePane)
+    if (this.verbosePane) this.transport.exec("pane", "close", this.verbosePane)
   }
 
   // -- door protocol: signals and the engine epilogue ----------------------------

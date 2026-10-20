@@ -11,8 +11,8 @@ import {
   policyFromToml,
   readModelsFile,
   writePending,
-} from "../src/model-ladder.ts"
-import { DEFAULT_ORDER } from "../src/model-chooser.ts"
+} from "../src/jev/model-ladder.ts"
+import { DEFAULT_ORDER } from "../src/jev/model-chooser.ts"
 
 const TOML = `[workflow]
 name = "t"

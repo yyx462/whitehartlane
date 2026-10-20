@@ -11,8 +11,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
-import { createJob, failJob, paneTitlesSession, pauseJob, readEvents, wakeFirstMate, type JobRecord } from "../src/store.ts"
-import { spoolDirOf } from "../src/wake-spool.ts"
+import { createJob, failJob, paneTitlesSession, pauseJob, readEvents, wakeFirstMate, type JobRecord } from "../src/adapters/store.ts"
+import { spoolDirOf } from "../src/adapters/wake-spool.ts"
 
 const HOME = mkdtempSync(join(tmpdir(), "aos-rungtrace-"))
 process.env.AGENTIC_OS_HOME = HOME

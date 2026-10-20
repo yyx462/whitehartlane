@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { refreshWait } from "../src/refresh.ts"
+import { refreshWait } from "../src/doors/refresh.ts"
 
 test("refresh waits while the drain is still running", () => {
   assert.equal(refreshWait("running", 0, 10_000), "wait")

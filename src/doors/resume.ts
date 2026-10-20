@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { HookError, loadManifest, runGrade } from "./hooks.ts"
-import { readReport, writeReport, type Report, type ReportRow } from "./report.ts"
-import { checkpoint, flipLegacyState, readState } from "./state.ts"
-import { appendEvent, jobRunDir, listJobs, type JobRecord } from "./store.ts"
+import { readReport, writeReport, type Report, type ReportRow } from "../core/report.ts"
+import { checkpoint, flipLegacyState, readState } from "../core/state.ts"
+import { appendEvent, jobRunDir, listJobs, type JobRecord } from "../adapters/store.ts"
 
 // regrade — the minimal-rerun resume (#144): a terminal Job whose units
 // FAILED AT THE GRADE STAGE (worker output exists, hook verdict bad or

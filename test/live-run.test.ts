@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { readSignal } from "../src/live-run.ts"
-import { protocolPath } from "../src/protocol.ts"
+import { readSignal } from "../src/engines/live-run.ts"
+import { protocolPath } from "../src/core/protocol.ts"
 
 test("no protocol births no wave", () => {
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-live-"))

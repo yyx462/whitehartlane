@@ -7,7 +7,7 @@
 // install-landscape.md, Stage 1).
 //
 // Runtime layout contract (import.meta.url anchors in src — don't move
-// these without checking src/jev-prompts.ts, src/jev-tuner.ts, src/hooks.ts,
+// these without checking src/jev/jev-prompts.ts, src/jev/jev-tuner.ts, src/doors/hooks.ts,
 // the plugin verb, and levy's orchestratorRoot):
 //   dist/whitehartlane.mjs        entry (npm bins whl + whitehartlane)
 //   dist/orchestrator             runner door, levy-spawned, sibling of the entry
@@ -44,7 +44,7 @@ await build({ ...common, ...door("whitehartlane"), outfile: "dist/whitehartlane.
 await build({ ...common, ...door("orchestrator"), outfile: "dist/orchestrator" })
 
 // Data the bundle resolves relative to its own location.
-cpSync("src/jev-prompts", "dist/jev-prompts", { recursive: true })
+cpSync("src/jev/jev-prompts", "dist/jev-prompts", { recursive: true })
 
 // npm preserves the tarball's file mode for bin targets — without the exec
 // bit the global shim dies with EACCES.

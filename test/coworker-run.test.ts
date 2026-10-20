@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { runCoworker } from "../src/coworker-run.ts"
+import { runCoworker } from "../src/engines/coworker-run.ts"
 import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 
 // The coworker engine, driven end to end over scripted agents: birth,

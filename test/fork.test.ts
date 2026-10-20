@@ -4,14 +4,14 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { DatabaseSync } from "node:sqlite"
-import { admitFork } from "../src/policy.ts"
-import type { RunnerResult } from "../src/runners.ts"
-import type { JobRecord } from "../src/store.ts"
+import { admitFork } from "../src/jev/policy.ts"
+import type { RunnerResult } from "../src/doors/runners.ts"
+import type { JobRecord } from "../src/adapters/store.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-fork-"))
 
-const { attachPane, createJob, findOrOpenSession, projectJob, readEvents } = await import("../src/store.ts")
-const { forkLevy, forkReaperCmd } = await import("../src/fork.ts")
+const { attachPane, createJob, findOrOpenSession, projectJob, readEvents } = await import("../src/adapters/store.ts")
+const { forkLevy, forkReaperCmd } = await import("../src/adapters/fork.ts")
 
 test("a fork is booked: pane.born carries the seed beside the parent", () => {
   const { session } = findOrOpenSession({ cwd: "/tmp/lend" })
@@ -78,7 +78,7 @@ test("fork courier: delivery arms the self-close reaper", async () => {
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
-  const { openSession } = await import("../src/store.ts")
+  const { openSession } = await import("../src/adapters/store.ts")
   openSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
   const reaped: string[] = []
   const ok = (body: object) => ({ status: 0, stdout: JSON.stringify(body) })
@@ -106,7 +106,7 @@ test("fork repoints a ghost-levy to the nearest surviving ancestor and tells the
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_ghost", ghost, 1)
   db.close()
-  const { openSession } = await import("../src/store.ts")
+  const { openSession } = await import("../src/adapters/store.ts")
   openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_ghost" } })
   const prompts: string[] = []
   const tabs: string[] = []
@@ -144,7 +144,7 @@ test("fork refuses when no ancestor survives short of $HOME — too vague to rep
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_vague", ghost, 1)
   db.close()
-  const { openSession } = await import("../src/store.ts")
+  const { openSession } = await import("../src/adapters/store.ts")
   openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_vague" } })
   const calls: string[] = []
   const herdrRun = (args: string[]): RunnerResult => {
@@ -177,7 +177,7 @@ test("fork refuses when the session row will not move (db unwritable) (issue #12
   db.close()
   // the seed still resolves (reads fine) but the row will not move
   chmodSync(dbPath, 0o444)
-  const { openSession } = await import("../src/store.ts")
+  const { openSession } = await import("../src/adapters/store.ts")
   openSession({ cwd: ghost, host: { tool: "opencode", session_id: "ses_ro" } })
   const job = {
     id: "j-ro", dir: dbDir, status: "retired", created: "", updated: "",
@@ -201,7 +201,7 @@ test("C02: a live booked pane anchors the split — no new tab, and the borrowed
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
-  const { findOrOpenSession } = await import("../src/store.ts")
+  const { findOrOpenSession } = await import("../src/adapters/store.ts")
   // Duplicate rule 1: ONE OS session per host conversation. A raw
   // openSession here minted a SECOND ses_x binding (the courier test
   // above already opened one), and forkLevy's findSessionByHost then
@@ -242,7 +242,7 @@ test("C02: a dead booked pane scopes the fallback tab to the levy's workspace", 
   db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
   db.prepare("INSERT INTO session (id, directory, time_created) VALUES (?, ?, ?)").run("ses_x", realCwd, 1)
   db.close()
-  const { findOrOpenSession } = await import("../src/store.ts")
+  const { findOrOpenSession } = await import("../src/adapters/store.ts")
   // same rule as C02a: reuse the one ses_x binding, mint no duplicates
   findOrOpenSession({ cwd: realCwd, host: { tool: "opencode", session_id: "ses_x" } })
   const tabs: string[] = []

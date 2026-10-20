@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { admitAnotherJob, admitDirect, admitFanOut, admitWorkerSpawn } from "../src/policy.ts"
+import { admitAnotherJob, admitDirect, admitFanOut, admitWorkerSpawn } from "../src/jev/policy.ts"
 
 test("direct is always admitted — no pane is born, so nothing to check", () => {
   assert.deepEqual(admitDirect(), { admit: true })

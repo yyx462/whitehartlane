@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { drop, emptyBoard, note, place, share } from "../src/lanes.ts"
+import { drop, emptyBoard, note, place, share } from "../src/core/lanes.ts"
 
 test("lanes open only when needed and share the tab", () => {
   let board = emptyBoard()

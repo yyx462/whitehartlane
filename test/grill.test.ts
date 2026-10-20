@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { GRILL_ASK, judgeEnough } from "../src/grill.ts"
+import { GRILL_ASK, judgeEnough } from "../src/jev/grill.ts"
 
 test("judgeEnough skips on 'just do it' and forces on 'grill me'", () => {
   const prev = process.env.AGENTIC_OS_GRILL

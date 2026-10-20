@@ -3,7 +3,7 @@
 // that never became code survive. The planner must not contradict them.
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { readEvents, type OsEvent, type SessionRecord } from "./store.ts"
+import { readEvents, type OsEvent, type SessionRecord } from "../adapters/store.ts"
 
 type PiLine = {
   type?: string

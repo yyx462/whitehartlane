@@ -4,9 +4,9 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { PERMISSION_CAP } from "../src/permission.ts"
-import { Rail, type RailLedger, type RunnerResult } from "../src/rail.ts"
-import type { JobRecord } from "../src/store.ts"
+import { PERMISSION_CAP } from "../src/core/permission.ts"
+import { Rail, type RailLedger, type RunnerResult } from "../src/adapters/rail.ts"
+import type { JobRecord } from "../src/adapters/store.ts"
 
 // The rail is driven through fake shep/herdr runners — the same seam a
 // future migration (panes as remote machines) would swap. No real CLI

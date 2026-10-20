@@ -9,9 +9,9 @@
 // same key jev uses. promote lands a named candidate by hand.
 // Plain JS on purpose: this file has no extension, so Node will not
 // type-strip it. The modules it imports are .ts and strip fine.
-import { appendCases, listGates, loadCases, loadCandidates, loadGateConfig, readWinner, runGate } from "../src/jev-tuner.ts"
-import { initCases } from "../src/jev-tuner-init.ts"
-import { landGate, loadThreshold } from "../src/jev-prompts.ts"
+import { appendCases, listGates, loadCases, loadCandidates, loadGateConfig, readWinner, runGate } from "../src/jev/jev-tuner.ts"
+import { initCases } from "../src/jev/jev-tuner-init.ts"
+import { landGate, loadThreshold } from "../src/jev/jev-prompts.ts"
 
 const cmd = process.argv[2] ?? "list"
 const arg = process.argv[3]

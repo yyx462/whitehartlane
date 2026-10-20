@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { prepareRun } from "./run.ts"
+import { prepareRun } from "../doors/run.ts"
 import { abortJob, continueJob, killPane, saveJob, type JobRecord } from "./store.ts"
 
 export type LevyOutcome =

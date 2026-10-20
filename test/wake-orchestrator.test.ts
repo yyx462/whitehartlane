@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { wakesFor, waveClosed } from "../src/live-run.ts"
+import { wakesFor, waveClosed } from "../src/engines/live-run.ts"
 
 test("a blocked mock wakes the orchestrator and a done mock does not", () => {
   const ends = [

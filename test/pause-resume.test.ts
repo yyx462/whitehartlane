@@ -17,10 +17,10 @@ import {
   type CycleDeps,
   type ResumePointer,
   type ShepPort,
-} from "../src/orchestrator.ts"
-import { drainDeadline } from "../src/levy.ts"
-import { hooksFromDir } from "../src/hooks.ts"
-import { readState } from "../src/state.ts"
+} from "../src/engines/orchestrator.ts"
+import { drainDeadline } from "../src/adapters/levy.ts"
+import { hooksFromDir } from "../src/doors/hooks.ts"
+import { readState } from "../src/core/state.ts"
 import { copyExample } from "./util.ts"
 
 function fakeShep(overrides: Record<string, (...args: never[]) => unknown> = {}) {
@@ -214,7 +214,7 @@ test("continueBriefFor restates the finish protocol for both resume shapes", () 
 })
 
 test("the relay ledger round-trips deliveries and refusals", async () => {
-  const { interruptedMember, readRelayLedger, writeRelayLedger } = await import("../src/coworker.ts")
+  const { interruptedMember, readRelayLedger, writeRelayLedger } = await import("../src/engines/coworker.ts")
   const dir = mkdtempSync(join(tmpdir(), "pause-relay-"))
   assert.deepEqual(readRelayLedger(dir), { delivered: [], refused: [], refusedDetail: [] })
   writeRelayLedger(dir, { delivered: ["3-alice.json"], refused: ["2-bad.json"], refusedDetail: [{ file: "2-bad.json", why: "not JSON", from: "alice" }] })
@@ -232,7 +232,7 @@ test("the relay ledger round-trips deliveries and refusals", async () => {
 })
 
 test("interruptedMember derives the mid-turn member from disk alone", async () => {
-  const { interruptedMember } = await import("../src/coworker.ts")
+  const { interruptedMember } = await import("../src/engines/coworker.ts")
   const msg = (file: string, seq: number, from: string, to: string) => ({ file, seq, from, to, type: "note" as const, body: "b" })
   const messages = [
     msg("1-alice.json", 1, "alice", "bob"),
@@ -252,7 +252,7 @@ test("interruptedMember derives the mid-turn member from disk alone", async () =
 test("the store books pause, continue, and pane sessions — and the trace replays them", async () => {
   process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-pause-store-"))
   const { attachPane, continueJob, createJob, openSession, pauseJob, projectJob, setPaneSession } =
-    await import("../src/store.ts")
+    await import("../src/adapters/store.ts")
   const sess = openSession({ cwd: "/tmp/r" })
   const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "t", dir: "/tmp/r/j" })
   attachPane(job, {

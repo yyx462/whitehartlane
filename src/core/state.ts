@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join } from "node:path"
-import { appendEvent, createJob, findJobByDir, openSession, readEvents } from "./store.ts"
+import { appendEvent, createJob, findJobByDir, openSession, readEvents } from "../adapters/store.ts"
 
 export type Settled = { done: string[]; failed: string[] }
 

@@ -6,10 +6,10 @@ import test from "node:test"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-regrade-"))
 
-import { homeRoot, findJobByDir, listJobs, readEvents } from "../src/store.ts"
-import { regradeJob } from "../src/resume.ts"
-import { readReport } from "../src/report.ts"
-import { checkpoint, readCheckpoints, readState, settle } from "../src/state.ts"
+import { homeRoot, findJobByDir, listJobs, readEvents } from "../src/adapters/store.ts"
+import { regradeJob } from "../src/doors/resume.ts"
+import { readReport } from "../src/core/report.ts"
+import { checkpoint, readCheckpoints, readState, settle } from "../src/core/state.ts"
 
 // #144 — regrade: a terminal Job re-enters at the GRADE card only.
 // Worker output (the done marker) is the ticket; units that never

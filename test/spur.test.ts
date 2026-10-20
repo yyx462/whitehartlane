@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { order, parseSpur, ready, tick, type Spur, type TickIn } from "../src/spur.ts"
+import { order, parseSpur, ready, tick, type Spur, type TickIn } from "../src/doors/spur.ts"
 
 const program = readFileSync(join(import.meta.dirname, "..", "examples", "lab-spurs", "lab-program", "spur.mjs"), "utf8")
 

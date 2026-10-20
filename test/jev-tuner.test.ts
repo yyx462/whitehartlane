@@ -12,9 +12,9 @@ import {
   readWinner,
   runGate,
   type TunerCase,
-} from "../src/jev-tuner.ts"
-import { initCases, parseSeedCases } from "../src/jev-tuner-init.ts"
-import { loadPrompt } from "../src/jev-prompts.ts"
+} from "../src/jev/jev-tuner.ts"
+import { initCases, parseSeedCases } from "../src/jev/jev-tuner-init.ts"
+import { loadPrompt } from "../src/jev/jev-prompts.ts"
 
 const repoGates = gatesRoot() // captured before the env points elsewhere
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { formatGate, promoteFindings } from "../src/promote.ts"
-import type { JobRecord } from "../src/store.ts"
+import { formatGate, promoteFindings } from "../src/doors/promote.ts"
+import type { JobRecord } from "../src/adapters/store.ts"
 
 function job(over: Partial<JobRecord> = {}): JobRecord {
   return {

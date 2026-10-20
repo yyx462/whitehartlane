@@ -7,7 +7,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { loadManifest, probeHooks } from "../src/hooks.ts"
+import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
 
 const EXAMPLE = join(import.meta.dirname, "fixtures", "three-lookups")
 
@@ -94,8 +94,8 @@ test("the door refuses a silent counts hook before booking anything (j-64e035 re
     toml,
     readFileSync(toml, "utf8").replace(/counts = "[^"]*"/, 'counts = "node silentcounts.cjs"'),
   )
-  const { prepareRun } = await import("../src/run.ts")
-  const { listJobs, abortJob } = await import("../src/store.ts")
+  const { prepareRun } = await import("../src/doors/run.ts")
+  const { listJobs, abortJob } = await import("../src/adapters/store.ts")
   const refused = prepareRun(dir)
   assert.equal(refused.ok, false)
   if (!refused.ok) assert.match(refused.why, /hook probe refused: counts hook prints no JSON/)

@@ -12,7 +12,7 @@ import {
   createJob,
   finishJob,
   readEvents,
-} from "../src/store.ts"
+} from "../src/adapters/store.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-wake-"))
 process.env.AGENTIC_OS_NOTIFY = "0"
