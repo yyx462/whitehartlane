@@ -19,27 +19,36 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 
 ## Rails — machinery every workflow uses and none may rewrite
 
-- **One Rail class (`src/rail.ts`).** The shared machinery every
+- **One Rail class (`src/adapters/rail.ts`).** The shared machinery every
   orchestrator runs on: the Job ledger, pane bookkeeping (birth,
   session booking, retire, the receipt), layout, the verbose lane,
   the permission sweep, and the run envelope's shared verbs — the
   booked-wait (`rail.bookedWait`, one spelling for fan-out units and
   coworker members) and the drain registration (`installDrain`).
   `bin/orchestrator` is the one thin entry that constructs one `Rail`
-  and picks the engine by the staged program's shape (`src/engine.ts`)
+  and picks the engine by the staged program's shape (`src/engines/engine.ts`)
   — kind-blind beyond that single pick: SIGTERM is one protocol for
   every shape (every engine registers a drain hook — fan-out,
   coworker, and lab alike drain to their own boundary and park;
   sessions stay booked either way), and every verb that hands a Job to
   a runner process goes through `spawnRunner`/`rebirthRunner`
-  (`src/levy.ts`) — one door resolution, one rebirth ceremony. The
-  fan-out engine (`runOrchestrator`) speaks the port the Rail
-  implements and drives its chain through ONE object
-  (`src/orchestrator-chain.ts`): the wave order, the frontier
+  (`src/adapters/levy.ts`) — one door resolution, one rebirth
+  ceremony. The fan-out engine (`runOrchestrator`) speaks the port
+  the Rail implements and drives its chain through ONE object
+  (`src/core/orchestrator-chain.ts`): the wave order, the frontier
   predicate, unreachability, and the step-finish ceremony (one settle
   card, one event, one report row) live there, and check polling,
   stage gates, and wake levies are kind-specific step executors one
   walker dispatches — not three machines each hand-rolling the walk.
+  Flight supervision is the same shape (the flight bench): each beat
+  observes ONE typed Beat per in-flight unit, an ordered bench of
+  judges (marker, liveness, privilege, brief-grace, the platform pen,
+  the stall ladder) returns the first ruling, and one bailiff applies
+  it — one close ceremony (settle card + retire + wake) instead of a
+  rung ladder hand-rolling it per verdict. The completion-mode flags
+  (`settle_mode`, `fallback_ladder`) compose the bench — the pen
+  judge sits only in a status-first court, and `fallback_ladder =
+  false` or a drain unseats the stall judge.
   Engines address workers by name only — every shep/herdr
   call funnels through the Rail's injected runners, so the day panes
   become remote machines, the swap is one file and the engines do not
@@ -47,8 +56,9 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
 - **The trace.** One `events.jsonl` per session, append-only, the
   single source. `job.json` and `report.json` are projections
   (`projectJob` rebuilds them from events); the task dir's unit
-  lifecycle lives in its one append-only ledger
-  (`checkpoints.jsonl`). Event kinds:
+  lifecycle rides the same trace as `unit.card` events on the run's
+  session (ADR 0013 — the task-dir `checkpoints.jsonl` store is
+  retired). Event kinds:
   `route, admit, reject, job.born, job.orphaned, job.relaunched,
   pane.born, pane.died, reprompt, backpressure, unit.finished,
   job.retired, job.aborted, wake.consumed, fatal`.
@@ -182,9 +192,8 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   **grade-fault** (broken path, dead container, race): one immediate
   retry, then a `grade-fault: …` row that can never be read as an
   answer failure, never trips the canary (the gate judges plans, not
-  hooks), and lands on the stage ledger (`run/checkpoints.jsonl`,
-  append-only, one line per stage transition) as a card `regrade` can
-  re-enter. `whl regrade <jid>` re-runs ONLY the grade for failed
+  hooks), and lands on the run's trace (a `unit.card` event, ADR 0013)
+  as a card `regrade` can re-enter. `whl regrade <jid>` re-runs ONLY the grade for failed
   units whose worker output survives (the `done` marker is the
   ticket); units without output are named needsRerun — a fresh booking
   (state.json spares the done units) is their path, never a guess. A

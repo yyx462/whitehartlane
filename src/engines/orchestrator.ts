@@ -18,7 +18,8 @@ import { writeReport, type Report, type ReportRow } from "../core/report.ts"
 import { findJobByDir } from "../adapters/store.ts"
 import { checkpoint, readState, settle, writeUnitsSnapshot } from "../core/state.ts"
 
-export type { AgentStatus } from "../ports/agent-host.ts"
+import type { AgentStatus } from "../ports/agent-host.ts"
+export type { AgentStatus }
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
@@ -406,6 +407,92 @@ function resumeSpawn(
   return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd, model)
 }
 
+// ── the flight bench (OPTIMUM §2, the flight half of the dispatch) ──
+//
+// Before: one interleaved rung ladder inside cycle() — marker,
+// liveness, privilege, brief-grace, the #178 platform pen, the stall
+// ladder — where every rung was guarded by every other rung's flags
+// (settleMode, fallbackLadder, draining), and the close ceremony
+// (settle card + retire + leave the maps + wake) was hand-rolled at
+// eleven sites. Now, the same shape the step machines took in #167
+// (one walker, kind-specific executors): ONE observation per flight
+// per beat, an ORDERED bench of judges where the first ruling wins,
+// and ONE bailiff applying the ruling. The mode flags stop guarding
+// rungs and COMPOSE THE BENCH — the pen judge sits only in a
+// status-first court, the stall judge leaves when fallback_ladder is
+// switched off or a drain owns the run.
+
+// One beat: everything a judge may ask about one flight, gathered
+// once, in the open. waited/booked are LAZY (getters) — the wait-DAG
+// reads bookings off disk, and only the judges that need them pay.
+export type Beat = {
+  id: string
+  flight: Flight
+  marker: "done" | "blocked" | null
+  blockedWhy: string
+  alive: boolean
+  paneStatus: AgentStatus
+  privilege: "capped" | "answered" | "none"
+  size: number
+  logPresent: boolean
+  logGrew: boolean
+  silentFor: number
+  age: number
+  waited: boolean
+  booked: boolean
+}
+
+// What a judge returns. "close" = the flight ends (card + retire +
+// wake, the one ceremony); "carry" = leave the unit open (a drain
+// keeps it for its booked session); "defer" = the silence is
+// explained, the clock resets; "reprompt" = an act, sent through the
+// bailiff so the clock/event side-ceremonies have one spelling;
+// "none" = no opinion, the next judge speaks.
+export type Ruling =
+  | {
+      kind: "close"
+      stage: string
+      pass: boolean
+      row: ReportRow
+      faultsCanary?: boolean
+      fault?: boolean
+      detail?: string
+      trigger?: string
+      wake?: string
+    }
+  | { kind: "carry" }
+  | { kind: "defer"; why: string; event?: [string, Record<string, unknown>] }
+  | {
+      kind: "reprompt"
+      note: string
+      // "ok" = the clock resets and the event fires only when the port
+      // accepted the prompt (brief grace); absent = always (the pen's
+      // evidence reprompt books the attempt before it is sent)
+      onOkOnly?: boolean
+      event?: [string, Record<string, unknown>]
+    }
+  | { kind: "none" }
+
+export type JudgeSeat = "marker" | "liveness" | "privilege" | "grace" | "pen" | "stall"
+export type Judge = (beat: Beat) => Ruling
+
+// The seating — composed once per cycle from the declared mode. This
+// IS the precedence: marker beats liveness beats privilege beats
+// grace; the pen (armed only by settle_mode = "status-first") hears
+// idle panes before the stall ladder can; the stall judge is unseated
+// by fallback_ladder = false (the ADR 0015 trial window) and by every
+// drain. Pure: tests pin the seating without building a run.
+export function benchOrder(mode: {
+  settleMode?: "marker" | "status-first"
+  fallbackLadder?: boolean
+  draining?: boolean
+}): JudgeSeat[] {
+  const seats: JudgeSeat[] = ["marker", "liveness", "privilege", "grace"]
+  if (mode.settleMode === "status-first") seats.push("pen")
+  if (mode.fallbackLadder !== false && !mode.draining) seats.push("stall")
+  return seats
+}
+
 export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
@@ -424,7 +511,6 @@ export function cycle(deps: CycleDeps): boolean {
   // not answer) never trips the canary: the stop-the-line gate exists
   // to protect slots from a doomed PLAN, and a broken hook says
   // nothing about the plan (#144).
-  const faultUnits = new Set<string>()
   const finish = (
     id: string,
     pass: boolean,
@@ -443,10 +529,46 @@ export function cycle(deps: CycleDeps): boolean {
     }
   }
 
-  for (const [id, flight] of [...deps.inFlight]) {
+  // observe: one Beat per flight per beat — the whole bench asks this,
+  // never the shep/fs directly. workerStatus is asked ONCE (a working
+  // pane is progress evidence the pen keys on). waited/booked stay
+  // lazy: the wait-DAG reads bookings off disk, and only the judges
+  // that need them pay for the read.
+  const observe = (id: string, flight: Flight, swept: { answered: Set<string>; capped: Set<string> }): Beat => {
     const size = existsSync(flight.logPath) ? readFileSync(flight.logPath).length : 0
     const text = logText(flight.logPath)
-    if (text.includes(`done ${id}`)) {
+    const paneStatus = deps.shep.workerStatus?.(`w-${id}`) ?? "unknown"
+    if (paneStatus === "working") flight.workedSinceAttempt = true
+    return {
+      id,
+      flight,
+      marker: text.includes(`done ${id}`) ? "done" : text.includes(`blocked ${id}`) ? "blocked" : null,
+      blockedWhy: text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? "",
+      alive: deps.shep.paneAlive(`w-${id}`),
+      paneStatus,
+      privilege: swept.capped.has(`w-${id}`) ? "capped" : swept.answered.has(`w-${id}`) ? "answered" : "none",
+      size,
+      logPresent: existsSync(flight.logPath),
+      logGrew: size !== flight.lastSize,
+      silentFor: now() - flight.lastChange,
+      age: now() - flight.spawnedAt,
+      get waited() {
+        return Boolean(deps.bookedWait?.(id)) || waitingOnLiveChild(deps.taskDir, id)
+      },
+      get booked() {
+        return Boolean(deps.bookedWait?.(id))
+      },
+    }
+  }
+
+  // ── the bench: each judge rules on one question; the first ruling
+  // wins. Seats are added in benchOrder's precedence. ───────────────
+
+  // The worker's own pen — the typed log markers (done/blocked), the
+  // stage binding (#150), and the task grade.
+  const markerJudge: Judge = (b) => {
+    const id = b.id
+    if (b.marker === "done") {
       checkpoint(deps.taskDir, `unit:${id}`, "info", "worker output landed", id)
       // Stage binding (#150): a stage may claim this unit's verdict for
       // itself — its own check, or its own word — instead of the task
@@ -462,25 +584,27 @@ export function cycle(deps: CycleDeps): boolean {
           } catch (err) {
             why = err instanceof Error ? err.message.split("\n")[0] : String(err)
           }
-          finish(id, pass, {
-            unit: id,
-            result: pass ? "stage check passed" : `stage check failed: ${why.slice(0, 120)}`,
+          return {
+            kind: "close",
+            stage: "check",
             pass,
-          }, "check")
-          deps.shep.retire(`w-${id}`)
-          deps.inFlight.delete(id)
-          deps.attempts.delete(id)
-          if (!pass) deps.shep.wake(id, "blocked", `stage check failed: ${why.slice(0, 120)}`)
-          continue
+            row: {
+              unit: id,
+              result: pass ? "stage check passed" : `stage check failed: ${why.slice(0, 120)}`,
+              pass,
+            },
+            wake: pass ? undefined : `stage check failed: ${why.slice(0, 120)}`,
+          }
         }
         // "none": the stage declared no hook — the worker's done is the
         // unit's word; grading belongs to a later stage's gate
         checkpoint(deps.taskDir, `check:${id}`, "info", "no check declared")
-        finish(id, true, { unit: id, result: "stage complete (no check declared)", pass: true }, "unit")
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-        continue
+        return {
+          kind: "close",
+          stage: "unit",
+          pass: true,
+          row: { unit: id, result: "stage complete (no check declared)", pass: true },
+        }
       }
       if (deps.canary?.enabled && !deps.canary.released) {
         writeFileSync(join(unitDir(deps.taskDir, id), ".grade-jev"), "")
@@ -494,195 +618,259 @@ export function cycle(deps: CycleDeps): boolean {
       // grade-fault card `regrade` can re-enter.
       let grade: { pass: boolean; row: string; fault?: "grade-fault" }
       try {
-        grade = deps.hooks.grade(flight.unit)
+        grade = deps.hooks.grade(b.flight.unit)
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err)
-        faultUnits.add(id)
-        finish(id, false, { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false }, "grade", false, true)
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", `grade error: ${why.split("\n")[0]}`)
-        continue
-      }
-      if (grade.fault) faultUnits.add(id)
-      finish(id, grade.pass, { unit: id, result: grade.row, pass: grade.pass }, "grade", !grade.fault, Boolean(grade.fault))
-      deps.shep.retire(`w-${id}`)
-      deps.inFlight.delete(id)
-      deps.attempts.delete(id)
-      if (!grade.pass) {
-        deps.shep.wake(id, "blocked", `grade failed: ${grade.row}`)
-      }
-    } else if (text.includes(`blocked ${id}`)) {
-      const why = text.split("\n").find((line) => line.includes(`blocked ${id}`)) ?? ""
-      finish(id, false, { unit: id, result: "blocked", pass: false }, "unit", true, false, why.slice(0, 120))
-      deps.shep.retire(`w-${id}`)
-      deps.inFlight.delete(id)
-      deps.attempts.delete(id)
-      deps.shep.wake(id, "blocked", why)
-    } else if (!deps.shep.paneAlive(`w-${id}`)) {
-      if (deps.draining) {
-        // draining: leave the unit open — continue resumes its session
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-      } else {
-        finish(id, false, { unit: id, result: "pane dead", pass: false }, "unit", true, false, "pane not live in herdr")
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", "pane not live in herdr")
-      }
-    } else {
-      // completion-detection: the pane's own verdict, observed once
-      // per beat (a working pane is progress evidence the idle-settle
-      // keys on). The privilege sweep below still owns dialogs.
-      const paneStatus = deps.shep.workerStatus?.(`w-${id}`) ?? "unknown"
-      if (paneStatus === "working") flight.workedSinceAttempt = true
-      // Privilege (zen 6): a permission dialog is not a stall. Ask the
-      // port to answer it first; only an unanswered pane (verdict
-      // "none") falls through to the grace/stall/growth ladder. A
-      // capped pane finished_by like a block — the wake carries the story.
-      const verdict = sweep.capped.has(`w-${id}`)
-        ? "capped"
-        : sweep.answered.has(`w-${id}`)
-          ? "answered"
-          : "none"
-      if (verdict === "capped") {
-        finish(id, false, { unit: id, result: "blocked", pass: false })
-        deps.shep.retire(`w-${id}`)
-        deps.inFlight.delete(id)
-        deps.attempts.delete(id)
-        deps.shep.wake(id, "blocked", `permission deny cap (${PERMISSION_CAP}) hit`)
-      } else if (verdict !== "none") {
-        // answered — an injected verdict is progress; the stall clock resets
-        flight.lastChange = now()
-      } else if (
-        !existsSync(flight.logPath) &&
-        !flight.reprompted &&
-        now() - flight.spawnedAt > briefGraceMs &&
-        paneStatus !== "working" &&
-        // status-first: an idle pane with no log is the idle-settle's
-        // customer — its evidence reprompt carries the probe; a bare
-        // re-brief says nothing the agent can act on
-        (deps.settleMode !== "status-first" || paneStatus !== "idle")
-      ) {
-        // The agent started but the brief never landed (a startup race shep
-        // cannot see). Submit it once more; the stall timer is the backstop.
-        // A MISSING log alone is not evidence: the worker protocol writes
-        // nothing to the log until its single done line, so every healthy
-        // unit past the grace window used to be re-briefed mid-work
-        // (j-78ca43: 3 of 4 units grace-reprompted at exactly 90s). The
-        // heartbeat is the discriminator — a working agent proves its
-        // brief landed, so the reprompt waits for an idle pane. Ports
-        // without the status seam (workerStatus absent) keep the old rule.
-        flight.reprompted = true
-        const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
-        if (ok) {
-          flight.lastChange = now()
-          deps.emit?.("reprompt", { unit: id, reason: "brief grace" })
+        return {
+          kind: "close",
+          stage: "grade",
+          pass: false,
+          row: { unit: id, result: `grade error: ${why.split("\n")[0]}`, pass: false },
+          faultsCanary: false,
+          fault: true,
+          wake: `grade error: ${why.split("\n")[0]}`,
         }
-      } else if (
-        deps.settleMode === "status-first" &&
-        paneStatus === "idle" &&
-        (flight.settleAttempts === 0 || flight.workedSinceAttempt)
-      ) {
-        // completion-detection — the platform pen. The turn ended and
-        // no marker came (the iter-4 lesson: finished-but-silent used
-        // to ride the stall clock into a wrong verdict). Ask the DAG
-        // first, then the deliverable; the Clerk writes completion —
-        // the agent's memory is never load-bearing. A pane idle since
-        // its first attempt without working since belongs to the
-        // grace lane, not this one (workedSinceAttempt gates it).
-        if (deps.bookedWait?.(id) || waitingOnLiveChild(deps.taskDir, id)) {
-          flight.lastChange = now() // waiting by design — a live child owns this silence
-        } else {
-          const probe = probeDeliverable(deps.taskDir, id)
-          deps.emit?.("unit.grade", {
-            unit: id,
-            status: probe.ok ? "ok" : "fail",
-            detail: probe.detail,
-            trigger: "idle",
-          })
-          if (probe.ok) {
-            finish(
-              id,
-              true,
-              { unit: id, result: "settled on idle+grade", pass: true },
-              "settle",
-              true,
-              false,
-              "platform pen: deliverable present, marker never seen",
-              "idle+grade",
-            )
-            deps.shep.retire(`w-${id}`)
-            deps.inFlight.delete(id)
-            deps.attempts.delete(id)
-          } else {
-            flight.settleAttempts += 1
-            flight.workedSinceAttempt = false
-            if (flight.settleAttempts > SETTLE_ATTEMPT_CAP) {
-              finish(
-                id,
-                false,
-                { unit: id, result: "stalled", pass: false },
-                "settle",
-                true,
-                false,
-                `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts — ${probe.detail}`,
-                "idle+grade",
-              )
-              deps.shep.retire(`w-${id}`)
-              deps.inFlight.delete(id)
-              deps.attempts.delete(id)
-              deps.shep.wake(id, "blocked", `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts: ${probe.detail}`)
-            } else {
-              const note = join(unitDir(deps.taskDir, id), `reprompt-${flight.settleAttempts}.md`)
-              writeFileSync(note, evidenceBrief(id, probe.detail, unitPaths(deps.taskDir, id).resultPath))
-              deps.shep.reprompt(`w-${id}`, note)
-              flight.lastChange = now()
-              deps.emit?.("reprompt", {
-                unit: id,
-                reason: "idle grade fail",
-                attempt: flight.settleAttempts,
-                evidence: probe.detail,
-              })
-            }
-          }
-        }
-      } else if (
-        !deps.draining &&
-        deps.fallbackLadder !== false &&
-        size === flight.lastSize &&
-        now() - flight.lastChange > stallMs
-      ) {
-        if (deps.bookedWait?.(id)) {
-          // booked wait: a live child spur holds this pane (ADR 0006) —
-          // the silence is explained, so the stall clock restarts
-          flight.lastChange = now()
-        } else if (deps.churnSince?.(flight.worktree, flight.lastChange)) {
-          // worktree churn while the log is quiet is still life — the
-          // worker is editing, just not talking. The clock restarts;
-          // the next silent window (quiet log AND quiet tree) re-arms.
-          flight.lastChange = now()
-          deps.emit?.("stall-deferred", { unit: id, reason: "worktree churn" })
-        } else if (paneStatus === "working") {
-          // j-964391: mid-generation or a long bash call — quiet log,
-          // quiet tree, live agent. The pane's own status is the word.
-          flight.lastChange = now()
-          deps.emit?.("stall-deferred", { unit: id, reason: "agent working" })
-        } else {
-          finish(id, false, { unit: id, result: "stalled", pass: false }, "unit", true, false, `no log output for ${stallMs}ms`)
-          deps.shep.retire(`w-${id}`)
-          deps.inFlight.delete(id)
-          deps.attempts.delete(id)
-          deps.shep.wake(id, "blocked", `no log output for ${stallMs}ms`)
-        }
-      } else if (size !== flight.lastSize) {
-        flight.lastSize = size
-        flight.lastChange = now()
+      }
+      return {
+        kind: "close",
+        stage: "grade",
+        pass: grade.pass,
+        row: { unit: id, result: grade.row, pass: grade.pass },
+        faultsCanary: !grade.fault,
+        fault: Boolean(grade.fault),
+        wake: grade.pass ? undefined : `grade failed: ${grade.row}`,
       }
     }
+    if (b.marker === "blocked") {
+      return {
+        kind: "close",
+        stage: "unit",
+        pass: false,
+        row: { unit: id, result: "blocked", pass: false },
+        detail: b.blockedWhy.slice(0, 120),
+        wake: b.blockedWhy,
+      }
+    }
+    return { kind: "none" }
+  }
+
+  // A dead pane is dead regardless of everything else on the bench —
+  // unless a drain owns the run, in which case the unit stays open for
+  // its booked session.
+  const livenessJudge: Judge = (b) => {
+    if (b.alive) return { kind: "none" }
+    if (deps.draining) return { kind: "carry" }
+    return {
+      kind: "close",
+      stage: "unit",
+      pass: false,
+      row: { unit: b.id, result: "pane dead", pass: false },
+      detail: "pane not live in herdr",
+      wake: "pane not live in herdr",
+    }
+  }
+
+  // Privilege (zen 6): a permission dialog is not a stall. The sweep
+  // (rail-owned) already ran; this judge carries the consequence — a
+  // capped pane finished_by like a block, an answered one just reset
+  // the clock (an injected verdict is progress).
+  const privilegeJudge: Judge = (b) => {
+    if (b.privilege === "capped") {
+      return {
+        kind: "close",
+        stage: "unit",
+        pass: false,
+        row: { unit: b.id, result: "blocked", pass: false },
+        wake: `permission deny cap (${PERMISSION_CAP}) hit`,
+      }
+    }
+    if (b.privilege === "answered") {
+      return { kind: "defer", why: "an injected verdict is progress" }
+    }
+    return { kind: "none" }
+  }
+
+  // Brief grace: the agent started but the brief never landed (a
+  // startup race shep cannot see). Submit it once more; the stall
+  // timer is the backstop. A MISSING log alone is not evidence: the
+  // worker protocol writes nothing to the log until its single done
+  // line, so every healthy unit past the grace window used to be
+  // re-briefed mid-work (j-78ca43: 3 of 4 units grace-reprompted at
+  // exactly 90s). The heartbeat is the discriminator — a working agent
+  // proves its brief landed, so the reprompt waits for a quiet pane.
+  // status-first: an idle pane with no log is the PEN's customer — its
+  // evidence reprompt carries the probe; a bare re-brief says nothing
+  // the agent can act on.
+  const graceJudge: Judge = (b) => {
+    if (b.logPresent || b.flight.reprompted) return { kind: "none" }
+    if (b.age <= briefGraceMs || b.paneStatus === "working") return { kind: "none" }
+    if (deps.settleMode === "status-first" && b.paneStatus === "idle") return { kind: "none" }
+    b.flight.reprompted = true
+    return {
+      kind: "reprompt",
+      note: b.flight.briefPath,
+      onOkOnly: true,
+      event: ["reprompt", { unit: b.id, reason: "brief grace" }],
+    }
+  }
+
+  // completion-detection — the platform pen (ADR 0015), seated only in
+  // a status-first court. The turn ended and no marker came (the
+  // iter-4 lesson: finished-but-silent used to ride the stall clock
+  // into a wrong verdict). Ask the DAG first, then the deliverable;
+  // the Clerk writes completion — the agent's memory is never
+  // load-bearing. A pane idle since its first attempt without working
+  // since belongs to the grace lane, not this one.
+  const penJudge: Judge = (b) => {
+    if (b.paneStatus !== "idle") return { kind: "none" }
+    if (b.flight.settleAttempts !== 0 && !b.flight.workedSinceAttempt) return { kind: "none" }
+    if (b.waited) return { kind: "defer", why: "waiting by design — a live child owns this silence" }
+    const probe = probeDeliverable(deps.taskDir, b.id)
+    deps.emit?.("unit.grade", {
+      unit: b.id,
+      status: probe.ok ? "ok" : "fail",
+      detail: probe.detail,
+      trigger: "idle",
+    })
+    if (probe.ok) {
+      return {
+        kind: "close",
+        stage: "settle",
+        pass: true,
+        row: { unit: b.id, result: "settled on idle+grade", pass: true },
+        detail: "platform pen: deliverable present, marker never seen",
+        trigger: "idle+grade",
+      }
+    }
+    b.flight.settleAttempts += 1
+    b.flight.workedSinceAttempt = false
+    if (b.flight.settleAttempts > SETTLE_ATTEMPT_CAP) {
+      return {
+        kind: "close",
+        stage: "settle",
+        pass: false,
+        row: { unit: b.id, result: "stalled", pass: false },
+        detail: `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts — ${probe.detail}`,
+        trigger: "idle+grade",
+        wake: `deliverable missing after ${SETTLE_ATTEMPT_CAP} evidence reprompts: ${probe.detail}`,
+      }
+    }
+    // the evidence reprompt (never a plea — Claude Code #55754's bill):
+    // quotes the failing check and names the artifact
+    const note = join(unitDir(deps.taskDir, b.id), `reprompt-${b.flight.settleAttempts}.md`)
+    writeFileSync(note, evidenceBrief(b.id, probe.detail, unitPaths(deps.taskDir, b.id).resultPath))
+    return {
+      kind: "reprompt",
+      note,
+      event: [
+        "reprompt",
+        { unit: b.id, reason: "idle grade fail", attempt: b.flight.settleAttempts, evidence: probe.detail },
+      ],
+    }
+  }
+
+  // The passive stall ladder — the fallback lane (status-blind panes
+  // and the marker default), stood down by the trial switch and by
+  // every drain. Quiet log AND quiet tree AND unbooked AND not
+  // working: the only honest verdict left is stalled.
+  const stallJudge: Judge = (b) => {
+    if (deps.draining || deps.fallbackLadder === false) return { kind: "none" }
+    if (b.logGrew || b.silentFor <= stallMs) return { kind: "none" }
+    if (b.booked) {
+      // booked wait: a live child spur holds this pane (ADR 0006) —
+      // the silence is explained, so the stall clock restarts
+      return { kind: "defer", why: "booked wait — a live child holds this pane" }
+    }
+    if (deps.churnSince?.(b.flight.worktree, b.flight.lastChange)) {
+      // worktree churn while the log is quiet is still life — the
+      // worker is editing, just not talking. The clock restarts; the
+      // next silent window (quiet log AND quiet tree) re-arms.
+      return { kind: "defer", why: "worktree churn", event: ["stall-deferred", { unit: b.id, reason: "worktree churn" }] }
+    }
+    if (b.paneStatus === "working") {
+      // j-964391: mid-generation or a long bash call — quiet log,
+      // quiet tree, live agent. The pane's own status is the word.
+      return { kind: "defer", why: "agent working", event: ["stall-deferred", { unit: b.id, reason: "agent working" }] }
+    }
+    return {
+      kind: "close",
+      stage: "unit",
+      pass: false,
+      row: { unit: b.id, result: "stalled", pass: false },
+      detail: `no log output for ${stallMs}ms`,
+      wake: `no log output for ${stallMs}ms`,
+    }
+  }
+
+  const judges: Record<JudgeSeat, Judge> = {
+    marker: markerJudge,
+    liveness: livenessJudge,
+    privilege: privilegeJudge,
+    grace: graceJudge,
+    pen: penJudge,
+    stall: stallJudge,
+  }
+  const bench: Judge[] = benchOrder(deps).map((seat) => judges[seat])
+
+  // the bailiff: ONE ceremony per ruling. The close ceremony — settle
+  // card, retire, leave the flight and attempts maps, wake — that
+  // every rung of the old ladder hand-rolled lives here, once.
+  const applyRuling = (beat: Beat, ruling: Ruling): void => {
+    const { id, flight } = beat
+    switch (ruling.kind) {
+      case "close":
+        finish(
+          id,
+          ruling.pass,
+          ruling.row,
+          ruling.stage,
+          ruling.faultsCanary ?? true,
+          ruling.fault ?? false,
+          ruling.detail,
+          ruling.trigger,
+        )
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+        if (ruling.wake !== undefined) deps.shep.wake(id, "blocked", ruling.wake)
+        return
+      case "carry":
+        // a drain: the pane is gone, the unit stays open — continue
+        // resumes its booked session
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+        return
+      case "defer":
+        flight.lastChange = now()
+        if (ruling.event) deps.emit?.(ruling.event[0], ruling.event[1])
+        return
+      case "reprompt": {
+        const ok = deps.shep.reprompt(`w-${id}`, ruling.note)
+        if (ok || !ruling.onOkOnly) {
+          flight.lastChange = now()
+          if (ruling.event) deps.emit?.(ruling.event[0], ruling.event[1])
+        }
+        return
+      }
+      case "none":
+        // no judge ruled — the only event left is growth: a log that
+        // grew books its size and restarts the clock
+        if (beat.logGrew) {
+          flight.lastSize = beat.size
+          flight.lastChange = now()
+        }
+    }
+  }
+
+  for (const [id, flight] of [...deps.inFlight]) {
+    const beat = observe(id, flight, sweep)
+    let ruling: Ruling = { kind: "none" }
+    for (const judge of bench) {
+      ruling = judge(beat)
+      if (ruling.kind !== "none") break
+    }
+    applyRuling(beat, ruling)
   }
 
   const finished = readState(deps.taskDir)
