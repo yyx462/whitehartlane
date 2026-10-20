@@ -22,4 +22,16 @@ for s in smoke waves shots secrets escalate longsilent nested deadline forgotten
     sleep 20
   done
 done
+# transfer-window-v2 (the composite eval case) is OPT-IN: ~30 min of real
+# tokens, the ops eval lane's bench — never a battery default (see README).
+if [ "${TW2:-0}" = "1" ]; then
+  echo "== transfer-window-v2 =="
+  (cd "$here/transfer-window-v2" && python3 gen-universe.py \
+    && "$repo/bin/whl" run . --from "$from" 2>&1 | grep -E '^job:|warning')
+  while :; do
+    running=$("$repo/bin/whl" jobs 2>/dev/null | awk '$0 ~ "transfer-window-v2" && $2 == "running"')
+    [ -z "$running" ] && break
+    sleep 20
+  done
+fi
 echo "battery done — grade each run's report.json, orchestrator.log (permission/stall lines), and job.json woke.delivery (expect pane, your pane)"

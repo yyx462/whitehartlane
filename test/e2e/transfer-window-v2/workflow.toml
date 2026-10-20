@@ -1,0 +1,170 @@
+# transfer-window-v2 — the composite eval case (OPTIMUM's own spec
+# section): every topology in ONE chain, authored against [[stage]]
+# only, zero src files (the scope fence is the experiment — the grammar
+# must express the whole case). A real bench task, not a demo: a
+# deterministic offline player universe (gen-universe.py — no network),
+# hard budget arithmetic, a verify.sh that CHECKS rather than vibes.
+#   bring-up:  python3 gen-universe.py        (writes data/players.csv
+#              + data/window.json — deterministic, same universe always)
+#   real run:  <repo>/bin/whl run . --from opencode:<sid>   (ops eval
+#              lane, ≤30 min: deadline_ms below is the case's own bound)
+#   rehearsal: npm test — rehearse.test.ts drives this exact toml through
+#              the real orchestrator with scripted minds, zero tokens
+[workflow]
+name = "transfer-window-v2"
+spur_id = "transfer-window-v2"
+worker_kind = "opencode"
+model = "zhipuai-coding-plan/glm-5.3"
+slots = 3
+canary = false
+deadline_ms = 1800000
+
+[[stage]]
+id = "ingest"
+topology = "solo"
+brief = '''
+You are the window's data desk. The run directory (two levels up from
+your cwd — it holds workflow.toml, data/, hooks/) has data/players.csv:
+the raw scout export. It is messy on purpose: money as "£4.20m" /
+"£650k" strings, names padded or double-spaced, pos_group mixed-case.
+Normalize EVERY row, in file order, to one JSON object per line:
+  {"id":"p-001","name":"Ada Jokinen","pos_group":"gk","position":"cb",
+   "age":24,"fee_gbp_k":4200,"wage_gbp_k":38,"form_pct":88,
+   "contract_years":3}
+Rules: name single-spaced and trimmed (keep the export's spelling);
+pos_group lowercase, one of gk/def/mid/fwd; fee_gbp_k and wage_gbp_k
+are INTEGER thousands of pounds ("£4.20m" -> 4200, "£650k" -> 650);
+age/form_pct/contract_years integers; no row dropped, no row invented.
+Write the identical normalized JSONL to all THREE paths (mkdir -p the
+folders — the later delegated stages read their staged copies):
+  ../../data/players.jsonl
+  ../../stages/negotiate/data/players.jsonl
+  ../../stages/scout/data/players.jsonl
+Then write result.md in your cwd: one line, "normalized <N> players".
+Your stage gate jq-checks the schema (exact keys, integer types, id
+pattern, unique ids, row count == the CSV's data rows).
+'''
+check = "bash hooks/check-ingest.sh"
+
+[[stage]]
+id = "analyze"
+topology = "fan-out"
+grade = false
+preamble = '''
+You are one of three position-group analysts for the window. The
+universe is ../../data/players.jsonl (the ingest desk's normalized
+export — its fees are law). The commission (data/window.json): total
+spend <= 60000 (£k), squad minimums gk>=1 def>=3 mid>=3 fwd>=2, fees
+copied EXACTLY — never invented, never rounded. Read ONLY your group's
+players. Pick up to 6 targets by value (form per fee, age profile).
+Write your shard as JSON to ../../stages/negotiate/data/shortlist-<group>.json
+(mkdir -p; the negotiation stage reads it there):
+  {"group":"<defensive|midfield|forward>","targets":[
+    {"id":"p-017","name":"...","pos_group":"mid","fee_gbp_k":4200,
+     "reason":"one short line"}]}
+Then write result.md in your cwd: one line per target,
+"<id> <fee_gbp_k> <reason>". Do not read the other groups' rows.
+'''
+check = "bash hooks/check-shards.sh"
+
+[[stage.units]]
+id = "defensive"
+brief = '''
+Your group: pos_group gk AND def (goalkeepers and defenders). Shard
+file shortlist-defensive.json, "group":"defensive". At least 2 gk and
+at least 4 def among the targets.
+'''
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[[stage.units]]
+id = "midfield"
+brief = '''
+Your group: pos_group mid. Shard file shortlist-midfield.json,
+"group":"midfield". At least 5 targets.
+'''
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[[stage.units]]
+id = "forward"
+brief = '''
+Your group: pos_group fwd. Shard file shortlist-forward.json,
+"group":"forward". At least 3 targets.
+'''
+model = "zhipuai-coding-plan/glm-5.3-flash"
+
+[[stage]]
+id = "negotiate"
+topology = "coworker"
+check = "bash hooks/accept-plan.sh"
+
+[[stage.members]]
+name = "dof"
+initiates = true
+brief = '''
+You are the Director of Football. This exchange's shared folder is the
+program's data/ (two levels up from your sandbox: ../../data/): the
+three analyst shards (shortlist-defensive.json, shortlist-midfield.json,
+shortlist-forward.json) and players.jsonl (the universe — its fees are
+law). The commission: total spend <= 60000 (£k), squad minimums gk>=1
+def>=3 mid>=3 fwd>=2, 9-13 players, no duplicate ids, every id and fee
+exactly as in players.jsonl.
+Reconcile the shards under the cap — you will NOT fit every target;
+drop by value. Write the draft plan to ../../data/plan.json:
+  {"squad":[{"id":"p-017","name":"...","pos_group":"mid",
+             "fee_gbp_k":4200}, ...],
+   "budget_gbp_k":60000,"spent_gbp_k":<exact sum of squad fees>}
+Then message the capologist: the draft is at ../../data/plan.json, check
+it. Their verdict is the exchange's arithmetic. If they red-line it,
+fix the plan and ask again. When they confirm, write result.md in your
+cwd (one line: "confirmed under cap") and write the stop message with a
+one-line summary. Never stop before the capologist confirms.
+'''
+
+[[stage.members]]
+name = "capologist"
+brief = '''
+You are the capologist — the exchange's only arithmetic. When the DOF
+messages you that a draft is at ../../data/plan.json, CHECK it against
+../../data/players.jsonl and the commission: (1) spent_gbp_k equals the
+exact sum of the squad's fee_gbp_k; (2) spend <= 60000; (3) coverage
+gk>=1 def>=3 mid>=3 fwd>=2, 9-13 players; (4) no duplicate ids;
+(5) every id exists in players.jsonl AND its fee_gbp_k matches exactly.
+Reply to the DOF: PASS, or a red-line list (rule number, player id).
+The final gate's verify.sh re-checks all five — check as it will,
+because it will.
+'''
+
+[[stage]]
+id = "scout"
+topology = "lab"
+brief = '''
+You are the chief scout running verification probes on the window plan.
+This directory's data/ holds plan.json (the confirmed plan) and
+players.jsonl (the universe).
+Probe in waves. Each round: write protocol.json naming 2-4 probes; each
+probe's brief is EXACTLY this shape, nothing more:
+  "Look up player <id> in data/players.jsonl (two levels up from your
+   cwd). Write that player's JSON line verbatim as line 1 of result.md
+   in your working directory, then finish."
+You will be prompted when a wave closes. Read the probes' result.md
+lines: a probe VERIFIES a target when its line is exactly that player's
+players.jsonl row (id and fee included) — never verify from memory.
+Track verified ids across waves. Run waves until every squad id in
+data/plan.json is verified, then write data/scout-verdict.json:
+  {"probed":["p-017",...],"verified":["p-017",...],"fit":1.0,
+   "rounds":<n>}
+(probed = every id you sent a probe for; verified = those that came
+back exact; fit = verified-intersect-squad / squad size). Then write
+{"stop":true} as protocol.json. Do not write the verdict before every
+squad id has a probe's written line behind it.
+'''
+end = "e() { test -s units/$1/result.md && echo done || true; }; e"
+check = "bash hooks/accept-scout.sh"
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "bash hooks/verify.sh"
+
+[report]
+where = "units/"
