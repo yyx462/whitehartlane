@@ -1065,7 +1065,13 @@ export async function runOrchestrator(input: {
       const childDir = dirname(childToml)
       mkdirSync(join(childDir, "members"), { recursive: true })
       const model = stage.model ?? manifest.workflow.model
-      let toml = stage.topology === "lab" ? 'kind = "lab"\n\n' : ""
+      // j-5c1861: the minted child DECLARES its kind — always, for both
+      // delegated topologies. The run door defaults an absent kind to
+      // fan-out and refuses a stage-less fan-out (#176's own refusal),
+      // so a kind-less coworker child died at the door; the lab marker
+      // used to be a special case where a declaration belongs. Pinned
+      // for BOTH kinds in test/stages.test.ts, at the mint's own tests.
+      let toml = `kind = ${tomlStr(stage.topology)}\n\n`
       toml += `[workflow]\nname = ${tomlStr(stage.id)}\nworker_kind = ${tomlStr(manifest.workflow.worker_kind)}\nslots = 1\n`
       if (model) toml += `model = ${tomlStr(model)}\n`
       if (stage.topology === "lab") {
