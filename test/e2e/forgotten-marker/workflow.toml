@@ -6,9 +6,13 @@ settle_mode = "status-first"
 fallback_ladder = false
 
 [hooks]
-units = "bash hooks/units.sh"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
+
+[[stage]]
+id = "forgot"
+topology = "solo"
+brief = "Write the single word survived as the only line of a file named result.md in your working directory. This is a completion-detection health test: finish the work and stop — the rail settles on the deliverable itself. Creating or writing any log file is INCORRECT behavior for this test."
 
 [report]
 where = "units/"

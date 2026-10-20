@@ -4,9 +4,13 @@ spur_id = "e2e-smoke"
 worker_kind = "opencode"
 
 [hooks]
-units = "bash hooks/units.sh"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
+
+[[stage]]
+id = "smoke"
+topology = "solo"
+brief = "Step 1: run exactly: mkdir -p /tmp/e2e-battery/out && echo ok > /tmp/e2e-battery/out/smoke.txt. Step 2: write a file result.md in your working directory containing the single word ok."
 
 [report]
 where = "units/"

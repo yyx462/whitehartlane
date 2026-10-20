@@ -1,4 +1,0 @@
-~/work/agentic-os/ui-window
-~/.local/share/agentic-os
-~/work/agent-gadgets
-~/.config/opencode/skills

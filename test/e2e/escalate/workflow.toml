@@ -4,9 +4,13 @@ spur_id = "e2e-escalate"
 worker_kind = "opencode"
 
 [hooks]
-units = "bash hooks/units.sh"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
+
+[[stage]]
+id = "escalate"
+topology = "solo"
+brief = "Permission dialogs WILL pop up — do NOT answer or cancel them yourself; an external watcher answers within seconds. Step 1: attempt to create the file /Users/dev/e2e-weird-scratch/marker.txt with content x. Step 2: if that attempt was DENIED, attempt the exact same write exactly ONCE more. Step 3: write result.md in your working directory with: attempt1: <allowed|denied> and attempt2: <allowed|denied|not-tried>."
 
 [report]
 where = "units/"

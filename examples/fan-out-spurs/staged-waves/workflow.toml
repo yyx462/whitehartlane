@@ -1,39 +1,35 @@
-# staged-waves — ADR 0007's grammar in miniature: a serial first wave,
-# a human-file gate, then a parallel wave. The manifest says the whole
+# staged-waves — the chain in miniature: a serial first stage, a
+# human-file gate, then a parallel wave. The manifest says the whole
 # topology; nothing is inferred, no phase files, no relaunch.
 #   run it:  whl run staged-waves --from <tool>:<session-id>
 #            (or --unattended when nobody waits for the wake)
-#   gate:    touch gates/GO when wave 1's work is reviewable
+#   gate:    touch gates/GO when stage 1's work is reviewable
 [workflow]
 name = "staged-waves"
 worker_kind = "opencode"
 slots = 2
 
 [hooks]
-units = "true"                 # steps define the units (ADR 0007)
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
-[[step]]
+[[stage]]
 id = "g0"
-finished_by = "end"                # a worker pane runs members/g0.md
-wave = "w1"
+topology = "solo"
+brief = "Look up the capital of France. Write the city name to result.md in your working directory (your cwd). One line, nothing else."
 
-[[step]]
+[[stage]]
 id = "review"
-finished_by = "check"              # nothing works — test -f gates/GO must exit 0
-check = "test -f gates/GO"
-wave = "w2"
+topology = "gate"
+run = "test -f gates/GO"
 
-[[step]]
-id = "g1"
-finished_by = "end"
-wave = "w3"
-
-[[step]]
-id = "g2"
-finished_by = "end"
-wave = "w3"
+[[stage]]
+id = "g1g2"
+topology = "fan-out"
+units = [
+  { id = "g1", brief = "Look up the capital of Japan. Write the city name to result.md in your working directory (your cwd). One line, nothing else." },
+  { id = "g2", brief = "Look up the capital of Peru. Write the city name to result.md in your working directory (your cwd). One line, nothing else." },
+]
 
 [report]
 where = "units/"

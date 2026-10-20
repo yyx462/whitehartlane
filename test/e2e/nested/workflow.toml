@@ -1,26 +1,33 @@
-# e2e-nested — box in box: a worker wave, then a whole child program as a
-# wake step. The rail levies the child, books itself as spawner, and the
-# step finishes on the child's wake (booked wait — no pane, no deadlock).
+# e2e-nested — box in box: a worker stage, then a delegated exchange the
+# rail mints as a WHOLE child program (stages/child-run/) and levies once
+# at the frontier. The child's wake receipt settles the stage (booked
+# wait — no pane watches the child, no deadlock).
 [workflow]
 name = "e2e-nested"
 spur_id = "e2e-nested"
 worker_kind = "opencode"
 
 [hooks]
-units = "true"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
-[[step]]
+[[stage]]
 id = "warmup"
-finished_by = "end"
-wave = "w1"
+topology = "solo"
+brief = "Step 1: run exactly: `echo warm > /tmp/e2e-battery/out/warm.txt`. Step 2: write result.md in your working directory containing warm."
 
-[[step]]
+[[stage]]
 id = "child-run"
-finished_by = "wake"
-folder = "./child"
-wave = "w2"
+topology = "coworker"
+
+[[stage.members]]
+name = "child"
+initiates = true
+brief = "Step 1: run exactly: `echo child > /tmp/e2e-battery/out/child.txt`. Step 2: write result.md in your working directory containing child. Step 3: message the witness member with one line: child done. Then wait — the witness closes the exchange."
+
+[[stage.members]]
+name = "witness"
+brief = "You are the witness of the child program. When the relayed note from child arrives, answer child with one line: seen. Then write the stop message with a one-line summary: the child program ran."
 
 [report]
 where = "units/"

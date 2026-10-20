@@ -1,24 +1,22 @@
-# e2e-waves — one end step, then a check step that must NOT spawn a pane
+# e2e-waves — one worker stage, then a gate that must NOT spawn a pane
 [workflow]
 name = "e2e-waves"
 spur_id = "e2e-waves"
 worker_kind = "opencode"
 
 [hooks]
-units = "true"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
-[[step]]
+[[stage]]
 id = "writer"
-finished_by = "end"
-wave = "w1"
+topology = "solo"
+brief = "Step 1: run exactly: `echo gate > /tmp/e2e-battery/out/gate.txt`. Step 2: write result.md in your working directory containing the word gate."
 
-[[step]]
+[[stage]]
 id = "gate"
-finished_by = "check"
-check = "test -f /tmp/e2e-battery/out/gate.txt"
-wave = "w2"
+topology = "gate"
+run = "test -f /tmp/e2e-battery/out/gate.txt"
 
 [report]
 where = "units/"

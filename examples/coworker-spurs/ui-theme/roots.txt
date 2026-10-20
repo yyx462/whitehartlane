@@ -1,5 +1,0 @@
-~/work/agentic-os/ui-theme
-~/.local/share/agentic-os
-~/.config/opencode/skills
-~/.vista
-~/.local/bin
