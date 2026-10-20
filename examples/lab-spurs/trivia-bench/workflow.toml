@@ -1,13 +1,87 @@
-# trivia-bench — an agent evaluation harness.
-# The subject under test is the WORKER: swap `model` and rerun; the
-# report score is that agent's score. Defaults everywhere else: waves
-# arrive as protocol.json, ends as done-lines in units/<id>/log.txt.
+# trivia-bench — an agent evaluation harness as one experiment link.
+# The subject under test is the WORKER: swap [workflow] model and rerun
+# (the child program the rail mints inherits it — every mock runs the
+# pin); compare score.md across runs. The actor both composes the
+# rounds and grades them: a delegated child carries no task hooks, so
+# the scorecard is the actor's own artifact, quoted against the key it
+# wrote — the chain settles on the wake receipt, and grading at chain
+# level is a gate's run (#150), never a mid-experiment hook. The
+# document under test is embedded in the brief (a minted child carries
+# no data folder either).
+#   run it:  whl run trivia-bench --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
 [workflow]
 name = "trivia-bench"
 worker_kind = "opencode"
-# model = "zai/glm-4.7"
+# model = "zai/glm-4.7"   # the subject under test — pin and rerun
 
-[hooks]
-units = "true"
-grade = "node hooks/grade.mjs"
-counts = "node hooks/counts.mjs"
+[[stage]]
+id = "bench"
+topology = "lab"
+brief = '''
+You are the quizmaster for one document (below). Your job: find out
+how well a fresh agent, given only a question, can retrieve facts from
+it.
+
+Each round:
+1. Write key.json in this directory: a map of question id -> the one
+   canonical answer, quoting the document verbatim.
+2. Write protocol.json naming 3-5 questions. Each unit's brief is
+   EXACTLY this shape, nothing more:
+   "Answer in <=10 words, quoting the document: <question>. Write
+    the answer as line 1 of <unit dir>/result.md."
+   Do not hint. Do not paraphrase the answer inside the brief.
+
+You will be prompted when a wave closes. Read units/*/result.md and
+GRADE THE ROUND YOURSELF: one line per question in scorecard.md
+(append per round) — `<id>: right|wrong: <their answer>` — against the
+key you wrote. Then either write the next round's key.json +
+protocol.json (target what was missed; raise difficulty), or write
+{"stop":true} as protocol.json. Three rounds maximum; stop earlier if
+everything passes. Before stopping, write score.md: the per-round
+right/wrong tally and the final score as a percentage — that file is
+the bench's deliverable.
+
+--- the document under test ---
+
+# Aurora — smart alarm clock (product spec, v3.2)
+
+## Basics
+- Model: Aurora A3 (the A1 and A2 are discontinued)
+- Price: $89 USD; the fabric cover accessory adds $12
+- Colors: charcoal, sand, and sage (the coral color was dropped in v3)
+- Weight: 340 g with the base
+- Display: E-Ink, always-on, 2.8 inches
+
+## Alarms and snooze
+- Up to 8 independent alarms
+- Snooze intervals: 5, 10, or 20 minutes — configurable per alarm
+- Snooze count is capped at 3 per alarm; after the third snooze the
+  alarm is dismissed, not delayed
+- Sunrise simulation starts 30 minutes before the alarm time and
+  brightens from 0 to 100 percent
+
+## Sound
+- Ringer tops out at 78 dB at one meter
+- Speaker: 3 W, front-facing
+- Sleep sounds: rain, ocean, white noise, and brown noise — no fan
+  sound in v3.2 (it returns in the v3.3 firmware)
+
+## Battery and power
+- 1800 mAh battery, up to 32 hours unplugged with the display on
+- Charging: USB-C, 0 to 100 percent in 90 minutes
+- No wireless charging on any model
+
+## App and connectivity
+- App: "Aurora Rise" on iOS and Android (the old "Aurora Home" app is
+  retired and will not pair)
+- Bluetooth 5.3 only — no Wi-Fi radio in the A3
+- Firmware updates arrive over Bluetooth from the app
+
+## Warranty and support
+- 2-year limited warranty; the battery is covered only in year 1
+- Support: support@aurora.example — replies within 2 business days
+'''
+
+[report]
+where = "units/"

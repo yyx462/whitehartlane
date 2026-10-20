@@ -1,7 +1,7 @@
-# nested-wakes — ADR 0007 stage 3 in miniature: a wave of work, then a
-# whole child program as a step. The manifest says the topology; the
-# rail levies the child, books itself as spawner, and the step finishes
-# on the child's wake (the receipt colors it).
+# nested-wakes — a worker stage, then a delegated exchange the rail mints
+# as a WHOLE child program (stages/room/) and levies once at the frontier.
+# The child's wake receipt settles the stage: the parent books itself as
+# spawner and never spawns a pane for the child's work.
 #   run it:  whl run nested-wakes --from <tool>:<session-id>
 #            (or --unattended when nobody waits for the wake)
 [workflow]
@@ -10,20 +10,26 @@ worker_kind = "opencode"
 slots = 2
 
 [hooks]
-units = "true"                 # steps define the units (ADR 0007)
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
 
-[[step]]
+[[stage]]
 id = "g0"
-finished_by = "end"                # a worker pane runs members/g0.md
-wave = "w1"
+topology = "solo"
+brief = "Wave 1 of nested-wakes: prove the substrate before the child program runs. Write one line READY to result.md in your working directory (your cwd)."
 
-[[step]]
-id = "sub"
-finished_by = "wake"               # a child rail runs child/ — no pane
-folder = "./child"
-wave = "w2"
+[[stage]]
+id = "room"
+topology = "coworker"
+
+[[stage.members]]
+name = "first"
+initiates = true
+brief = "You are the first half of the child program. Write one line CHILD-RAN to result.md in your working directory (your cwd), then message your peer second with: ran."
+
+[[stage.members]]
+name = "second"
+brief = "You are the second half of the child program. When the relayed note from first arrives, reply to first with: acknowledged — then write the stop message with a one-line summary: the child program ran."
 
 [report]
 where = "units/"

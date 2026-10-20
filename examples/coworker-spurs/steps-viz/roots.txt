@@ -1,5 +1,0 @@
-~/work/agentic-os/ui-drag
-~/.local/share/agentic-os
-~/.config/opencode/skills
-~/.vista
-~/.local/bin

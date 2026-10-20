@@ -1,10 +1,11 @@
-# hand-off — a two-hop chain: the top spur drafts, delegates the
-# review to a whole child program, and that child delegates the
-# publishing one level further down. Each parent step finishes on its
-# child's wake (booked wait — no pane watches the child), so the chain
-# runs three rails deep and wakes ripple back up: publish wakes
-# review's step, review's report wakes hand-off's step. nested-wakes
-# (fan-out-spurs/) shows one hop; this is the chain.
+# hand-off — a two-link chain that hands work to a delegated exchange:
+# the draft stage's worker writes the note, then the review stage's
+# members (check, publish) are minted into a whole CHILD coworker
+# program under stages/review/ and levied once — the parent books
+# itself as spawner (booked wait — no pane watches the child), and the
+# child's wake receipt settles the review link. The retired [[step]]
+# wake chain spelled this with three rails and authored child programs
+# by hand; the stage grammar is one rail, the children minted.
 #   run it:  whl run hand-off --from <tool>:<session-id>
 #            (or --unattended when nobody waits for the wake)
 [workflow]
@@ -12,21 +13,23 @@ name = "hand-off"
 worker_kind = "opencode"
 slots = 1
 
-[hooks]
-units = "true"                 # steps define the units (ADR 0007)
-grade = "bash hooks/grade.sh"
-counts = "node -p \"JSON.stringify({units: 2})\""
-
-[[step]]
+[[stage]]
 id = "draft"
-finished_by = "end"            # a worker pane runs members/draft.md
-wave = "w1"
+topology = "solo"
+brief = "Wave 1 of hand-off: draft the note the chain will carry down. Write one line DRAFTED to result.md in your working directory (your cwd)."
 
-[[step]]
+[[stage]]
 id = "review"
-finished_by = "wake"           # a child rail runs review/ — no pane
-folder = "./review"
-wave = "w2"
+topology = "coworker"
+
+[[stage.members]]
+name = "check"
+initiates = true
+brief = "You are check, the reviewer of the exchange. The parent chain drafted a note (the draft stage's deliverable). Write one line CHECKED to result.md in your working directory (your cwd), then message your peer publish: the draft is checked, publish it."
+
+[[stage.members]]
+name = "publish"
+brief = "You are publish, the signer of the exchange. When the relayed note from check arrives, write one line PUBLISHED to result.md in your working directory (your cwd), then write the stop message with a one-line summary: the note is published."
 
 [report]
 where = "units/"

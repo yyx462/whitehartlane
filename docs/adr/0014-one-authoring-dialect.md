@@ -1,8 +1,8 @@
 # ADR 0014 — one authoring dialect
 
-Date: 2026-10-20 · Status: accepted (slice 1 landed #176; slice 2 — the
-dialect's engine — landed; the museum conversion is the stated next
-slice)
+Date: 2026-10-20 · Status: accepted — EXECUTED (slice 1 landed #176;
+slice 2 — the dialect's engine — landed #183; slice 3 — the museum
+conversion — landed)
 
 ## Context
 
@@ -35,7 +35,22 @@ evidence (the levy surface mints `[[stage]]`; the ops tree is clean).
 Refusal beats silence: every retired spelling is answered with the fix
 named, never a silent behavior change. `web/server.mjs` still renders
 `[[step]]`/spur manifests of HISTORICAL run dirs (its own parser) —
-the viewer keeps its history. The in-tree museum — `test/e2e/*`'s
-retired-spelling programs and the `examples/*-spurs` dirs — is inert
-(every spelling it holds is now refused at the door or at load) and
-converts to stage chains in the stated next slice.
+the viewer keeps its history. The museum CONVERTED (slice 3):
+`test/e2e/*`'s programs and the chain-shaped `examples/*-spurs`
+programs are `[[stage]]` chains (worker briefs inline; the e2e battery
+runs against them unchanged — `test/e2e/run-battery.sh`), and the
+museum pieces with no honest stage spelling are gone: the bare
+step-file specimen (`lab-spurs/lab-program`), the world-sourced
+auto-responder (`lab-spurs/inbox-zero` — its custom signal + human
+veto + requeue rode task-level detectors the delegated child cannot
+carry), the units-hook example (`fan-out-spurs/three-lookups`, whose
+living form is `test/fixtures/three-lookups`), and the screenshot-era
+coworker shells that had no member briefs at all (`steps-viz`,
+`ui-theme`, `ui-pause`, `ui-window`). Pure-exchange programs stay in
+their native shape — `kind = "coworker"` with `[members.*]`, the shape
+a coworker stage mints as its child; the run door's own refusal is
+fan-out-only by design ("coworker carries members, a lab its actor;
+neither needs stages" — `src/doors/run.ts`). `test/corpus.test.ts`
+pins the corpus: every `workflow.toml` under `examples/` and
+`test/e2e/` parses as a manifest, declares its workers as stages when
+fan-out-shaped, and holds no retired spelling.

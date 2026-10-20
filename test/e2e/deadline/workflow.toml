@@ -5,9 +5,13 @@ worker_kind = "opencode"
 deadline_ms = 90000
 
 [hooks]
-units = "bash hooks/units.sh"
 grade = "bash hooks/grade.sh"
 counts = "bash hooks/counts.sh"
+
+[[stage]]
+id = "never"
+topology = "solo"
+brief = "Step 1: run exactly: sleep 3600. Do nothing else. This unit is DESIGNED to hit the run's deadline — being killed by the deadline here is the CORRECT outcome, not a failure."
 
 [report]
 where = "units/"

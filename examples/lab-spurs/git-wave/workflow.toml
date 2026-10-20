@@ -1,19 +1,33 @@
-# git-wave — the program owns its world's detectors, the OS owns tick.
-# A wave is whatever signal.mjs says it is; a student ends however
-# end.mjs says it ends; await-review finishes when review.mjs prints
-# done. Absent these, the OS defaults (protocol.json, log.txt) run.
+# git-wave — the experiment as one chain link: ONE mind (the actor,
+# briefed by the stage's brief → stages/git-wave/actor.md) composes
+# student waves at runtime; the stage's `end` detector (inline — a
+# delegated child carries no hooks folder, so detectors are
+# self-contained commands) reads each student's finish off the
+# deliverable itself. Absent `signal`, the OS default runs: the actor's
+# protocol.json names each wave. The retired shape (spur.mjs steps +
+# the [gates] await-review table) is deleted with its dialect — the
+# review verdict is now the actor's own stop: finish only what you
+# would approve.
+#   run it:  whl run git-wave --from <tool>:<session-id>
+#            (or --unattended when nobody waits for the wake)
 [workflow]
 name = "git-wave"
 worker_kind = "opencode"
 
-[hooks]
-units = "node hooks/true.mjs"
-grade = "node hooks/true.mjs"
-counts = "node hooks/counts.mjs"
+[[stage]]
+id = "git-wave"
+topology = "lab"
+brief = '''
+Teach by waves over one repository. Each round: write protocol.json
+naming 2-3 fresh students; each student's brief is EXACTLY this shape,
+nothing more:
+  "Run git log --oneline -5 in the run directory. Write the output
+   verbatim to result.md in your working directory, then finish."
+You will be prompted when a wave closes. Read the students' results;
+run up to three waves, then write review-approved (one line: the waves
+are reviewed) in this directory and finish with {"stop":true}.
+'''
+end = "e() { test -s units/$1/result.md && echo done || true; }; e"
 
-[detectors]
-signal = "node hooks/signal.mjs"
-end = "node hooks/end.mjs"
-
-[gates]
-await-review = "node hooks/review.mjs"
+[report]
+where = "units/"
