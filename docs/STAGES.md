@@ -35,7 +35,12 @@ at once). Concurrency = `[workflow] slots`.
 **coworker** — roles that must TALK. Delegates: members are minted into
 a child coworker program under `stages/<id>/` and levied once via the
 wake machinery; the child's wake receipt (plus the stage's `check`)
-settles the stage. No worker pane is born in the parent rail.
+settles the stage. The minted child DECLARES its kind (`kind =
+"coworker"`, like a lab child's `kind = "lab"`): the run door
+classifies a kind-less manifest as fan-out and refuses a stage-less
+fan-out (ADR 0014) — the declaration is the mint's first line, for
+both delegated topologies (receipt j-5c1861). No worker pane is born
+in the parent rail.
 
 **gate** — no workforce at all: the rail itself executes `run`, once,
 at the frontier. Pass opens the next link; fail blocks the chain. This

@@ -103,14 +103,16 @@ child at the levy); the negotiate and scout stages' `check` hooks
 booking (`wakes/<id>.json`) and land the child's artifacts in the
 parent `data/` — the grade gate judges everything parent-side.
 
-KNOWN SEAM (receipted 2026-10-20, j-5c1861 — NOT patched here; the
-scope fence is the experiment): a coworker stage's minted child
+SEAM FOLDED (receipted 2026-10-20, j-5c1861; folded rail-side, the
+mint's one line plus its pin): a coworker stage's minted child
 (`stages/<id>/workflow.toml`, minted by src/engines/orchestrator.ts)
-carries no `kind = "coworker"` line, so the run door refuses it as a
-stage-less fan-out ("no [[stage]] entries"). The declaration is sound —
+used to carry no `kind` line, so the run door refused it as a stage-less
+fan-out ("no [[stage]] entries"). The mint now writes the kind marker
+for BOTH delegated topologies — `kind = "coworker"` / `kind = "lab"` —
+as its first line, pinned in test/stages.test.ts at the mint's own
+tests (the lab pin existed; the coworker pin did not, which is exactly
+how the seam survived #176's door). The declaration was always sound —
 loadManifest parses it (corpus pin), the mint mints it, the chain
-compiles it; the fix is rail-side (the mint writes the kind marker, as
-it already does for labs — pinned for labs in test/stages.test.ts, and
-unpinned for coworker, which is exactly how the seam survived). The
-rehearsal seats both delegated stages through the levy port the test
-suite itself uses; the REAL run lands when §1 re-opens on this receipt.
+compiles it. The rehearsal seats both delegated stages through the
+levy port the test suite itself uses; the REAL ≤30-min run is the
+graduation exercise (ops-side, the driver's eval lane).
