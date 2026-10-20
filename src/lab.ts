@@ -324,7 +324,7 @@ export async function runLab(
       if (!end && !flight.carried && Date.now() - flight.spawnedAt > graceMs && !rail.paneAlive(paneName("mock", id))) {
         end = "dead"
       }
-      if (!end && !flight.carried && rail.agentStatus(paneName("mock", id)).includes('"agent_status":"blocked"')) {
+      if (!end && !flight.carried && rail.workerStatus(paneName("mock", id)) === "blocked") {
         end = "blocked"
       }
       return { id, end }
@@ -364,7 +364,7 @@ export async function runLab(
       // the boundary: no mock in flight (every pane-holding flight
       // closed; carried ones run nothing) and the actor not mid-turn
       const inFlight = ends.some((row) => row.end === null && !flights.get(row.id)?.carried)
-      const actorWorking = rail.agentStatus("actor").includes('"agent_status":"working"')
+      const actorWorking = rail.workerStatus("actor") === "working"
       if ((!inFlight && !actorWorking) || (drainUntil !== null && Date.now() > drainUntil)) {
         parked = true
         break

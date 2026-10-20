@@ -18,7 +18,7 @@ import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } f
 import { isProviderFault, parseModelRef } from "./model-ladder.ts"
 import { landMockUnit, loadManifest, type Layout, type Manifest } from "./hooks.ts"
 import { drop, note, place, type Board } from "./lanes.ts"
-import { paneLabeler, runIdFor, type ShepPort } from "./orchestrator.ts"
+import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "./orchestrator.ts"
 import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "./permission.ts"
 import type { Report } from "./report.ts"
 import {
@@ -720,25 +720,23 @@ export class Rail implements ShepPort {
     return this.herdr("agent", "get", this.scopedFn(name)).status === 0
   }
 
-  // Heartbeat of last resort (j-964391): herdr's own view of the pane.
-  agentWorking(name: string): boolean {
-    return this.agentState(name).includes('"agent_status":"working"')
+  // ONE parser for herdr's `agent get` stdout — every status question
+  // in the rail goes through it (the liveness consolidation: the four
+  // former spellings — agentWorking, paneBlocked, the raw agentStatus
+  // greps — are deleted; one verb, workerStatus, answers all of them).
+  private parseStatus(stdout: string): AgentStatus {
+    if (stdout.includes('"agent_status":"working"')) return "working"
+    if (stdout.includes('"agent_status":"blocked"')) return "blocked"
+    if (stdout.includes('"agent_status":"idle"') || stdout.includes('"agent_status":"done"')) return "idle"
+    return "unknown"
   }
 
   // completion-detection: the pane's own verdict, parsed once — the
   // status-first settle lane keys on idle ("done" folds to idle: both
   // mean the turn ended); anything else is unknown = the fallback
-  // ladder. agentState returns raw `agent get` stdout.
-  workerStatus(name: string): "working" | "idle" | "blocked" | "unknown" {
-    const st = this.agentState(name)
-    if (st.includes('"agent_status":"working"')) return "working"
-    if (st.includes('"agent_status":"blocked"')) return "blocked"
-    if (st.includes('"agent_status":"idle"') || st.includes('"agent_status":"done"')) return "idle"
-    return "unknown"
-  }
-
-  paneBlocked(name: string): boolean {
-    return this.agentState(name).includes('"agent_status":"blocked"')
+  // ladder.
+  workerStatus(name: string): AgentStatus {
+    return this.parseStatus(this.agentState(name))
   }
 
   reprompt(name: string, briefPath: string): boolean {
@@ -879,7 +877,7 @@ export class Rail implements ShepPort {
   answerPermission(name: string): "allow" | "deny" | "none" | "capped" {
     const label = this.scopedName(name)
     const state = this.herdr("agent", "get", label).stdout
-    if (!state.includes('"agent_status":"blocked"')) return "none"
+    if (this.parseStatus(state) !== "blocked") return "none"
     return this.answerDialog(label)
   }
 
@@ -956,7 +954,8 @@ export class Rail implements ShepPort {
     let flushed = 0
     for (const [held, note] of this.pendingNote) {
       const st = this.herdr("agent", "get", held).stdout
-      if (st.includes('"agent_status":"blocked"') || st.includes('"agent_status":"working"')) continue
+      const ps = this.parseStatus(st)
+      if (ps === "blocked" || ps === "working") continue
       if (this.herdr("agent", "prompt", held, note).status === 0) {
         this.pendingNote.delete(held)
         this.log(`injected queued note into ${held}`)
@@ -990,7 +989,7 @@ export class Rail implements ShepPort {
     const capped = new Set<string>()
     for (const label of [...this.mine]) {
       const st = this.herdr("agent", "get", label).stdout
-      if (!st.includes('"agent_status":"blocked"')) continue
+      if (this.parseStatus(st) !== "blocked") continue
       const verdict = this.answerDialog(label)
       const name = this.unscopedOf.get(label) ?? label
       answered.add(name)
@@ -1012,11 +1011,6 @@ export class Rail implements ShepPort {
   // Engines prompt panes by name; the runner behind it is the seam.
   promptAgent(name: string, text: string): RunnerResult {
     return this.herdr("agent", "prompt", this.scopedFn(name), text)
-  }
-
-  // Raw `agent get` stdout — engines grep agent_status from it.
-  agentStatus(name: string): string {
-    return this.agentState(name)
   }
 
   // Latest session message whose error.type is a provider budget fault.

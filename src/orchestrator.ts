@@ -18,6 +18,8 @@ import { writeReport, type Report, type ReportRow } from "./report.ts"
 import { findJobByDir } from "./store.ts"
 import { checkpoint, readState, settle, writeUnitsSnapshot } from "./state.ts"
 
+export type AgentStatus = "working" | "idle" | "blocked" | "unknown"
+
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
   spawnWorker: (name: string, kind: string, briefPath: string, cwd: string, model?: string) => boolean
@@ -37,16 +39,13 @@ export type ShepPort = {
     model?: string,
   ) => boolean
   paneAlive: (name: string) => boolean
-  // Heartbeat of last resort (j-964391): a worker mid-generation or a
-  // long bash call writes neither log lines nor file churn for minutes
-  // while being fully alive — herdr's agent_status is the only witness.
-  agentWorking?: (name: string) => boolean
-  // completion-detection: the pane's full verdict, once per beat. The
-  // status-first settle lane keys on "idle" (a turn that ended — "done"
-  // folds there); "unknown" = the pane speaks no status grammar and the
-  // unit rides the fallback ladder. Absent = unknown (old ports,
-  // byte-identical).
-  workerStatus?: (name: string) => "working" | "idle" | "blocked" | "unknown"
+  // completion-detection: the pane's full verdict, once per beat — the
+  // ONE liveness verb (j-964391's witness, promoted from stall
+  // acquittal to completion trigger and sole spelling). "idle" means
+  // the turn ended ("done" folds there); "unknown" = the pane speaks
+  // no status grammar and the unit rides the fallback ladder. Absent
+  // = unknown (old ports, byte-identical).
+  workerStatus?: (name: string) => AgentStatus
   reprompt: (name: string, briefPath: string) => boolean
   retire: (name: string) => void
   retireAll: () => void
@@ -562,7 +561,7 @@ export function cycle(deps: CycleDeps): boolean {
         !existsSync(flight.logPath) &&
         !flight.reprompted &&
         now() - flight.spawnedAt > briefGraceMs &&
-        !deps.shep.agentWorking?.(`w-${id}`) &&
+        paneStatus !== "working" &&
         // status-first: an idle pane with no log is the idle-settle's
         // customer — its evidence reprompt carries the probe; a bare
         // re-brief says nothing the agent can act on
@@ -576,7 +575,7 @@ export function cycle(deps: CycleDeps): boolean {
         // (j-78ca43: 3 of 4 units grace-reprompted at exactly 90s). The
         // heartbeat is the discriminator — a working agent proves its
         // brief landed, so the reprompt waits for an idle pane. Ports
-        // without the heartbeat (agentWorking absent) keep the old rule.
+        // without the status seam (workerStatus absent) keep the old rule.
         flight.reprompted = true
         const ok = deps.shep.reprompt(`w-${id}`, flight.briefPath)
         if (ok) {
@@ -667,7 +666,7 @@ export function cycle(deps: CycleDeps): boolean {
           // the next silent window (quiet log AND quiet tree) re-arms.
           flight.lastChange = now()
           deps.emit?.("stall-deferred", { unit: id, reason: "worktree churn" })
-        } else if (deps.shep.agentWorking?.(`w-${id}`)) {
+        } else if (paneStatus === "working") {
           // j-964391: mid-generation or a long bash call — quiet log,
           // quiet tree, live agent. The pane's own status is the word.
           flight.lastChange = now()
