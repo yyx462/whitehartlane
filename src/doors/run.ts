@@ -1,17 +1,36 @@
+import { execFileSync } from "node:child_process"
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
-import { contentHashOf, ensureProject, labelsFor, registerSpur, spurIdOf, type SpurIdentity } from "./project.ts"
+import {
+  contentHashOf,
+  duplicateStageIds,
+  ensureProject,
+  labelsFor,
+  registerSpur,
+  relSourceOf,
+  scopeRootOf,
+  spurIdOf,
+  validateSpurId,
+  type SpurIdentity,
+} from "./project.ts"
 import {
   appendEvent,
   createJob,
   eventsPath,
   findOrOpenSession,
+  findSessionByHost,
+  findSessionBySpur,
   listJobs,
+  openSession,
+  stampSpurKey,
   type JobRecord,
+  type Provenance,
+  type SessionRecord,
   type SpawnerPointer,
 } from "../adapters/store.ts"
 
@@ -102,6 +121,72 @@ function copyBeside(source: string, store: string): void {
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
 }
 
+// The lineage resolution, ONE spelling (deep seam: book() and the
+// tests ask the same question). Lookup order: host binding by dir
+// (continuity — a pre-lineage session is adopted and stamped, never
+// forked), then the lineage key, then create. The ONE refusal: same
+// (scope_root, spur_id) answering a different rel_source — two program
+// dirs wearing one name inside one worktree would silently merge two
+// step histories. Different scopes never compare.
+export function resolveLineageSession(
+  dir: string,
+  spurId: string,
+): { session: SessionRecord } | { refuse: string } {
+  const scopeRoot = scopeRootOf(dir)
+  const relSource = relSourceOf(dir, scopeRoot)
+  const byHost = findSessionByHost("whitehartlane", dir)
+  if (byHost) {
+    if (!byHost.spur_key) stampSpurKey(byHost, { scope_root: scopeRoot, spur_id: spurId, rel_source: relSource })
+    return { session: byHost }
+  }
+  const bySpur = findSessionBySpur(scopeRoot, spurId)
+  if (bySpur) {
+    if (bySpur.spur_key && bySpur.spur_key.rel_source !== relSource) {
+      return {
+        refuse: `spur_id "${spurId}" in scope ${scopeRoot} is already claimed by ${bySpur.spur_key.rel_source} (session ${bySpur.id}); this run comes from ${relSource} — rename one spur_id, or run it from its own worktree`,
+      }
+    }
+    return { session: bySpur }
+  }
+  const session = openSession({ cwd: dir, host: { tool: "whitehartlane", session_id: dir } })
+  stampSpurKey(session, { scope_root: scopeRoot, spur_id: spurId, rel_source: relSource })
+  return { session }
+}
+
+// Provenance, best-effort and never a gate: which whl ran it (the
+// door's own commit), which model the workflow declares, and which
+// commit the program's repo sat on. The f313a23c pair — two runs, one
+// content_hash, different work — taught why: the program text alone
+// does not identify a run; its surroundings do.
+function provenanceOf(dir: string): Provenance {
+  const p: Provenance = {}
+  try {
+    const wf = loadManifest(dir).workflow as Record<string, unknown>
+    if (typeof wf.model === "string") p.model = wf.model
+    if (typeof wf.worker_kind === "string") p.worker_kind = wf.worker_kind
+  } catch {
+    /* a scaffolded program has no manifest — nothing to record */
+  }
+  try {
+    const doorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
+    p.door_commit = execFileSync("git", ["-C", doorRoot, "rev-parse", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+  } catch {
+    /* a released install is not a git checkout */
+  }
+  try {
+    p.repo_head = execFileSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+  } catch {
+    /* program folders often sit outside any repo */
+  }
+  return p
+}
+
 function book(
   dir: string,
   kind: WorkflowKind,
@@ -119,21 +204,13 @@ function book(
   if (!admission.admit) {
     return { ok: false, why: admission.why ?? "policy rejected", code: 1 }
   }
-  const { session } = findOrOpenSession({
-    cwd: dir,
-    host: { tool: "whitehartlane", session_id: dir },
-  })
-  const running = listJobs(session.id).filter((job) => job.state === "running").length
-  const another = admitAnotherJob(running)
-  if (!another.admit) {
-    appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: kind })
-    return { ok: false, why: another.why ?? "a job is already running", code: 1 }
-  }
   const warnings: string[] = [...preWarnings]
-  // spur identity: project pid (minted once into project.json), spur_id
-  // (explicit, else the name, else a hashed id + a loud warning), the
-  // source content hash as the version, branch/worktree as labels.
-  // Paths are never identity; worktrees copy project.json and combine.
+  // ── spur identity FIRST — a session is the spur's lineage, so the
+  // lineage key must exist before any session is opened. project pid
+  // (minted once into project.json), spur_id (explicit, else the name,
+  // else a hashed id + a loud warning), the source content hash as the
+  // version, branch/worktree as labels. Paths are never identity;
+  // worktrees copy project.json and combine.
   const proj = ensureProject(dir)
   if (proj.minted) warnings.push(`no project.json in ${dir} — minted ${proj.pid} and wrote it there`)
   const spurId = spurIdOf({
@@ -155,10 +232,29 @@ function book(
   })
   if (spurId.derived) {
     warnings.push(`no spur_id (and no name) in ${dir} — derived ${spurId.spurId} from content; define workflow.spur_id to group runs`)
+  } else {
+    const bad = validateSpurId(spurId.spurId)
+    if (bad) return { ok: false, why: bad, code: 1 }
+  }
+  const dupStages = duplicateStageIds(dir)
+  if (dupStages.length > 0) {
+    return { ok: false, why: `duplicate stage id(s) in workflow.toml: ${dupStages.join(", ")} — rename one`, code: 1 }
   }
   const version = contentHashOf(dir)
   const dup = registerSpur(proj.pid, spurId.spurId, version, dir)
   if (dup) warnings.push(dup)
+  // ── the session is the spur's lineage, scoped by the commissioning
+  // worktree (the Airflow dag_id rule, scoped: uniqueness is only ever
+  // enforceable per worktree, because worktrees copy program folders).
+  const lineage = resolveLineageSession(dir, spurId.spurId)
+  if ("refuse" in lineage) return { ok: false, why: lineage.refuse, code: 1 }
+  const session = lineage.session
+  const running = listJobs(session.id).filter((job) => job.state === "running").length
+  const another = admitAnotherJob(running)
+  if (!another.admit) {
+    appendEvent(session.id, { actor: "cli", kind: "reject", why: another.why, workflow: kind })
+    return { ok: false, why: another.why ?? "a job is already running", code: 1 }
+  }
   // Issue #121 — the staging probe: grammar-check the hooks this run
   // will actually call, on sample inputs, BEFORE the job is booked or
   // any pane is born. j-64e035: a counts hook that cannot speak the
@@ -195,6 +291,7 @@ function book(
     task,
     runDir: true,
     spur,
+    provenance: provenanceOf(dir),
   })
   stage(job.dir)
   appendEvent(session.id, { actor: "cli", kind: "admit", jid: job.id, workflow: kind })

@@ -6,10 +6,10 @@
 // never identity. Paths are never identity: move the folder, the
 // trace continues.
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, join } from "node:path"
-
+import { basename, dirname, join, relative } from "node:path"
 export type SpurIdentity = {
   project: string
   project_name: string
@@ -85,10 +85,14 @@ export function ensureProject(
 
 // spur_id: explicit in workflow.toml, else the workflow name, else a
 // content hash with a loud warning — grouping never silently falls
-// apart, and it always exists.
+// apart, and it always exists. A name only SERVES as an id when it
+// passes the id grammar (a path-laden task line is a name, not a
+// lineage key): otherwise the hash branch answers, loudly.
 export function spurIdOf(input: { spurId?: string; name?: string; toml: string }): { spurId: string; derived: boolean } {
   if (input.spurId && input.spurId.trim()) return { spurId: input.spurId.trim(), derived: false }
-  if (input.name && input.name.trim()) return { spurId: input.name.trim(), derived: false }
+  if (input.name && input.name.trim() && validateSpurId(input.name.trim()) === null) {
+    return { spurId: input.name.trim(), derived: false }
+  }
   return { spurId: `spur-${createHash("sha1").update(input.toml).digest("hex").slice(0, 8)}`, derived: true }
 }
 
@@ -139,6 +143,78 @@ export function labelsFor(dir: string): Record<string, string> {
   return labels
 }
 
+// The scope root — the commissioning worktree. The registry is scoped
+// by it (paths scope the registry, they are never identity): git's own
+// worktree top when the program sits in a repo, else the program dir
+// ITSELF — a scope models a worktree, and where there is no worktree
+// there is nothing for a neighbor's spur_id to collide with (a copied
+// program folder outside git is its own scope, its own lineage — the
+// same session-per-dir continuity the host binding always gave).
+// realpath first — a symlinked or /private-aliased path must not become
+// two scopes. Best-effort: no git, no error, dir wins.
+export function scopeRootOf(dir: string): string {
+  let real = dir
+  try {
+    real = realpathSync(dir)
+  } catch {
+    /* keep dir */
+  }
+  try {
+    const top = execFileSync("git", ["-C", real, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
+    if (top) return realpathSync(top)
+  } catch {
+    /* not a repo — the dir is its own scope */
+  }
+  return real
+}
+
+// A spur_id is a lineage name worn for its whole life — refuse at the
+// door what cannot be typed, keyed, or grepped later. Derived ids
+// (spur-<hash>) pass by construction; only explicit ones are checked.
+export function validateSpurId(id: string): string | null {
+  if (id !== id.trim()) return `spur_id "${id}" has surrounding whitespace`
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+    return `spur_id "${id}" must match ^[a-z0-9][a-z0-9-*$] (lowercase, digits, dashes)`
+  }
+  if (id.length > 64) return `spur_id "${id}" longer than 64 chars`
+  return null
+}
+
+// rel_source: the program dir relative to its scope root, realpathed —
+// /tmp and /private/tmp must not spell two sources. The only path ever
+// COMPARED, and only within one scope.
+export function relSourceOf(dir: string, scopeRoot: string): string {
+  let real = dir
+  try {
+    real = realpathSync(dir)
+  } catch {
+    /* keep dir */
+  }
+  return relative(scopeRoot, real) || "."
+}
+
+// Duplicate [[stage]] ids in one workflow.toml are Airflow's
+// duplicate-task-id refusal: two stages answering one name would merge
+// two step histories silently. Refuse at the door, where the fix is a
+// one-line rename instead of a corrupted trace.
+export function duplicateStageIds(dir: string): string[] {
+  try {
+    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
+    const ids: string[] = []
+    const seen = new Set<string>()
+    const dup = new Set<string>()
+    for (const m of toml.matchAll(/^\s*\[\[stage\]\]([\s\S]*?)(?=^\s*\[\[|\s*$)/gm)) {
+      const id = m[1].match(/^\s*id\s*=\s*"([^"]+)"/m)?.[1]
+      if (!id) continue
+      ids.push(id)
+      if (seen.has(id)) dup.add(id)
+      seen.add(id)
+    }
+    return [...dup]
+  } catch {
+    return []
+  }
+}
 // duplicate protection (light, by request): the same spur_id under one
 // project showing different content from a different path deserves a
 // loud warning — never a refusal. Versions accumulate.

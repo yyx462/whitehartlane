@@ -119,11 +119,22 @@ test("a Job's life is events; the record is a faithful projection", () => {
     [true, true],
   )
 
-  // the trace itself is ordered and append-only
+  // the trace itself is ordered and append-only — stage.started is the
+  // BEFORE half of each unit's bracket (the dur_ms partner)
   const kinds = readEvents(session.id).map((e) => e.kind)
   assert.deepEqual(
     kinds.filter((k) => k !== "route"),
-    ["job.born", "pane.born", "pane.born", "unit.finished", "pane.died", "pane.died", "job.retired"],
+    [
+      "job.born",
+      "stage.started",
+      "pane.born",
+      "stage.started",
+      "pane.born",
+      "unit.finished",
+      "pane.died",
+      "pane.died",
+      "job.retired",
+    ],
   )
 })
 
