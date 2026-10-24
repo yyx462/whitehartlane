@@ -21,6 +21,10 @@ on the transcript, then delivery).
 
 ## Levy
 
+`roots.txt` declares the subject (the repo path the briefs name) — the
+door refuses a run whose briefs name paths no root covers; edit it to
+interview a different checkout.
+
 ```
 cd test/e2e/whl-interview
 AGENTIC_OS_RELAY_CAP=140 <repo>/bin/whl run . --from opencode:<sid>
