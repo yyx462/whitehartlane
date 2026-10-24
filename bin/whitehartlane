@@ -36,6 +36,7 @@ import {
   eventsPath,
   failJob,
   findOrOpenSession,
+  findSessionBySpur,
   homeRoot,
   killPane,
   leaseExpired,
@@ -48,7 +49,11 @@ import {
   saveJob,
   wakeAudit,
 } from "../src/adapters/store.ts"
+import { contentHashOf, duplicateStageIds, relSourceOf, scopeRootOf, spurIdOf, validateSpurId } from "../src/doors/project.ts"
+import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
+import { jobTracePath, renderTraceTable } from "../src/adapters/trace.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
+import { resolve } from "node:path"
 
 // "90s", "2m", "1h", "5000" (ms) — the pause --wait one-shot ceiling.
 function parseDuration(raw) {
@@ -277,6 +282,20 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   }
 
   if (cmd === "events") {
+    // --job <jid>: the per-job TSV trace, rendered as the fixed table —
+    // `column -t -s$'\t'` shape, straight from the file. The bare form
+    // stays the JSONL fold dump (the internal trace).
+    const jobFlag = process.argv.indexOf("--job")
+    if (jobFlag !== -1 && process.argv[jobFlag + 1]) {
+      const jid = process.argv[jobFlag + 1]
+      const owner = jobs.find((j) => j.id === jid)
+      if (!owner) {
+        console.error(`no job ${jid} on the OS disk`)
+        process.exit(1)
+      }
+      console.log(renderTraceTable(jobTracePath(owner.sid, jid)))
+      return
+    }
     const sid = process.argv[3]
     const streams = sid ? [{ sid, events: readEvents(sid) }] : readAllEvents()
     let total = 0
@@ -287,6 +306,65 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       total += events.length
     }
     console.log(`events: ${total} across ${streams.filter((x) => x.events.length).length} session(s)`)
+    return
+  }
+
+  if (cmd === "validate") {
+    // The dry-run door: everything run would check about a program, no
+    // job booked, nothing run. CI-shaped by design — exit 0 is the
+    // only silence.
+    const folder = process.argv[3]
+    if (!folder) {
+      console.error("usage: whitehartlane validate <program-folder>")
+      process.exit(2)
+    }
+    const dir = resolve(folder)
+    const problems = []
+    const notes = []
+    if (!existsSync(dir)) problems.push(`no such folder: ${dir}`)
+    if (!problems.length && !existsSync(join(dir, "workflow.toml"))) {
+      problems.push("no workflow.toml — a program is workflow.toml with [[stage]] entries (ADR 0014)")
+    }
+    if (!problems.length) {
+      let spurId = ""
+      try {
+        const manifest = loadManifest(dir)
+        const wf = manifest.workflow
+        const spur = spurIdOf({
+          spurId: typeof wf.spur_id === "string" ? wf.spur_id : undefined,
+          name: String(wf.name ?? ""),
+          toml: readFileSync(join(dir, "workflow.toml"), "utf8"),
+        })
+        spurId = spur.spurId
+        if (spur.derived) notes.push(`spur_id derived from content (${spur.spurId}) — define workflow.spur_id to group runs`)
+        else {
+          const bad = validateSpurId(spur.spurId)
+          if (bad) problems.push(bad)
+          else notes.push(`spur_id ${spur.spurId}`)
+        }
+      } catch (err) {
+        problems.push(err instanceof Error ? err.message : String(err))
+      }
+      const dupStages = duplicateStageIds(dir)
+      if (dupStages.length > 0) problems.push(`duplicate stage id(s): ${dupStages.join(", ")}`)
+      try {
+        const refusals = probeHooks(dir, loadManifest(dir))
+        for (const r of refusals) problems.push(`hook probe: ${r}`)
+      } catch (err) {
+        problems.push(err instanceof Error ? err.message : String(err))
+      }
+      const scopeRoot = scopeRootOf(dir)
+      notes.push(`scope ${scopeRoot}`)
+      notes.push(`rel_source ${relSourceOf(dir, scopeRoot)}`)
+      notes.push(`content_hash ${contentHashOf(dir)}`)
+      if (spurId) {
+        const existing = findSessionBySpur(scopeRoot, spurId)
+        if (existing) notes.push(`lineage session ${existing.id} (rel_source ${existing.spur_key?.rel_source})`)
+      }
+    }
+    for (const n of notes) console.log(`ok   ${n}`)
+    for (const p of [...new Set(problems)]) console.error(`REFUSED ${p}`)
+    if (problems.length) process.exit(1)
     return
   }
 

@@ -13,6 +13,7 @@ import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
 import { backoffBase, backoffMs, retries, sleepSync } from "./backoff.ts"
 import { opencodeSessionTitle } from "./transcripts.ts"
+import { emitTrace } from "./trace.ts"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
@@ -123,6 +124,13 @@ export type JobRecord = {
   repo?: string
   worktree?: string
   spur?: SpurIdentity
+  provenance?: {
+    model?: string
+    worker_kind?: string
+    door_commit?: string
+    repo_head?: string
+    inputs?: Record<string, string>
+  }
   state: JobState
   created: string
   finished?: string
@@ -162,6 +170,13 @@ export type SessionRecord = {
   repo?: string
   worktree?: string
   host?: HostBinding
+  // The lineage key (ADR 0009 + the session-as-lineage ruling): a
+  // session is the SPUR's whole life across runs. scope_root is the
+  // commissioning worktree (paths scope the registry, they are not
+  // identity); rel_source is the program dir relative to it — the only
+  // path ever COMPARED, and only within one scope. Two worktree copies
+  // of one program are two scopes, two sessions, never an error.
+  spur_key?: { scope_root: string; spur_id: string; rel_source: string }
 }
 
 export type OsEvent = {
@@ -251,6 +266,23 @@ export function saveSession(session: SessionRecord): void {
   writeJson(join(sessionDir(session.id), "session.json"), session)
 }
 
+// The lineage lookup: one (scope_root, spur_id) pair answers at most
+// one session — that pair IS the Airflow-style uniqueness key, and the
+// collision question (same key, different rel_source) is the caller's
+// to refuse, never this finder's to merge.
+export function findSessionBySpur(scopeRoot: string, spurId: string): SessionRecord | null {
+  for (const s of listSessions()) {
+    if (s.spur_key && s.spur_key.scope_root === scopeRoot && s.spur_key.spur_id === spurId) return s
+  }
+  return null
+}
+
+export function stampSpurKey(session: SessionRecord, key: { scope_root: string; spur_id: string; rel_source: string }): SessionRecord {
+  session.spur_key = key
+  saveSession(session)
+  return session
+}
+
 export function loadSession(sid: string): SessionRecord | null {
   const path = join(sessionDir(sid), "session.json")
   return existsSync(path) ? readJson<SessionRecord>(path) : null
@@ -298,6 +330,11 @@ export function appendEvent(sid: string, event: Omit<OsEvent, "ts" | "sid"> & { 
   const full: OsEvent = { ts: ts ?? new Date().toISOString(), sid, ...rest }
   mkdirSync(sessionDir(sid), { recursive: true })
   appendFileSync(eventsPath(sid), `${JSON.stringify(full)}\n`)
+  // the same fact, in the queryable shape: fixed-column TSV, routed by
+  // scope (job file for run detail, session file for lineage). The
+  // JSONL above stays the orchestrator's internal fold input; this
+  // surface is what readers sort/join/display. Best-effort by contract.
+  emitTrace(sid, full as unknown as Record<string, unknown>)
   return full
 }
 
@@ -325,6 +362,19 @@ export function readAllEvents(): { sid: string; events: OsEvent[] }[] {
 
 // -- jobs (records are projections of events) -----------------------------------
 
+// Provenance (the f313a23c lesson): two runs of one program carried the
+// same content_hash while doing different work, because the program
+// text only POINTS at its inputs. A run is only reproducible — and a
+// skip only safe — when the trace names which whl, which model, and
+// which repo HEAD executed it.
+export type Provenance = {
+  model?: string
+  worker_kind?: string
+  door_commit?: string
+  repo_head?: string
+  inputs?: Record<string, string>
+}
+
 export function createJob(input: {
   sid: string
   stoodUpBy: StoodUpBy
@@ -337,6 +387,7 @@ export function createJob(input: {
   worktree?: string
   spur?: SpurIdentity
   spawner?: SpawnerPointer
+  provenance?: Provenance
 }): JobRecord {
   const id = shortId("j")
   const job: JobRecord = {
@@ -351,6 +402,7 @@ export function createJob(input: {
     worktree: input.worktree,
     spur: input.spur,
     spawner: input.spawner,
+    provenance: input.provenance,
     state: "running",
     created: new Date().toISOString(),
     panes: [],
@@ -362,6 +414,7 @@ export function createJob(input: {
     dir: job.dir,
     task: job.task,
     ...(job.spur ? { spur: job.spur } : {}),
+    ...(input.provenance ? { provenance: input.provenance } : {}),
   })
   writeJson(join(jobDir(input.sid, job.id), "job.json"), job)
   return job
@@ -384,6 +437,14 @@ export function attachPane(
     const born = new Date().toISOString()
     job.panes.push({ born, ...pane })
     saveJob(job)
+    // the BEFORE half of the bracket (the 23:41:57 lesson): a pane is
+    // booked before the side effect runs, so a death mid-stage leaves
+    // "started, never finished" — the trace points at the death spot.
+    // In the TSV trace this line is what unit.finished computes its
+    // dur_ms against.
+    if (pane.unit) {
+      appendEvent(job.sid, { actor: "orchestrator", kind: "stage.started", jid: job.id, stage: pane.unit, obj: pane.label, task: job.task })
+    }
     appendEvent(job.sid, {
       actor: "orchestrator",
       kind: "pane.born",
