@@ -12,31 +12,35 @@ turn-contract block. The product is TWO DOCUMENTS, not a chat log:
   able to explain admission/JEV and pane supervision from it alone.
 - `gaps.md` — every gap that SURVIVED the author's one rebuttal pass,
   ranked, each with the question that exposed it and the next design
-  question. **At least one gap must stand**: the audit gate fails a run
-  whose interviewer was too soft.
+  question. **At least one gap must stand**: a run whose interviewer
+  was too soft FAILS at the audit.
 
-Chain: `interview` (coworker: interviewee initiates with the pitch,
-interviewer grades and routes) → `audit` (gate: deterministic verdict
-on the transcript, then delivery).
+Shape: a **pure coworker exchange** (the door's own members-shaped
+spelling). The rail is the supervisor end to end: the relay routes
+every turn, the relay cap bounds it, the member court retires panes,
+and the audit gate is the program's `counts` hook — run at report time,
+absolutized by the door against the source, nonzero exit fails the
+report.
 
 ## Levy
 
 `roots.txt` declares the subject (the repo path the briefs name) — the
 door refuses a run whose briefs name paths no root covers; edit it to
-interview a different checkout.
+interview a different checkout. The member `roots` entries grant the
+panes their read at session start.
 
 ```
 cd test/e2e/whl-interview
 AGENTIC_OS_RELAY_CAP=140 <repo>/bin/whl run . --from opencode:<sid>
 ```
 
-`deadline_ms = 5400000` (90 min) is the run budget; the relay cap
-bounds total turns (~6 topics × ≤6 turns × 2 + pitch + synthesis +
-rebuttal + slack). Both panes pin `glm-5.3` via `[workflow] model`.
+Bounds: the relay cap counts total turns (~6 topics × ≤6 turns × 2 +
+pitch + synthesis + rebuttal + slack); the coworker engine carries its
+own 2h deadline. Both panes pin `glm-5.3` via `[workflow] model`.
 
 Standalone, zero tokens, no whl — prove the gate CHECKS rather than
-vibes (golden exchange passes; six doctored copies each fail for the
-reason the check exists):
+vibes (golden exchange passes with a JSON counts line; six doctored
+copies each fail for the reason the check exists):
 
 ```
 bash hooks/audit-selftest.sh
@@ -46,28 +50,34 @@ bash hooks/audit-selftest.sh
 
 | brief concept | the spelling here |
 |---|---|
-| supervisor = whl itself, no model call | the rail: the relay routes every turn (`relayPlan`), `deadline_ms` + the relay cap bound the run, the member court retires panes |
+| supervisor = whl itself, no model call | the rail: the relay routes every turn (`relayPlan`), the relay cap + the engine deadline bound the run, the member court retires panes |
 | separate sessions, no shared context | fresh coworker members; the rail appends the wire protocol to each brief (`memberProtocol`) |
-| different system prompts per pane | the roster briefs (`[[stage.members]]`) — one brief source per mind |
+| different system prompts per pane | the roster briefs (`members/<name>.md`) — one brief source per mind |
 | deterministic topic map + ladder | declared in the interviewer's brief and RE-PINNED deterministically by `hooks/audit.py` (declared order, no revisits, ≤6 turns/topic) |
-| turn contract JSON | a fenced ` ```turn-contract ` block on every interviewer note; schema, enums, one-question law enforced by the audit gate |
-| malformed block → re-ask once → log | mid-flight: the interviewee replies `contract-malformed, please re-send` (brief law); after the wake: `audit.py` fails a run with >2 consecutive malformed blocks and logs every error into `transcript.jsonl` |
-| interviewer read access to check citations | `roots` grants the repo from birth; "only to check citations" is brief discipline — conditional access is not expressible in today's grammar |
-| token budget per run | `deadline_ms` + `AGENTIC_OS_RELAY_CAP` — there is no token field in the grammar; the pins keep turns cheap |
+| turn contract JSON | a fenced ` ```turn-contract ` block on every interviewer note; schema, enums, one-question law enforced by the audit |
+| malformed block → re-ask once → log | mid-flight: the interviewee replies `contract-malformed, please re-send` (brief law); at the audit: >2 consecutive malformed blocks fail the run and every error is logged into `transcript.jsonl` |
+| interviewer read access to check citations | `roots.txt` (the door's scan) + member `roots` (the panes' grant); "only to check citations" is brief discipline — conditional access is not expressible in today's grammar |
+| token budget per run | the relay cap + the engine's 2h deadline — there is no token field in the grammar; the pins keep turns cheap |
 | temperature (interviewer hot, author cold) | NOT expressible — a member pins `provider/model` only; both panes run the same model |
-| outputs under `interviews/<date>/` | members write `data/*.md` in the shared tree; the audit gate (the program's only writer) builds `transcript.jsonl` deterministically and delivers everything to `interviews/<date>/` in the job dir on PASS; set `WHL_INTERVIEW_REPO` to mirror into a repo checkout as `interviews/<date>-<job>/` |
+| audit gate (`check`/gate stage) | the `counts` hook: runs at report time, stdout must be JSON, nonzero exit fails the report — the deterministic verdict rides the same path the rail already absolutizes |
+| outputs under `interviews/<date>/` | members write `data/*.md` in the run tree; the audit builds `transcript.jsonl` deterministically and delivers everything to `interviews/<date>/` on PASS; set `WHL_INTERVIEW_REPO` to mirror into a repo checkout as `interviews/<date>-<job>/` |
 
-Two of those rows are honest gaps, not choices: per-member temperature
-and mid-flight body parsing don't exist in the grammar. The program
-works around both with brief discipline and an ex-post deterministic
-gate; if a real run shows the workaround bending, that is a ticket on
-the door, never a mid-run edit of whl.
+Two honest grammar gaps remain worked around here (per-member
+temperature; mid-flight body parsing — the rail reads envelopes, not
+bodies). Two more were found by the first levy attempts and FILED as
+rail issues, not worked around silently: stage `check`/gate `run`
+commands are never absolutized and `hooks/` is never staged (a
+`[[stage]]` chain cannot run a script check in a real run — receipts
+j-36f78c/j-c93562), and a minted `stages/<id>/` child carries no
+`roots.txt`, so a delegated child whose briefs name outside paths can
+never pass admission. This program is a pure coworker exchange, which
+needs neither.
 
 ## Rubric (done when)
 
-- Every topic ends solid or stands in `gaps.md` — the gate enforces it.
+- Every topic ends solid or stands in `gaps.md` — the audit enforces it.
 - A cold reader can explain admission/JEV and pane supervision from
-  `explained.md` alone — the human grades this line; the gate only
+  `explained.md` alone — the human grades this line; the audit only
   checks that every section carries a surviving citation.
 - At least one gap was news to the maintainer. Zero standing gaps is a
   FAILED run by construction; tighten the interviewer's brief and

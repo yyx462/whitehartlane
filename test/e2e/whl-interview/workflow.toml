@@ -5,151 +5,35 @@
 # — who climbs a fixed five-level ladder over a fixed six-topic map,
 # grades every answer in a JSON turn-contract block, and writes the two
 # deliverables (explained.md, gaps.md). The rail is the supervisor: it
-# routes every turn (relay), bounds the run (deadline + relay cap), and
-# the audit gate judges the transcript DETERMINISTICALLY after the wake
-# — the contract schema, the per-topic ladder stops, the >=1 standing
-# gap, the rebuttal pass. Same topic map, same ladder every run; only
-# the model answers vary.
+# routes every turn (relay), bounds the run (the engine's deadline and
+# the relay cap), and the counts hook — the audit — judges the
+# transcript DETERMINISTICALLY at report time: contract schema, ladder
+# stops, caps, the >=1 standing gap. A red audit fails the report.
+# Same topic map, same ladder every run; only the model answers vary.
+#
+# Shape: a PURE coworker exchange (the door's own members-shaped spelling
+# — "coworker carries members; neither needs stages"). A chain with a
+# script check was tried first and is UNRUNNABLE today (receipts
+# j-36f78c/j-c93562: stage check/run commands are never absolutized and
+# hooks/ is never staged; a minted stages/<id>/ child carries no
+# roots.txt) — those are filed as rail issues; this shape needs neither.
 #   levy:  AGENTIC_OS_RELAY_CAP=140 <repo>/bin/whl run . --from opencode:<sid>
 #   audit standalone: bash hooks/audit-selftest.sh   (no whl, no tokens)
 [workflow]
 name = "whl-interview"
 spur_id = "whl-interview"
+kind = "coworker"
 worker_kind = "opencode"
 model = "zhipuai-coding-plan/glm-5.3"
 slots = 2
 canary = false
-deadline_ms = 5400000
 
-[[stage]]
-id = "interview"
-topology = "coworker"
-check = "bash hooks/accept-exchange.sh"
-
-[[stage.members]]
-name = "interviewee"
+[members.interviewee]
 initiates = true
-brief = '''
-You are playing the AUTHOR of WhiteHartLane (whl) — you know every
-design decision in the repo at ~/projects/Agentic-Workspace/whitehartlane
-(master worktree: the shipped trunk). Your canon: GOAL.md, CONTEXT.md
-(the glossary), docs/prd/OPTIMUM.md (the momentum vector), docs/adr/
-(the design records), docs/STAGES.md, docs/RAILS.md, and the src/ tree
-itself. Read before you claim; never answer from memory.
+roots = ["~/projects/Agentic-Workspace/whitehartlane"]
 
-THE LAW OF THIS INTERVIEW:
-- Every claim carries a citation: `path/file.ts:LINE`, or `functionName
-  in path/file.ts`, or a config key in a named file. A claim without a
-  location is not an answer.
-- When something was never really designed, say exactly: "not designed
-  yet" — and name where its design WOULD live. That is an honest
-  answer, and the only honest one. Never improvise a mechanism you
-  cannot point at.
-- If a relayed question carries no readable turn-contract block, do not
-  answer it: reply once with exactly "contract-malformed, please
-  re-send". Answer the corrected question normally when it arrives.
-- Answers are precise and short. The interviewer will climb from "what"
-  to "how" to "why" to "what breaks" to "what is NOT handled" — meet
-  the level asked. A level-4 (break) question needs failure paths,
-  races, bad input — not a feature description.
+[members.interviewer]
+roots = ["~/projects/Agentic-Workspace/whitehartlane"]
 
-START NOW, before any message arrives: write your pitch to
-../../data/pitch.md (create the folder). One page: what whl is, its
-rails, and an honest map of its load-bearing parts — admission and the
-JEV model ladder, pane supervision (the flight bench and the courts),
-the spur/program grammar, the wake ladder, accounting (the events trace
-and ledgers), and the relay/turn-taking protocol. Flag inside the pitch
-which parts you consider weakest. Then relay the pitch (or its summary
-and the file path) to the interviewer and await questions. Answer each
-question when it arrives, one message per question.
-
-At the END, after synthesis, the interviewer will send you the draft
-gaps list for ONE rebuttal pass: for each gap, either concede ("stands")
-or refute — refutation ONLY with a citation that proves the design
-exists. One message for the whole pass. You write no other files.
-'''
-
-[[stage.members]]
-name = "interviewer"
-brief = '''
-You are a skeptical staff engineer who has NEVER seen this codebase.
-An author just pitched you their system: a shell and supervisor for
-subagent work ("whl"), repo at ~/projects/Agentic-Workspace/whitehartlane
-(master worktree). You may open that repo ONLY to check a citation you
-were just given — look exactly where the author pointed, decide whether
-it says what they claimed, and record that in citation_checked
-(ok | wrong | missing). Do not explore for them; your power is the
-outside view.
-
-Read the pitch at ../../data/pitch.md (your first relay names it). Then
-interview the author over this FIXED topic map, in this order, one
-topic at a time:
-
-  1. admission-jev      — admission gates and the JEV model ladder
-                          (chooser, budgetAction, pins)
-  2. pane-supervision   — the flight bench, the member court, the settle
-                          pen, stall/liveness precedence
-  3. spur-grammar       — the [[stage]] chain, five topologies, refusals,
-                          minting delegated children
-  4. wakes              — the wake ladder, bookings, pause/continue/fork
-  5. accounting         — the events trace, the unit ledger, the relay
-                          ledger, reports and counts
-  6. relay-protocol     — the member wire protocol, turn routing, caps,
-                          why the exchange cannot deadlock
-
-For each topic climb this ladder IN ORDER, one level per turn:
-
-  1 What — what does it do, in one sentence?
-  2 How  — walk the mechanism; the author must cite the code.
-  3 Why  — why THIS design over the obvious alternative?
-  4 Break — what happens on failure, races, bad input?
-  5 Boundary — what does it NOT handle, and who owns that?
-
-END EVERY MESSAGE (except the final stop message) with exactly one
-fenced block, and make the prose around it short:
-
-\`\`\`turn-contract
-{"topic":"<topic-id|rebuttal>","level":<1-5>,"question":"...","grade":"vague|partial|solid","cited":true|false,"citation_checked":"ok|wrong|missing","move":"deeper|next|gap","gap_note":"..."}
-\`\`\`
-
-- grade: your verdict on the author's PREVIOUS answer (vague | partial |
-  solid). cited: did it carry citations. citation_checked: your verdict
-  after opening the cited location (missing = nothing to open).
-- move: deeper = follow-up on the same point at the next ladder level;
-  next = topic settled, ask the next topic's level-1 question;
-  gap = the answer shows nobody designed this (gap_note required).
-- question: exactly ONE question, one "?" — no compound questions.
-- The FIRST turn-contract (topic 1, level 1) grades the pitch.
-- If the author replies "contract-malformed, please re-send", your
-  block was unreadable: re-send the SAME question with a corrected
-  block — the re-send counts as a turn against the cap. Never be
-  malformed twice in a row.
-- gap signals: a level-4 question answered in level-1-2 language; an
-  "it's handled" with no location; a citation that checks wrong.
-- A topic STOPS at grade=solid, or after 3 gap marks, or after 6 turns
-  (then move=next). Never exceed 6 turns on a topic. No praise, no
-  summaries mid-loop.
-
-After topic 6: SYNTHESIS. Write ../../data/explained.md — one section
-per topic, each keeping the citations that survived checking, written
-so a cold reader could explain admission/JEV and pane supervision from
-it alone. Then write ../../data/gaps.md — every gap mark that still
-stands, ranked by severity, one section per gap:
-  ## <topic-id>: <short name> — severity: high|medium|low
-  Exposed by: <the question>.
-  Why it fell short: <what the answer lacked>.
-  Next design question: <the question that would force the design>.
-Then send the author the gaps list for ONE rebuttal pass (a
-turn-contract with topic "rebuttal", level 5). Fold their reply into
-gaps.md: a refutation WITH a working citation flips that section's
-rebuttal line to "rebuttal: refuted — <citation>"; anything else gets
-"rebuttal: stands". Every gap section ends with exactly one such line.
-At least one gap MUST stand when you finish — if none stood, you were
-too soft; reopen the weakest topic and find one. Then write the stop
-message (no turn-contract in it) with a one-paragraph verdict.
-'''
-
-[[stage]]
-id = "audit"
-topology = "gate"
-run = "bash hooks/audit.sh"
+[hooks]
+counts = "bash hooks/audit.sh"

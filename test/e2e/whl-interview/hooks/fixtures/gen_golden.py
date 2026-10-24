@@ -2,8 +2,9 @@
 """gen_golden.py — a deterministic mock exchange for the whl-interview
 audit gate (no whl, no tokens, no model). Builds a run tree under the
 target directory: data/{pitch,topic-map,explained,gaps}.md plus the raw
-relay mail in data/messages/. The selftest (audit-selftest.sh) plays it
-through audit.py and then mutates copies to prove each gate check bites.
+relay mail in messages/ — the same layout a real run's task dir carries.
+The selftest (audit-selftest.sh) plays it through audit.py and then
+mutates copies to prove each gate check bites.
 """
 
 import json
@@ -40,8 +41,9 @@ def fenced(c):
 
 def build(target):
     target = Path(target)
-    msgs = target / "data" / "messages"
+    msgs = target / "messages"
     msgs.mkdir(parents=True, exist_ok=True)
+    (target / "data").mkdir(parents=True, exist_ok=True)
     seq = 0
 
     def note(frm, body, to=None, typ="note"):

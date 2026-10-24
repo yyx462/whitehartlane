@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""audit.py — the whl-interview gate's deterministic verdict.
+"""audit.py — the whl-interview audit gate (the counts hook's engine).
 
-Judges the folded exchange in <job-dir>/data against the turn contract:
+Judges the exchange in <run-dir> against the turn contract:
   1. every interviewer note carries exactly one fenced ```turn-contract
      block, schema-valid (exact keys, legal enums, one question, one "?")
   2. a malformed block is re-asked at most once (a run of >2 consecutive
@@ -13,9 +13,12 @@ Judges the folded exchange in <job-dir>/data against the turn contract:
   5. explained.md has one cited section per topic; gaps.md one rebuttal-
      annotated section per gapped topic; the stop message exists
 
-On PASS it delivers the artifacts to interviews/<date>/ under the job
-dir (and mirrors them to $WHL_INTERVIEW_REPO/interviews/<date>-<job>/
-when that env is set) — the gate is the program's only repo writer.
+On PASS it builds data/transcript.jsonl, delivers the artifacts to
+interviews/<date>/ under the run dir (mirroring to
+$WHL_INTERVIEW_REPO/interviews/<date>-<job>/ when set) and prints ONE
+JSON counts line on stdout — the rail parses counts stdout strictly, so
+every human-readable word goes to stderr and a FAIL exits nonzero
+(failing the run's report honestly).
 """
 
 import json
@@ -55,8 +58,12 @@ CITATION = re.compile(r"[A-Za-z0-9_./~-]+\.(?:ts|mts|mjs|js|md|toml|sh|py)(?::\d
 REBUTTAL_LINE = re.compile(r"^rebuttal:\s*(refuted|stands)\b", re.MULTILINE)
 
 
+def say(why):
+    print(f"audit: {why}", file=sys.stderr)
+
+
 def die(why):
-    print(f"audit: FAIL — {why}")
+    say(f"FAIL — {why}")
     sys.exit(1)
 
 
@@ -66,7 +73,7 @@ def load_messages(msg_dir):
         try:
             raw = json.loads(p.read_text())
         except json.JSONDecodeError:
-            die(f"message {p.name} is not JSON (the rail refuses it; it must never reach data/)")
+            die(f"message {p.name} is not JSON (the rail refuses it; it must never reach the transcript)")
         seq = int(p.name.split("-")[0])
         rows.append({"seq": seq, "file": p.name, **raw})
     rows.sort(key=lambda r: (r["seq"], r["file"]))
@@ -131,14 +138,15 @@ def extract_contracts(messages):
     return contracts, errors
 
 
-def audit(data_dir):
+def audit(job_dir):
+    data_dir = job_dir / "data"
     for doc in ("pitch", "topic-map", "explained", "gaps"):
         if not (data_dir / f"{doc}.md").is_file() or (data_dir / f"{doc}.md").stat().st_size == 0:
             die(f"data/{doc}.md missing or empty")
 
-    messages = load_messages(data_dir / "messages")
+    messages = load_messages(job_dir / "messages")
     if not messages:
-        die("no messages folded into data/messages")
+        die("no relayed messages in messages/ — an exchange with no mail is a failed interview")
 
     stops = [m for m in messages if m["type"] == "stop" and m["from"] == "interviewer"]
     if len(stops) != 1:
@@ -245,7 +253,7 @@ def build_transcript(data_dir, messages, contracts, errors):
         if m["file"] in by_file:
             row["contract"] = by_file[m["file"]]
         lines.append(row)
-    out = {"run": Path(data_dir).resolve().parent.name, "turns": len(contracts), "contract_errors": errors, "messages": lines}
+    out = {"run": data_dir.resolve().parent.name, "turns": len(contracts), "contract_errors": errors, "messages": lines}
     (data_dir / "transcript.jsonl").write_text(json.dumps(out, indent=2) + "\n")
 
 
@@ -256,23 +264,33 @@ def deliver(job_dir):
     names = ["pitch.md", "topic-map.md", "explained.md", "gaps.md", "transcript.jsonl"]
     for n in names:
         shutil.copy2(job_dir / "data" / n, out / n)
-    print(f"audit: delivered {', '.join(names)} -> interviews/{day}/")
+    say(f"delivered {', '.join(names)} -> interviews/{day}/")
     repo = os.environ.get("WHL_INTERVIEW_REPO")
     if repo:
         dest = Path(repo).expanduser() / "interviews" / f"{day}-{job_dir.name}"
         dest.mkdir(parents=True, exist_ok=True)
         for n in names:
             shutil.copy2(job_dir / "data" / n, dest / n)
-        print(f"audit: mirrored to {dest}")
+        say(f"mirrored to {dest}")
 
 
 def main():
-    job_dir = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
-    data_dir = job_dir / "data"
-    messages, contracts, errors = audit(data_dir)
-    build_transcript(data_dir, messages, contracts, errors)
+    job_dir = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("WHL_AUDIT_DIR", ".")).resolve()
+    if not (job_dir / "messages").is_dir():
+        # the door probes the counts hook at booking, before any exchange
+        # exists; a real run dir always carries messages/ (the engine
+        # creates it at start). A probe has nothing to audit — say so and
+        # count zero, never fail the booking.
+        say("probe — no exchange in this dir yet, nothing to audit")
+        print(json.dumps({"topics": 0, "graded_turns": 0, "contract_errors": 0, "gaps_standing": 0}))
+        return
+    messages, contracts, errors = audit(job_dir)
+    build_transcript(job_dir / "data", messages, contracts, errors)
     deliver(job_dir)
-    print(f"audit: PASS — {len(contracts)} graded turns, {len(errors)} logged contract error(s)")
+    standing = (job_dir / "data" / "gaps.md").read_text().count("rebuttal: stands")
+    say(f"PASS — {len(contracts)} graded turns, {len(errors)} logged contract error(s)")
+    # counts stdout is parsed strictly by the rail — one JSON line, last
+    print(json.dumps({"topics": len(TOPICS), "graded_turns": len(contracts), "contract_errors": len(errors), "gaps_standing": standing}))
 
 
 if __name__ == "__main__":
