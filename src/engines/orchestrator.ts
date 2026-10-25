@@ -8,6 +8,7 @@ import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, 
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { runFaultLane, type FaultRail } from "./fault-lane.ts"
 import { runCoworker } from "./coworker-run.ts"
+import { runLab } from "./lab.ts"
 import type { Member } from "./coworker.ts"
 import { PERMISSION_CAP } from "../core/permission.ts"
 import {
@@ -1173,55 +1174,10 @@ export async function runOrchestrator(input: {
     )
   }
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
-  // Coworker/lab stages mint their child program up front (idempotent):
-  // the members/actor become a full workflow.toml under stages/<id>/ and
-  // the wake machinery levies it once at the frontier. On-disk beats
-  // in-memory — a paused or crashed parent re-nurses the SAME child.
-  // JSON.stringify emits valid TOML basic strings (quotes/backslashes
-  // escaped) — arbitrary hook commands must survive the round trip.
-  const tomlStr = (s: string): string => JSON.stringify(s)
-  for (const stage of manifest.stages ?? []) {
-    if (stage.topology !== "lab") continue
-    const childToml = join(input.taskDir, "stages", stage.id, "workflow.toml")
-    if (!existsSync(childToml)) {
-      const childDir = dirname(childToml)
-      mkdirSync(join(childDir, "members"), { recursive: true })
-      // #205 rides the delegation: a minted child is a program at its
-      // own door, and the door refuses deliverable-less programs — the
-      // exchange record is the delegated stage's declared product
-      writeFileSync(
-        join(childDir, "contract.toml"),
-        "# minted with the child (ADR 0016 will retire the mint whole)\n[[contract.deliverables]]\nname = \"exchange-record\"\npath = \"relay.json\"\nkind = \"json\"\n",
-      )
-      const model = stage.model ?? manifest.workflow.model
-      // j-5c1861: the minted child DECLARES its kind — the run door
-      // defaults an absent kind to fan-out and refuses a stage-less
-      // fan-out (#176's own refusal), so a kind-less lab child died at
-      // the door. Pinned in test/stages.test.ts, at the mint's tests.
-      // (Coworker stages stopped minting here — ADR 0016 slice 1 hosts
-      // them in-process; the mint dies whole with slice 2.)
-      let toml = `kind = ${tomlStr(stage.topology)}\n\n`
-      toml += `[workflow]\nname = ${tomlStr(stage.id)}\nworker_kind = ${tomlStr(manifest.workflow.worker_kind)}\nslots = 1\n`
-      if (model) toml += `model = ${tomlStr(model)}\n`
-      if (stage.topology === "lab") {
-        if (stage.signal || stage.end) {
-          toml += "\n[detectors]\n"
-          if (stage.signal) toml += `signal = ${tomlStr(stage.signal)}\n`
-          if (stage.end) toml += `end = ${tomlStr(stage.end)}\n`
-        }
-        writeFileSync(join(childDir, "actor.md"), `${stage.brief}\n`)
-      }
-      for (const member of stage.members ?? []) {
-        const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
-        writeFileSync(join(childDir, "members", `${member.name}.md`), `${pre}${member.brief}\n`)
-        toml += `\n[members.${member.name}]\n`
-        if (member.initiates) toml += "initiates = true\n"
-        if (member.model) toml += `model = ${tomlStr(member.model)}\n`
-      }
-      writeFileSync(childToml, toml)
-      log(`${stage.topology} stage ${stage.id}: minted child program at ${childToml}`)
-    }
-  }
+  // (The mint is DEAD - ADR 0016 slices 1+2: coworker and lab stages
+  // host in-process at stations/<id>/; nothing is copied, nothing is
+  // levied. The stages/ dialect is gone from birth.)
+
   const stages = manifest.stages
   if (stages?.length) {
     loaded.hooks = { ...loaded.hooks, units: () => unitsFromStages(stages) }
@@ -1612,13 +1568,30 @@ export async function runOrchestrator(input: {
   // re-reports from the stop already delivered).
   const stationFlights = new Map<string, Promise<void>>()
   const stationSettled = new Map<string, { status: string; why?: string }>()
-  const defaultHostStation = (stage: { id: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; preamble?: string }, dir: string): Promise<Report | null> => {
+  const defaultHostStation = (stage: { id: string; topology?: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; brief?: string; signal?: string; end?: string; preamble?: string }, dir: string): Promise<Report | null> => {
     const rail = input.shep as unknown as { inhabitPane?: unknown }
     if (typeof rail.inhabitPane !== "function") {
-      throw new HookError(`station ${stage.id} needs a rail that hosts conversations (inhabitPane) — this shep port cannot`)
+      throw new HookError(`station ${stage.id} needs a rail that hosts its engine (inhabitPane) — this shep port cannot`)
+    }
+    const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
+    if (stage.topology === "lab") {
+      // slice 2: the experiment hosts the same way — the actor's brief
+      // is station-owned bytes, detectors ride the spec
+      const actorFile = join(dir, "actor.md")
+      if (!existsSync(actorFile)) {
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(actorFile, `${pre}${stage.brief ?? ""}\n`)
+      }
+      return runLab(rail as never as import("../adapters/rail.ts").Rail, {
+        station: {
+          dir,
+          brief: `${pre}${stage.brief ?? ""}\n`,
+          workerKind: manifest.workflow.worker_kind,
+          ...(stage.signal || stage.end ? { detectors: { ...(stage.signal ? { signal: stage.signal } : {}), ...(stage.end ? { end: stage.end } : {}) } } : {}),
+        },
+      })
     }
     mkdirSync(join(dir, "members"), { recursive: true })
-    const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
     const members: Member[] = []
     for (const m of stage.members ?? []) {
       const briefFile = join(dir, "members", `${m.name}.md`)
@@ -1655,9 +1628,9 @@ export async function runOrchestrator(input: {
           checkRow = ` — stage check failed: ${why}`
         }
       }
-      const result = `station ${step.id} exchange ${settled.status}${settled.why ? ` — ${settled.why}` : ""}${checkRow}`
+      const result = `station ${step.id} ${settled.status}${settled.why ? ` — ${settled.why}` : ""}${checkRow}`
       record(step.id, "station", pass, result.slice(0, 120), result)
-      log(`station ${step.id}: exchange ${settled.status} — step ${pass ? "done" : "failed"}`)
+      log(`station ${step.id}: ${settled.status} — step ${pass ? "done" : "failed"}`)
       if (!pass) input.shep.wake(step.id, "blocked", `station exchange ${settled.status}`)
       stationFlights.delete(step.id)
       return true
@@ -1672,14 +1645,14 @@ export async function runOrchestrator(input: {
       const flight = (async () => {
         try {
           const report = await host(stage, dir)
-          stationSettled.set(step.id, { status: report?.status ?? "failed", ...(report?.status ? {} : { why: "no report from the exchange" }) })
+          stationSettled.set(step.id, { status: report?.status ?? "failed", ...(report?.status ? {} : { why: "no report from the station's engine" }) })
         } catch (err) {
           stationSettled.set(step.id, { status: "failed", why: err instanceof HookError ? err.message : String(err) })
         }
       })()
       stationFlights.set(step.id, flight)
       emit("station.hosted", { unit: step.id, dir })
-      log(`station ${step.id}: exchange hosted in-process at ${dir}`)
+      log(`station ${step.id}: engine hosted in-process at ${dir}`)
       return true
     }
     return false

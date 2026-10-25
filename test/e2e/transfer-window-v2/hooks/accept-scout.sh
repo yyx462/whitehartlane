@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# accept-scout.sh — the scout stage's check (after the child's wake
-# receipt): the experiment delivered its verdict artifact. Same delivery
-# fold as accept-plan.sh: the booking names the child's job dir; the
-# artifact lands in the parent data/ for the grade gate. The fit number
-# itself is verify.sh's to judge.
+# accept-scout.sh — the scout stage's check (after the HOSTED
+# experiment — ADR 0016 slice 2): the station delivered its verdict
+# artifact. Same delivery fold as accept-plan.sh: the artifact promotes
+# from the station's data/ shelf into the parent data/ for the grade
+# gate. The fit number itself is verify.sh's to judge.
 set -uo pipefail
 fail() { echo "scout: $1" >&2; exit 1; }
-[ -s wakes/scout.json ] || fail "no wake booking for scout"
-job_dir=$(jq -r .jobDir wakes/scout.json)
-src="$job_dir/data/scout-verdict.json"
-[ -s "$src" ] || fail "the experiment produced no data/scout-verdict.json in its child run"
+src="stations/scout/data/scout-verdict.json"
+[ -s "$src" ] || fail "the experiment produced no data/scout-verdict.json at its station"
+[ -s stations/scout/report.json ] || fail "no experiment report at the station"
 jq -e '
   type == "object" and ((keys | sort) == ["fit", "probed", "rounds", "verified"]) and
   (.fit | type == "number" and . >= 0 and . <= 1) and
@@ -21,4 +20,4 @@ jq -e '
 ' "$src" >/dev/null || fail "scout-verdict schema invalid"
 mkdir -p data
 cp "$src" data/scout-verdict.json
-echo "scout: verdict accepted into data/ (fit is the grade gate's to judge)"
+echo "scout: verdict promoted from the station into data/ (fit is the grade gate's to judge)"

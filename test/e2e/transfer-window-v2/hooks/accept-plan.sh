@@ -24,7 +24,7 @@ jq -e '
       (.pos_group == "gk" or .pos_group == "def" or .pos_group == "mid" or .pos_group == "fwd") and
       (.fee_gbp_k | type == "number" and floor == .))
 ' "$src" >/dev/null || fail "plan schema invalid"
-mkdir -p data stages/scout/data
+mkdir -p data stations/scout/data
 cp "$src" data/plan.json
-cp "$src" stages/scout/data/plan.json
+cp "$src" stations/scout/data/plan.json
 echo "negotiate: plan promoted from the station into data/ and stages/scout/data/ (verdict is the grade gate's)"
