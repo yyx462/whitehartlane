@@ -80,3 +80,33 @@ rebuttal line to "rebuttal: refuted — <citation>"; anything else gets
 At least one gap MUST stand when you finish — if none stood, you were
 too soft; reopen the weakest topic and find one. Then write the stop
 message (no turn-contract in it) with a one-paragraph verdict.
+
+<!-- contract-rendered:start -->
+## THE AUDIT'S LAW (generated from contract.toml — do not edit;
+## a hand-edited section here FAILS the run)
+
+**Deliverables — the run's product, checked for existence, size,
+and kind; a missing or empty one fails the run (#205: every
+commission guarantees a deliverable):**
+- `data/pitch.md` (md) — YOU must write this
+- `data/topic-map.md` (md) — YOU must write this
+- `data/explained.md` (md) — YOU must write this
+- `data/gaps.md` (md) — YOU must write this
+- `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
+
+**Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting, relay-protocol.
+**Ladder (one level per turn, in order):** What -> How -> Why -> Break -> Boundary.
+**Turns:** at most 6 per topic; a topic stops at
+grade=solid, or 3 gap marks, or the cap. The rebuttal pass is
+2 turns at most.
+**Gaps:** at least 1 must STAND after the
+rebuttal pass — zero standing gaps means the interviewer was too
+soft and the run fails.
+**Questions:** every question you ask must come from the bank
+(questions.toml) — if you need one it lacks, APPEND it
+there first (append-only; retire with `retired = true`, never
+erase), then ask it. The audit checks every asked question is banked.
+**Citations:** every claim in an answer and every explained.md
+section carries at least one repo citation — `path/file.ts` or
+`path/file.ts:LINE`.
+<!-- contract-rendered:end -->

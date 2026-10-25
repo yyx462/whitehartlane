@@ -1,0 +1,155 @@
+# questions.toml — the QUESTION BANK (zen 7: questions are data, not
+# model behavior). Every run inherits this list verbatim and may APPEND
+# (append-only; retire with `retired = true`, never erase). The audit
+# checks every question the interviewer asked is banked — the brief's
+# "same questions every run" becomes true by construction.
+
+[[question]]
+topic = "admission-jev"
+level = 1
+q = "What does the door check before a run is booked, in one sentence?"
+
+[[question]]
+topic = "admission-jev"
+level = 2
+q = "Walk the brief-path screen: how does the door decide a named folder is uncovered?"
+
+[[question]]
+topic = "admission-jev"
+level = 3
+q = "Why refuse at the door instead of letting runtime permissions handle it?"
+
+[[question]]
+topic = "admission-jev"
+level = 4
+q = "What happens when roots.txt names a folder that does not exist, or a member root is malformed?"
+
+[[question]]
+topic = "admission-jev"
+level = 5
+q = "What can never be expressed at admission today, and who owns that?"
+
+[[question]]
+topic = "pane-supervision"
+level = 1
+q = "What does the flight bench do, in one sentence?"
+
+[[question]]
+topic = "pane-supervision"
+level = 2
+q = "Walk one beat: what does the court observe, and in what order does it rule?"
+
+[[question]]
+topic = "pane-supervision"
+level = 3
+q = "Why does liveness outrank stall?"
+
+[[question]]
+topic = "pane-supervision"
+level = 4
+q = "What happens when two orchestrators drive one job at the same time?"
+
+[[question]]
+topic = "pane-supervision"
+level = 5
+q = "What does the bench refuse to judge, and who owns that?"
+
+[[question]]
+topic = "spur-grammar"
+level = 1
+q = "What is a [[stage]] chain, in one sentence?"
+
+[[question]]
+topic = "spur-grammar"
+level = 2
+q = "How does a coworker stage become a running exchange — walk the mint and the levy?"
+
+[[question]]
+topic = "spur-grammar"
+level = 3
+q = "Why delegate to a child job instead of hosting the loop in-process?"
+
+[[question]]
+topic = "spur-grammar"
+level = 4
+q = "What happens when a stage's check command cannot find its script?"
+
+[[question]]
+topic = "spur-grammar"
+level = 5
+q = "What can the grammar not say today, and who owns closing that?"
+
+[[question]]
+topic = "wakes"
+level = 1
+q = "What is the wake ladder, in one sentence?"
+
+[[question]]
+topic = "wakes"
+level = 2
+q = "Walk a paused run's continue: what survives, and what resumes?"
+
+[[question]]
+topic = "wakes"
+level = 3
+q = "Why exactly one wake per commission?"
+
+[[question]]
+topic = "wakes"
+level = 4
+q = "What happens when the levy is dead and the wake fires?"
+
+[[question]]
+topic = "wakes"
+level = 5
+q = "What does fork deliberately NOT do?"
+
+[[question]]
+topic = "accounting"
+level = 1
+q = "Where does the trace live and what is a card, in one sentence?"
+
+[[question]]
+topic = "accounting"
+level = 2
+q = "Walk one settle: how does a card become readable state?"
+
+[[question]]
+topic = "accounting"
+level = 3
+q = "Why one carded store instead of checkpoints plus a state file?"
+
+[[question]]
+topic = "accounting"
+level = 4
+q = "What happens when the counts hook exits nonzero at report time?"
+
+[[question]]
+topic = "accounting"
+level = 5
+q = "What is not on the trace today, and who owns adding it?"
+
+[[question]]
+topic = "relay-protocol"
+level = 1
+q = "How do two members exchange a message, in one sentence?"
+
+[[question]]
+topic = "relay-protocol"
+level = 2
+q = "Walk a message file from write to delivered prompt."
+
+[[question]]
+topic = "relay-protocol"
+level = 3
+q = "Why is the rail the only mailman?"
+
+[[question]]
+topic = "relay-protocol"
+level = 4
+q = "What happens when a member writes a file into a peer's outbox?"
+
+[[question]]
+topic = "relay-protocol"
+level = 5
+q = "What can the wire not enforce today, and who owns that boundary?"

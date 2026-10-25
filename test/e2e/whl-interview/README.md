@@ -54,7 +54,9 @@ bash hooks/audit-selftest.sh
 | separate sessions, no shared context | fresh coworker members; the rail appends the wire protocol to each brief (`memberProtocol`) |
 | different system prompts per pane | the roster briefs (`members/<name>.md`) — one brief source per mind |
 | deterministic topic map + ladder | declared in the interviewer's brief and RE-PINNED deterministically by `hooks/audit.py` (declared order, no revisits, ≤6 turns/topic) |
-| turn contract JSON | a fenced ` ```turn-contract ` block on every interviewer note; schema, enums, one-question law enforced by the audit |
+| turn contract + audit law | **ONE source**: `contract.toml` — rendered into the briefs (`hooks/render_contract.py --write`) AND read directly by the audit; a stale section in any brief FAILS the run, so hand-edits can never drift from the machine's demands |
+| deliverables (#205) | declared IN the contract with kinds (`.md`, `.jsonl`, …); the audit refuses a run with a missing or empty deliverable — every commission guarantees its product |
+| the question bank | `questions.toml` — every asked question must be banked, or appended first (append-only); makes "same questions every run" true by construction |
 | malformed block → re-ask once → log | mid-flight: the interviewee replies `contract-malformed, please re-send` (brief law); at the audit: >2 consecutive malformed blocks fail the run and every error is logged into `transcript.jsonl` |
 | interviewer read access to check citations | `roots.txt` (the door's scan) + member `roots` (the panes' grant); "only to check citations" is brief discipline — conditional access is not expressible in today's grammar |
 | token budget per run | the relay cap + the engine's 2h deadline — there is no token field in the grammar; the pins keep turns cheap |
