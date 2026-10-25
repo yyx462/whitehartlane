@@ -226,3 +226,15 @@ _Avoid_: nag, poke
 **Wait edge**:
 One edge of the wait-for DAG: a wake receipt's `parentUnit` → its levied child `jid`. Live = the child's `wake.json` has not landed; a dangling edge folds to "not a wait". Acyclic by birth (every levy mints a fresh child job) — no cycle machinery exists.
 _Avoid_: dependency, blocking link
+
+**Station**:
+One `[[stage]]` of a chain, ANY topology (solo, fan-out, coworker, lab, gate) — one word because they are managed identically. A station owns a folder in the one run tree (`briefs/`, `work/`, optional `messages/`/`protocol.json`/`verdict.txt`) and is hosted in-process by the engine that speaks its topology. A job is a run of the whole spur; stages are never jobs.
+_Avoid_: child job, minted program, delegated stage
+
+**Repair ticket**:
+A parked run's wake when it carries the repair path, not just the verdict: the verbatim why, the failed artifact, and one line naming the cheapest next command (`continue` after a program fix — proven by the content-hash compare; resume with a repair note when panes still live).
+_Avoid_: failure notice, death certificate
+
+**Question bank**:
+The committed `questions.toml` a run inherits and grows: the interviewer asks banked questions, may append new ones (append-only; `retired = true`, never erasure), and the audit checks every asked question is banked. Makes "same questions every run" true by construction instead of by model discipline.
+_Avoid_: prompt library, FAQ

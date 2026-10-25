@@ -1,0 +1,23 @@
+# meta.toml — whitehartlane's project meta manifest
+# The yyx-project-meta skill reads this; it refuses to run without it.
+
+[aspects]
+supervision = "benches, courts, liveness, retirement, settle pens"
+communication = "mailbox, send tool, relay, turn-taking, ledger"
+program-grammar = "stages/stations, topologies, declarations, refusals"
+storage = "run-tree layout, placement law, per-station folders"
+accounting = "trace events, token rows, reports, counts"
+admission = "door screens, permissions, roots, probes, job-id minting"
+wakes = "wake ladder, pause/continue/fork, repair tickets"
+evaluation = "audits, question banks, interviews, self-review"
+
+[paths]
+zens = "docs/zen"
+adr = "docs/adr"
+prd = "docs/prd"
+glossary = "CONTEXT.md"
+agents_pointer = "AGENTS.md"
+
+[checkpoint]
+last_session = "opencode:ses_e928a1f45ffea1bYcmnmOU3uTp"
+pending = []
