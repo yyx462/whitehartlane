@@ -1,0 +1,39 @@
+# whl-interview — an adversarial self-review loop: whl interviews whl.
+# Two minds, one exchange: an interviewee playing the author of whl
+# (cites file:line for every claim, says "not designed yet" when true)
+# and an interviewer — a skeptical staff engineer hearing only the pitch
+# — who climbs a fixed five-level ladder over a fixed six-topic map,
+# grades every answer in a JSON turn-contract block, and writes the two
+# deliverables (explained.md, gaps.md). The rail is the supervisor: it
+# routes every turn (relay), bounds the run (the engine's deadline and
+# the relay cap), and the counts hook — the audit — judges the
+# transcript DETERMINISTICALLY at report time: contract schema, ladder
+# stops, caps, the >=1 standing gap. A red audit fails the report.
+# Same topic map, same ladder every run; only the model answers vary.
+#
+# Shape: a PURE coworker exchange (the door's own members-shaped spelling
+# — "coworker carries members; neither needs stages"). A chain with a
+# script check was tried first and is UNRUNNABLE today (receipts
+# j-36f78c/j-c93562: stage check/run commands are never absolutized and
+# hooks/ is never staged; a minted stages/<id>/ child carries no
+# roots.txt) — those are filed as rail issues; this shape needs neither.
+#   levy:  AGENTIC_OS_RELAY_CAP=140 <repo>/bin/whl run . --from opencode:<sid>
+#   audit standalone: bash hooks/audit-selftest.sh   (no whl, no tokens)
+[workflow]
+name = "whl-interview"
+spur_id = "whl-interview"
+kind = "coworker"
+worker_kind = "opencode"
+model = "zhipuai-coding-plan/glm-5.3"
+slots = 2
+canary = false
+
+[members.interviewee]
+initiates = true
+roots = ["~/projects/Agentic-Workspace/whitehartlane"]
+
+[members.interviewer]
+roots = ["~/projects/Agentic-Workspace/whitehartlane"]
+
+[hooks]
+counts = "bash hooks/audit.sh"

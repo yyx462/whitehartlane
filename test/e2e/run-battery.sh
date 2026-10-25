@@ -34,4 +34,15 @@ if [ "${TW2:-0}" = "1" ]; then
     sleep 20
   done
 fi
+# whl-interview (the adversarial self-review loop) is OPT-IN: ~90 min of
+# real tokens interviewing the repo's own trunk — never a battery default.
+if [ "${WHL_INT:-0}" = "1" ]; then
+  echo "== whl-interview =="
+  (cd "$here/whl-interview" && AGENTIC_OS_RELAY_CAP=140 "$repo/bin/whl" run . --from "$from" 2>&1 | grep -E '^job:|warning')
+  while :; do
+    running=$("$repo/bin/whl" jobs 2>/dev/null | awk '$0 ~ "whl-interview" && $2 == "running"')
+    [ -z "$running" ] && break
+    sleep 20
+  done
+fi
 echo "battery done — grade each run's report.json, orchestrator.log (permission/stall lines), and job.json woke.delivery (expect pane, your pane)"
