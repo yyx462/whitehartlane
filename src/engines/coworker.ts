@@ -12,7 +12,7 @@ export type SeedSpec = { tool: string; session_id: string; since?: string }
 // OUTSIDE the job tree — declared up front so the dialogs never fire
 // (a granted root is only read at session start; answering mid-run
 // spends the sweep). A vista reviewer names ~/.vista here.
-export type Member = { name: string; model?: string; seed?: SeedSpec; initiates?: boolean; roots?: string[] }
+export type Member = { name: string; model?: string; temperature?: number; seed?: SeedSpec; initiates?: boolean; roots?: string[] }
 
 const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
 
@@ -43,6 +43,18 @@ export function parseMembers(toml: string): Member[] {
     if (model !== undefined && !/^[^/\s]+\/[^/\s]+$/.test(model)) {
       throw new Error(`members.${name}.model must be provider/model: ${model}`)
     }
+    // per-mind model settings: a member's temperature rides the host's
+    // config layer (opencode: provider.<p>.models.<id>.temperature).
+    // Loose match first — a present-but-unparsable value refuses, never
+    // silently drops.
+    const tempLine = body.match(/^\s*temperature\s*=\s*(.+?)\s*$/m)?.[1]
+    let temperature: number | undefined
+    if (tempLine !== undefined) {
+      temperature = Number(tempLine)
+      if (!/^[0-9]*\.?[0-9]+$/.test(tempLine) || !Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+        throw new Error(`members.${name}.temperature must be a number 0..2: ${tempLine}`)
+      }
+    }
     const seedTool = body.match(/^\s*seed_tool\s*=\s*"([^"]+)"/m)?.[1]
     const seedSession = body.match(/^\s*seed_session\s*=\s*"([^"]+)"/m)?.[1]
     const seedSince = body.match(/^\s*seed_since\s*=\s*"([^"]+)"/m)?.[1]
@@ -68,6 +80,7 @@ export function parseMembers(toml: string): Member[] {
     members.push({
       name,
       ...(model ? { model } : {}),
+      ...(temperature !== undefined ? { temperature } : {}),
       ...(seed ? { seed } : {}),
       ...(initiates ? { initiates: true } : {}),
       ...(roots ? { roots } : {}),

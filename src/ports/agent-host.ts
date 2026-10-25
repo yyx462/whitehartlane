@@ -15,6 +15,10 @@ export interface HostInhabitSpec {
   briefPath: string
   cwd: string
   model?: string
+  // per-mind model settings: opencode pins this into the sandbox
+  // config (provider.<p>.models.<id>.temperature, the schema's own
+  // key); hosts without a settings layer log it, never drop silently
+  temperature?: number
   // ADR 5: resume a booked session instead of a fresh brief
   resumeSession?: string
   // zen 6: a member that does not initiate is born idle — its brief

@@ -275,6 +275,25 @@ test("worker configs pre-seed temp scratch so a /tmp write never prompts (j-b606
   assert.ok(!("/​**" in oc.permission.external_directory), "seeding temp never grants the disk")
 })
 
+// per-mind model settings: the temperature pin lands in the schema's
+// own home (provider.<p>.models.<id>.temperature, verified against
+// opencode v2.1.4) and PRESERVES the permissions/model already shaped
+test("writeOpencodeModelSettings pins temperature beside the model pin", async () => {
+  const { writeOpencodeModel, writeOpencodeModelSettings } = await import("../src/adapters/store.ts")
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-modelset-"))
+  writeOpencodeModel(dir, "zhipuai-coding-plan/glm-5.3")
+  writeOpencodeModelSettings(dir, "zhipuai-coding-plan/glm-5.3", { temperature: 0.2 })
+  const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
+  assert.equal(oc.model, "zhipuai-coding-plan/glm-5.3")
+  assert.equal(oc.provider["zhipuai-coding-plan"].models["glm-5.3"].temperature, 0.2)
+  // a second mind on another provider merges, never clobbers
+  writeOpencodeModelSettings(dir, "anthropic/claude-sonnet-4-5", { temperature: 1 })
+  const oc2 = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
+  assert.equal(oc2.provider["zhipuai-coding-plan"].models["glm-5.3"].temperature, 0.2)
+  assert.equal(oc2.provider.anthropic.models["claude-sonnet-4-5"].temperature, 1)
+  assert.equal(oc2.model, "zhipuai-coding-plan/glm-5.3", "the model pin is never rewritten by settings")
+})
+
 test("addWorkerRoot refuses degenerate roots — no /, no empty key (j-b6067c)", async () => {
   const { addWorkerRoot, writeWorkerPermissions } = await import("../src/adapters/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-degen-"))

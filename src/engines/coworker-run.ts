@@ -142,7 +142,7 @@ export async function runCoworker(
     const ok = slot.pane
       ? rail.inhabitPane(
           m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
-          m.model, m.seed, !m.initiates || Boolean(resumeId), resumeId,
+          m.model, m.seed, !m.initiates || Boolean(resumeId), resumeId, m.temperature,
         )
       : false
     if (slot.pane) rail.renamePane(slot.pane, m.name)
@@ -185,7 +185,7 @@ export async function runCoworker(
     const ok = slot.pane
       ? rail.inhabitPane(
           m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
-          m.model, m.seed, Boolean(resumeId), resumeId,
+          m.model, m.seed, Boolean(resumeId), resumeId, m.temperature,
         )
       : false
     if (slot.pane && ok) rail.renamePane(slot.pane, m.name)

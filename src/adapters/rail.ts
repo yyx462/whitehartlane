@@ -509,6 +509,7 @@ export class Rail implements ShepPort {
     seed: SeedPointer | undefined = undefined,
     hold = false,
     resumeSession: string | undefined = undefined,
+    temperature: number | undefined = undefined,
   ): boolean {
     const since = new Date().toISOString()
     const name = this.scopedName(rawName)
@@ -526,7 +527,7 @@ export class Rail implements ShepPort {
     // CLI's own settings file), the brownout guard (stagger + start
     // retry, ADR 0010), and the brief delivery. Rail keeps only the
     // ledger bookkeeping around it.
-    const ok = this.host.inhabit(name, pane, { kind, briefPath, cwd, model, hold, resumeSession })
+    const ok = this.host.inhabit(name, pane, { kind, briefPath, cwd, model, hold, resumeSession, temperature })
     if (!ok) {
       this.shep("retire", name)
       this.ledger?.emit("reject", { label: name, why: "agent start failed" })
@@ -574,7 +575,7 @@ export class Rail implements ShepPort {
     if (want.tab === "new") this.openFleetTab(dir)
   }
 
-  spawnWorker(name: string, kind: string, briefPath: string, cwd: string, model?: string): boolean {
+  spawnWorker(name: string, kind: string, briefPath: string, cwd: string, model?: string, temperature?: number): boolean {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
@@ -602,7 +603,7 @@ export class Rail implements ShepPort {
         this.log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      const ok = this.inhabitPane(name, kind, pane, briefPath, cwd, model)
+      const ok = this.inhabitPane(name, kind, pane, briefPath, cwd, model, undefined, false, undefined, temperature)
       if (ok) {
         this.liveWorkerPanes.push(pane)
         this.paneOf.set(label, pane)
@@ -628,7 +629,7 @@ export class Rail implements ShepPort {
   // (--session passes through herdr to the agent CLI) and the continue
   // brief. The shep path has no arg pass-through — a fresh pane with the
   // continue brief covers it (the unit dir is the outliving memory).
-  resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string, model?: string): boolean {
+  resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string, model?: string, temperature?: number): boolean {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
@@ -643,7 +644,7 @@ export class Rail implements ShepPort {
         this.log(`pane split failed for ${label} — no live anchor`)
         return false
       }
-      const ok = this.inhabitPane(name, session.tool, pane, briefPath, cwd, model ?? this.workerModel, undefined, false, session.session_id)
+      const ok = this.inhabitPane(name, session.tool, pane, briefPath, cwd, model ?? this.workerModel, undefined, false, session.session_id, temperature)
       if (ok) {
         this.liveWorkerPanes.push(pane)
         this.paneOf.set(label, pane)
