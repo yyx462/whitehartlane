@@ -90,13 +90,13 @@ test("a second Job does not see the first Job's progress", async () => {
   const dir = await copyExample("agentic-os-run-fresh-")
   const first = prepareRun(dir)
   assert.equal(first.ok, true)
-  if (!first.ok) return
+  if (!first.ok || !("job" in first)) return
   writeFileSync(join(first.job.dir, "state.json"), JSON.stringify({ done: [], failed: ["france"] }))
   writeFileSync(join(first.job.dir, "units.jsonl"), "{\"id\":\"france\",\"brief\":\"x\"}\n")
   abortJob(first.job, "test", 0, "cli")
   const second = prepareRun(dir)
   assert.equal(second.ok, true)
-  if (!second.ok) return
+  if (!second.ok || !("job" in second)) return
   assert.notEqual(second.job.dir, first.job.dir)
   assert.equal(existsSync(join(dir, "state.json")), false)
   assert.equal(existsSync(join(dir, "units.jsonl")), false)
@@ -136,7 +136,7 @@ test("run books a kind=lab program and stages its detectors as absolute paths", 
   writeFileSync(join(dir, "roots.txt"), "/abs/target\n")
   const booked = prepareRun(dir)
   assert.equal(booked.ok, true, booked.ok ? "" : booked.why)
-  if (!booked.ok) return
+  if (!booked.ok || !("job" in booked)) return
   assert.equal(booked.kind, "lab")
   assert.match(readFileSync(join(booked.job.dir, "workflow.toml"), "utf8"), /signal = "node \//)
   assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n")
@@ -164,16 +164,37 @@ test("run refuses a deliverable-less program at the screen — no job is formed 
   if (!refused.ok) assert.match(refused.why, /no deliverable forced in contract\.toml/)
   assert.equal(listJobs().filter((job) => job.task === "old-spur").length, 0, "no job is formed")
   assert.equal(listJobs().length, before, "the screen books nothing")
-  // the fix is one file: declaring deliverables un-refuses it
+  // the fix is one file: declaring deliverables un-refuses it — and
+  // the check proves it WITHOUT minting (#200 slice 7: the phantom-row
+  // incident was exactly this assert booking a job)
   writeFileSync(
     join(dir, "contract.toml"),
     "[[contract.deliverables]]\nname = \"exchange-record\"\npath = \"relay.json\"\nkind = \"json\"\n",
   )
-  const ok = prepareRun(dir)
+  const ok = prepareRun(dir, { check: true })
   assert.equal(ok.ok, true, "a declared deliverable passes the screen")
-  // never leak the booked job into later tests
-  if (ok.ok) {
+  assert.equal(listJobs().length, before, "the check mints nothing — no phantom rows (#68)")
+})
+
+// #200 slice 7 / #68: prepareRun-as-check used to BOOK. The check verb
+// runs every program screen and mints zero rows; the booking path is
+// unchanged for whl run and the levy.
+test("the admission check mints nothing — no phantom running job blocks the next levy (#68)", async () => {
+  const dir = await copyExample("agentic-os-check-")
+  const before = listJobs().length
+  const checked = prepareRun(dir, { check: true })
+  assert.equal(checked.ok, true)
+  assert.equal(listJobs().length, before, "check minted no job row")
+  if (checked.ok) {
+    assert.ok(!("job" in checked), "the check result carries no job")
+    assert.equal(checked.kind, "fan-out")
+  }
+  // the check consumed nothing: the same folder still books for real
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  assert.equal(listJobs().length, before + 1, "the booking path still books")
+  if (booked.ok && "job" in booked) {
     const { abortJob } = await import("../src/adapters/store.ts")
-    abortJob(ok.job, "test", 0, "cli")
+    abortJob(booked.job, "test", 0, "cli")
   }
 })
