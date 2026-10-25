@@ -297,6 +297,28 @@ def main():
     LADDER = CONTRACT["exchange"]["ladder"]
     CITATION = re.compile(CONTRACT["citations"]["pattern"])
     CITE_KIND = "file:line"
+    if len(sys.argv) > 1 and sys.argv[1] == "--verdict":
+        # #198 — the PRE-RETIRE probe: deliverables exist + briefs fresh.
+        # Runs while the panes still live (the rail's verdict hook); red
+        # hands the stop's author one revise round naming exactly this.
+        # The full transcript law stays at report time (counts).
+        for d in CONTRACT["deliverables"]:
+            if d.get("rail-built"):
+                continue
+            p = Path(d["path"])
+            if not p.is_file() or p.stat().st_size == 0:
+                say(f"deliverable missing: {d['path']} ({d['name']}) — write it, then stop again")
+                sys.exit(1)
+        sys.path.insert(0, str(SOURCE_ROOT / "hooks"))
+        from render_contract import embedded, render  # noqa: E402
+
+        section = render(CONTRACT, BANK)
+        for b in sorted((SOURCE_ROOT / "members").glob("*.md")):
+            if embedded(b.read_text()) != section:
+                say(f"stale contract section in members/{b.name}")
+                sys.exit(1)
+        say("verdict: deliverables present, briefs fresh")
+        return
     job_dir = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("WHL_AUDIT_DIR", ".")).resolve()
     if not (job_dir / "messages").is_dir():
         say("probe — no exchange in this dir yet, nothing to audit")

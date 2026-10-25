@@ -385,7 +385,7 @@ export type Manifest = {
   workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
   // only for coworker-run's legacy-toml warning (that file's concern)
-  hooks: { units?: string; grade?: string; counts?: string }
+  hooks: { units?: string; grade?: string; counts?: string; verdict?: string }
   detectors?: { signal?: string; end?: string }
   stages?: Stage[]
   report?: { where?: string }
@@ -605,6 +605,11 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
         refuseNoop:
           'hooks.counts = "true" prints nothing — a counts hook must print a JSON object of numbers; omit the line for the built-in counter, or use counts = "default" (issue #120, j-64e035)',
       }),
+      // #198 — the pre-retire verdict: runs when the exchange sees a
+      // stop, while every pane is still alive. Red = one bounded revise
+      // round for the stop's author (the verbatim why rides the note);
+      // a second red ends the run with the verdict row on the report.
+      verdict: optHook((hooks as { verdict?: unknown }).verdict, "hooks.verdict"),
     },
     detectors: signal !== undefined || end !== undefined ? detectors : undefined,
     stages,
