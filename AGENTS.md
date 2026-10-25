@@ -18,6 +18,12 @@ patch inside it. Do not fight the momentum without writing down why in
 the PRD first.
 <!-- /momentum -->
 
+<!-- project-meta: zens are the decision inbox. A design session is not
+finished until its rulings exist as a zen entry (distilled by the
+yyx-project-meta skill); the refit consumes every zen newer than the
+last refit. Newest: docs/zen/2026-10-25-zen-7.md. Manifest + checkpoint:
+meta.toml. -->
+
 <!-- agent-api: coding-agent and herdr state comes from API fields
      (OpenCode message error.type / finish, herdr agent_status). Never
      scrape pane screen text or TUI chrome for control flow. -->
