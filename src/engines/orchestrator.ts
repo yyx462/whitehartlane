@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "../core/backpressure.ts"
 import { chainOf, stepRecorder, type Chain } from "../core/orchestrator-chain.ts"
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
+import { readModelsFile } from "../jev/model-ladder.ts"
+import { runFaultLane, type FaultRail } from "./fault-lane.ts"
 import { PERMISSION_CAP } from "../core/permission.ts"
 import {
   drainDeadline,
@@ -157,6 +159,10 @@ export type CycleDeps = {
   // absent = undefined passed to the spawn seam, which falls to the
   // manifest pin — byte-identical to the pre-stage rail.
   unitModels?: Map<string, string>
+  // The provider-fault lane's rail seam (j-93d652 gap #4): fan-out
+  // workers get the jev ladder coworker members always had. Optional —
+  // a test shep without it simply runs lane-less, as before.
+  faults?: { sessionOf: (unitId: string) => string | undefined; cwdOf: (unitId: string) => string } & FaultRail
 }
 
 const DEFAULT_SLOTS = 2
@@ -486,8 +492,7 @@ export type JudgeSeat = "marker" | "liveness" | "privilege" | "grace" | "pen" | 
 // shared, never the observation's shape.
 export type Judge<B = Beat> = (beat: B) => Ruling
 
-// The seating — composed once per cycle from the declared mode. This
-// IS the precedence: marker beats liveness beats privilege beats
+// The seating — composed once per cycle from the declared mode. This// IS the precedence: marker beats liveness beats privilege beats
 // grace; the pen (armed only by settle_mode = "status-first") hears
 // idle panes before the stall ladder can; the stall judge is unseated
 // by fallback_ladder = false (the ADR 0015 trial window) and by every
@@ -515,6 +520,14 @@ export function firstRuling<B>(bench: Judge<B>[], beat: B): Ruling {
   }
   return ruling
 }
+
+// Per-run fault-lane state, keyed by the stable shep object (cycle
+// rebuilds its deps literal per tick; the shep — the rail — is one
+// object for the run's life).
+const faultStateOf = new WeakMap<
+  object,
+  { awaitingTurn: Set<string>; actedFault: Map<string, string>; deadModels: Map<string, Set<string>>; overrides: Map<string, string> }
+>()
 
 export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
@@ -885,6 +898,54 @@ export function cycle(deps: CycleDeps): boolean {
         }
     }
   }
+
+  // the provider-fault lane (j-93d652 gap #4): fan-out workers ride the
+  // jev model ladder — same algorithm as the conversation engine, one
+  // shared extraction. Runs BEFORE the bench: a fault is transport
+  // class and outranks stall, and its close flows through the same
+  // ceremony applyRuling owns. State is keyed by the stable shep
+  // object (cycle rebuilds its deps literal per tick; the shep — the
+  // rail — is one object for the run's life).
+  const faultLane = () => {
+    if (!deps.faults) return
+    let st = faultStateOf(deps.shep)
+    if (st === undefined) {
+      st = { awaitingTurn: new Set(), actedFault: new Map(), deadModels: new Map(), overrides: new Map() }
+      faultStateOf.set(deps.shep, st)
+    }
+    let toml = ""
+    try {
+      toml = readFileSync(join(deps.taskDir, "workflow.toml"), "utf8")
+    } catch {
+      return
+    }
+    runFaultLane({
+      taskDir: deps.taskDir,
+      names: [...deps.inFlight.keys()],
+      sessionOf: (id) => deps.faults!.sessionOf(id),
+      cwdOf: (id) => deps.faults!.cwdOf(id),
+      modelOf: (id) => st!.overrides.get(id) ?? deps.unitModels?.get(id),
+      setModel: (id, model) => st!.overrides.set(id, model),
+      isDead: (id) => !deps.inFlight.has(id),
+      awaitingTurn: st.awaitingTurn,
+      actedFault: st.actedFault,
+      deadModels: st.deadModels,
+      policy: readModelsFile(deps.taskDir, toml, join(import.meta.dirname, "..", "..")),
+      rail: deps.faults,
+      close: (id, why) => {
+        finish(id, false, { unit: id, result: why, pass: false }, "unit", true, true)
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        deps.attempts.delete(id)
+      },
+      resetClock: (id) => {
+        const f = deps.inFlight.get(id)
+        if (f) f.lastChange = now()
+      },
+      log: (msg) => deps.emit?.("fault-lane", { msg }),
+    })
+  }
+  faultLane()
 
   for (const [id, flight] of [...deps.inFlight]) {
     const beat = observe(id, flight, sweep)

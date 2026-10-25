@@ -1011,8 +1011,20 @@ export class Rail implements ShepPort {
   // A held member mints its session on its first prompt — book it
   // shortly (ADR 5), so a continue resumes its conversation. Marker
   // first, newest-wins as the last resort (a session always books).
-  bookSessionLate(name: string, kind: string, cwd: string, since: string): void {
-    setTimeout(() => {
+  // The latest booked session for a worker NAME (the fan-out fault
+  // lane's session lookup — the same shape the conversation engine
+  // inlines for members): panes book under the unit name, transcripts
+  // carry the host session id, the newest born wins.
+  bookedSessionOf(name: string): string | undefined {
+    if (!this.ledger) return undefined
+    const latest = this.ledger.job.panes
+      .filter((p) => (p.unit === name || p.unit?.startsWith(`${name}-`)) && p.transcript)
+      .sort((a, b) => a.born.localeCompare(b.born))
+      .pop()
+    return latest?.transcript?.session_id
+  }
+
+  bookSessionLate(name: string, kind: string, cwd: string, since: string): void {    setTimeout(() => {
       const briefPath = this.briefOf.get(this.scopedName(name)) ?? this.briefOf.get(name)
       const marker = briefPath ? dirname(briefPath) : undefined
       const sid =

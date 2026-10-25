@@ -9,8 +9,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
-import { budgetAction, clearPending, nextModel, readModelsFile, writePending } from "../jev/model-ladder.ts"
-import { chooseModel, remainingCandidates } from "../jev/model-chooser.ts"
+import { readModelsFile } from "../jev/model-ladder.ts"
+import { chooseModel } from "../jev/model-chooser.ts"
+import { runFaultLane } from "./fault-lane.ts"
 import { runCounts } from "../doors/hooks.ts"
 import { emptyBoard } from "../core/lanes.ts"
 import { drainDeadline } from "../adapters/levy.ts"
@@ -539,86 +540,32 @@ export async function runCoworker(
     // the provider-fault lane (the jev model ladder) — not a stall
     // question, so it rides its own block: its clock resets and its
     // deaths flow through the bailiff's close, never a hand-rolled one.
+    // ONE algorithm, two engines since j-93d652's gap #4 (fan-out had
+    // no provider-fault lane at all) — the shared extraction lives in
+    // engines/fault-lane.ts; this is the conversation engine's call.
     const policy = readModelsFile(taskDir, toml, DOOR_ROOT)
-    for (const m of members) {
-      if (dead.includes(m.name)) continue
-      if (switchedAwaitingTurn.has(m.name)) {
-        if (rail.workerStatus(m.name) === "working") switchedAwaitingTurn.delete(m.name)
-        else continue
-      }
-      const sid = bookedSessionOf(m.name)
-      const fault = sid ? rail.latestSessionFault(sid, sandboxOf.get(m.name) ?? taskDir) : null
-      if (fault && fault.id === actedFault.get(m.name)) continue
-      const action = budgetAction({ fault: Boolean(fault), member: m.name, current: m.model, policy })
-      if (action.kind === "none") continue
-      if (action.kind === "waiting") {
-        if (ballOn.name === m.name) ballOn.since = Date.now()
-        continue
-      }
-      if (action.kind === "stay") {
-        clearPending(taskDir, policy, m.name)
-        continue
-      }
-      if (action.kind === "exhausted") {
-        closeMember(m.name, `${m.name} hit a provider fault and the model ladder is empty`)
-        log(`member ${m.name} out of candidates — no next model in the ladder`)
-        break
-      }
-      if (action.kind === "ask") {
-        writePending(taskDir, policy, { member: m.name, from: m.model ?? "", to: action.to, at: new Date().toISOString(), why: "provider fault" })
-        if (ballOn.name === m.name) ballOn.since = Date.now()
-        log(`ASK model switch ${m.name}: ${m.model ?? "?"} -> ${action.to}`)
-        continue
-      }
-      if (!sid) {
-        log(`model switch ${m.name} -> ${action.to} skipped — no booked session yet`)
-        continue
-      }
-      if (fault) actedFault.set(m.name, fault.id)
-      // The failed model leaves the candidate set; the chooser (or the
-      // static ladder, when no chooser is configured) picks among what
-      // is still live. Empty remaining = the honest death walk.
-      const deadSet = deadModels.get(m.name) ?? new Set<string>()
-      if (m.model) deadSet.add(m.model)
-      deadModels.set(m.name, deadSet)
-      const remaining = remainingCandidates(policy.order, deadSet)
-      if (remaining.length === 0) {
-        closeMember(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
-        log(`member ${m.name} out of candidates — every candidate model failed`)
-        break
-      }
-      let to: string | null = null
-      if (policy.chooser === "jev") {
-        const pick = chooseModel({
-          taskDir,
-          member: m.name,
-          remaining,
-          fault: fault ? { model: m.model ?? "", detail: fault.type } : null,
-        })
-        if (pick.ok && pick.model) {
-          to = pick.model
-          log(`chooser ${m.name}: ${to} (jev confidence ${pick.confidence}) over [${remaining.join(", ")}]`)
-        } else {
-          log(`chooser ${m.name}: ${pick.why} — static ladder fallback over [${remaining.join(", ")}]`)
-        }
-      }
-      if (!to) to = nextModel(remaining, m.model)
-      if (!to) {
-        closeMember(m.name, `${m.name} hit a provider fault and every candidate model has failed`)
-        log(`member ${m.name} out of candidates — no next model among [${remaining.join(", ")}]`)
-        break
-      }
-      const switched = rail.switchSessionModel(sid, to, sandboxOf.get(m.name) ?? taskDir)
-      if (!switched.ok) {
-        log(`model switch ${m.name} -> ${to} failed: ${switched.why}`)
-        continue
-      }
-      m.model = to
-      switchedAwaitingTurn.add(m.name)
-      rail.promptAgent(m.name, `[rail] Your provider refused another turn. The model for this session is now ${to}. Continue exactly where you left off.`)
-      if (ballOn.name === m.name) ballOn.since = Date.now()
-      log(`model switch ${m.name}: -> ${to} (inside the live session)`)
-    }
+    runFaultLane({
+      taskDir,
+      names: members.map((m) => m.name),
+      sessionOf: bookedSessionOf,
+      cwdOf: (n) => sandboxOf.get(n) ?? taskDir,
+      modelOf: (n) => members.find((m) => m.name === n)?.model,
+      setModel: (n, model) => {
+        const m = members.find((x) => x.name === n)
+        if (m) m.model = model
+      },
+      isDead: (n) => dead.includes(n),
+      awaitingTurn: switchedAwaitingTurn,
+      actedFault,
+      deadModels,
+      policy,
+      rail,
+      close: (n, why) => closeMember(n, why),
+      resetClock: (n) => {
+        if (ballOn.name === n) ballOn.since = Date.now()
+      },
+      log,
+    })
     if (dead.length > 0) {
       ended = "dead"
       break

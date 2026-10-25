@@ -99,6 +99,17 @@ export function fanOutEngine(
     return (deps.runFanOut ?? runOrchestrator)({
       taskDir: rail.taskDir,
       shep: rail,
+      // The provider-fault lane's rail seam (j-93d652 gap #4): the jev
+      // ladder reaches fan-out workers too — session lookup, cwd, and
+      // the rail verbs the shared lane drives.
+      faults: {
+        sessionOf: (unitId) => rail.bookedSessionOf(unitId),
+        cwdOf: () => worktreeLadderOf(rail) ?? rail.taskDir,
+        workerStatus: (name) => rail.workerStatus(name),
+        latestSessionFault: (sid, cwd) => rail.latestSessionFault(sid, cwd),
+        switchSessionModel: (sid, model, cwd) => rail.switchSessionModel(sid, model, cwd),
+        promptAgent: (name, text) => rail.promptAgent(name, text),
+      },
       checkMs: Number(process.env.AGENTIC_OS_CHECK_MS ?? "") || undefined,
       slots: Number(process.env.AGENTIC_OS_SLOTS ?? "") || undefined,
       drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
