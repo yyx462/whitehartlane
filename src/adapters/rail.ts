@@ -18,7 +18,7 @@ import { isProviderFault, parseModelRef } from "../jev/model-ladder.ts"
 import { landMockUnit, loadManifest, type Layout, type Manifest } from "../doors/hooks.ts"
 import { drop, note, place, type Board } from "../core/lanes.ts"
 import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "../engines/orchestrator.ts"
-import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, tunedPermissionJudge, type PathScope, type PermissionJudge } from "../core/permission.ts"
+import { decidePermission, declareScope, escalateOnRepeat, expandHome, PERMISSION_CAP, splitRoMarker, tunedPermissionJudge, type PathScope, type PermissionJudge } from "../core/permission.ts"
 import type { Report } from "../core/report.ts"
 import {
   abortJob as abortJobRec,
@@ -344,7 +344,9 @@ export class Rail implements ShepPort {
   // predicate's one expandHome spelling applies). The bins reach
   // through with the program roots; engines pre-grant member sandboxes.
   writePermissions(dir: string = this.taskDir, extraRoots: string[] = []): void {
-    writeWorkerPermissions(dir, [...this.scope.roots, ...extraRoots.map(expandHome)])
+    // markers can't reach here (member ro refuses at parse); the strip
+    // is belt-and-suspenders so a marker never mints a bogus grant
+    writeWorkerPermissions(dir, [...this.scope.roots, ...extraRoots.map((r) => expandHome(splitRoMarker(r).path))])
   }
 
   existingRows(): { unit: string; result: string; pass: boolean }[] | undefined {

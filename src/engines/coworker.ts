@@ -65,6 +65,11 @@ export function parseMembers(toml: string): Member[] {
       roots = [...rootsBody.matchAll(/"([^"]+)"/g)].map((m) => m[1])
       if (roots.length === 0) throw new Error(`members.${name} roots list is empty`)
       for (const root of roots) {
+        if (root.startsWith("ro ")) {
+          throw new Error(
+            `members.${name} root "${root}" — member roots are read-write by construction (the pre-seed allow bypasses dialogs, so an ro marking here would be unenforced); declare read-only roots in the program's roots.txt, where the door's judge refuses writes`,
+          )
+        }
         if (!root.startsWith("/") && !root.startsWith("~/") && root !== "~") {
           throw new Error(`members.${name} root must be absolute or ~-relative: ${root}`)
         }
