@@ -206,6 +206,7 @@ export async function runCoworker(
     if (ok) rail.say("rail", `birth ${m.name}`)
   }
   const CAP = Number(process.env.AGENTIC_OS_RELAY_CAP ?? "") || 60
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   const deadline = Date.now() + 2 * 60 * 60_000
   // Issue #122 — transport retry: a member pane that dies mid-exchange
   // (crash, killed TTY) is a malfunction, not an answer. The rail
@@ -596,6 +597,12 @@ export async function runCoworker(
       // report honest; the verdict row rides it).
       const verdictCmd = manifest.hooks.verdict
       if (verdictCmd) {
+        // The stop-settle (j-53850f): a member's final artifact writes
+        // can land microseconds behind its stop message — the send and
+        // the write are separate tool calls in its session. One beat of
+        // quiescence before the hook reads the shelf lets the bytes
+        // land; the panes are still alive, so nothing is lost.
+        await sleep(beatMs)
         verdictRuns += 1
         let verdictWhy = ""
         let verdictPass = false
