@@ -38,7 +38,12 @@ def render(contract: dict, questions: list) -> str:
     ]
     for d in contract["deliverables"]:
         who = "the AUDIT builds this — never demanded of you" if d.get("rail-built") else "YOU must write this"
+        if d.get("owner"):
+            who = f"the {str(d['owner']).upper()} owns this file — no one else writes it"
         lines.append(f"- `{d['path']}` ({d['kind']}) — {who}")
+        if d["name"] == "gaps":
+            lines.append("  every gap section ends with exactly one line: `rebuttal: stands`")
+            lines.append("  or `rebuttal: refuted — <citation>` — any other shape fails the audit")
     lines += [
         "",
         f"**Topic map (fixed order, never revisited):** {', '.join(topics)}.",

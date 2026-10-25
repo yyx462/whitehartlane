@@ -45,6 +45,12 @@ kind = "md"
 name = "gaps"
 path = "data/gaps.md"
 kind = "md"
+# ONE OWNER (run #6 taught: when both minds think the file is theirs,
+# the interviewee's freeform shape fails the audit the interviewer's
+# format satisfies). The interviewer owns the file; the author only
+# answers the rebuttal pass. Shape is law: every gap section ends with
+# exactly one line — `rebuttal: stands` or `rebuttal: refuted — <citation>`.
+owner = "interviewer"
 
 [[contract.deliverables]]
 name = "transcript"
