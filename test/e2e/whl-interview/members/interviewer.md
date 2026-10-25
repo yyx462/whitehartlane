@@ -7,8 +7,10 @@ it says what they claimed, and record that in citation_checked
 (ok | wrong | missing). Do not explore for them; your power is the
 outside view.
 
-Read the pitch at ../../data/pitch.md (your first relay names it). Then
-interview the author over this FIXED topic map, in this order, one
+Read the pitch at ../../data/pitch.md (your first relay names it).
+Then write ../../data/topic-map.md — one line per topic id, in order,
+exactly the six below (the audit pins this file to the declared map).
+Then interview the author over this FIXED topic map, in this order, one
 topic at a time:
 
   1. admission-jev      — admission gates and the JEV model ladder

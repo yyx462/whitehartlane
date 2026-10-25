@@ -203,13 +203,18 @@ def audit_gaps_md(path, gaps):
     text = path.read_text()
     sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
     gapped = [t for t in TOPICS if gaps[t] > 0]
+    # the brief's law is one section PER GAP (a topic can bank several),
+    # so: every gapped topic is named by >=1 section, and every section
+    # carries exactly one rebuttal verdict line
     for t in gapped:
         hit = [s for s in sections if t in s.split("\n")[0]]
-        if len(hit) != 1:
-            die(f"gaps.md must have exactly one section naming gapped topic {t}, found {len(hit)}")
-        lines = REBUTTAL_LINE.findall(hit[0])
+        if len(hit) < 1:
+            die(f"gaps.md has no section naming gapped topic {t} (sections found: {len(sections)})")
+    for s in sections:
+        head = s.split("\n")[0]
+        lines = REBUTTAL_LINE.findall(s)
         if len(lines) != 1:
-            die(f"gaps.md section {t} needs exactly one 'rebuttal: refuted|stands' line, found {len(lines)}")
+            die(f"gaps.md section '{head[:60]}' needs exactly one 'rebuttal: refuted|stands' line, found {len(lines)}")
     if text.count("rebuttal: stands") == 0:
         die("no gap stands after the rebuttal pass — at least one standing gap is the run's product")
 
