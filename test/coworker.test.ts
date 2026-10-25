@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -91,6 +91,44 @@ test("readMessages sorts by seq and separates the refused", () => {
     [1, 2],
   )
   assert.equal(bad.length, 1)
+})
+
+test("zen 7 outboxes: identity is the FOLDER, and a forged from is refused", () => {
+  const members = ["backend", "frontend"]
+  // the honest outbox file: folder owner == from
+  const ok = parseMessage("backend/7.json", JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "api up" }), members)
+  assert.equal("why" in ok ? "bad" : ok.from, "backend")
+  // the forgery the interview found: a file in alice's outbox claiming
+  // from bob — refused, and the refusal names the folder law
+  const forge = parseMessage("frontend/8.json", JSON.stringify({ from: "backend", to: "frontend", type: "stop", body: "done" }), members) as {
+    why: string
+    from?: string
+  }
+  assert.match(forge.why, /outbox folder/)
+  assert.equal(forge.from, "backend")
+  // legacy one-level mail still parses (parked runs resume unchanged)
+  const legacy = parseMessage("0001-backend.json", JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "x" }), members)
+  assert.equal("why" in legacy ? "bad" : legacy.seq, 1)
+})
+
+test("readMessages walks the outbox layout beside the legacy layout", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-msgs-"))
+  mkdirSync(join(dir, "backend"))
+  mkdirSync(join(dir, "frontend"))
+  writeFileSync(join(dir, "backend", "1.json"), JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "framework up" }))
+  writeFileSync(join(dir, "frontend", "2.json"), JSON.stringify({ from: "frontend", to: "backend", type: "note", body: "styling done" }))
+  writeFileSync(join(dir, "frontend", "3.json"), JSON.stringify({ from: "backend", to: "frontend", type: "note", body: "forged" }))
+  const { messages, bad } = readMessages(dir, ["backend", "frontend"])
+  assert.deepEqual(messages.map((m) => m.from), ["backend", "frontend"])
+  assert.equal(bad.length, 1)
+  assert.match(bad[0].why, /outbox folder/)
+})
+
+test("memberProtocol sends members to their OWN outbox", () => {
+  const text = memberProtocol("backend", ["frontend"], "/run")
+  assert.match(text, /messages\/backend\/<seq>\.json/)
+  assert.match(text, /NEVER write into a peer's outbox/)
+  assert.match(text, /EVERY outbox/)
 })
 
 test("the relay plan delivers to the named pane only, then honors stop and cap", () => {

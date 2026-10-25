@@ -69,13 +69,14 @@ def die(why):
 
 def load_messages(msg_dir):
     rows = []
-    for p in sorted(Path(msg_dir).glob("*.json")):
+    paths = list(Path(msg_dir).glob("*.json")) + list(Path(msg_dir).glob("*/*.json"))
+    for p in sorted(paths):
         try:
             raw = json.loads(p.read_text())
         except json.JSONDecodeError:
             die(f"message {p.name} is not JSON (the rail refuses it; it must never reach the transcript)")
-        seq = int(p.name.split("-")[0])
-        rows.append({"seq": seq, "file": p.name, **raw})
+        seq = int(p.name.replace(".json", "").split("-")[0])
+        rows.append({"seq": seq, "file": str(p.relative_to(msg_dir)), **raw})
     rows.sort(key=lambda r: (r["seq"], r["file"]))
     return rows
 

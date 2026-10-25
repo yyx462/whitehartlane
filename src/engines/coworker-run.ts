@@ -233,7 +233,7 @@ export async function runCoworker(
     if (refusalsOf(member).length === 0) return ""
     return (
       ` The relay REFUSED your message file(s) — nothing you sent was delivered: ${refusalList(member)}.` +
-      ` Fix the file and write it again: messages/<seq>-<your-name>.json holding {"from","to","type":"note"|"stop","body"} with seq a positive integer.`
+      ` Fix the file and write it again: messages/<your-name>/<seq>.json holding {"from","to","type":"note"|"stop","body"} with seq a positive integer.`
     )
   }
   const refusalSuffix = (member: string): string => {
@@ -372,7 +372,7 @@ export async function runCoworker(
         kind: "reprompt",
         note:
           (used === 0
-            ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<seq>-<name>.json)."
+            ? "The exchange waits on you. Continue your task now; when you have something for a peer, write your message file (messages/<your-name>/<seq>.json)."
             : `Second and final nudge, ${b.id}: the exchange waits on you. Act now or the job ends unresolved.`) + refusalQuote(b.id),
         event: ["reprompt", { member: b.id, nudge: used + 1 }],
       }

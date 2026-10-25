@@ -101,14 +101,23 @@ export type Message = {
 // at the use site.
 export type BadMessage = { file: string; why: string; from?: string }
 
-// One message file: <seq>-<from>.json holding {from, to, type, body}.
-// from must match the filename; to must be a member — a message to a
-// stranger is refused, never relayed.
+// One message file. TWO layouts, both read forever:
+//  - OUTBOX (zen 7): messages/<owner>/<seq>.json — identity is the
+//    FOLDER; the from field must equal the folder's owner. A file in
+//    alice's outbox claiming from bob is refused: the sender identity
+//    is where the file lives, not what its bytes claim.
+//  - LEGACY: messages/<seq>-<from>.json — identity is the filename's
+//    sender slot (both bytes attacker-writable in the shared folder);
+//    kept so parked runs resume their old mail unchanged.
+// from must be a member; to must be a member — a message to a stranger
+// is refused, never relayed.
 export function parseMessage(file: string, raw: string, members: string[]): Message | BadMessage {
-  const base = file.replace(/^.*\//, "")
-  const name = base.replace(/\.json$/, "")
-  const seq = Number(name.split("-")[0])
-  const from = base.split("-").slice(1).join("-").replace(/\.json$/, "") || undefined
+  const rel = file.replace(/^.*[\/]messages[\/]/, "")
+  const parts = rel.replace(/\.json$/, "").split("/")
+  const owner = parts.length === 2 ? parts[0] : undefined
+  const base = parts[parts.length - 1]
+  const seq = Number(base.split("-")[0])
+  const from = owner !== undefined ? owner : base.split("-").slice(1).join("-") || undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -118,8 +127,15 @@ export function parseMessage(file: string, raw: string, members: string[]): Mess
   const m = parsed as { from?: unknown; to?: unknown; type?: unknown; body?: unknown }
   if (typeof m.from !== "string" || typeof m.to !== "string")
     return { file, why: "from and to must be strings", from: typeof m.from === "string" ? m.from : from }
-  if (from !== m.from) return { file, why: `filename sender ${from ?? "(none)"} does not match from ${m.from}`, from: m.from }
-  if (!Number.isInteger(seq) || seq < 1) return { file, why: `seq is not a positive integer: ${name.split("-")[0]}`, from: m.from }
+  if (from !== m.from)
+    return {
+      file,
+      why: owner !== undefined
+        ? `from ${m.from} does not match its outbox folder ${owner} — sender identity is the folder, never the bytes`
+        : `filename sender ${from ?? "(none)"} does not match from ${m.from}`,
+      from: m.from,
+    }
+  if (!Number.isInteger(seq) || seq < 1) return { file, why: `seq is not a positive integer: ${base.split("-")[0]}`, from: m.from }
   if (!members.includes(m.from)) return { file, why: `from is not a member: ${m.from}`, from: m.from }
   if (!members.includes(m.to)) return { file, why: `to is not a member: ${m.to}`, from: m.from }
   if (m.from === m.to) return { file, why: `a message to itself: ${m.from}`, from: m.from }
@@ -129,15 +145,24 @@ export function parseMessage(file: string, raw: string, members: string[]): Mess
 }
 
 export function readMessages(dir: string, members: string[]): { messages: Message[]; bad: BadMessage[] } {
-  let names: string[] = []
+  const files: string[] = []
   try {
-    names = readdirSync(dir).filter((n) => n.endsWith(".json")).sort()
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".json")) files.push(e.name)
+      // outbox layout: messages/<owner>/<seq>.json — the relative path
+      // rides into parseMessage so the folder IS the identity
+      else if (e.isDirectory()) {
+        for (const f of readdirSync(join(dir, e.name))) {
+          if (f.endsWith(".json")) files.push(`${e.name}/${f}`)
+        }
+      }
+    }
   } catch {
     return { messages: [], bad: [] }
   }
   const messages: Message[] = []
   const bad: BadMessage[] = []
-  for (const name of names) {
+  for (const name of files.sort()) {
     const parsed = parseMessage(name, readFileSync(join(dir, name), "utf8"), members)
     if ("why" in parsed) bad.push(parsed)
     else messages.push(parsed)
@@ -224,10 +249,14 @@ export function memberProtocol(name: string, peers: string[], dir: string): stri
     `A message from a peer arrives as a prompt from the rail, prefixed [relay].`,
     "You never poll messages/, never wait in a loop — the rail watches the",
     "folder and wakes you. Between prompts: work, or idle.",
-    "To reply, write a JSON file in messages/ (absolute path):",
-    `${join(dir, "messages", "<seq>-${name}.json")}`,
+    "To reply, write a JSON file in YOUR outbox (absolute path):",
+    `${join(dir, "messages", name, "<seq>.json")}`,
     `with {"from":"${name}","to":"<peer>","type":"note","body":"..."}.`,
-    "<seq> is the highest existing seq plus one (look at messages/ first).",
+    "Your outbox folder is yours alone — NEVER write into a peer's outbox;",
+    "your identity is the folder the file lives in, and the rail refuses a",
+    "file whose from does not match its folder.",
+    "<seq> is the highest existing seq across EVERY outbox in messages/",
+    "(look at all of messages/ first, not just your own folder), plus one.",
     'When the exchange has fully reached its goal, write type "stop" with a',
     "one-paragraph summary as body, addressed to any peer. Never prompt or",
     "message a peer any other way. Never write a peer's message file.",
