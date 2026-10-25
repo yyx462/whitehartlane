@@ -51,7 +51,7 @@ import { resolveOpencode, resolvePi } from "./transcripts.ts"
 import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
 import { HerdrTransport } from "./herdr-transport.ts"
 import { OpenCodeHost, parseAgentStatus } from "./opencode-host.ts"
-import type { AgentHost } from "../ports/agent-host.ts"
+import type { AgentHost, UsageRow } from "../ports/agent-host.ts"
 import type { Transport } from "../ports/transport.ts"
 import { beat, note as sayOnce, verboseOn } from "../core/verbose.ts"
 
@@ -174,6 +174,15 @@ export class Rail implements ShepPort {
   private readonly scopedFn: (name: string) => string
   // per-pane memory the permission sweep derives roots and context from
   private readonly cwdOf = new Map<string, string>()
+
+  // #104 / #201: the worker's cumulative token usage, addressed by
+  // NAME — the rail knows the sandbox cwd, the host knows its own
+  // store. Null = no row (best-effort, never a gate).
+  usageOf(rawName: string, sinceMs: number): UsageRow | null {
+    const cwd = this.cwdOf.get(this.scopedName(rawName)) ?? this.cwdOf.get(rawName)
+    if (!cwd) return null
+    return this.host.usageOf(cwd, sinceMs)
+  }
   private readonly briefOf = new Map<string, string>()
   // fleet tab state (layout tab = "new")
   private layout: { tab: "same" | "new"; orchestrator: "left" | "right" } = { tab: "same", orchestrator: "left" }

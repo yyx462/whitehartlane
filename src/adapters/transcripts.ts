@@ -10,6 +10,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import type { TranscriptPointer } from "./store.ts"
+import type { UsageRow } from "../ports/agent-host.ts"
 
 export function piSessionsRoot(): string {
   return process.env.PI_SESSIONS_ROOT ?? join(homedir(), ".pi", "agent", "sessions")
@@ -116,6 +117,31 @@ function opencodeReadDb(): DatabaseSync | null {
 // post-migration levy session fell to the doorbell. Ask v2 first,
 // then legacy, then the CLI list.
 const OPENCODE_SESSION_TABLES = ["session_v2", "session"]
+
+// #104 / #201 accounting: a worker's token ledger, read from the same
+// db the session resolver reads. (cwd, since) → SUM over the window —
+// a respawned member mints a new session row in the same sandbox, and
+// retries are the run's cost too. Cumulative by construction; callers
+// sample per delivery and diff for the turn's own cost.
+export function opencodeUsageOf(cwd: string, sinceMs: number): UsageRow | null {
+  const db = opencodeReadDb()
+  if (!db) return null
+  for (const table of OPENCODE_SESSION_TABLES) {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT tokens_input, tokens_output, tokens_cache_read, cost FROM ${table} WHERE directory = ? AND time_created >= ?`,
+        )
+        .all(cwd, sinceMs) as Record<string, unknown>[]
+      if (rows.length === 0) continue
+      const sum = (k: string) => rows.reduce((n, r) => n + (typeof r[k] === "number" ? (r[k] as number) : 0), 0)
+      return { input: sum("tokens_input"), output: sum("tokens_output"), cacheRead: sum("tokens_cache_read"), cost: sum("cost"), sessions: rows.length }
+    } catch {
+      // try the next table shape
+    }
+  }
+  return null
+}
 
 // True when the session's FIRST user message contains the marker: that
 // message is the brief a pane was born with, so the marker (the unit
