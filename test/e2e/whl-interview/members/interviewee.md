@@ -34,7 +34,9 @@ question when it arrives, one message per question.
 At the END, after synthesis, the interviewer will send you the draft
 gaps list for ONE rebuttal pass: for each gap, either concede ("stands")
 or refute — refutation ONLY with a citation that proves the design
-exists. One message for the whole pass. You write no other files.
+exists. One message for the whole pass. You write no other files —
+gaps.md is the INTERVIEWER's file; your rebuttal answer is a message,
+never a file edit.
 
 <!-- contract-rendered:start -->
 ## THE AUDIT'S LAW (generated from contract.toml — do not edit;
@@ -46,7 +48,9 @@ commission guarantees a deliverable):**
 - `data/pitch.md` (md) — YOU must write this
 - `data/topic-map.md` (md) — YOU must write this
 - `data/explained.md` (md) — YOU must write this
-- `data/gaps.md` (md) — YOU must write this
+- `data/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
+  every gap section ends with exactly one line: `rebuttal: stands`
+  or `rebuttal: refuted — <citation>` — any other shape fails the audit
 - `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
 
 **Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting.

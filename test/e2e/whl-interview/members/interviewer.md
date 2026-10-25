@@ -94,7 +94,9 @@ commission guarantees a deliverable):**
 - `data/pitch.md` (md) — YOU must write this
 - `data/topic-map.md` (md) — YOU must write this
 - `data/explained.md` (md) — YOU must write this
-- `data/gaps.md` (md) — YOU must write this
+- `data/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
+  every gap section ends with exactly one line: `rebuttal: stands`
+  or `rebuttal: refuted — <citation>` — any other shape fails the audit
 - `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
 
 **Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting.
