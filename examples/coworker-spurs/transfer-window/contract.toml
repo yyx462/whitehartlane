@@ -1,0 +1,8 @@
+# contract.toml — #205: every commission names its deliverables.
+# The door refuses a program that declares none; existence is the
+# program's own verdict hook's to judge (unit ids only exist mid-run).
+
+[[contract.deliverables]]
+name = "exchange-record"
+path = "relay.json"
+kind = "json"

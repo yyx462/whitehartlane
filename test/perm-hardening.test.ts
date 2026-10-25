@@ -82,6 +82,7 @@ test("admission refuses briefs naming existing paths no root covers (#51)", asyn
       "",
     ].join("\n"),
   )
+  writeFileSync(join(prog, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
   // temp + nonexistent paths never count; an existing uncovered one does
   writeFileSync(join(prog, "task.txt"), `work in ${elsewhere} — logs at /tmp/x/y.log, see also /no/such/dir/z\n`)
 
@@ -119,6 +120,7 @@ async function coworkerDir(prefix: string): Promise<string> {
   mkdirSync(join(dir, "members"), { recursive: true })
   writeFileSync(join(dir, "members", "alpha.md"), "Hold the ball; beta stops the exchange.\n")
   writeFileSync(join(dir, "members", "beta.md"), "Stop the exchange when told.\n")
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
   return dir
 }
 

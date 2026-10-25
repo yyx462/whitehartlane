@@ -19,6 +19,7 @@ function copyExample(): string {
 
 function retoml(dir: string, field: "grade" | "counts", value: string): void {
   const toml = join(dir, "workflow.toml")
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = 'results'\npath = 'units/*/result.md'\nkind = 'md'\n")
   const raw = readFileSync(toml, "utf8")
   writeFileSync(toml, raw.replace(new RegExp(`${field} = "[^"]*"`), `${field} = "${value}"`))
 }
@@ -90,6 +91,7 @@ test("the door refuses a silent counts hook before booking anything (j-64e035 re
   cpSync(EXAMPLE, dir, { recursive: true })
   writeFileSync(join(dir, "silentcounts.cjs"), "")
   const toml = join(dir, "workflow.toml")
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = 'results'\npath = 'units/*/result.md'\nkind = 'md'\n")
   writeFileSync(
     toml,
     readFileSync(toml, "utf8").replace(/counts = "[^"]*"/, 'counts = "node silentcounts.cjs"'),

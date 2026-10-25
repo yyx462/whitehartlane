@@ -1,0 +1,4 @@
+[[contract.deliverables]]
+name = "results"
+path = "units/*/result.md"
+kind = "md"
