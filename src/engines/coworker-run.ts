@@ -329,7 +329,9 @@ export async function runCoworker(
     answered: swept.answered.has(name),
     retriesLeft: (retriesUsed.get(name) ?? 0) < retryCap,
     get booked() {
-      return rail.bookedWait(name)
+      // ADR 0016 slice 4: stations host in-process — no child spur can
+      // hold a member's session as its spawner, so no booked wait
+      return false
     },
     get pendingNote() {
       return rail.hasPendingNote(name)

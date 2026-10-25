@@ -1,29 +1,15 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { prepareRun } from "../doors/run.ts"
 import { abortJob, continueJob, killPane, saveJob, type JobRecord } from "./store.ts"
 
-export type LevyOutcome =
-  | { ok: true; jid: string; jobDir: string; warnings: string[] }
-  | { ok: false; why: string }
-
-// ── the run envelope (OPTIMUM §2 slice 2) ───────────────────────────
-//
-// One runner door means ONE way to start it. Every verb that hands a
-// Job to a runner process — the run door, continue, refresh, and the
-// levy's own children — goes through these. Before, each call site
-// hand-rolled the spawn (and drift showed: `run` and the levy honored
-// AGENTIC_OS_ORCHESTRATOR while `continue`/`refresh` silently ignored
-// it, and only some sites checked the door exists).
+export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
 // The runner door path: env override (tests, pinned doors), else the
 // caller's own root (dev: bin/, npm bundle: dist/).
 export function runnerDoor(orchestratorRoot: string): string {
   return process.env.AGENTIC_OS_ORCHESTRATOR ?? join(orchestratorRoot, "orchestrator")
 }
-
-export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
 // Hand a Job to its runner process: detached, logged to the Job's
 // orchestrator.log, booked with SID/JID env, pid saved on the record.
@@ -90,98 +76,12 @@ export function drainDeadline(taskDir: string, nowMs: number, ceilingMs: number)
 // (agentic-os run), books the RAIL as spawner (tool "rail": a process,
 // not a conversation — no pane holds it, no doorbell serves it), and
 // spawns the child orchestrator detached. The durable wake.json on the
-// child's job dir is the receipt the parent polls; the child survives
-// the parent's death (continue re-nurses from the booking on disk).
-export function levyChildProgram(input: {
-  folder: string
-  parentSid: string
-  // dir holding the orchestrator bins (import.meta.dirname of the parent)
-  orchestratorRoot: string
-  now?: () => Date
-}): LevyOutcome {
-  const ready = prepareRun(input.folder)
-  if (!ready.ok || !("job" in ready)) return { ok: false, why: !ready.ok ? ready.why : "admission check used where a booking was required" }
-  ready.job.spawner = {
-    tool: "rail",
-    session_id: input.parentSid,
-    since: (input.now ?? (() => new Date()))().toISOString(),
-  }
-  const spawned = spawnRunner(ready.job, input.orchestratorRoot)
-  if (!spawned.ok) {
-    abortJob(ready.job, spawned.why, 0, "rail")
-    return { ok: false, why: spawned.why }
-  }
-  return { ok: true, jid: ready.job.id, jobDir: ready.job.dir, warnings: ready.warnings }
-}
-
-export type WakeBooking = {
-  jid: string
-  jobDir: string
-  folder: string
-  leviedAt: string
-  // completion-detection: the receipt is self-contained — parentUnit
-  // names the waiting step in THIS program (the wait-for DAG's edge
-  // source); spawnerSession is the parent job's session (the
-  // registered-pane registry key). Optional so pre-fold bookings still
-  // fold (their parent is derivable from the receipt's location).
-  parentUnit?: string
-  spawnerSession?: string
-}
-
 // The wait-for DAG, built from receipts alone (completion-detection):
 // every booking under wakes/ contributes one edge parentUnit → jid.
 // A booking without parentUnit (pre-fold) contributes nothing — the
 // graph is by birth acyclic (every levy mints a fresh child job), so
-// there is no cycle machinery; a dangling jid folds to "not live".
-export type WaitEdge = { parentUnit: string; jid: string; jobDir: string }
-
-export function waitEdges(taskDir: string): WaitEdge[] {
-  const dir = join(taskDir, "wakes")
-  if (!existsSync(dir)) return []
-  const edges: WaitEdge[] = []
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".json")) continue
-    try {
-      const b = JSON.parse(readFileSync(join(dir, f), "utf8")) as WakeBooking
-      if (b.parentUnit && b.jid && b.jobDir) {
-        edges.push({ parentUnit: b.parentUnit, jid: b.jid, jobDir: b.jobDir })
-      }
-    } catch {
-      // an unparsable booking is not an edge
-    }
-  }
-  return edges
-}
-
 // Is this parent still waiting on a LIVE child? Live = the child has
 // not yet written its wake.json (the receipt the parent polls); a
-// dangling booking (child dir gone, or its wake already read) is NOT
-// a wait.
-export function waitingOnLiveChild(taskDir: string, parentUnit: string): boolean {
-  return waitEdges(taskDir).some(
-    (e) => e.parentUnit === parentUnit && existsSync(e.jobDir) && !existsSync(join(e.jobDir, "wake.json")),
-  )
-}
-
-// The levy is durable on the parent's task dir: a paused or crashed
-// parent re-nurses from the booking instead of levying a second child.
-export function wakeBookingPath(taskDir: string, stepId: string): string {
-  return join(taskDir, "wakes", `${stepId}.json`)
-}
-
-export function readWakeBooking(taskDir: string, stepId: string): WakeBooking | null {
-  try {
-    return JSON.parse(readFileSync(wakeBookingPath(taskDir, stepId), "utf8")) as WakeBooking
-  } catch {
-    return null
-  }
-}
-
-export function writeWakeBooking(taskDir: string, stepId: string, booking: WakeBooking): void {
-  mkdirSync(join(taskDir, "wakes"), { recursive: true })
-  writeFileSync(wakeBookingPath(taskDir, stepId), JSON.stringify(booking, null, 2) + "\n")
-}
-
 export type ChildWake = { outcome: string; report?: string; jid?: string; task?: string }
 
 // The receipt the parent polls: wake.json on the child job dir, written

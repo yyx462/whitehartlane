@@ -66,7 +66,7 @@ test("engineFor: one dispatch — the shape picks the engine, in process", async
   assert.deepEqual(seen, ["coworker:true", "lab:true"])
 })
 
-test("fanOutEngine: the moved wiring — levy port only with a ledger, manifest deadline, env canary", async () => {
+test("fanOutEngine: the wiring — no levy port ever (ADR 0016 slice 4), manifest deadline, env canary", async () => {
   const toml = ["[workflow]", 'name = "w"', "deadline_ms = 900000", ""].join("\n")
   let got: Record<string, unknown> | null = null
   const deps = {
@@ -75,10 +75,11 @@ test("fanOutEngine: the moved wiring — levy port only with a ledger, manifest 
       return Promise.resolve(null)
     }) as never,
   }
-  // no ledger → no levy port (the rail cannot spawn child jobs)
+  // ADR 0016 slice 4: the levy port is DEAD — stages host in-process,
+  // no engine input wires a child-program spawner, ledger or not
   const bare = fakeRail(dirOf(toml), fakeHerdr(), null)
   await engineFor(bare, "fan-out", "/x", deps)()
-  assert.equal(got!.levyChild, undefined)
+  assert.equal("levyChild" in got!, false, "the levy input no longer exists")
   assert.equal((got!.deadlineMs as number), 900000)
   assert.equal(got!.existingRows, undefined)
   // a ledger → the levy port exists; env canary wins over the manifest
@@ -96,7 +97,7 @@ test("fanOutEngine: the moved wiring — levy port only with a ledger, manifest 
   } finally {
     delete process.env.AGENTIC_OS_CANARY
   }
-  assert.equal(typeof got!.levyChild, "function")
+  assert.equal("levyChild" in got!, false)
   assert.equal(got!.canary, false)
   assert.equal((got!.taskDir as string), booked.taskDir)
   assert.deepEqual(got!.existingRows, [])

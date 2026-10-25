@@ -10,7 +10,6 @@ import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
 import { runCoworker } from "./coworker-run.ts"
-import { levyChildProgram } from "../adapters/levy.ts"
 import { runLab } from "./lab.ts"
 import { runOrchestrator, worktreeChurnedSince } from "./orchestrator.ts"
 import { declareScope, readRootsTxt } from "../core/permission.ts"
@@ -115,16 +114,6 @@ export function fanOutEngine(
       drainMs: Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || undefined,
       deadlineMs,
       resumes,
-      // Booked wait (ADR 0006), the rail's one spelling: a pane session
-      // a live child spur names as its spawner is idle on purpose.
-      bookedWait: (unitId) => rail.bookedWait(`w-${unitId}`),
-      // ADR 0007 stage 3 — the rail as levy: wake steps spawn child
-      // programs through the door's own admission; the durable
-      // wake.json is the receipt the engine polls.
-      levyChild: ledger
-        ? (unitId, folder) =>
-            levyChildProgram({ folder, parentSid: ledger.job.sid, orchestratorRoot })
-        : undefined,
       emit: (kind, payload) => ledger?.emit(kind, payload),
       existingRows: rail.existingRows(),
       // The worktree is the PROGRAM's tree, not the door's (j-battery):

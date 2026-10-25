@@ -11,7 +11,6 @@ process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-cd-"))
 import { cycle, probeDeliverable, type CycleDeps, type ShepPort } from "../src/engines/orchestrator.ts"
 import { hooksFromDir } from "../src/doors/hooks.ts"
 import { readCheckpoints, readState } from "../src/core/state.ts"
-import { readWakeBooking, waitEdges, waitingOnLiveChild, writeWakeBooking } from "../src/adapters/levy.ts"
 
 import { copyExample } from "./util.ts"
 
@@ -161,35 +160,6 @@ test("status-first: 8 evidence reprompts cap out into stalled-with-evidence quot
   assert.ok(shep.wakes.some((w) => /deliverable missing after 8/.test(w.detail)), "the wake carries the story")
 })
 
-// -- the DAG: a live child owns the parent's silence -------------------
-
-test("status-first: an idle parent with a live booked child waits — and settles once the child wakes", async (t) => {
-  const dir = await taskDirWith("demo4")
-  const childDir = mkdtempSync(join(tmpdir(), "whl-cd-child-"))
-  writeWakeBooking(dir, "demo4", {
-    jid: "j-child1",
-    jobDir: childDir,
-    folder: ".",
-    leviedAt: new Date().toISOString(),
-    parentUnit: "demo4",
-    spawnerSession: "s-parent",
-  })
-  let phase: "working" | "idle" = "working"
-  const shep = fakeShep(() => phase)
-  const d = deps(dir, shep.port, { settleMode: "status-first", fallbackLadder: false })
-
-  cycle(d) // spawn
-  phase = "idle"
-  writeFileSync(join(dir, "units", "demo4", "result.md"), "done while waiting\n")
-  cycle(d) // idle + deliverable, but a live child owns the silence
-  assert.ok(d.inFlight.has("demo4"), "still waiting — no settle while the child is live")
-  assert.equal(shep.reprompts.length, 0, "and no evidence reprompt either")
-
-  writeFileSync(join(childDir, "wake.json"), JSON.stringify({ outcome: "done" }))
-  cycle(d) // child woke — the parent may now settle
-  assert.ok(readState(dir).done.includes("demo4"), "settled after the child woke")
-})
-
 // -- byte-identical default: no settleMode, no platform pen -----------
 
 test("marker mode (default): idle + deliverable settles NOTHING — the worker pen is still the only path", async (t) => {
@@ -257,41 +227,6 @@ test("unknown pane past the stall window: the ladder still rules (fallback on), 
 })
 
 // -- the DAG round-trip: writer shape ≡ reader shape -------------------
-
-test("WakeBooking round-trip: parentUnit and spawnerSession survive the write and feed the edge builder", async (t) => {
-  const dir = await taskDirWith("demo9")
-  const childDir = mkdtempSync(join(tmpdir(), "whl-cd-child2-"))
-  writeWakeBooking(dir, "demo9", {
-    jid: "j-c1",
-    jobDir: childDir,
-    folder: ".",
-    leviedAt: "2026-10-20T00:00:00.000Z",
-    parentUnit: "demo9",
-    spawnerSession: "s-par",
-  })
-  const back = readWakeBooking(dir, "demo9")!
-  assert.equal(back.parentUnit, "demo9")
-  assert.equal(back.spawnerSession, "s-par")
-  assert.equal(back.jid, "j-c1")
-
-  const edges = waitEdges(dir)
-  assert.deepEqual(edges.map((e) => [e.parentUnit, e.jid]), [["demo9", "j-c1"]], "the parser eats exactly what the writer laid down")
-
-  assert.ok(waitingOnLiveChild(dir, "demo9"), "live child: no wake.json yet")
-  writeFileSync(join(childDir, "wake.json"), "{}")
-  assert.ok(!waitingOnLiveChild(dir, "demo9"), "child woke — not a wait")
-
-  // dangling: a booking whose child dir vanished folds to not-waiting
-  const dir2 = await taskDirWith("demo10")
-  writeWakeBooking(dir2, "demo10", {
-    jid: "j-gone",
-    jobDir: join(tmpdir(), "whl-cd-no-such-child-"),
-    folder: ".",
-    leviedAt: "2026-10-20T00:00:00.000Z",
-    parentUnit: "demo10",
-  })
-  assert.ok(!waitingOnLiveChild(dir2, "demo10"), "a dangling edge is not a wait")
-})
 
 // -- the probe itself: shape only --------------------------------------
 
