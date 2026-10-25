@@ -18,11 +18,28 @@ export function writeReport(  taskDir: string,
   counts: (rows: CountRow[]) => Record<string, number>,
   status?: Report["status"],
 ): Report {
+  let finalRows = rows
+  let counted: Record<string, number>
+  try {
+    counted = counts(rows.map(({ unit, result, pass }) => ({ unit, result, pass })))
+  } catch (err) {
+    // #197 — a verdict hook's red is a ROW, not a crash: the report
+    // always lands (the wake names a real file; `whl continue` can
+    // re-run the verdict on the same work). The hook's why rides the
+    // table; the built-in counter keeps the numbers honest.
+    const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]
+    finalRows = [...rows, { unit: "counts", result: `verdict hook failed: ${why.slice(0, 160)}`, pass: false }]
+    counted = {
+      units: finalRows.length,
+      passed: finalRows.filter((r) => r.pass).length,
+      failed: finalRows.filter((r) => !r.pass).length,
+    }
+  }
   const body: Report = {
     kind: "report",
-    status: status ?? (rows.some((row) => !row.pass) ? "failed" : "done"),
-    counts: counts(rows.map(({ unit, result, pass }) => ({ unit, result, pass }))),
-    table: rows.map(({ unit, result }) => ({ unit, result })),
+    status: status ?? (finalRows.some((row) => !row.pass) ? "failed" : "done"),
+    counts: counted,
+    table: finalRows.map(({ unit, result }) => ({ unit, result })),
     where,
   }
   mkdirSync(taskDir, { recursive: true })
