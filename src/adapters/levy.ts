@@ -100,7 +100,7 @@ export function levyChildProgram(input: {
   now?: () => Date
 }): LevyOutcome {
   const ready = prepareRun(input.folder)
-  if (!ready.ok) return { ok: false, why: ready.why }
+  if (!ready.ok || !("job" in ready)) return { ok: false, why: !ready.ok ? ready.why : "admission check used where a booking was required" }
   ready.job.spawner = {
     tool: "rail",
     session_id: input.parentSid,

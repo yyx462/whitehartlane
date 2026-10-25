@@ -350,7 +350,16 @@ function uncoveredBriefPaths(source: string): string[] {  const scope = scopeFro
   return [...uncovered]
 }
 
-export function prepareRun(folder: string): RunReady | RunRefused {
+// #200 slice 7 / #68: the admission CHECK — every program screen the
+// door runs (retired step file, grammar, grade smoke, brief paths,
+// stage shape, deliverables), and NOTHING minted: no session opened, no
+// job row, no staging. The phantom incident: prepareRun-as-check booked
+// a running job that then blocked the next levy (three probe rows in
+// one session). The booking ceremony (lineage, slots, hook probes)
+// stays book-time — those screens own booking state by design.
+export type RunCheck = { ok: true; kind: WorkflowKind; warnings: string[] } | RunRefused
+
+export function prepareRun(folder: string, opts: { check?: boolean } = {}): RunReady | RunCheck | RunRefused {
   const dir = resolve(folder)
   // ADR 0014 slice 2: the spur step file no longer admits. Refusal
   // beats silence — the door names the fix (a stage chain), whether the
@@ -432,5 +441,8 @@ export function prepareRun(folder: string): RunReady | RunRefused {
       code: 1,
     }
   }
+  // the check stops at the last program screen: passed = would book,
+  // and nothing was minted proving it
+  if (opts.check) return { ok: true, kind, warnings: [] }
   return book(dir, kind, task, slots, (store) => stageRun(dir, store))
 }
