@@ -50,6 +50,9 @@ commission guarantees a deliverable):**
 - `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
 
 **Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting.
+**The order is LAW, pinned at both ends: your FIRST fresh question opens
+admission-jev; your LAST fresh question opens accounting. Skipping any topic
+fails the audit — the transcript must show every topic opened, in order.**
 **THE REQUIREMENT FOR THIS COMMISSION: the question list is at
 most 5 questions — the WHOLE interview, all
 topics combined. Five topics, one fresh question each; you cannot

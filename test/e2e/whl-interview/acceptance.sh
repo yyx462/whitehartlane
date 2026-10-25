@@ -32,6 +32,10 @@ check() { # <id> <ok|fail|pend> <receipt>
 }
 
 jobcount() { WHL jobs 2>/dev/null | grep -c '^j-' || true; }
+# the run-folder law is per-RUN: the door books exactly ONE new job for
+# this commission (lineage sessions ACCUMULATE jobs across runs of the
+# same spur — counting the session's folders would count history)
+before_run=$(jobcount)
 
 echo "== E1: the old spur (no contract.toml) is refused, no job formed =="
 e1="$work/old-spur"; cp -R "$here" "$e1"; rm "$e1/contract.toml"
@@ -76,11 +80,11 @@ echo "== E2: ONE folder for the run, subfolders inside it =="
 if [[ "$state" == "retired" ]]; then
   inside=$(ls "$rdir" 2>/dev/null | tr '\n' ' ')
   report_status=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status','?'))" "$rdir/report.json" 2>/dev/null || echo "?")
-  jobs_here=$(ls "$(dirname "$(dirname "$rdir")")" | grep -c "^j-" || true)
-  if [ "$jobs_here" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
-    check "E2" ok "one job dir ($jid), report done, stations inside: ${inside:-empty}"
+  jobs_new=$(( $(jobcount) - before_run ))
+  if [ "$jobs_new" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
+    check "E2" ok "one NEW job dir ($jid) for this run, report done, stations inside: ${inside:-empty}"
   else
-    check "E2" fail "state=$state report=$report_status jobs_here=$jobs_here inside: ${inside:-none}"
+    check "E2" fail "state=$state report=$report_status new_jobs=$jobs_new inside: ${inside:-none}"
   fi
 else
   check "E2" fail "run state=$state (expected a finished green run)"
@@ -163,7 +167,9 @@ appends = [q["q"] for q in bank_run if q["q"] not in repo_qs]
 run_qs = {q["q"] for q in bank_run if not q.get("retired")}
 fresh = []
 tr = rdir / "data" / "transcript.jsonl"
+transcript = "missing"
 if tr.exists():
+    transcript = "ok"
     doc = json.loads(tr.read_text())
     for m in doc.get("messages", []):
         c = m.get("contract") or {}
@@ -173,10 +179,12 @@ asked_ok = all(q in run_qs for q in fresh)
 print(f"fresh={len(fresh)} within_cap={len(fresh) <= 5} appends={len(appends)} all_banked={asked_ok}")
 PY
 )"
-if echo "$e7" | grep -qE 'fresh=[0-5] within_cap=True appends=[0-9]+ all_banked=True'; then
+if [ "$transcript" != "ok" ]; then
+  check "E7" fail "no data/transcript.jsonl — the audit went RED and built nothing (the exchange itself failed the contract)"
+elif echo "$e7" | grep -qE 'fresh=[1-5] within_cap=True appends=[0-9]+ all_banked=True'; then
   check "E7" ok "$e7 (bank updated from this run where needed)"
 else
-  check "E7" fail "$e7"
+  check "E7" fail "$e7 (fresh must be 1..5 — zero means the transcript parse found no questions)"
 fi
 
 echo

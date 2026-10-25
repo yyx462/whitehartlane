@@ -42,6 +42,9 @@ def render(contract: dict, questions: list) -> str:
     lines += [
         "",
         f"**Topic map (fixed order, never revisited):** {', '.join(topics)}.",
+        f"**The order is LAW, pinned at both ends: your FIRST fresh question opens",
+        f"{topics[0]}; your LAST fresh question opens {topics[-1]}. Skipping any topic",
+        "fails the audit — the transcript must show every topic opened, in order.**",
         f"**THE REQUIREMENT FOR THIS COMMISSION: the question list is at",
         f"most {ex['max-questions']} questions — the WHOLE interview, all",
         "topics combined. Five topics, one fresh question each; you cannot",
