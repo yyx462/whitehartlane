@@ -167,18 +167,18 @@ appends = [q["q"] for q in bank_run if q["q"] not in repo_qs]
 run_qs = {q["q"] for q in bank_run if not q.get("retired")}
 fresh = []
 tr = rdir / "data" / "transcript.jsonl"
-transcript = "missing"
 if tr.exists():
-    transcript = "ok"
     doc = json.loads(tr.read_text())
     for m in doc.get("messages", []):
         c = m.get("contract") or {}
         if c.get("topic") and c["topic"] != "rebuttal" and c.get("question"):
             fresh.append(c["question"])
+print(f"transcript={'ok' if tr.exists() else 'missing'}")
 asked_ok = all(q in run_qs for q in fresh)
 print(f"fresh={len(fresh)} within_cap={len(fresh) <= 5} appends={len(appends)} all_banked={asked_ok}")
 PY
 )"
+transcript="$(echo "$e7" | grep -oE 'transcript=(ok|missing)' | cut -d= -f2)"
 if [ "$transcript" != "ok" ]; then
   check "E7" fail "no data/transcript.jsonl — the audit went RED and built nothing (the exchange itself failed the contract)"
 elif echo "$e7" | grep -qE 'fresh=[1-5] within_cap=True appends=[0-9]+ all_banked=True'; then

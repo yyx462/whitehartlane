@@ -42,9 +42,19 @@ def render(contract: dict, questions: list) -> str:
     lines += [
         "",
         f"**Topic map (fixed order, never revisited):** {', '.join(topics)}.",
-        f"**The order is LAW, pinned at both ends: your FIRST fresh question opens",
-        f"{topics[0]}; your LAST fresh question opens {topics[-1]}. Skipping any topic",
-        "fails the audit — the transcript must show every topic opened, in order.**",
+        "**THE FIVE QUESTIONS — pinned, in order, verbatim from the bank.",
+        "Ask EXACTLY these, one per message, in this order (the audit",
+        "checks order, budget, and banking; drift on any of the three",
+        "fails the run):**",
+    ]
+    for t in topics:
+        banked = [q for q in questions if q.get("topic") == t and not q.get("retired")]
+        pick = next((q for q in banked if q.get("level") == 4), next((q for q in banked if q.get("level") == 3), banked[0] if banked else None))
+        if pick:
+            lines.append(f"{len(lines) and ''}  {t}: \"{pick['q']}\"")
+        else:
+            lines.append(f"  {t}: APPEND a question to the bank first, then ask it")
+    lines += [
         f"**THE REQUIREMENT FOR THIS COMMISSION: the question list is at",
         f"most {ex['max-questions']} questions — the WHOLE interview, all",
         "topics combined. Five topics, one fresh question each; you cannot",

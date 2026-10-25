@@ -98,9 +98,15 @@ commission guarantees a deliverable):**
 - `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
 
 **Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting.
-**The order is LAW, pinned at both ends: your FIRST fresh question opens
-admission-jev; your LAST fresh question opens accounting. Skipping any topic
-fails the audit — the transcript must show every topic opened, in order.**
+**THE FIVE QUESTIONS — pinned, in order, verbatim from the bank.
+Ask EXACTLY these, one per message, in this order (the audit
+checks order, budget, and banking; drift on any of the three
+fails the run):**
+  admission-jev: "What happens when roots.txt names a folder that does not exist, or a member root is malformed?"
+  pane-supervision: "What happens when two orchestrators drive one job at the same time?"
+  spur-grammar: "What happens when a stage's check command cannot find its script?"
+  wakes: "What happens when the levy is dead and the wake fires?"
+  accounting: "What happens when the counts hook exits nonzero at report time?"
 **THE REQUIREMENT FOR THIS COMMISSION: the question list is at
 most 5 questions — the WHOLE interview, all
 topics combined. Five topics, one fresh question each; you cannot
