@@ -13,11 +13,6 @@ import type { Member } from "./coworker.ts"
 import { PERMISSION_CAP } from "../core/permission.ts"
 import {
   drainDeadline,
-  readChildWake,
-  readWakeBooking,
-  waitingOnLiveChild,
-  writeWakeBooking,
-  type LevyOutcome,
 } from "../adapters/levy.ts"
 import { writeReport, type Report, type ReportRow } from "../core/report.ts"
 import { findJobByDir } from "../adapters/store.ts"
@@ -608,7 +603,10 @@ export function cycle(deps: CycleDeps): boolean {
       silentFor: now() - flight.lastChange,
       age: now() - flight.spawnedAt,
       get waited() {
-        return Boolean(deps.bookedWait?.(id)) || waitingOnLiveChild(deps.taskDir, id)
+        // ADR 0016 slice 4: in-process stations ended the child-wait
+        // stand-down — a booked delegation's wait returns with the
+        // delegations/ commissioning if it is ever authored again
+        return Boolean(deps.bookedWait?.(id))
       },
       get booked() {
         return Boolean(deps.bookedWait?.(id))
@@ -1127,11 +1125,6 @@ export async function runOrchestrator(input: {
   // Suppress the passive stall ladder (the status-first trial window —
   // the old killer must not fire while the new lane is being proven).
   fallbackLadder?: boolean
-  // ADR 0007 stage 3 — wake steps: the rail levies a whole child
-  // program per wake step and finishes the step on the child's wake
-  // (the receipt colors it). The bin wires the real levy; tests inject
-  // a fake. Absent + wake steps in the manifest = honest refusal.
-  levyChild?: (unitId: string, folder: string) => LevyOutcome
   // ADR 0016 slice 1 — station hosting: a coworker stage's exchange
   // runs in-process at stations/<id>/. The default seats runCoworker on
   // the rail (the shep port must be a Rail); tests inject a rehearsal
@@ -1168,11 +1161,7 @@ export async function runOrchestrator(input: {
       }
     }
   }
-  if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
-    throw new HookError(
-      "wake steps (and coworker stages, which delegate to a child program) need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)",
-    )
-  }
+
   const log = input.log ?? ((msg: string) => console.log(`${new Date().toISOString()} ${msg}`))
   // (The mint is DEAD - ADR 0016 slices 1+2: coworker and lab stages
   // host in-process at stations/<id>/; nothing is copied, nothing is
@@ -1228,7 +1217,6 @@ export async function runOrchestrator(input: {
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const watchers: FSWatcher[] = []
   const watchedFiles = new Set<string>()
-  const watchedDirs = new Set<string>()
   let running = false
   let finished = false
   let parked = false
@@ -1432,7 +1420,7 @@ export async function runOrchestrator(input: {
     }
   }
   const gateCache = new Map<string, { at: number; pass: boolean }>()
-  const stepPending = { checks: 0, wakes: 0, stations: 0 }
+  const stepPending = { checks: 0, stations: 0 }
 
   // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
   // (unlike [gates] report detectors, which print "done" per ADR 0003).
@@ -1482,80 +1470,10 @@ export async function runOrchestrator(input: {
     return true
   }
 
-  // ADR 0007 stage 3 — wake steps: the rail as levy. Each frontier wake
-  // step gets ONE child job (booked durably under wakes/<id>.json — a
-  // paused or crashed parent re-nurses the same child, never a second
-  // levy), and the step finishes on the child's wake.json — the receipt
-  // colors it. An unreachable wake step (earlier wave failed) is never
-  // levied and cannot count against the run finishing. (A wake step
-  // with no levy port never reaches here — the run refuses at boot.)
-  const watchChild = (jobDir: string): void => {
-    if (watchedDirs.has(jobDir)) return
-    watchedDirs.add(jobDir)
-    try {
-      watchers.push(watch(jobDir, () => enqueue("wake")))
-    } catch {
-      /* the arm() backstop covers it */
-    }
-  }
-  const execWake = (step: Step): boolean => {
-    let acted = false
-    let booking = readWakeBooking(input.taskDir, step.id)
-    if (!booking) {
-      const levy = input.levyChild?.(step.id, resolve(input.taskDir, step.folder ?? "."))
-      if (!levy) return false
-      if (!levy.ok) {
-        // deterministic refusal (missing manifest, policy) — an honest
-        // failed row, not a retry loop
-        record(step.id, "levy", false, `levy failed: ${levy.why}`)
-        log(`wake ${step.id}: levy failed — ${levy.why}`)
-        return true
-      }
-      const folder = resolve(input.taskDir, step.folder ?? ".")
-      booking = {
-        jid: levy.jid,
-        jobDir: levy.jobDir,
-        folder,
-        leviedAt: new Date().toISOString(),
-        // completion-detection: the DAG fields — the receipt names its
-        // own parent (the waiting step) and the parent job's session
-        // (the registered-pane registry key), so the wait-for graph
-        // builds from receipt contents alone
-        parentUnit: step.id,
-        spawnerSession: findJobByDir(input.taskDir)?.sid,
-      }
-      writeWakeBooking(input.taskDir, step.id, booking)
-      emit("child.levied", { unit: step.id, jid: booking.jid, folder })
-      log(`wake ${step.id}: levied child job ${booking.jid} (${folder})`)
-      acted = true
-    }
-    watchChild(booking.jobDir)
-    const wake = readChildWake(booking.jobDir)
-    if (!wake) return acted
-    // A stage's own check (coworker/lab stages): the child's wake
-    // receipt says the exchange/experiment ENDED; the check says it
-    // ended WELL. Both must pass — a green receipt with a red check
-    // fails the stage honestly.
-    let pass = wake.outcome === "done"
-    let checkRow = ""
-    if (pass && step.check) {
-      try {
-        execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
-        checkRow = " — stage check passed"
-      } catch (err) {
-        pass = false
-        const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]?.slice(0, 100) ?? ""
-        checkRow = ` — stage check failed: ${why}`
-      }
-    }
-    const result = `child ${booking.jid} ${wake.outcome}${wake.report ? ` — ${wake.report}` : ""}${checkRow}`
-    record(step.id, "wake", pass, result.slice(0, 120), result)
-    log(`wake ${step.id}: child ${booking.jid} ${wake.outcome} — step ${pass ? "done" : "failed"}`)
-    if (!pass) {
-      input.shep.wake(step.id, "blocked", `child job ${booking.jid} ${wake.outcome}`)
-    }
-    return true
-  }
+  // (The wake-step levy is DEAD — ADR 0016 slice 4: stages host
+  // in-process; nothing mints a child, nothing polls a child's
+  // wake.json, and the wakes/ accept-hop is gone. Genuine cross-
+  // program commissions keep the door + one wake per commission.)
 
   // ADR 0016 slice 1 — station steps: a coworker stage hosts its
   // exchange IN-PROCESS at stations/<id>/ behind the hosting contract
@@ -1659,10 +1577,9 @@ export async function runOrchestrator(input: {
   }
 
   // kind-specific step execution — the walker dispatches on finished_by
-  const executors: Record<"check" | "gate" | "wake" | "station", (step: Step) => boolean> = {
+  const executors: Record<"check" | "gate" | "station", (step: Step) => boolean> = {
     check: execCheck,
     gate: execGate,
-    wake: execWake,
     station: execStation,
   }
 
@@ -1672,7 +1589,6 @@ export async function runOrchestrator(input: {
   const advance = (): number => {
     let acted = 0
     stepPending.checks = 0
-    stepPending.wakes = 0
     stepPending.stations = 0
     if (chain.steps.length === 0) return 0
     const { finishedIds, failedIds } = stateSets()
@@ -1680,7 +1596,6 @@ export async function runOrchestrator(input: {
       if (finishedIds.has(step.id)) continue
       if (!chain.frontier(step.wave, finishedIds, failedIds)) continue
       if (step.finished_by === "check") stepPending.checks += 1
-      if (step.finished_by === "wake" && input.levyChild) stepPending.wakes += 1
       if (step.finished_by === "station" && stationFlights.has(step.id)) stepPending.stations += 1
       if (executors[step.finished_by](step)) acted += 1
     }
@@ -1706,7 +1621,7 @@ export async function runOrchestrator(input: {
       }
       waits.push(flight.lastChange + stallMs - now())
     }
-    if (stepPending.checks > 0 || stepPending.wakes > 0 || stepPending.stations > 0) waits.push(gateCheckMs)
+    if (stepPending.checks > 0 || stepPending.stations > 0) waits.push(gateCheckMs)
     const ms = Math.max(1, Math.min(...waits))
     armed = setTimeout(() => {
       if (armed) timers.delete(armed)

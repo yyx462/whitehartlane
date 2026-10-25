@@ -29,7 +29,7 @@ import {
   finishJob as finishJobRec,
   jobRunDir,
   killPane,
-  liveSpawnerSessionIds,
+  
   loadJob,
   modelIn,
   openSession,
@@ -757,22 +757,7 @@ export class Rail implements ShepPort {
 
   // Booked wait (ADR 0006), one spelling for every engine: a pane whose
   // booked session a LIVE child spur names as its spawner is idle on
-  // purpose — fan-out units and coworker members both ask by name and
-  // the answer memoizes briefly (disk lookup, 10s TTL).
-  private spawnIdsAt = 0
-  private spawnIds = new Set<string>()
-  bookedWait(name: string): boolean {
-    if (!this.ledger) return false
-    const label = this.scopedName(name)
-    const panes = this.ledger.job.panes.filter((p) => p.label === label || p.unit === label)
-    const sid = panes[panes.length - 1]?.transcript?.session_id
-    if (!sid) return false
-    if (Date.now() - this.spawnIdsAt > 10_000) {
-      this.spawnIds = liveSpawnerSessionIds()
-      this.spawnIdsAt = Date.now()
-    }
-    return this.spawnIds.has(sid)
-  }
+  // purpose — fan-out units and coworker members both ask by name and}
 
   // The drain registration (ADR 5): an engine that can drain installs
   // its hook here — fan-out at runOrchestrator start, coworker at
