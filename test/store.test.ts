@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -302,7 +303,10 @@ test("a lease is acquired with a bumping epoch, renewed on beat, and expiry is j
   assert.match(job.lease?.holder ?? "", /pid=1/)
   assert.equal(leaseExpired(job), false, "a fresh lease is not expired")
 
-  // a second claim (takeover shape) bumps the epoch — fencing's anchor
+  // a second claim may only STEAL (the lease is a mutex now): expire
+  // the first holder's horizon, then the takeover bumps the epoch —
+  // fencing's anchor
+  job.lease!.expires = new Date(Date.now() - 10 * LEASE_TTL_MS).toISOString()
   acquireLease(job, "orchestrator pid=2")
   assert.equal(job.lease?.epoch, 2)
 
@@ -319,8 +323,33 @@ test("a lease is acquired with a bumping epoch, renewed on beat, and expiry is j
   assert.equal(leaseExpired(job), true, "no renewal, horizon far past — expired is sticky")
 })
 
-test("orphanJob single-acts: a second sweep on a flipped record no-ops", () => {
+// j-93d652 gap #2 — "double-continue split brain; the lease is not a
+// mutex": acquiring over a LIVE holder refuses (one writer per job), a
+// dead-or-expired holder is stolen with a fencing epoch bump, and a
+// deposed writer's renewal reports the loss instead of double-driving.
+test("the lease is a mutex: live holders refuse, dead holders are stolen, lost renews report", () => {
   const sess = openSession({ cwd: tmpdir() })
+  const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "mutex", dir: "/tmp/lease-3" })
+  // a LIVE holder: this very process
+  acquireLease(job, `orchestrator pid=${process.pid}`)
+  // a second orchestrator (launchd, pid=1, alive by definition) is refused
+  assert.throws(() => acquireLease(job, "orchestrator pid=1"), /LEASE_HELD_BY_LIVE_ORCHESTRATOR/)
+  assert.equal(job.lease?.epoch, 1, "a refusal never bumps the epoch")
+  assert.equal(job.lease?.holder, `orchestrator pid=${process.pid}`)
+  // a DEAD holder is stolen — the epoch fences the old writer out
+  const dead = spawnSync("sleep", ["0"]).pid ?? 0
+  assert.ok(dead > 0)
+  job.lease!.holder = `orchestrator pid=${dead}`
+  acquireLease(job, "orchestrator pid=1")
+  assert.equal(job.lease?.epoch, 2)
+  // renewal by the deposed writer detects the loss; the holder renews clean
+  assert.equal(renewLeaseOf(job, `orchestrator pid=${dead}`), false)
+  assert.equal(renewLeaseOf(job, "orchestrator pid=1"), true)
+  // legacy callers (no holder argument) keep the void behavior
+  assert.equal(renewLeaseOf(job), true)
+})
+
+test("orphanJob single-acts: a second sweep on a flipped record no-ops", () => {  const sess = openSession({ cwd: tmpdir() })
   const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "sweep", dir: "/tmp/lease-2", pid: 424242 })
   const first = orphanJob(job, "orchestrator pid 424242 gone", 0)
   assert.equal(first.state, "orphaned")
