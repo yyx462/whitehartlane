@@ -124,6 +124,48 @@ txt["body"] = txt["body"].replace("\"topic\": \"admission-jev\"", "\"topic\": \"
 first.write_text(json.dumps(txt))
 '
 
+# 4b. gap_note is conditional: omitted on a non-gap turn the contract
+# still parses (run #8's interviewer omitted it three times); omitted
+# on a gap turn it still dies
+cp -R "$work/golden" "$work/golden-nogap"
+python3 - "$work/golden-nogap" <<'PYG'
+import json, re, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+for f in sorted((d / "messages" / "interviewer").glob("*.json"), key=lambda p: int(p.name.split(".")[0])):
+    body = json.loads(f.read_text())
+    m = re.search(r"turn-contract\s*(\{.*?\})\s*```", body["body"], re.DOTALL)
+    if not m:
+        continue
+    c = json.loads(m.group(1))
+    if c.get("move") != "gap" and c.get("gap_note") == "":
+        del c["gap_note"]
+        body["body"] = body["body"].replace(m.group(1), json.dumps(c))
+        f.write_text(json.dumps(body))
+        break
+PYG
+expect_pass "$work/golden-nogap" "an omitted gap_note on a non-gap turn parses"
+
+cp -R "$work/golden" "$work/golden-nogaplen"
+python3 - "$work/golden-nogaplen" <<'PYG'
+import json, re, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+for f in sorted((d / "messages" / "interviewer").glob("*.json"), key=lambda p: int(p.name.split(".")[0])):
+    body = json.loads(f.read_text())
+    m = re.search(r"turn-contract\s*(\{.*?\})\s*```", body["body"], re.DOTALL)
+    if not m:
+        continue
+    c = json.loads(m.group(1))
+    if c.get("move") == "gap":
+        del c["gap_note"]
+        body["body"] = body["body"].replace(m.group(1), json.dumps(c))
+        f.write_text(json.dumps(body))
+        break
+PYG
+# the dropped turn cascades: wakes never opens, the order check dies
+expect_fail "$work/golden-nogaplen" "gap without a note kills the run" "topics must open in declared order"
+
 # 5a. a SUPERSEDED re-statement: re-asking an already-asked question
 # (a re-grade, a mis-file the interviewer corrects by name) is not a
 # new list entry — the golden plus one duplicate turn still PASSES
