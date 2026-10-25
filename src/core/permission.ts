@@ -129,17 +129,33 @@ export function readRootsTxt(dir: string): string[] {
   }
 }
 
-export type PathScope = { roots: string[] }
+export type PathScope = { roots: string[]; ro: string[] }
+
+// ro/rw roots: a roots.txt line may carry an `ro ` prefix — the path is
+// granted for READING (external_directory allow; reads never prompt)
+// but the dialog judge refuses WRITE asks into it. The prefix is this
+// file's grammar; every consumer (door fold, worker pre-seed, judge)
+// parses through declareScope, never by hand.
+export function splitRoMarker(line: string): { ro: boolean; path: string } {
+  return line.startsWith("ro ") ? { ro: true, path: line.slice(3).trim() } : { ro: false, path: line }
+}
 
 // Construct the scope: expand `~`, strip hard-deny roots (deny
 // outranks roots EVERYWHERE a root can ride — #77, the pre-seed
 // projection included; the strip is LOUD, see sanitizeRoots), drop
 // empties, dedupe. Idempotent: the doors pass already-sanitized
 // programRoots through unchanged — and quietly, since a second pass
-// strips nothing.
+// strips nothing. `ro` markers split off here: roots carries ALL
+// granted paths (ro included — reads and existence checks stay true),
+// ro carries the write-forbidden subset.
 export function declareScope(roots: string[]): PathScope {
-  const { kept } = sanitizeRoots(roots)
-  return { roots: [...new Set(kept.map(expandHome).filter((r) => r.length > 0))] }
+  const marked = roots.map(splitRoMarker)
+  const { kept } = sanitizeRoots(marked.map((m) => m.path))
+  const expanded = kept.map(expandHome).filter((r) => r.length > 0)
+  const roSet = new Set(
+    marked.filter((m) => m.ro).map((m) => expandHome(m.path)),
+  )
+  return { roots: [...new Set(expanded)], ro: [...roSet].filter((r) => expanded.includes(r)) }
 }
 
 // The admission view (#51): the program dir plus its declared roots.
@@ -273,6 +289,19 @@ export function decidePermission(
       path,
       escalatable: false,
       message: `denied: ${path} looks like secrets or credentials. Never touch it in this Job. Continue your own task.`,
+    }
+  }
+  // ro roots (#201): the path is granted for READING, never writing —
+  // a write ask into it is refused flat (not escalatable: the
+  // declaration, not the worker's insistence, owns this one). Read
+  // asks never generate a dialog, so any ask landing here about an ro
+  // root is a write ask.
+  if ((input.scope.ro ?? []).some((root) => under(path, root))) {
+    return {
+      decision: "deny",
+      path,
+      escalatable: false,
+      message: `denied: ${path} is inside a read-only root (declared \`ro\` in roots.txt) — read it, never write it. Do the writing inside the job dir.`,
     }
   }
   if (allowedRoots.some((root) => under(path, root))) {

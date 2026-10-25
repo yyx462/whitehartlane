@@ -19,6 +19,37 @@ process.env.AGENTIC_OS_JEV_PROMPTS_DIR = mkdtempSync(join(tmpdir(), "aos-prompts
 
 const scope = declareScope(["/Users/me/proj/ui-window", "/Users/me/.local/share/agentic-os"])
 
+// ro roots (#201): granted for reading, refused for writing — and the
+// refusal never escalates (the declaration owns it, not insistence)
+const roScope = declareScope(["/Users/me/proj/ui-window", "ro /Users/me/readonly-refs"])
+
+test("an ro root still covers reads (existence + scope), but a write ask into it is refused flat", () => {
+  assert.deepEqual(roScope.ro, ["/Users/me/readonly-refs"])
+  assert.ok(roScope.roots.includes("/Users/me/readonly-refs"), "reads stay granted")
+  assert.ok(scopeCovers(roScope, "/Users/me/readonly-refs/spec.md"), "the door's coverage screen admits it")
+  const v = decidePermission({
+    question: "Permission required\nthe agent wants to write /Users/me/readonly-refs/spec.md",
+    scope: roScope,
+  })
+  assert.equal(v.decision, "deny")
+  assert.match(v.message, /read-only root/)
+  assert.equal(v.escalatable, false, "a repeat ask never escalates past the declaration")
+  // the same path with no ro marking stays writable (regression)
+  const w = decidePermission({
+    question: "Permission required\nthe agent wants to write /Users/me/proj/ui-window/web/x.ts",
+    scope,
+  })
+  assert.equal(w.decision, "allow")
+})
+
+test("an ro marker on a MEMBER root refuses at parse — unenforced marking is worse than none", async () => {
+  const { parseMembers } = await import("../src/engines/coworker.ts")
+  assert.throws(
+    () => parseMembers('[members.a]\nroots = ["ro ~/.vista"]\n'),
+    /member roots are read-write by construction.*roots\.txt/s,
+  )
+})
+
 test("a path inside the roots is allowed", () => {
   const v = decidePermission({
     question: "Permission required\nAccess external directory /Users/me/proj/ui-window/web\nPatterns: ...",
