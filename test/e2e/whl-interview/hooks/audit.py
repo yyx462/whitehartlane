@@ -194,10 +194,18 @@ def audit(job_dir):
 
     contracts, errors = extract_contracts(messages)
 
-    # the question bank: every asked question is banked (or was appended first)
-    banked = {q["q"] for q in BANK if not q.get("retired")}
+    # the question bank: every asked question is banked (or was
+    # appended first). Membership is NORMALIZED — case, apostrophes,
+    # and punctuation fold — because the check exists to stop
+    # FREESTYLING (inventing questions), not to punish a dropped
+    # possessive (run #10: "a stage check" vs the banked "a stage's
+    # check" — the same banked question, two characters of morphology)
+    def norm(q: str) -> str:
+        return " ".join(q.casefold().replace("'", "").replace('"', "").replace("?", "").replace(".", "").split())
+
+    banked = {norm(q["q"]) for q in BANK if not q.get("retired")}
     for c in contracts:
-        if c["topic"] != REBUTTAL and c["question"] not in banked:
+        if c["topic"] != REBUTTAL and norm(c["question"]) not in banked:
             die(f"question not in the bank: \"{c['question'][:70]}\" — append it to questions.toml first (append-only), then ask it")
 
     # topic order: first occurrences strictly climb the declared map.
@@ -213,9 +221,9 @@ def audit(job_dir):
                 seen.append(REBUTTAL)
                 order.append(REBUTTAL)
             continue
-        if c["question"] in seen_q:
+        if norm(c["question"]) in seen_q:
             continue
-        seen_q.add(c["question"])
+        seen_q.add(norm(c["question"]))
         if c["topic"] not in seen:
             seen.append(c["topic"])
             order.append(c["topic"])
@@ -230,9 +238,9 @@ def audit(job_dir):
     effective: list[dict] = []
     effective_seen: set[str] = set()
     for c in contracts:
-        if c["topic"] == REBUTTAL or c["question"] not in effective_seen:
+        if c["topic"] == REBUTTAL or norm(c["question"]) not in effective_seen:
             if c["topic"] != REBUTTAL:
-                effective_seen.add(c["question"])
+                effective_seen.add(norm(c["question"]))
             effective.append(c)
 
     turns, gaps = {}, {t: 0 for t in TOPICS}
@@ -255,8 +263,8 @@ def audit(job_dir):
     # superseded mis-file) is not a new entry.
     distinct: list[str] = []
     for c in effective:
-        if c["topic"] != REBUTTAL and c["question"] not in distinct:
-            distinct.append(c["question"])
+        if c["topic"] != REBUTTAL and norm(c["question"]) not in distinct:
+            distinct.append(norm(c["question"]))
     if len(distinct) > MAX_QUESTIONS:
         die(f"question budget exceeded: {len(distinct)} distinct fresh questions asked, the commission caps the list at {MAX_QUESTIONS}")
 
