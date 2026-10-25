@@ -202,7 +202,7 @@ test("a refused message is quoted in the nudges and the death reason — the mem
   for (const n of nudges) {
     assert.match(n, /REFUSED your message file/)
     assert.match(n, /'0-alpha\.json': seq is not a positive integer: 0/)
-    assert.match(n, /messages\/<seq>-<your-name>\.json/)
+    assert.match(n, /messages\/<your-name>\/<seq>\.json/)
   }
   // the death record and the ledger wake carry the diagnosis, not just "stalled"
   assert.equal(report?.status, "failed")
