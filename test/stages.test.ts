@@ -11,6 +11,7 @@ import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/engines/orchestrator.ts"
 import { readCheckpoints } from "../src/core/state.ts"
+import { workflowKind } from "../src/core/workflow-kind.ts"
 import { gradePlanFromStages, stepsFromStages, unitsFromStages, loadManifest, landMockUnit, modelPlanFromStages, type Stage } from "../src/doors/hooks.ts"
 
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "aos-stages-"))
@@ -508,6 +509,12 @@ run = "true"
   assert.equal(report.status, "done")
   // the child program was minted from the stage's members
   const childToml = readFileSync(join(dir, "stages", "review", "workflow.toml"), "utf8")
+  // j-5c1861: the child DECLARES its kind — the run door defaults an
+  // absent kind to fan-out and refuses a stage-less fan-out (#176), so
+  // an unpinned coworker mint is exactly how the seam survived. The lab
+  // pin below (kind = "lab") is this seam's other half.
+  assert.match(childToml, /^kind = "coworker"$/m)
+  assert.equal(workflowKind(childToml), "coworker") // what the door reads
   assert.match(childToml, /\[members\.alex\][\s\S]*initiates = true/)
   assert.match(childToml, /\[members\.sam\][\s\S]*model = "zhipuai-coding-plan\/glm-5\.3"/)
   assert.match(childToml, /model = "zhipuai-coding-plan\/glm-5\.3-flash"/) // inherited default
