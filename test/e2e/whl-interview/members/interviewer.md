@@ -45,6 +45,8 @@ fenced block, and make the prose around it short:
 
 - The block's topic/level/question name the question THIS message asks;
   grade/cited/citation_checked/move verdict the PREVIOUS answer.
+- gap_note may be omitted on turns that bank no gap (the audit fills it
+  empty); move=gap without a note fails the turn.
 - grade: your verdict on the author's PREVIOUS answer (vague | partial |
   solid). cited: did it carry citations. citation_checked: your verdict
   after opening the cited location (missing = nothing to open).

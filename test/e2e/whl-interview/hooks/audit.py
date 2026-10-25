@@ -103,7 +103,15 @@ def validate_contract(block, where):
         c = json.loads(block)
     except json.JSONDecodeError as e:
         return None, f"{where}: contract is not JSON ({e})"
-    if not isinstance(c, dict) or set(c) != CONTRACT_KEYS:
+    if not isinstance(c, dict):
+        return None, f"{where}: contract must be a JSON object"
+    # gap_note is conditional by nature (run #8: the interviewer omitted
+    # it on non-gap turns — a sensible reading — and the exact-keys
+    # schema killed three perfect turns). It defaults to ""; the gap
+    # check below still REQUIRES it when move = gap.
+    if "gap_note" not in c:
+        c["gap_note"] = ""
+    if set(c) != CONTRACT_KEYS:
         return None, f"{where}: keys must be exactly {sorted(CONTRACT_KEYS)}"
     if c["topic"] != REBUTTAL and c["topic"] not in TOPICS:
         return None, f"{where}: unknown topic {c['topic']!r}"
