@@ -69,6 +69,9 @@ stands, ranked by severity, one section per gap:
   Exposed by: <the question>.
   Why it fell short: <what the answer lacked>.
   Next design question: <the question that would force the design>.
+Bank every gap with move=gap AT THE MOMENT it is exposed — not
+retroactively at synthesis; the audit cross-checks marks against
+sections.
 Then send the author the gaps list for ONE rebuttal pass (a
 turn-contract with topic "rebuttal", level 5). Fold their reply into
 gaps.md: a refutation WITH a working citation flips that section's

@@ -54,14 +54,14 @@ PYEOF
   expect_fail "$d" "$1" "$2"
 }
 
-# 1. zero gap marks = the interviewer was too soft (the brief's own law)
-m zero-gaps "zero gap marks" '
+# 1. no gap sections at all = the interviewer was too soft (the brief's own law)
+m zero-gaps "no gap stands" '
 for f in sorted((d / "messages").glob("*interviewer.json")):
     body = json.loads(f.read_text())["body"]
     if "gap" in body and "races" in body:
         f.unlink()
 g = d / "data/gaps.md"
-g.write_text(g.read_text().replace("rebuttal: stands\n", ""))
+g.write_text("# Gaps\n\nNone found — everything checked out.\n")
 '
 
 # 2. three consecutive malformed contracts — the one-re-ask law caps it
