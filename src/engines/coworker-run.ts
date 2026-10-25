@@ -514,6 +514,16 @@ export async function runCoworker(
       }
       delivered.push(r.file)
       commitRelay()
+      // #104 / #201: the sender's turn just completed — its cumulative
+      // usage sampled onto the trace (turn.tokens). Deltas between
+      // consecutive rows are the turn's own cost; the report's
+      // per-member row carries the final word. Best-effort: no host
+      // store, no row.
+      const senderSince = bornAt.get(r.from) ?? 0
+      const usage = rail.usageOf(r.from, senderSince)
+      if (usage) {
+        ledger?.emit("turn.tokens", { member: r.from, to: r.to, file: r.file, ...usage })
+      }
       // a held member mints its session on this first prompt — book it
       // shortly (ADR 5), so continue resumes its conversation
       rail.bookSessionLate(r.to, memberKind, sandboxOf.get(r.to) ?? taskDir, new Date(bornAt.get(r.to) ?? Date.now()).toISOString())
@@ -673,6 +683,22 @@ export async function runCoworker(
     })
   }
   log(`exchange ended (${ended}) — ${messages.length} messages, ${delivered.length} relayed${unresolved.length > 0 ? `, ${unresolved.length} refused` : ""}`)
+  // #104 / #201: the per-member cost columns — cumulative usage from
+  // the host's own store, plus the wall-clock each member lived. One
+  // accounting row per member, AFTER the exchange ends (the final
+  // word, not a sample).
+  for (const m of members) {
+    const since = bornAt.get(m.name) ?? 0
+    const usage = rail.usageOf(m.name, since)
+    const lived = since > 0 ? Math.round((Date.now() - since) / 1000) : 0
+    rows.push({
+      unit: `tokens ${m.name}`,
+      result: usage
+        ? `in ${usage.input} / out ${usage.output} / cache ${usage.cacheRead} — $${usage.cost.toFixed(4)} across ${usage.sessions} session(s), ${lived}s lived`
+        : `no usage row (host keeps none) — ${lived}s lived`,
+      pass: true,
+    })
+  }
   const report = writeReport(
     taskDir,
     taskDir,

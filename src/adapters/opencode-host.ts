@@ -9,6 +9,8 @@
 import { readFileSync } from "node:fs"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
 import { splitModel, writeOpencodeModel, writeOpencodeModelSettings, writePiSettings } from "./store.ts"
+import { opencodeUsageOf } from "./transcripts.ts"
+import type { UsageRow } from "../ports/agent-host.ts"
 import type { AgentHost, AgentStatus, HostInhabitSpec } from "../ports/agent-host.ts"
 import type { CmdResult, Transport } from "../ports/transport.ts"
 
@@ -93,6 +95,12 @@ export class OpenCodeHost implements AgentHost {
 
   status(label: string): AgentStatus {
     return parseAgentStatus(this.transport.exec("agent", "get", label).stdout)
+  }
+
+  // #104: the opencode sqlite db IS the usage store; pi keeps none
+  // yet (null — the caller emits no row, never a fake zero)
+  usageOf(cwd: string, sinceMs: number): UsageRow | null {
+    return opencodeUsageOf(cwd, sinceMs)
   }
 }
 
