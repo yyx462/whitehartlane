@@ -982,6 +982,7 @@ export function cycle(deps: CycleDeps): boolean {
         if (f) f.lastChange = now()
       },
       log: (msg) => deps.emit?.("fault-lane", { msg }),
+      emit: (kind, payload) => deps.emit?.(kind, payload),
     })
   }
   faultLane()

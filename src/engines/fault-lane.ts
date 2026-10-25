@@ -32,6 +32,10 @@ export type FaultLaneDeps = {
   close: (name: string, why: string) => void
   resetClock: (name: string) => void
   log: (msg: string) => void
+  // #201 row 6: a model-ladder switch is an ACCOUNTING event — the
+  // trace names who switched, from what, to what, why. Absent (tests
+  // without a ledger) the log line stands alone.
+  emit?: (kind: string, payload: Record<string, unknown>) => void
 }
 
 export function runFaultLane(d: FaultLaneDeps): void {
@@ -103,15 +107,18 @@ export function runFaultLane(d: FaultLaneDeps): void {
       d.log(`worker ${name} out of candidates — no next model among [${remaining.join(", ")}]`)
       continue
     }
+    const from = d.modelOf(name)
     const switched = d.rail.switchSessionModel(sid, to, d.cwdOf(name))
     if (!switched.ok) {
       d.log(`model switch ${name} -> ${to} failed: ${switched.why}`)
+      d.emit?.("model.switch", { unit: name, from: from ?? null, to, ok: false, why: switched.why })
       continue
     }
     d.setModel(name, to)
     d.awaitingTurn.add(name)
     d.rail.promptAgent(name, `[rail] Your provider refused another turn. The model for this session is now ${to}. Continue exactly where you left off.`)
     d.resetClock(name)
+    d.emit?.("model.switch", { unit: name, from: from ?? null, to, ok: true, why: fault.type })
     d.log(`model switch ${name}: -> ${to} (inside the live session)`)
   }
 }

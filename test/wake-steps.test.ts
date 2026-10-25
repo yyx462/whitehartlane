@@ -220,6 +220,12 @@ test("a rail spawner is never doorbelled — the durable wake is the receipt", (
   // delivery stays queued: no pane prompt, no doorbell — the parent
   // rail polls wake.json (delivery "queued" books exactly that)
   assert.equal(woken.woke?.delivery, "queued")
+  // #201 row 7: the queue is ANNOUNCED — a wake.queued event lands on
+  // the trace the moment the receipt is written, so a forever-waiting
+  // rail wake is visible without knowing where to look
+  const queued = readEvents("s-rail").filter((e) => e.kind === "wake.queued" && e.jid === job.id)
+  assert.equal(queued.length, 1, "the queued wake is announced once")
+  assert.equal(queued[0].to, "rail:s-parent")
   const wake = JSON.parse(readFileSync(join(jobDir, "wake.json"), "utf8"))
   assert.equal(wake.to.tool, "rail")
   assert.equal(wake.to.session_id, "s-parent")
