@@ -5,3 +5,4 @@ dist
 
 # operator-local global model policy (never pushed)
 models.local.toml
+__pycache__/
