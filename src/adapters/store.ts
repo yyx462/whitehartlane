@@ -615,6 +615,19 @@ export function wakeFirstMate(
   const prompt = (label: string): boolean => (promptPane ? promptPane(label, `[wake] ${message}`) : false)
   if (railSpawner) {
     step("in-band", false, "rail spawner — in-band rungs skipped; wake.json is the receipt")
+    // #201 row 7: a queued wake was unbounded and unannounced — nobody
+    // polls a rail spawner's receipt by default, so the wake could sit
+    // forever with no trace of its waiting. The event names it and its
+    // age is auditable (`whl audit` reports rail-queued wakes).
+    appendEvent(job.sid, {
+      actor: "rail",
+      kind: "wake.queued",
+      jid: job.id,
+      to: `rail:${job.spawner.session_id}`,
+      message: outcome,
+      at,
+      note: "durably queued — the receipt waits at wake.json until the rail spawner polls",
+    })
   }
   // rungs 1-4 live in one chain: spool, parent pane, rebirth, doorbell.
   // (2026-10-17 reorder: the spool outranks the pane rungs — a fresh
@@ -1182,9 +1195,11 @@ export function wakeAudit(jobs: JobRecord[]): WakeAuditRow[] {
       why:
         j.woke.delivery === "fork"
           ? "courier pane closed without ever working — the wake prompt never reached a live turn; drain it again"
-          : j.woke.rungs?.filter((r) => r.rung === "fork").at(-1)?.why ??
-            j.woke.rungs?.filter((r) => !r.ok).at(-1)?.why ??
-            j.woke.message,
+          : j.woke.delivery === "queued"
+            ? "rail spawner receipt waits at wake.json — poll it from the commissioning rail, or clear it if that rail is gone"
+            : j.woke.rungs?.filter((r) => r.rung === "fork").at(-1)?.why ??
+              j.woke.rungs?.filter((r) => !r.ok).at(-1)?.why ??
+              j.woke.message,
     }))
 }
 

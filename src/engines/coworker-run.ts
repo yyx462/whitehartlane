@@ -677,6 +677,7 @@ export async function runCoworker(
       policy,
       rail,
       close: (n, why) => closeMember(n, why),
+      emit: (kind, payload) => ledger?.emit(kind, payload),
       resetClock: (n) => {
         if (ballOn.name === n) ballOn.since = Date.now()
       },

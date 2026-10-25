@@ -44,6 +44,7 @@ import {
   loadJob,
   normalizeSpur,
   orphanJob,
+  projectJob,
   readAllEvents,
   readEvents,
   saveJob,
@@ -285,6 +286,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // --job <jid>: the per-job TSV trace, rendered as the fixed table —
     // `column -t -s$'\t'` shape, straight from the file. The bare form
     // stays the JSONL fold dump (the internal trace).
+    // --job <jid> --rebuild: the projection recovery the docs promise —
+    // the Job record is REBUILT from the trace and saved over a
+    // corrupted/mangled job.json (#201 row 9: advertised, never wired).
     const jobFlag = process.argv.indexOf("--job")
     if (jobFlag !== -1 && process.argv[jobFlag + 1]) {
       const jid = process.argv[jobFlag + 1]
@@ -292,6 +296,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       if (!owner) {
         console.error(`no job ${jid} on the OS disk`)
         process.exit(1)
+      }
+      if (process.argv.includes("--rebuild")) {
+        const rebuilt = projectJob(owner.sid, jid)
+        if (!rebuilt) {
+          console.error(`rebuild: the trace holds no job.born for ${jid} — nothing to project`)
+          process.exit(1)
+        }
+        saveJob(rebuilt)
+        console.log(`rebuild: ${jid} projected from ${readEvents(owner.sid).filter((e) => e.jid === jid).length} trace event(s) — state=${rebuilt.state}, panes=${rebuilt.panes.length}, record saved`)
+        return
       }
       console.log(renderTraceTable(jobTracePath(owner.sid, jid)))
       return
@@ -628,6 +642,28 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       console.error(`continue: ${job.id} is ${job.state}, not paused/aborted/orphaned`)
       process.exitCode = 2
       return
+    }
+    // #201 row 8: an edited declaration must not continue in silence —
+    // the booking carries the program's content hash; a source that
+    // hashes differently now means the rebirth runs DIFFERENT program
+    // bytes than the ones that produced the work so far. Say it, book
+    // it on the trace, and let the commissioner decide.
+    if (job.spur?.source && job.spur?.content_hash) {
+      let changed = false
+      try {
+        changed = contentHashOf(job.spur.source) !== job.spur.content_hash
+      } catch {
+        /* the source vanished — the plain continue still works */
+      }
+      if (changed) {
+        appendEvent(job.sid, {
+          actor: "cli",
+          kind: "program.changed",
+          jid: job.id,
+          why: "the program source changed since booking — this continue runs edited bytes",
+        })
+        console.log(`continue: NOTE — ${job.spur.source} changed since booking; this rebirth runs the EDITED program (the staged copy in the job dir is untouched)`)
+      }
     }
     // one rebirth ceremony (straggler retire + fresh runner + booked
     // continue) — the same verb `refresh` lands on after its drain
