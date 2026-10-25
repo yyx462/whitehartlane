@@ -4,8 +4,11 @@ whl interviews itself. Two minds, one relayed exchange: an
 **interviewee** playing the author of whl (every claim cites
 `file:line`; when nothing designed it, it says "not designed yet") and
 an **interviewer**, a skeptical staff engineer hearing only the pitch,
-who climbs a fixed five-level ladder (what → how → why → break →
-boundary) over a fixed six-topic map and grades every answer in a JSON
+who draws from a fixed five-level ladder (what → how → why → break →
+boundary) over a fixed FIVE-topic map under THIS commission's hard
+budget — the whole question list is AT MOST FIVE questions (one fresh
+question per topic, the sharpest the bank holds) — and grades every
+answer in a JSON
 turn-contract block. The product is TWO DOCUMENTS, not a chat log:
 
 - `explained.md` — one cited section per topic; a cold reader should be
@@ -86,3 +89,24 @@ needs neither.
   FAILED run by construction; tighten the interviewer's brief and
   re-run. `project.json` pins the pid, so every re-run lands in the
   same project's trace — run-over-run diffs are the improvement loop.
+
+## The acceptance test — the 7 expectations
+
+`bash test/e2e/whl-interview/acceptance.sh` runs the commission live and
+scores it against the seven expectations, in order:
+
+1. the old spur (no contract.toml) is refused by screening, no job formed
+2. ONE folder for the run, subfolders (stations) inside it
+3. members send via THE SEND TOOL — own mailbox rw, peers out of scope,
+   the rail-written mail ledger on the trace
+4. prompts + audits generated from the ONE contract (drift-cop: a stale
+   brief section fails the run)
+5. token / trace / time-cost / tables semantic logging (turn.tokens per
+   delivered relay, per-member cost rows on the report)
+6. on failure the rail SAYS the cheapest repair (the wake names
+   `whl continue` re-runs the verdict when the program hash moved)
+7. the question bank: the interviewer appends to the run's own staged
+   copy on the data/ shelf, <= 5 asked, all banked
+
+Expectations whose mechanism has not landed print `pend` naming the
+delivery — never a silent pass. Any `fail` exits non-zero.
