@@ -898,7 +898,14 @@ export function failJob(
   if (opts.again) job.woke = undefined
   saveJob(job)
   appendEvent(job.sid, { actor: "levy", kind: "job.fail-button", jid: job.id, reason, again: Boolean(opts.again) })
-  wakeFirstMate(job, `failed (fail-button: ${reason})`, report, opts.port)
+  // the fail button is the deterministic repro for the wake path — its
+  // wake must say what a REAL failure's would: the cheapest repair
+  // when the program changed after booking (#197/#204), the plain
+  // reason otherwise. The hint rides BOTH the wake.json and the trace.
+  const hint = failedWakeWhy(job, "failed")
+  const outcome = hint === "failed" ? `failed (fail-button: ${reason})` : `failed (fail-button: ${reason}) — ${hint.replace(/^failed — /, "")}`
+  appendEvent(job.sid, { actor: "levy", kind: "wake.hint", jid: job.id, why: outcome })
+  wakeFirstMate(job, outcome, report, opts.port)
   return job
 }
 

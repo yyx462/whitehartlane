@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# accept-plan.sh — the negotiate stage's check (judge, after the child's
-# wake receipt): the exchange ended WELL = it delivered a schema-valid
-# plan. The verdict on the plan's ARITHMETIC belongs to the final gate's
-# verify.sh — never mid-chain (#150). Delivery OUT of a delegated child
-# rides this check: the booking (wakes/<id>.json, the durable interface
-# the wake machinery owns) names the child's job dir; the plan lands in
-# the parent data/ and in the scout's staged folder (its next input).
+# accept-plan.sh — the negotiate stage's check (judge, after the HOSTED
+# exchange — ADR 0016 slice 1): the exchange ended WELL = it delivered
+# a schema-valid plan at its station. The verdict on the plan's
+# ARITHMETIC belongs to the final gate's verify.sh — never mid-chain
+# (#150). Delivery OUT of a station rides this check: the plan promotes
+# from the station's data/ shelf to the parent data/ and the scout's
+# staged folder (its next input) — data/ promotion is the placement
+# law's promotion step.
 set -uo pipefail
 fail() { echo "negotiate: $1" >&2; exit 1; }
-[ -s wakes/negotiate.json ] || fail "no wake booking for negotiate"
-job_dir=$(jq -r .jobDir wakes/negotiate.json)
-src="$job_dir/data/plan.json"
-[ -s "$src" ] || fail "the exchange produced no data/plan.json in its child run"
+src="stations/negotiate/data/plan.json"
+[ -s "$src" ] || fail "the exchange produced no data/plan.json at its station"
+[ -s stations/negotiate/relay.json ] || fail "no exchange record at the station"
 jq -e '
   type == "object" and ((keys | sort) == ["budget_gbp_k", "spent_gbp_k", "squad"]) and
   (.budget_gbp_k | type == "number" and floor == .) and
@@ -27,4 +27,4 @@ jq -e '
 mkdir -p data stages/scout/data
 cp "$src" data/plan.json
 cp "$src" stages/scout/data/plan.json
-echo "negotiate: plan accepted into data/ and stages/scout/data/ (verdict is the grade gate's)"
+echo "negotiate: plan promoted from the station into data/ and stages/scout/data/ (verdict is the grade gate's)"

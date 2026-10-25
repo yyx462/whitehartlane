@@ -76,7 +76,7 @@ echo "== E2: ONE folder for the run, subfolders inside it =="
 if [[ "$state" == "retired" ]]; then
   inside=$(ls "$rdir" 2>/dev/null | tr '\n' ' ')
   report_status=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status','?'))" "$rdir/report.json" 2>/dev/null || echo "?")
-  jobs_here=$(ls "$(dirname "$rdir")" | grep -c "^j-" || true)
+  jobs_here=$(ls "$(dirname "$(dirname "$rdir")")" | grep -c "^j-" || true)
   if [ "$jobs_here" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
     check "E2" ok "one job dir ($jid), report done, stations inside: ${inside:-empty}"
   else

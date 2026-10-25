@@ -54,7 +54,7 @@ export type Layout = {
 // raw [[step]] dialect is refused at parse.
 export type Step = {
   id: string
-  finished_by: "end" | "check" | "wake" | "gate"
+  finished_by: "end" | "check" | "wake" | "gate" | "station"
   wave: string
   brief?: string
   check?: string
@@ -338,12 +338,23 @@ export function stepsFromStages(stages: Stage[]): Step[] {
       steps.push({ id: stage.id, finished_by: "gate", wave, check: stage.run })
       continue
     }
-    if (stage.topology === "coworker" || stage.topology === "lab") {
-      // the exchange/experiment is delegated: the child program lives
-      // at stages/<id>/ (minted by the orchestrator) and the wake
-      // machinery levies it once at the frontier — the child's wake
-      // receipt settles this stage like any wake step; an optional
-      // stage check runs after the receipt as the stage's own verdict
+    if (stage.topology === "coworker") {
+      // ADR 0016 slice 1: the conversation is HOSTED in-process at
+      // stations/<id>/ (the stage's members passed through the hosting
+      // contract) — the mint and its child job are dead. An optional
+      // stage check runs after the exchange as the stage's own verdict.
+      steps.push({
+        id: stage.id,
+        finished_by: "station",
+        wave,
+        ...(stage.check ? { check: stage.check } : {}),
+      })
+      continue
+    }
+    if (stage.topology === "lab") {
+      // the experiment still delegates (slice 2 hosts it): the child
+      // program lives at stages/<id>/ (minted by the orchestrator) and
+      // the wake machinery levies it once at the frontier
       steps.push({
         id: stage.id,
         finished_by: "wake",

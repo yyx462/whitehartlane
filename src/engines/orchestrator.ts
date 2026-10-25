@@ -7,6 +7,8 @@ import { chainOf, stepRecorder, type Chain } from "../core/orchestrator-chain.ts
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, settingsPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { runFaultLane, type FaultRail } from "./fault-lane.ts"
+import { runCoworker } from "./coworker-run.ts"
+import type { Member } from "./coworker.ts"
 import { PERMISSION_CAP } from "../core/permission.ts"
 import {
   drainDeadline,
@@ -1129,6 +1131,11 @@ export async function runOrchestrator(input: {
   // (the receipt colors it). The bin wires the real levy; tests inject
   // a fake. Absent + wake steps in the manifest = honest refusal.
   levyChild?: (unitId: string, folder: string) => LevyOutcome
+  // ADR 0016 slice 1 — station hosting: a coworker stage's exchange
+  // runs in-process at stations/<id>/. The default seats runCoworker on
+  // the rail (the shep port must be a Rail); tests inject a rehearsal
+  // host. The host resolves with the exchange's Report (or throws).
+  hostStation?: (stage: Manifest["stages"] extends (infer S)[] | undefined ? S : never, dir: string) => Promise<Report | null>
 }): Promise<Report | null> {
   const loaded = input.hooks
     ? { hooks: input.hooks, manifest: input.manifest }
@@ -1145,6 +1152,21 @@ export async function runOrchestrator(input: {
   // wave machinery finishes downstream units as blocked rows.
   // ADR 0014: stages are the only authoring dialect.
   const steps = manifest.stages ? stepsFromStages(manifest.stages) : undefined
+  // ADR 0016 slice 1: member names are station-global — the rail keys
+  // panes by name, so two stations repeating a member name would
+  // cross-book each other's panes. Refused at boot, never crossed.
+  {
+    const seenMembers = new Set<string>()
+    for (const stage of manifest.stages ?? []) {
+      if (stage.topology !== "coworker") continue
+      for (const m of stage.members ?? []) {
+        if (seenMembers.has(m.name)) {
+          throw new HookError(`member name ${m.name} repeats across coworker stations — the rail keys panes by name; rename one (station-scoped names land with a later slice)`)
+        }
+        seenMembers.add(m.name)
+      }
+    }
+  }
   if (steps?.some((s) => s.finished_by === "wake") && !input.levyChild) {
     throw new HookError(
       "wake steps (and coworker stages, which delegate to a child program) need a levy port — this rail cannot spawn child jobs (ADR 0007 stage 3)",
@@ -1159,7 +1181,7 @@ export async function runOrchestrator(input: {
   // escaped) — arbitrary hook commands must survive the round trip.
   const tomlStr = (s: string): string => JSON.stringify(s)
   for (const stage of manifest.stages ?? []) {
-    if (stage.topology !== "coworker" && stage.topology !== "lab") continue
+    if (stage.topology !== "lab") continue
     const childToml = join(input.taskDir, "stages", stage.id, "workflow.toml")
     if (!existsSync(childToml)) {
       const childDir = dirname(childToml)
@@ -1172,12 +1194,12 @@ export async function runOrchestrator(input: {
         "# minted with the child (ADR 0016 will retire the mint whole)\n[[contract.deliverables]]\nname = \"exchange-record\"\npath = \"relay.json\"\nkind = \"json\"\n",
       )
       const model = stage.model ?? manifest.workflow.model
-      // j-5c1861: the minted child DECLARES its kind — always, for both
-      // delegated topologies. The run door defaults an absent kind to
-      // fan-out and refuses a stage-less fan-out (#176's own refusal),
-      // so a kind-less coworker child died at the door; the lab marker
-      // used to be a special case where a declaration belongs. Pinned
-      // for BOTH kinds in test/stages.test.ts, at the mint's own tests.
+      // j-5c1861: the minted child DECLARES its kind — the run door
+      // defaults an absent kind to fan-out and refuses a stage-less
+      // fan-out (#176's own refusal), so a kind-less lab child died at
+      // the door. Pinned in test/stages.test.ts, at the mint's tests.
+      // (Coworker stages stopped minting here — ADR 0016 slice 1 hosts
+      // them in-process; the mint dies whole with slice 2.)
       let toml = `kind = ${tomlStr(stage.topology)}\n\n`
       toml += `[workflow]\nname = ${tomlStr(stage.id)}\nworker_kind = ${tomlStr(manifest.workflow.worker_kind)}\nslots = 1\n`
       if (model) toml += `model = ${tomlStr(model)}\n`
@@ -1454,7 +1476,7 @@ export async function runOrchestrator(input: {
     }
   }
   const gateCache = new Map<string, { at: number; pass: boolean }>()
-  const stepPending = { checks: 0, wakes: 0 }
+  const stepPending = { checks: 0, wakes: 0, stations: 0 }
 
   // ADR 0007: check steps poll with EXIT-CODE semantics — exit 0 passes
   // (unlike [gates] report detectors, which print "done" per ADR 0003).
@@ -1579,11 +1601,96 @@ export async function runOrchestrator(input: {
     return true
   }
 
+  // ADR 0016 slice 1 — station steps: a coworker stage hosts its
+  // exchange IN-PROCESS at stations/<id>/ behind the hosting contract
+  // (station folder + members passed by spec — the station is a
+  // folder, never program bytes). ONE job carries the whole chain: the
+  // mint and its child job are dead. The flight runs as a concurrent
+  // promise so the beat loop keeps renewing the lease and answering
+  // dialogs; idempotence is on disk (members/ + the relay ledger — a
+  // re-nursed parent resumes the SAME exchange, and a finished one
+  // re-reports from the stop already delivered).
+  const stationFlights = new Map<string, Promise<void>>()
+  const stationSettled = new Map<string, { status: string; why?: string }>()
+  const defaultHostStation = (stage: { id: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; preamble?: string }, dir: string): Promise<Report | null> => {
+    const rail = input.shep as unknown as { inhabitPane?: unknown }
+    if (typeof rail.inhabitPane !== "function") {
+      throw new HookError(`station ${stage.id} needs a rail that hosts conversations (inhabitPane) — this shep port cannot`)
+    }
+    mkdirSync(join(dir, "members"), { recursive: true })
+    const pre = stage.preamble ? `${stage.preamble}\n\n` : ""
+    const members: Member[] = []
+    for (const m of stage.members ?? []) {
+      const briefFile = join(dir, "members", `${m.name}.md`)
+      // briefs are STATION-owned bytes: written once at first hosting,
+      // never rewritten under a live exchange (a re-nursed parent must
+      // not swap the words mid-conversation)
+      if (!existsSync(briefFile)) writeFileSync(briefFile, `${pre}${m.brief}\n`)
+      members.push({
+        name: m.name,
+        ...(m.model ? { model: m.model } : {}),
+        ...(m.temperature !== undefined ? { temperature: m.temperature } : {}),
+        ...(m.initiates ? { initiates: true } : {}),
+      })
+    }
+    return runCoworker(rail as never as import("../adapters/rail.ts").Rail, {
+      station: { dir, members, workerKind: manifest.workflow.worker_kind },
+    })
+  }
+  const execStation = (step: Step): boolean => {
+    const stage = manifest.stages?.find((s) => s.id === step.id)
+    if (!stage) return false
+    const dir = join(input.taskDir, "stations", step.id)
+    const settled = stationSettled.get(step.id)
+    if (settled) {
+      let pass = settled.status === "done"
+      let checkRow = ""
+      if (pass && step.check) {
+        try {
+          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          checkRow = " — stage check passed"
+        } catch (err) {
+          pass = false
+          const why = (err instanceof Error ? err.message : String(err)).split("\n")[0]?.slice(0, 100) ?? ""
+          checkRow = ` — stage check failed: ${why}`
+        }
+      }
+      const result = `station ${step.id} exchange ${settled.status}${settled.why ? ` — ${settled.why}` : ""}${checkRow}`
+      record(step.id, "station", pass, result.slice(0, 120), result)
+      log(`station ${step.id}: exchange ${settled.status} — step ${pass ? "done" : "failed"}`)
+      if (!pass) input.shep.wake(step.id, "blocked", `station exchange ${settled.status}`)
+      stationFlights.delete(step.id)
+      return true
+    }
+    if (!stationFlights.has(step.id)) {
+      const protocolFile = join(dir, "protocol.json")
+      if (!existsSync(protocolFile)) {
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(protocolFile, JSON.stringify({ stage: step.id, station: dir, started: new Date().toISOString() }, null, 2) + "\n")
+      }
+      const host = input.hostStation ?? defaultHostStation
+      const flight = (async () => {
+        try {
+          const report = await host(stage, dir)
+          stationSettled.set(step.id, { status: report?.status ?? "failed", ...(report?.status ? {} : { why: "no report from the exchange" }) })
+        } catch (err) {
+          stationSettled.set(step.id, { status: "failed", why: err instanceof HookError ? err.message : String(err) })
+        }
+      })()
+      stationFlights.set(step.id, flight)
+      emit("station.hosted", { unit: step.id, dir })
+      log(`station ${step.id}: exchange hosted in-process at ${dir}`)
+      return true
+    }
+    return false
+  }
+
   // kind-specific step execution — the walker dispatches on finished_by
-  const executors: Record<"check" | "gate" | "wake", (step: Step) => boolean> = {
+  const executors: Record<"check" | "gate" | "wake" | "station", (step: Step) => boolean> = {
     check: execCheck,
     gate: execGate,
     wake: execWake,
+    station: execStation,
   }
 
   // The ONE walker: every unfinished step on the chain's frontier, in
@@ -1593,6 +1700,7 @@ export async function runOrchestrator(input: {
     let acted = 0
     stepPending.checks = 0
     stepPending.wakes = 0
+    stepPending.stations = 0
     if (chain.steps.length === 0) return 0
     const { finishedIds, failedIds } = stateSets()
     for (const step of chain.watched) {
@@ -1600,6 +1708,7 @@ export async function runOrchestrator(input: {
       if (!chain.frontier(step.wave, finishedIds, failedIds)) continue
       if (step.finished_by === "check") stepPending.checks += 1
       if (step.finished_by === "wake" && input.levyChild) stepPending.wakes += 1
+      if (step.finished_by === "station" && stationFlights.has(step.id)) stepPending.stations += 1
       if (executors[step.finished_by](step)) acted += 1
     }
     return acted
@@ -1624,7 +1733,7 @@ export async function runOrchestrator(input: {
       }
       waits.push(flight.lastChange + stallMs - now())
     }
-    if (stepPending.checks > 0 || stepPending.wakes > 0) waits.push(gateCheckMs)
+    if (stepPending.checks > 0 || stepPending.wakes > 0 || stepPending.stations > 0) waits.push(gateCheckMs)
     const ms = Math.max(1, Math.min(...waits))
     armed = setTimeout(() => {
       if (armed) timers.delete(armed)

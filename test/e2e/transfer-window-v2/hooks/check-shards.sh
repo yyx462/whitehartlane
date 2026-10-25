@@ -6,8 +6,8 @@
 set -uo pipefail
 fail() { echo "analyze: $1" >&2; exit 1; }
 shopt -s nullglob
-shards=(stages/negotiate/data/shortlist-*.json)
-[ ${#shards[@]} -gt 0 ] || fail "no shortlist-*.json in stages/negotiate/data/"
+shards=(stations/negotiate/data/shortlist-*.json)
+[ ${#shards[@]} -gt 0 ] || fail "no shortlist-*.json in stations/negotiate/data/"
 for f in "${shards[@]}"; do
   base=$(basename "$f" .json)
   case "$base" in

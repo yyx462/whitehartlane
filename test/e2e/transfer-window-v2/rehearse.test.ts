@@ -65,7 +65,7 @@ async function rehearse(name: string, planFixture: string) {
         const jsonl = normalize(readFileSync(join(dir, "data", "players.csv"), "utf8"))
         for (const target of [
           join(dir, "data", "players.jsonl"),
-          join(dir, "stages", "negotiate", "data", "players.jsonl"),
+          join(dir, "stations", "negotiate", "data", "players.jsonl"),
           join(dir, "stages", "scout", "data", "players.jsonl"),
         ]) {
           mkdirSync(join(target, ".."), { recursive: true })
@@ -73,8 +73,8 @@ async function rehearse(name: string, planFixture: string) {
         }
       } else {
         const shard = `shortlist-${id === "defensive" ? "defensive" : id === "midfield" ? "midfield" : "forward"}.json`
-        mkdirSync(join(dir, "stages", "negotiate", "data"), { recursive: true })
-        cpSync(join(CASE, "fixtures", shard), join(dir, "stages", "negotiate", "data", shard))
+        mkdirSync(join(dir, "stations", "negotiate", "data"), { recursive: true })
+        cpSync(join(CASE, "fixtures", shard), join(dir, "stations", "negotiate", "data", shard))
       }
       writeFileSync(join(cwd, "result.md"), `${id} done\n`)
       writeFileSync(join(briefPath, "..", "log.txt"), `done ${id}\n`)
@@ -87,19 +87,43 @@ async function rehearse(name: string, planFixture: string) {
     wake: () => {},
     tickPrivilege: () => ({ answered: new Set<string>(), capped: new Set<string>() }),
   }
-  // the scripted delegated mind: the child's members/actor delivered
-  // their artifacts inside the child job's run dir — the wake booking
-  // (wakes/<id>.json) is where the stage's accept checks find them
+  // the scripted delegated mind, split by ADR 0016 slice 1: negotiate
+  // (coworker) is HOSTED — its scripted exchange delivers the plan at
+  // the station's data/ shelf; scout (lab) still delegates via the
+  // wake machinery (slice 2 hosts it)
+  const hostStation = async (stage: { id: string }, stationDir: string) => {
+    if (stage.id !== "negotiate") throw new Error(`no scripted mind for station ${stage.id}`)
+    mkdirSync(join(stationDir, "data"), { recursive: true })
+    cpSync(join(CASE, "fixtures", planFixture), join(stationDir, "data", "plan.json"))
+    // mirror the default host's station bytes: the members' briefs
+    // (from the stage declaration) and the exchange record
+    const stages = readFileSync(join(CASE, "workflow.toml"), "utf8")
+    mkdirSync(join(stationDir, "members"), { recursive: true })
+    for (const who of ["dof", "capologist"]) {
+      const brief = stages.split(`name = "${who}"`)[1]?.split("[[stage.members]]")[0] ?? ""
+      writeFileSync(join(stationDir, "members", `${who}.md`), brief)
+      mkdirSync(join(stationDir, "messages", who), { recursive: true })
+    }
+    writeFileSync(
+      join(stationDir, "messages", "dof", "2.json"),
+      JSON.stringify({ from: "dof", to: "capologist", type: "note", body: "draft at ../../data/plan.json — check it" }),
+    )
+    writeFileSync(
+      join(stationDir, "messages", "capologist", "3.json"),
+      JSON.stringify({ from: "capologist", to: "dof", type: "stop", body: "PASS — arithmetic exact" }),
+    )
+    writeFileSync(join(stationDir, "relay.json"), JSON.stringify({ delivered: ["dof/2.json"], refused: [] }))
+    return { status: "done", table: [] }
+  }
   const levyChild = (unitId: string) => {
     const jobDir = join(dir, "child-jobs", unitId)
     mkdirSync(join(jobDir, "data"), { recursive: true })
-    if (unitId === "negotiate") cpSync(join(CASE, "fixtures", planFixture), join(jobDir, "data", "plan.json"))
     if (unitId === "scout") cpSync(join(CASE, "fixtures", "scout-verdict.json"), join(jobDir, "data", "scout-verdict.json"))
     writeFileSync(join(jobDir, "wake.json"), JSON.stringify({ outcome: "done", at: new Date().toISOString() }))
     return { ok: true as const, jid: `j-${unitId}`, jobDir, warnings: [] }
   }
   const report = await runOrchestrator({
-    taskDir: dir, shep, levyChild,
+    taskDir: dir, shep, levyChild, hostStation: hostStation as never,
     gateCheckMs: 50, logPollMs: 50, stallMs: 60_000, briefGraceMs: 60_000, log: () => {},
   })
   return { dir, spawned, report }
@@ -116,11 +140,12 @@ test("transfer-window-v2 rehearses green: five topologies, one chain, verify.sh 
   const rows = Object.fromEntries(report.table.map((r) => [r.unit, String(r.result)]))
   assert.match(rows.ingest, /stage check passed/)
   for (const unit of ["defensive", "midfield", "forward"]) assert.match(rows[unit], /stage check passed/)
-  assert.match(rows.negotiate, /child j-negotiate done — stage check passed/)
+  assert.match(rows.negotiate, /station negotiate exchange done — stage check passed/)
   assert.match(rows.scout, /child j-scout done — stage check passed/)
   assert.match(rows.grade, /stage gate passed/)
-  // delivery INTO the delegated stages rode the minted folders
-  assert.ok(readFileSync(join(dir, "stages", "negotiate", "members", "dof.md"), "utf8").includes("Director of Football"))
+  // delivery INTO the hosted station rode its own data/ shelf; the lab
+  // stage still carries its minted actor
+  assert.ok(readFileSync(join(dir, "stations", "negotiate", "members", "dof.md"), "utf8").includes("Director of Football"))
   assert.ok(readFileSync(join(dir, "stages", "scout", "actor.md"), "utf8").includes("chief scout"))
   // delivery OUT rode the accept checks (bookings -> parent data/)
   assert.ok(readFileSync(join(dir, "data", "plan.json"), "utf8").length > 0)
