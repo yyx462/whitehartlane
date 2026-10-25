@@ -95,17 +95,19 @@ for f in files:
                              "body": "question without a contract block"}))
 '
 
-# 4. a topic past the turn cap — the appended turns reuse a BANKED question
-m turn-cap "took 6 turns (cap 2)" '
+# 4. a topic past the turn cap — the appended turns are DISTINCT banked
+# questions (supersession collapses re-statements, so a cap test must
+# spend real distinct questions)
+m turn-cap "took 5 turns (cap 2)" '
 import tomllib
 bank = tomllib.loads((d / "data" / "questions.toml").read_text())["question"]
-q = next(x["q"] for x in bank if x["topic"] == "admission-jev" and x["level"] == 4)
+qs = [x["q"] for x in bank if x["topic"] == "admission-jev"]
 files = sorted((d / "messages").glob("*/*.json"))
 seq = max(int(f.name.split(".")[0]) for f in files)
 bt = chr(96)
 fence = bt * 3
 for n in range(5):
-    c = {"topic": "admission-jev", "level": 4, "question": q,
+    c = {"topic": "admission-jev", "level": 4, "question": qs[n % len(qs)],
          "grade": "partial", "cited": True, "citation_checked": "ok",
          "move": "deeper", "gap_note": ""}
     s = seq + 1 + n
@@ -121,6 +123,32 @@ txt = json.loads(first.read_text())
 txt["body"] = txt["body"].replace("\"topic\": \"admission-jev\"", "\"topic\": \"spur-grammar\"")
 first.write_text(json.dumps(txt))
 '
+
+# 5a. a SUPERSEDED re-statement: re-asking an already-asked question
+# (a re-grade, a mis-file the interviewer corrects by name) is not a
+# new list entry — the golden plus one duplicate turn still PASSES
+cp -R "$work/golden" "$work/golden-dup"
+python3 - "$work/golden-dup" <<'PYD'
+import json, re, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+# find an already-asked golden question (the first topic's contract)
+for f in sorted((d / "messages" / "interviewer").glob("*.json"), key=lambda p: int(p.name.split(".")[0])):
+    body = json.loads(f.read_text())["body"]
+    m = re.search(r"turn-contract\s*(\{.*?\})\s*```", body, re.DOTALL)
+    if not m:
+        continue
+    c = json.loads(m.group(1))
+    if c.get("topic") and c["topic"] != "rebuttal":
+        dup = dict(c)
+        break
+seq = max(int(p.name.split(".")[0]) for p in (d / "messages").glob("*/*.json"))
+fence = chr(96) * 3
+(d / "messages" / "interviewer" / f"{seq + 1}.json").write_text(
+    json.dumps({"from": "interviewer", "to": "interviewee", "type": "note",
+                "body": "correction: my last block was mis-filed; this supersedes it.\n\n" + fence + "turn-contract\n" + json.dumps(dup) + "\n" + fence}))
+PYD
+expect_pass "$work/golden-dup" "a superseded re-statement does not blow the budget"
 
 # 5b. a SIXTH fresh question — over the commission's question budget
 # (one extra banked question on an already-opened topic: per-topic cap
