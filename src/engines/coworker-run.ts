@@ -6,6 +6,7 @@
 // shape (src/engine.ts). Member supervision is the flight bench's
 // member court (below) — the second customer of #181's bench, folded
 // onto it from a hand-rolled nudge/stall ladder.
+import { execSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
@@ -428,6 +429,10 @@ export async function runCoworker(
     }
   }
   let ended: "stop" | "cap" | "deadline" | "dead" | "paused" | null = null
+  // #198 — the verdict hook's round bookkeeping: one revise round,
+  // then the red verdict rides the report honestly
+  let verdictRuns = 0
+  let verdictRed: string | null = null
   let draining = false
   let drainUntil: number | null = null
   // SIGTERM is the drain (ADR 5): the hook goes to the Rail, whose
@@ -519,6 +524,54 @@ export async function runCoworker(
       rail.say("rail", `relay ${r.from} -> ${r.to}`)
     }
     if (plan.stop) {
+      // #198 — audit BEFORE retire: a program may declare [hooks]
+      // verdict; it runs HERE, while every pane is still alive. Green:
+      // the stop stands. Red: the hook's first stderr line is handed
+      // VERBATIM to the stop's author for ONE revise round — the stop
+      // is consumed, the exchange continues, the next stop re-runs the
+      // hook. A second red ends the run honestly (#204 made the red
+      // report honest; the verdict row rides it).
+      const verdictCmd = manifest.hooks.verdict
+      if (verdictCmd) {
+        verdictRuns += 1
+        let verdictWhy = ""
+        let verdictPass = false
+        try {
+          execSync(verdictCmd, { cwd: taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          verdictPass = true
+        } catch (err) {
+          // the hook's OWN stderr line outranks execSync's generic
+          // "Command failed" — the revise note must name the artifact
+          const stderr = (err as { stderr?: Buffer | string }).stderr
+          const firstStderr = stderr ? Buffer.from(stderr).toString().split("\n").find((l) => l.trim()) : undefined
+          verdictWhy = firstStderr ?? (err instanceof Error ? err.message.split("\n")[0] : String(err)).split("\n")[0]
+        }
+        if (verdictPass) {
+          ended = plan.why ?? "stop"
+          break
+        }
+        if (verdictRuns > 1) {
+          verdictRed = verdictWhy
+          ended = plan.why ?? "stop"
+          break
+        }
+        const stopMsg = messages.find((m) => m.type === "stop" && !delivered.includes(m.file))
+        const author = stopMsg?.from ?? initiator ?? names[0]
+        // the failed stop is consumed — the author fixes what the hook
+        // named, then stops again; the next stop re-runs the verdict
+        if (stopMsg) {
+          delivered.push(stopMsg.file)
+          commitRelay()
+        }
+        rail.promptAgent(
+          author,
+          `[rail] verdict hook failed (the exchange is NOT over — one revise round): ${verdictWhy}\nFix exactly what it names, then write your stop message again.`,
+        )
+        if (ballOn.name === author) ballOn.since = Date.now()
+        ledger?.emit("verdict-reprompt", { to: author, why: verdictWhy.slice(0, 160) })
+        log(`verdict hook red — revise round handed to ${author}: ${verdictWhy.slice(0, 120)}`)
+        continue
+      }
       ended = plan.why ?? "stop"
       break
     }
@@ -594,6 +647,9 @@ export async function runCoworker(
     const why = [...deadWhy.values()].join("; ")
     rows.push({ unit: "exchange", result: `ended by ${ended}${why ? ` — ${why}` : ""}`, pass: false })
   }
+  if (verdictRed !== null) {
+    rows.push({ unit: "verdict", result: `verdict hook failed twice: ${verdictRed.slice(0, 160)}`, pass: false })
+  }
   // transport churn is visible, not silent (issue #122): the levy sees
   // who was respawned and how often
   const spent = [...retriesUsed.entries()].filter(([, n]) => n > 0)
@@ -622,7 +678,7 @@ export async function runCoworker(
     taskDir,
     rows,
     (table) => runCounts(taskDir, rail.manifest(), table),
-    ended === "stop" && dead.length === 0 && unresolved.length === 0 ? "done" : undefined,
+    ended === "stop" && dead.length === 0 && unresolved.length === 0 && verdictRed === null ? "done" : undefined,
   )
   rail.retireAll()
   rail.closeVerbose()

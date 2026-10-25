@@ -12,7 +12,7 @@ import { fakeHerdr, fakeLedger, fakeRail } from "./util.ts"
 // relay, the stop, and the report. This is the flow the smoke ran —
 // now a test.
 
-async function coworkerDir(prefix: string): Promise<string> {
+async function coworkerDir(prefix: string, extraToml = ""): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
   writeFileSync(join(dir, "workflow.toml"), [
     'kind = "coworker"',
@@ -24,6 +24,7 @@ async function coworkerDir(prefix: string): Promise<string> {
     "[hooks]",
     'grade = "echo pass"',
     'counts = "printf \'{}\'"',
+    ...(extraToml ? [extraToml] : []),
     "",
     "[members.alpha]",
     "initiates = true",
@@ -258,6 +259,72 @@ test("a member that heeds the quoted refusal self-heals — the exchange finishe
   const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as { delivered: string[] }
   assert.ok(relayLedger.delivered.includes("1-alpha.json"), "the fixed file was delivered")
 })
+
+// #198 — the verdict hook: audit BEFORE retire, while panes live.
+test("the verdict hook hands the stop's author one revise round, then green ends done", async () => {
+  const dir = await coworkerDir("coworker-verdict-", 'verdict = "bash hooks/verdict.sh"')
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  mkdirSync(join(dir, "data"), { recursive: true })
+  writeFileSync(
+    join(dir, "hooks", "verdict.sh"),
+    'set -euo pipefail\n[ -s data/proof.md ] || { echo "deliverable missing: data/proof.md" >&2; exit 1; }\n',
+  )
+  writeFileSync(join(dir, "messages", "1-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }))
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let betaPrompts = 0
+  herdr.onPrompt = (name, text, later) => {
+    if (name.startsWith("beta")) {
+      betaPrompts += 1
+      if (betaPrompts === 1) {
+        later(() =>
+          writeFileSync(join(dir, "messages", "2-beta.json"), JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" })),
+        )
+        return
+      }
+      assert.match(text, /verdict hook failed/, "the revise note carries the hook's verbatim why")
+      assert.match(text, /deliverable missing: data\/proof\.md/, "the hook's stderr rides verbatim")
+      later(() => {
+        writeFileSync(join(dir, "data", "proof.md"), "the product\n")
+        writeFileSync(join(dir, "messages", "3-beta.json"), JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "fixed — done" }))
+      })
+      return
+    }
+  }
+  const report = await runCoworker(rail, { stallMs: 100, beatMs: 10 })
+  assert.equal(report?.status, "done", "the revise round healed the verdict")
+  assert.equal(report?.table.find((row) => row.unit === "verdict"), undefined, "no verdict row when it heals")
+})
+
+test("a second verdict red ends honestly — the verdict row rides the failed report", async () => {
+  const dir = await coworkerDir("coworker-verdict2-", 'verdict = "bash hooks/verdict.sh"')
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  writeFileSync(join(dir, "hooks", "verdict.sh"), 'echo "deliverable missing: data/proof.md" >&2\nexit 1\n')
+  writeFileSync(join(dir, "messages", "1-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }))
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  let betaPrompts = 0
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("beta")) {
+      betaPrompts += 1
+      later(() =>
+        writeFileSync(
+          join(dir, "messages", `${betaPrompts + 1}-beta.json`),
+          JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }),
+        ),
+      )
+      return
+    }
+  }
+  const report = await runCoworker(rail, { stallMs: 100, beatMs: 10 })
+  assert.equal(report?.status, "failed", "two reds fail the run honestly")
+  const row = report?.table.find((r) => r.unit === "verdict")
+  assert.ok(row, "the verdict row rides the report")
+  assert.match(row!.result, /verdict hook failed twice/)
+})
+
 
 // Issue #122 — a pane death is a transport fault, not a member's
 // answer: the rail respawns the member from its booked session, bounded

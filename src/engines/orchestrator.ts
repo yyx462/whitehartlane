@@ -529,6 +529,19 @@ const faultStateOf = new WeakMap<
   { awaitingTurn: Set<string>; actedFault: Map<string, string>; deadModels: Map<string, Set<string>>; overrides: Map<string, string> }
 >()
 
+// Per-run check-reprompt memory, keyed by the stable shep object (the
+// settle path re-runs per tick; the shep — the rail — is one object
+// for the run's life). One revise round per unit, never more.
+const checkRetriedOfMap = new WeakMap<object, Set<string>>()
+function checkRetriedOf(shep: object): Set<string> {
+  let s = checkRetriedOfMap.get(shep)
+  if (s === undefined) {
+    s = new Set()
+    checkRetriedOfMap.set(shep, s)
+  }
+  return s
+}
+
 export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
@@ -620,16 +633,38 @@ export function cycle(deps: CycleDeps): boolean {
           } catch (err) {
             why = err instanceof Error ? err.message.split("\n")[0] : String(err)
           }
+          if (pass) {
+            return {
+              kind: "close",
+              stage: "check",
+              pass,
+              row: { unit: id, result: "stage check passed", pass },
+            }
+          }
+          // #198 — audit before retire, the fan-out twin: ONE revise
+          // round while the worker's pane still lives — the check's
+          // verbatim why goes back to the producer; the next settle
+          // re-runs the check; a second failure closes as before.
+          const retried = checkRetriedOf(deps.shep)
+          if (!retried.has(id)) {
+            retried.add(id)
+            return {
+              kind: "reprompt",
+              note: `[rail] your stage check failed: ${why.slice(0, 160)} — fix exactly what it names, then finish again`,
+              onOkOnly: false,
+              event: ["check-reprompt", { unit: id, why: why.slice(0, 120) }] as [string, Record<string, unknown>],
+            }
+          }
           return {
             kind: "close",
             stage: "check",
             pass,
             row: {
               unit: id,
-              result: pass ? "stage check passed" : `stage check failed: ${why.slice(0, 120)}`,
+              result: `stage check failed (after one revise round): ${why.slice(0, 120)}`,
               pass,
             },
-            wake: pass ? undefined : `stage check failed: ${why.slice(0, 120)}`,
+            wake: `stage check failed: ${why.slice(0, 120)}`,
           }
         }
         // "none": the stage declared no hook — the worker's done is the

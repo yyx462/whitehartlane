@@ -37,3 +37,4 @@ roots = ["~/projects/Agentic-Workspace/whitehartlane"]
 
 [hooks]
 counts = "bash hooks/audit.sh"
+verdict = "bash hooks/verdict.sh"

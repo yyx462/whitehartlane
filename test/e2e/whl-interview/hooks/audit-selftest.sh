@@ -36,6 +36,24 @@ expect_fail() { # <dir> <label> <why-substring>
 
 python3 "$here/fixtures/gen_golden.py" "$work/golden" >/dev/null
 expect_pass "$work/golden" "golden exchange passes with JSON counts"
+
+# the pre-retire probe (#198): deliverables present = green; a missing
+# one = red naming the artifact — the revise round's ammunition
+cp -R "$work/golden" "$work/golden-pristine"
+if (cd "$work/golden" && WHL_CONTRACT_DIR="$here/.." python3 "$here/audit.py" --verdict >/dev/null 2>&1); then
+  pass_n=$((pass_n + 1)); echo "ok   — verdict probe green on the golden tree"
+else
+  fail_n=$((fail_n + 1)); echo "FAIL — verdict probe should be green on golden"
+fi
+rm "$work/golden/data/pitch.md"
+if out=$(cd "$work/golden" && WHL_CONTRACT_DIR="$here/.." python3 "$here/audit.py" --verdict 2>&1); then
+  fail_n=$((fail_n + 1)); echo "FAIL — verdict probe should bite on a missing deliverable"
+elif [[ "$out" == *"deliverable missing"* ]]; then
+  pass_n=$((pass_n + 1)); echo "ok   — verdict probe bites: deliverable missing (names the artifact)"
+else
+  fail_n=$((fail_n + 1)); echo "FAIL — verdict probe bit for the wrong reason: $out"
+fi
+cp "$work/golden-pristine/data/pitch.md" "$work/golden/data/pitch.md"
 [ -s "$work/golden/data/transcript.jsonl" ] || { echo "FAIL — transcript.jsonl not built"; exit 1; }
 [ -s "$work/golden/interviews/$(date +%F)/gaps.md" ] || { echo "FAIL — interviews/<date>/ not delivered"; exit 1; }
 pass_n=$((pass_n + 1)); echo "ok   — transcript built, all deliverables delivered to interviews/<date>/"
