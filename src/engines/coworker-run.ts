@@ -7,7 +7,7 @@
 // member court (below) — the second customer of #181's bench, folded
 // onto it from a hand-rolled nudge/stall ladder.
 import { execSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
@@ -65,6 +65,9 @@ export async function runCoworker(
   // refusals survive the orchestrator; pending mail redelivers by it.
   const relayLedger = readRelayLedger(taskDir)
   const delivered = [...relayLedger.delivered]
+  // the mail ledger's memory: files already accounted (a resumed run
+  // pre-seeds from the relay ledger so old mail never re-accounts)
+  const knownFiles = new Set<string>(delivered)
   const refused = [...relayLedger.refused]
   // why each refusal happened, and its attributable sender — the nudge
   // ladder quotes these AT the sender (the 2026-10-12 wave-2 lesson:
@@ -119,12 +122,31 @@ export async function runCoworker(
     const dir = join(taskDir, "sandboxes", m.name)
     sandboxOf.set(m.name, dir)
     mkdirSync(dir, { recursive: true })
+    // THE SEND TOOL (ADR 0016 slice 5 / zen 7): staged once per run —
+    // the only sanctioned sender. Identity = the caller's sandbox
+    // folder; the roster names the legal recipients. Members reach it
+    // at tools/send.mjs (the protocol section teaches the call).
+    const toolsDir = join(taskDir, "tools")
+    if (!existsSync(join(toolsDir, "send.mjs"))) {
+      mkdirSync(toolsDir, { recursive: true })
+      copyFileSync(new URL("./send-tool.mjs", import.meta.url).pathname, join(toolsDir, "send.mjs"))
+      writeFileSync(join(toolsDir, "roster.txt"), `${names.join("\n")}\n`)
+    }
     // pre-declared external roots ride the session-start config — the
     // dialogs for these paths never fire, so the sweep never spends
     // on them (the j-5b245e lesson: a vista reviewer died at the cap
     // for paths every verdict allowed). The scope's roots ride too;
     // member roots arrive tilde-form and expand inside.
-    rail.writePermissions(dir, m.roots ?? [])
+    //
+    // Mailbox law (slice 5): a member's write scope adds the shared
+    // data/ shelf and its OWN outbox only — peers' outboxes sit
+    // outside every scope, so a forged or misdirected write is out of
+    // scope by construction (the interview's gap #1, closed).
+    rail.writePermissions(dir, [
+      ...(m.roots ?? []),
+      join(taskDir, "data"),
+      join(taskDir, "messages", m.name),
+    ])
     let brief = ""
     try {
       brief = readFileSync(join(taskDir, "members", `${m.name}.md`), "utf8")
@@ -496,6 +518,15 @@ export async function runCoworker(
     // queued privilege notes ride the sweep (tickPrivilege flushes);
     // readMessages follows it on the same beat
     const { messages, bad } = readMessages(join(taskDir, "messages"), names)
+    // the RAIL-written mail ledger (slice 5): every NEW file a mailbox
+    // produces is accounted the beat it first parses — who filed it,
+    // where it sits, what it says it is. The ledger is rail-owned by
+    // construction: panes write mail, only the rail writes accounting.
+    for (const m of messages) {
+      if (knownFiles.has(m.file)) continue
+      knownFiles.add(m.file)
+      ledger?.emit("mail.filed", { from: m.from, to: m.to, file: m.file, type: m.type })
+    }
     for (const b of bad) {
       // the detail (why + sender) is refreshed every beat — a refusal
       // loaded from an old ledger without detail backfills here

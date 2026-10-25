@@ -39,8 +39,9 @@ def build(target):
     msgs.mkdir(parents=True, exist_ok=True)
     (target / "data").mkdir(parents=True, exist_ok=True)
     # the source side rides along so the selftest can mutate it per case
-    for name in ("contract.toml", "questions.toml"):
-        shutil.copy2(SOURCE / name, target / name)
+    (target / "data").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SOURCE / "contract.toml", target / "contract.toml")
+    shutil.copy2(SOURCE / "questions.toml", target / "data" / "questions.toml")
     if (target / "members").exists():
         shutil.rmtree(target / "members")
     shutil.copytree(SOURCE / "members", target / "members")

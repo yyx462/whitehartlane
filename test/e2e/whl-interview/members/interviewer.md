@@ -113,11 +113,12 @@ the cap. The rebuttal pass is 2 turns at most
 rebuttal pass — zero standing gaps means the interviewer was too
 soft and the run fails.
 **Questions:** every question you ask must come from the bank
-(questions.toml) — at run time that is the staged
-copy at `../../questions.toml` (from your sandbox). If you need a
-question it lacks, APPEND it there first (append-only; retire with
-`retired = true`, never erase), then ask it. The audit checks every
-asked question is banked in THAT copy — the run's own law.
+(data/questions.toml) — at run time that is the staged
+copy at `../../data/questions.toml` (the shared shelf, from your
+sandbox). If you need a question it lacks, APPEND it there first
+(append-only; retire with `retired = true`, never erase), then ask
+it. The audit checks every asked question is banked in THAT copy —
+the run's own law.
 **Citations:** every claim in an answer and every explained.md
 section carries at least one repo citation — `path/file.ts` or
 `path/file.ts:LINE`.

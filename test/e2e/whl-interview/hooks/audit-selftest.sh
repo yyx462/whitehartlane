@@ -98,7 +98,7 @@ for f in files:
 # 4. a topic past the turn cap — the appended turns reuse a BANKED question
 m turn-cap "took 6 turns (cap 2)" '
 import tomllib
-bank = tomllib.loads((d / "questions.toml").read_text())["question"]
+bank = tomllib.loads((d / "data" / "questions.toml").read_text())["question"]
 q = next(x["q"] for x in bank if x["topic"] == "admission-jev" and x["level"] == 4)
 files = sorted((d / "messages").glob("*/*.json"))
 seq = max(int(f.name.split(".")[0]) for f in files)
@@ -127,7 +127,7 @@ first.write_text(json.dumps(txt))
 # 2 is respected, the budget is not)
 m budget-cap "question budget exceeded" '
 import tomllib
-bank = tomllib.loads((d / "questions.toml").read_text())["question"]
+bank = tomllib.loads((d / "data" / "questions.toml").read_text())["question"]
 q = next(x["q"] for x in bank if x["topic"] == "admission-jev" and x["level"] == 4)
 files = sorted((d / "messages").glob("*/*.json"))
 seq = max(int(f.name.split(".")[0]) for f in files)
