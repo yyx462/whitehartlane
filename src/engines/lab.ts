@@ -70,22 +70,38 @@ export function labBookings(ledger: RailLedger | null): LabBookings {
 // spawnWave re-inhabits carried mocks when the wave names them again.
 type Flight = { spawnedAt: number; pane?: string; carried: boolean }
 
+// ADR 0016 slice 2 — the LAB station hosting contract: a lab STAGE in
+// a chain runs THIS engine in-process at stations/<S>/ (the stage's
+// brief is the actor's, its detectors ride the spec; the station is a
+// folder, never program bytes). The actor spawns on the same rail, so
+// the model pin inherits the parent manifest exactly as the mint's
+// child toml used to write.
+export type LabStationSpec = {
+  dir: string
+  brief: string
+  workerKind: string
+  detectors?: { signal?: string; end?: string }
+}
+
 export async function runLab(
   rail: Rail,
-  opts: { graceMs?: number } = {},
+  opts: { graceMs?: number; station?: LabStationSpec } = {},
 ): Promise<Report | null> {
   // the newborn/liveness grace (endOf's own dead-rule default; the
   // drain-dead carry uses the same clock) — parameterized so tests
   // drive it to 0
   const graceMs = opts.graceMs ?? GRACE_MS
-  const taskDir = rail.taskDir
+  const taskDir = opts.station?.dir ?? rail.taskDir
   const log = rail.log
-  let jobText = ""
-  try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
+  let jobText = opts.station?.brief ?? ""
+  if (!jobText) {
+    try { jobText = readFileSync(join(taskDir, "actor.md"), "utf8") } catch {}
+  }
   // Detectors: the program's say in what a wave or an end is. Absent,
   // the OS defaults (protocol.json, log.txt) run — a detector may
   // slow or fail, never kill the rail: refusal retries, deterministic
-  // failure degrades and logs once.
+  // failure degrades and logs once. A hosted station carries its
+  // detectors in the spec; a standalone run reads the manifest.
   const manifestEarly = (() => {
     try {
       return rail.manifest()
@@ -93,7 +109,7 @@ export async function runLab(
       return null
     }
   })()
-  const detectors = manifestEarly?.detectors
+  const detectors = opts.station?.detectors ?? manifestEarly?.detectors
   const saidDetectorFailure = new Set<string>()
   function detectorCall<T>(what: string, fn: () => T, fallback: T): T {
     try {
@@ -130,7 +146,7 @@ export async function runLab(
   const graded = new Map<string, { pass: boolean; row: string }>()
   const woke: string[] = []
   let prompted = ""
-  const kind = (() => {
+  const kind = opts.station?.workerKind ?? (() => {
     try {
       return readFileSync(join(taskDir, "workflow.toml"), "utf8").match(/worker_kind\s*=\s*"([^"]+)"/)?.[1] ?? "opencode"
     } catch {

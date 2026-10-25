@@ -450,7 +450,7 @@ members = [
   })
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.review, /needs a rail that hosts conversations/)
+  assert.match(byUnit.review, /needs a rail that hosts its engine/)
   // and nothing was ever minted: no stages/ dialect for a conversation
   assert.equal(existsSync(join(dir, "stages")), false)
 })
@@ -510,7 +510,7 @@ run = "true"
   // hosted exchange's, born by the host
   assert.deepEqual(shep.spawned, ["w-draft"])
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.review, /^station review exchange done/)
+  assert.match(byUnit.review, /^station review done/)
 })
 
 // ── dry-run: worker_kind = "mock" births no agent ──────────────────
@@ -592,7 +592,7 @@ function rehearsalHost(
   }
 }
 
-test("lab stage mints a kind=lab child with actor.md + detectors, levied once", async () => {
+test("a lab stage HOSTS its experiment in-process at stations/<id>/ — actor brief + detectors by spec (ADR 0016 slice 2)", async () => {
   const dir = taskDir("lab-flow")
   writeFileSync(
     join(dir, "workflow.toml"),
@@ -612,12 +612,20 @@ topology = "gate"
 run = "true"
 `,
   )
-  const levies: Array<{ unitId: string; folder: string }> = []
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"found\"\npath = \"stations/explore/found.md\"\nkind = \"md\"\n")
+  const hosted: Array<{ id: string; dir: string }> = []
   const shep = fakeShep()
   const report = await runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild: autoWakeLevy(dir, "done", levies),
+    // the scripted lab mind: the actor's found.md lands at the station
+    hostStation: async (stage, stationDir) => {
+      hosted.push({ id: stage.id, dir: stationDir })
+      mkdirSync(stationDir, { recursive: true })
+      writeFileSync(join(stationDir, "found.md"), "the signal\n")
+      writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: "done", table: [] }))
+      return { status: "done", table: [] }
+    },
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -625,14 +633,14 @@ run = "true"
     log: () => {},
   })
   assert.equal(report.status, "done")
-  const childToml = readFileSync(join(dir, "stages", "explore", "workflow.toml"), "utf8")
-  assert.match(childToml, /^kind = "lab"$/m)
-  assert.match(childToml, /\[detectors\][\s\S]*end = "test -f found\.md"/)
-  assert.equal(readFileSync(join(dir, "stages", "explore", "actor.md"), "utf8"), "find the signal in the noise\n")
-  assert.deepEqual(levies.map((l) => l.unitId), ["explore"])
-  assert.deepEqual(shep.spawned, []) // the actor is the child's, not ours
+  // NO mint: the stages/ dialect is dead for experiments too
+  assert.equal(existsSync(join(dir, "stages")), false)
+  // the station folder: the booking + the experiment's product
+  assert.ok(existsSync(join(dir, "stations", "explore", "protocol.json")))
+  assert.equal(readFileSync(join(dir, "stations", "explore", "found.md"), "utf8"), "the signal\n")
+  assert.deepEqual(hosted.map((h) => h.id), ["explore"])
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.explore, /^child j-explore done/)
+  assert.match(byUnit.explore, /^station explore done/)
 })
 
 test("a coworker stage's check runs after the HOSTED exchange — green exchange, red check fails", async () => {

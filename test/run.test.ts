@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -174,6 +174,28 @@ test("run refuses a deliverable-less program at the screen — no job is formed 
   const ok = prepareRun(dir, { check: true })
   assert.equal(ok.ok, true, "a declared deliverable passes the screen")
   assert.equal(listJobs().length, before, "the check mints nothing — no phantom rows (#68)")
+})
+
+// #196 / ADR 0016 slice 3: the staged program is SELF-CONTAINED —
+// hooks/ travels into the run dir and every hook command (verdict
+// included) resolves there. The interview taught this live: a relative
+// verdict.sh doomed the run and the members hallucinated repairs
+// (j-aaa5e4: "verdict hook failed twice: No such file or directory").
+test("the staged program carries its hooks and resolves the verdict in the run dir (#196)", async () => {
+  const dir = await mkdtempSync(join(tmpdir(), "agentic-os-hooks-"))
+  cpSync(join(import.meta.dirname, "e2e", "whl-interview"), dir, { recursive: true })
+  const booked = prepareRun(dir)
+  assert.equal(booked.ok, true)
+  if (!booked.ok || !("job" in booked)) return
+  const staged = readFileSync(join(booked.job.dir, "workflow.toml"), "utf8")
+  const verdict = staged.match(/^verdict = "([^"]+)"/m)?.[1] ?? ""
+  assert.notEqual(verdict, "", "the fixture declares a verdict hook")
+  assert.ok(verdict.startsWith("bash "), `verdict stays a bash command: ${verdict}`)
+  const verdictPath = verdict.replace(/^bash /, "").split(" ")[0]
+  assert.ok(verdictPath.startsWith(booked.job.dir), `verdict resolves IN the run dir: ${verdictPath}`)
+  assert.ok(existsSync(verdictPath), "the resolved verdict script exists (hooks/ traveled)")
+  const { abortJob } = await import("../src/adapters/store.ts")
+  abortJob(booked.job, "test", 0, "cli")
 })
 
 // #200 slice 7 / #68: prepareRun-as-check used to BOOK. The check verb

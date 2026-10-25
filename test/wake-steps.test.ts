@@ -101,14 +101,22 @@ ${extra}`,
   return dir
 }
 
-test("a wake step levies once and finishes done on the child's wake (ADR 0007 stage 3)", async () => {
+test("a lab station hosts once and finishes done on the engine's report (ADR 0016 slice 2)", async () => {
   const dir = nestedStagesDir("wake-once-")
   const shep = fakeShep()
-  const levy = fakeLevy(dir)
+  const hosted: string[] = []
+  let release: (() => void) | null = null
+  const gate = new Promise<void>((resolve) => { release = resolve })
   const engine = runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild: levy.port,
+    hostStation: async (stage, stationDir) => {
+      hosted.push(stage.id)
+      mkdirSync(stationDir, { recursive: true })
+      writeFileSync(join(stationDir, "found.md"), "signal\n")
+      await gate // the exchange takes time — the chain waits on it
+      return { status: "done", table: [] }
+    },
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -116,22 +124,19 @@ test("a wake step levies once and finishes done on the child's wake (ADR 0007 st
     log: () => {},
   })
   await new Promise((resolve) => setTimeout(resolve, 250))
-  // exactly one levy for the wake step — never a second while it waits
-  assert.equal(levy.levies.length, 1)
-  assert.equal(levy.levies[0].unitId, "sub")
-  assert.ok(levy.levies[0].folder.endsWith(join("stages", "sub")), `folder is the minted child: ${levy.levies[0].folder}`)
-  assert.ok(existsSync(join(dir, "stages", "sub", "workflow.toml")), "the lab stage minted its child program")
-  // the booking is durable on the task dir
-  assert.ok(existsSync(join(dir, "wakes", "sub.json")))
-  childWakes(dir, "done")
+  // hosted exactly once, at the station — never a second while it runs
+  assert.deepEqual(hosted, ["sub"])
+  assert.ok(existsSync(join(dir, "stations", "sub", "protocol.json")), "the station books itself durably")
+  assert.equal(existsSync(join(dir, "stages")), false, "no mint, ever")
+  release!()
   const report = await Promise.race([
     engine,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("wake never finished the step")), 4000)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("the station never settled")), 4000)),
   ])
   assert.equal(report.status, "done")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.sub, /child j-sub done/)
-  assert.equal(levy.levies.length, 1, "the booking guards against a second levy")
+  assert.match(byUnit.sub, /^station sub done/)
+  assert.deepEqual(hosted, ["sub"], "the booking guards against a second hosting")
 })
 
 test("a failed child receipt fails the step and blocks downstream waves honestly", async () => {
@@ -143,39 +148,41 @@ topology = "fan-out"
 units = [{ id = "auditor", brief = "audit the experiment" }]
 `)
   const shep = fakeShep()
-  const levy = fakeLevy(dir)
   const engine = runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild: levy.port,
+    hostStation: async (stage, stationDir) => {
+      mkdirSync(stationDir, { recursive: true })
+      return { status: "failed", table: [] }
+    },
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
     briefGraceMs: 60_000,
     log: () => {},
   })
-  await new Promise((resolve) => setTimeout(resolve, 250))
-  childWakes(dir, "failed")
   const report = await Promise.race([
     engine,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("failed child never landed")), 4000)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("failed station never landed")), 4000)),
   ])
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.sub, /child j-sub failed/)
+  assert.match(byUnit.sub, /^station sub failed/)
   // audit is unreachable — never spawned, never counted against finishing
   assert.ok(!shep.spawned.includes("w-auditor"))
   assert.match(byUnit.auditor, /wave blocked by failed sub/)
-  assert.ok(shep.wakes.some((w) => w.label === "sub" && /child job j-sub failed/.test(w.detail)))
+  assert.ok(shep.wakes.some((w) => w.label === "sub" && /station exchange failed/.test(w.detail)))
 })
 
-test("a refused levy is an honest failed row, not a retry loop", async () => {
+test("a station host that throws is an honest failed row, not a retry loop", async () => {
   const dir = nestedStagesDir("wake-refused-")
   const shep = fakeShep()
   const report = await runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild: () => ({ ok: false, why: "no workflow.toml in /nowhere" }),
+    hostStation: async () => {
+      throw new Error("no workflow.toml in /nowhere")
+    },
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -184,7 +191,7 @@ test("a refused levy is an honest failed row, not a retry loop", async () => {
   })
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.sub, /levy failed: no workflow\.toml in \/nowhere/)
+  assert.match(byUnit.sub, /no workflow\.toml in \/nowhere/)
 })
 
 test("a rail spawner is never doorbelled — the durable wake is the receipt", () => {

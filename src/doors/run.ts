@@ -85,16 +85,24 @@ function absolutize(cmd: string, source: string): string {
 export function stageRun(source: string, store: string): void {
   mkdirSync(store, { recursive: true })
   const manifest = loadManifest(source)
+  // #196 / ADR 0016 slice 3: hooks/ TRAVELS. The staged program is
+  // self-contained — every hook command (verdict included, the seam
+  // the interview taught: a relative verdict.sh doomed the run and the
+  // members hallucinated repairs) resolves against the RUN dir's own
+  // hooks, never the source's.
+  const hooksSrc = join(source, "hooks")
+  if (existsSync(hooksSrc)) cpSync(hooksSrc, join(store, "hooks"), { recursive: true })
   let raw = readFileSync(join(source, "workflow.toml"), "utf8")
   const cmds = [
     manifest.hooks.units,
     manifest.hooks.grade,
     manifest.hooks.counts,
+    manifest.hooks.verdict,
     manifest.detectors?.signal,
     manifest.detectors?.end,
   ]
   for (const cmd of cmds) {
-    if (cmd) raw = raw.replaceAll(cmd, absolutize(cmd, source))
+    if (cmd) raw = raw.replaceAll(cmd, absolutize(cmd, store))
   }
   // ADR 0007 wake steps: a child program's folder is staged absolute
   // against the source tree — the staged manifest in the OS store must

@@ -95,5 +95,5 @@ run = "true"
   assert.equal(existsSync(join(dir, "stages")), false)
   // the run's own report carries the station row, and the gate ran after
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.review, /^station review exchange done/)
+  assert.match(byUnit.review, /^station review done/)
 })
