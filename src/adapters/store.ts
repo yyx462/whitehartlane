@@ -1265,6 +1265,40 @@ export function writeOpencodeModel(dir: string, model: string): void {
   }
 }
 
+// Per-mind model SETTINGS, same config layer as the pin: read-modify-
+// write the sandbox opencode.json, merging into
+// provider.<p>.models.<id>.<key> (the schema's own options home —
+// verified against opencode v2.1.4's config.json schema). Preserves
+// whatever permissions/model already shaped the file.
+export function writeOpencodeModelSettings(
+  dir: string,
+  model: string,
+  settings: { temperature?: number },
+): void {
+  try {
+    const cfgPath = join(dir, "opencode.json")
+    const cfg = existsSync(cfgPath)
+      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
+      : {}
+    cfg.$schema ??= "https://opencode.ai/config.json"
+    const { provider, id } = splitModel(model)
+    const providers = (cfg.provider ?? {}) as Record<string, unknown>
+    const entry = (providers[provider] ?? {}) as Record<string, unknown>
+    const models = (entry.models ?? {}) as Record<string, unknown>
+    const modelEntry = (models[id] ?? {}) as Record<string, unknown>
+    for (const [key, value] of Object.entries(settings)) {
+      if (value !== undefined) modelEntry[key] = value
+    }
+    models[id] = modelEntry
+    entry.models = models
+    providers[provider] = entry
+    cfg.provider = providers
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+  } catch {
+    // settings pinning is best-effort; the model pin still applies
+  }
+}
+
 // Grant one more root to a live worker's permission file — durable for
 // the next session start; the current dialog is cleared by the rail.
 // A degenerate root ("/", "") is refused: one temp allow must never

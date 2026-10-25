@@ -29,6 +29,12 @@ test("members parse from [members.<name>] with model, seed, and initiates", () =
   assert.equal(members[0].initiates, true)
   assert.equal(members[1].initiates, undefined)
   assert.equal(members[1].seed?.session_id, "uuid-old")
+  // per-mind model settings: temperature parses and rides the member
+  assert.equal(parseMembers('[members.a]\ntemperature = 0.2\n')[0].temperature, 0.2)
+  assert.equal(parseMembers('[members.a]\n')[0].temperature, undefined)
+  assert.throws(() => parseMembers('[members.a]\ntemperature = 3\n'), /0\.\.2/)
+  assert.throws(() => parseMembers('[members.a]\ntemperature = -0.1\n'), /0\.\.2/)
+  assert.throws(() => parseMembers('[members.a]\ntemperature = "low"\n'), /temperature/)
   assert.throws(() => parseMembers('[members."bad name"]\n'), /shep-safe/)
   assert.throws(() => parseMembers('[members.a]\nmodel = "glm53"\n'), /provider\/model/)
   assert.throws(() => parseMembers('[members.a]\nseed_tool = "pi"\n'), /seed_tool and seed_session/)

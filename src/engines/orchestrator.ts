@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { withBackpressure } from "../core/backpressure.ts"
 import { chainOf, stepRecorder, type Chain } from "../core/orchestrator-chain.ts"
-import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
+import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, settingsPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { runFaultLane, type FaultRail } from "./fault-lane.ts"
 import { PERMISSION_CAP } from "../core/permission.ts"
@@ -25,7 +25,7 @@ export type { AgentStatus }
 
 export type ShepPort = {
   setLayout: (layout: Layout, taskDir: string) => void
-  spawnWorker: (name: string, kind: string, briefPath: string, cwd: string, model?: string) => boolean
+  spawnWorker: (name: string, kind: string, briefPath: string, cwd: string, model?: string, temperature?: number) => boolean
   // Issue #123 — renew the job lease once per engine cycle (one write).
   // Optional: a test shep without a ledger simply does not renew.
   renew?: () => void
@@ -40,6 +40,7 @@ export type ShepPort = {
     briefPath: string,
     cwd: string,
     model?: string,
+    temperature?: number,
   ) => boolean
   paneAlive: (name: string) => boolean
   // completion-detection: the pane's full verdict, once per beat — the
@@ -159,6 +160,7 @@ export type CycleDeps = {
   // absent = undefined passed to the spawn seam, which falls to the
   // manifest pin — byte-identical to the pre-stage rail.
   unitModels?: Map<string, string>
+  unitTemperatures?: Map<string, number>
   // The provider-fault lane's rail seam (j-93d652 gap #4): fan-out
   // workers get the jev ladder coworker members always had. Optional —
   // a test shep without it simply runs lane-less, as before.
@@ -407,10 +409,11 @@ function resumeSpawn(
   const cwd = deps.worktree ?? resume.cwd ?? paths.dir
   // a resumed unit keeps its pin (the nearest declaration at mint time)
   const model = deps.unitModels?.get(unit.id)
+  const temperature = deps.unitTemperatures?.get(unit.id)
   if (deps.shep.resumeWorker) {
-    return deps.shep.resumeWorker(`w-${unit.id}`, resume, continuePath, cwd, model)
+    return deps.shep.resumeWorker(`w-${unit.id}`, resume, continuePath, cwd, model, temperature)
   }
-  return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd, model)
+  return deps.shep.spawnWorker(`w-${unit.id}`, deps.hooks.workerKind, continuePath, cwd, model, temperature)
 }
 
 // ── the flight bench (OPTIMUM §2, the flight half of the dispatch) ──
@@ -1028,6 +1031,7 @@ export function cycle(deps: CycleDeps): boolean {
             paths.briefPath,
             deps.worktree ?? paths.dir,
             deps.unitModels?.get(unit.id),
+            deps.unitTemperatures?.get(unit.id),
           )
       if (ok) {
       deps.attempts.delete(unit.id)
@@ -1206,6 +1210,7 @@ export async function runOrchestrator(input: {
   const chain = chainOf(steps)
   const stagePlan = stages?.length ? gradePlanFromStages(stages) : undefined
   const unitModels = stages?.length ? modelPlanFromStages(stages) : undefined
+  const unitTemperatures = stages?.length ? settingsPlanFromStages(stages) : undefined
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
@@ -1306,6 +1311,7 @@ export async function runOrchestrator(input: {
         chain,
         stagePlan,
         unitModels,
+        unitTemperatures,
         emit: (kind, payload) => {
           emit(kind, payload)
           if (kind === "unit.finished" && typeof payload.unit === "string") {

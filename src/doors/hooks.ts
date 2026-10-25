@@ -74,13 +74,17 @@ export type StageMember = {
   brief: string
   initiates?: boolean
   model?: string
+  // per-mind model settings: opencode pins this as
+  // provider.<p>.models.<id>.temperature in the sandbox config (the
+  // schema's own key); a member without one rides the host default
+  temperature?: number
 }
 
 export type Stage = {
   id: string
   topology: "solo" | "fan-out" | "coworker" | "gate" | "lab"
   brief?: string
-  units?: { id: string; brief: string; model?: string }[]
+  units?: { id: string; brief: string; model?: string; temperature?: number }[]
   members?: StageMember[]
   model?: string
   check?: string
@@ -151,6 +155,14 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         if (row.initiates === true) initiates += 1
         else if (row.initiates !== undefined && row.initiates !== false) {
           throw new HookError(`stage ${id} members[${i}].initiates must be true or false: ${String(row.initiates)}`)
+        }
+        if (row.temperature !== undefined) {
+          const temp = row.temperature
+          if (typeof temp !== "number" || !Number.isFinite(temp) || temp < 0 || temp > 2) {
+            throw new HookError(
+              `stage ${id} members[${i}].temperature must be a number 0..2: ${String(temp)} (per-mind model settings; opencode pins it in the sandbox config)`,
+            )
+          }
         }
       }
       if (initiates !== 1) {
@@ -397,6 +409,22 @@ export type Manifest = {
 // Absent from the map = fall to the manifest pin (byte-identical to
 // the pre-stage rail). Fresh per stage: no inheritance from earlier
 // stages, ever.
+// Per-mind model SETTINGS plan (the temperature half of the pins
+// above): same nearest-declaration rule — unit.temperature →
+// stage-temperature? (stage-level temperature is not declared today;
+// units own theirs). Absent = the host default.
+export function settingsPlanFromStages(stages: Stage[]): Map<string, number> {
+  const pins = new Map<string, number>()
+  for (const stage of stages) {
+    if (stage.topology === "fan-out") {
+      for (const unit of stage.units ?? []) {
+        if (unit.temperature !== undefined) pins.set(unit.id, unit.temperature)
+      }
+    }
+  }
+  return pins
+}
+
 export function modelPlanFromStages(stages: Stage[]): Map<string, string> {
   const pins = new Map<string, string>()
   for (const stage of stages) {

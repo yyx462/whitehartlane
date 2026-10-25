@@ -8,7 +8,7 @@
 // the liveness consolidation's single verb feeds from here).
 import { readFileSync } from "node:fs"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
-import { splitModel, writeOpencodeModel, writePiSettings } from "./store.ts"
+import { splitModel, writeOpencodeModel, writeOpencodeModelSettings, writePiSettings } from "./store.ts"
 import type { AgentHost, AgentStatus, HostInhabitSpec } from "../ports/agent-host.ts"
 import type { CmdResult, Transport } from "../ports/transport.ts"
 
@@ -39,12 +39,18 @@ export class OpenCodeHost implements AgentHost {
       writePiSettings(spec.cwd, spec.model)
       const { provider, id } = splitModel(spec.model)
       tail.push("--approve", "--provider", provider, "--model", id)
+      if (spec.temperature !== undefined) {
+        this.log(`temperature ${spec.temperature} requested for ${label} — pi settings carry no temperature key today; the pin rides opencode only`)
+      }
     } else if (spec.model && spec.kind === "opencode") {
       // the root command dropped --model in the 2026-10 upgrade — a
       // passed flag crashes the TUI at birth (j-37bdc0: three start
       // timeouts, run dead). The pin rides the sandbox opencode.json
       // instead, symmetric with pi's settings write above.
       writeOpencodeModel(spec.cwd, spec.model)
+      if (spec.temperature !== undefined) {
+        writeOpencodeModelSettings(spec.cwd, spec.model, { temperature: spec.temperature })
+      }
     }
     if (spec.resumeSession) tail.push("--session", spec.resumeSession)
     const startArgs = tail.length ? ["--", ...tail] : []
