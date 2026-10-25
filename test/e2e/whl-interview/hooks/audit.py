@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """audit.py — the whl-interview audit gate (the counts hook's engine).
 
-Judges the exchange in <run-dir> against the turn contract:
-  1. every interviewer note carries exactly one fenced ```turn-contract
-     block, schema-valid (exact keys, legal enums, one question, one "?")
-  2. a malformed block is re-asked at most once (a run of >2 consecutive
-     malformed blocks fails); every error is logged into transcript.jsonl
-  3. topics appear in declared order, never revisited; each <= 6 turns;
-     each closes solid, or on >=1 gap mark, or at the 6-turn cap
-  4. at least one gap mark exists and at least one STANDS after the
-     rebuttal pass (zero standing gaps = the interviewer was too soft)
-  5. explained.md has one cited section per topic; gaps.md one rebuttal-
-     annotated section per gapped topic; the stop message exists
+THE SECOND RENDERING of one contract: every law below is READ from
+contract.toml (topics, caps, deliverables, gap law, citation pattern)
+and questions.toml (the bank). The FIRST rendering is the generated
+law section inside each member brief (hooks/render_contract.py); this
+audit refuses a run whose briefs carry a stale section — one source,
+two renderings, drift impossible (the attempt-3 disease: an audit that
+demanded a file the instructions never named).
 
-On PASS it builds data/transcript.jsonl, delivers the artifacts to
-interviews/<date>/ under the run dir (mirroring to
-$WHL_INTERVIEW_REPO/interviews/<date>-<job>/ when set) and prints ONE
-JSON counts line on stdout — the rail parses counts stdout strictly, so
-every human-readable word goes to stderr and a FAIL exits nonzero
-(failing the run's report honestly).
+Checks, in order:
+  0. probe (no exchange yet) counts zero and passes — the door probes
+     the counts hook at booking
+  1. every declared DELIVERABLE exists, is non-empty, and has its
+     declared kind (#205 — guarantee a deliverable on every commission;
+     rail-built ones are built by this audit, never demanded of panes)
+  2. the briefs' contract sections are FRESH (render == embedded)
+  3. every interviewer note carries exactly one fenced turn-contract
+     block, schema-valid (exact keys, legal enums, one "?")
+  4. every asked question is IN THE BANK (append before asking, never
+     freestyle — the question bank makes "same questions every run"
+     true by construction)
+  5. topics open in the declared order, never revisited, caps held;
+     each closes solid, gap-marked, or at the cap
+  6. at least one gap STANDS after the rebuttal pass
+  7. explained.md: one cited section per topic; gaps.md: one rebuttal
+     verdict line per section; topic-map.md names every topic
+  8. the exchange closed deliberately (>=1 stop, none carrying a block)
+
+On PASS: builds data/transcript.jsonl, delivers to interviews/<date>/,
+prints ONE JSON counts line (rail-parsed; human words go to stderr).
 """
 
 import json
@@ -26,36 +37,21 @@ import os
 import re
 import shutil
 import sys
+import tomllib
 from datetime import date
 from pathlib import Path
 
-TOPICS = [
-    "admission-jev",
-    "pane-supervision",
-    "spur-grammar",
-    "wakes",
-    "accounting",
-    "relay-protocol",
-]
-REBUTTAL = "rebuttal"
-CONTRACT_KEYS = {
-    "topic",
-    "level",
-    "question",
-    "grade",
-    "cited",
-    "citation_checked",
-    "move",
-    "gap_note",
-}
+# the wire protocol of a graded turn — the audit's own schema, not a
+# program deliverable; it lives here, not in contract.toml
+CONTRACT_KEYS = {"topic", "level", "question", "grade", "cited", "citation_checked", "move", "gap_note"}
 GRADES = {"vague", "partial", "solid"}
 CHECKED = {"ok", "wrong", "missing"}
 MOVES = {"deeper", "next", "gap"}
-TOPIC_TURNS = 6
-REBUTTAL_TURNS = 2
+REBUTTAL = "rebuttal"
 FENCE = re.compile(r"```turn-contract\s*(\{.*?\})\s*```", re.DOTALL)
-CITATION = re.compile(r"[A-Za-z0-9_./~-]+\.(?:ts|mts|mjs|js|md|toml|sh|py)(?::\d+)?")
 REBUTTAL_LINE = re.compile(r"^rebuttal:\s*(refuted|stands)\b", re.MULTILINE)
+
+SOURCE_ROOT = Path(os.environ.get("WHL_CONTRACT_DIR") or Path(__file__).resolve().parent.parent)
 
 
 def say(why):
@@ -65,6 +61,12 @@ def say(why):
 def die(why):
     say(f"FAIL — {why}")
     sys.exit(1)
+
+
+def load_contract():
+    contract = tomllib.loads((SOURCE_ROOT / "contract.toml").read_text())["contract"]
+    bank = tomllib.loads((SOURCE_ROOT / "questions.toml").read_text()).get("question", [])
+    return contract, bank
 
 
 def load_messages(msg_dir):
@@ -82,17 +84,16 @@ def load_messages(msg_dir):
 
 
 def validate_contract(block, where):
-    """Return (contract, None) or (None, why)."""
     try:
         c = json.loads(block)
     except json.JSONDecodeError as e:
         return None, f"{where}: contract is not JSON ({e})"
     if not isinstance(c, dict) or set(c) != CONTRACT_KEYS:
         return None, f"{where}: keys must be exactly {sorted(CONTRACT_KEYS)}"
-    if c["topic"] not in TOPICS and c["topic"] != REBUTTAL:
+    if c["topic"] != REBUTTAL and c["topic"] not in TOPICS:
         return None, f"{where}: unknown topic {c['topic']!r}"
-    if not isinstance(c["level"], int) or isinstance(c["level"], bool) or not 1 <= c["level"] <= 5:
-        return None, f"{where}: level must be an integer 1-5"
+    if not isinstance(c["level"], int) or isinstance(c["level"], bool) or not 1 <= c["level"] <= len(LADDER):
+        return None, f"{where}: level must be an integer 1-{len(LADDER)}"
     if c["grade"] not in GRADES:
         return None, f"{where}: grade must be one of {sorted(GRADES)}"
     if not isinstance(c["cited"], bool):
@@ -113,11 +114,6 @@ def validate_contract(block, where):
 
 
 def extract_contracts(messages):
-    """Walk interviewer notes in order; produce contracts + error entries.
-
-    A run of consecutive malformed blocks models the re-ask law: the
-    turn is re-asked once, then logged as an error. >2 in a row fails.
-    """
     contracts, errors = [], []
     malformed_run = 0
     for m in messages:
@@ -141,20 +137,31 @@ def extract_contracts(messages):
 
 def audit(job_dir):
     data_dir = job_dir / "data"
-    for doc in ("pitch", "topic-map", "explained", "gaps"):
-        if not (data_dir / f"{doc}.md").is_file() or (data_dir / f"{doc}.md").stat().st_size == 0:
-            die(f"data/{doc}.md missing or empty")
+
+    # #205 — deliverables first: the commission's product is the point
+    kinds = {"md": ".md", "jsonl": ".jsonl", "html": ".html", "png": ".png"}
+    for d in CONTRACT["deliverables"]:
+        if d.get("rail-built"):
+            continue
+        p = job_dir / d["path"]
+        if not p.is_file() or p.stat().st_size == 0:
+            die(f"deliverable '{d['name']}' missing or empty: {d['path']} (#205: every commission guarantees its deliverables)")
+        if not p.name.endswith(kinds.get(d["kind"], f".{d['kind']}")):
+            die(f"deliverable '{d['name']}' must be of kind {d['kind']}: {d['path']}")
+
+    # the drift-cop: the briefs' law sections must equal the rendering
+    sys.path.insert(0, str(SOURCE_ROOT / "hooks"))
+    from render_contract import embedded, render  # noqa: E402
+
+    section = render(CONTRACT, BANK)
+    for b in sorted((SOURCE_ROOT / "members").glob("*.md")):
+        if embedded(b.read_text()) != section:
+            die(f"stale contract section in members/{b.name} — run hooks/render_contract.py --write (one source, two renderings; hand-edits fail)")
 
     messages = load_messages(job_dir / "messages")
     if not messages:
         die("no relayed messages in messages/ — an exchange with no mail is a failed interview")
 
-    # the rail's memberProtocol (appended to every brief, law) authorizes
-    # ANY member to write the stop when the goal is reached — and on a
-    # healthy exchange both may close in the same beat (receipt j-93d652:
-    # the interviewee's summary and the interviewer's verdict, both seq
-    # 33). The audit's law is that the exchange closed DELIBERATELY:
-    # at least one stop, none carrying a turn-contract.
     stops = [m for m in messages if m["type"] == "stop"]
     if len(stops) == 0:
         die("no stop message — the exchange never closed deliberately")
@@ -164,8 +171,13 @@ def audit(job_dir):
 
     contracts, errors = extract_contracts(messages)
 
-    # topic order: first occurrences strictly climb the declared map,
-    # rebuttal comes last, no revisits
+    # the question bank: every asked question is banked (or was appended first)
+    banked = {q["q"] for q in BANK if not q.get("retired")}
+    for c in contracts:
+        if c["topic"] != REBUTTAL and c["question"] not in banked:
+            die(f"question not in the bank: \"{c['question'][:70]}\" — append it to questions.toml first (append-only), then ask it")
+
+    # topic order: first occurrences strictly climb the declared map
     seen, order = [], []
     for c in contracts:
         if c["topic"] not in seen:
@@ -183,43 +195,30 @@ def audit(job_dir):
     for t in TOPICS:
         if turns.get(t, 0) == 0:
             die(f"topic {t} never opened")
-        if turns[t] > TOPIC_TURNS:
-            die(f"topic {t} took {turns[t]} turns (cap {TOPIC_TURNS})")
+        if turns[t] > TURNS:
+            die(f"topic {t} took {turns[t]} turns (cap {TURNS})")
     if not 1 <= turns.get(REBUTTAL, 0) <= REBUTTAL_TURNS:
         die(f"the rebuttal pass is one turn (cap {REBUTTAL_TURNS}), got {turns.get(REBUTTAL, 0)}")
 
-    # closure: a topic ends solid (the NEXT contract's grade — it grades
-    # this topic's last answer), or on >=1 gap mark, or at the turn cap
     for t in TOPICS:
         idx = max(j for j, c in enumerate(contracts) if c["topic"] == t)
         if idx + 1 >= len(contracts):
             die(f"topic {t} has no closing turn (the exchange stopped grading mid-topic)")
         closing = contracts[idx + 1]
-        if closing["grade"] != "solid" and gaps[t] == 0 and turns[t] < TOPIC_TURNS:
-            die(f"topic {t} left vague: closing grade {closing['grade']!r}, {gaps[t]} gap marks, {turns[t]}/{TOPIC_TURNS} turns")
+        if closing["grade"] != "solid" and gaps[t] == 0 and turns[t] < TURNS:
+            die(f"topic {t} left vague: closing grade {closing['grade']!r}, {gaps[t]} gap marks, {turns[t]}/{TURNS} turns")
 
-    if sum(gaps.values()) == 0:
-        say("note: no move=gap marks banked — closure rode solid/turn-cap verdicts; "
-            "gaps.md sections below are graded on their own")
     audit_gaps_md(data_dir / "gaps.md", gaps)
     audit_explained_md(data_dir / "explained.md")
     audit_topic_map(data_dir / "topic-map.md")
-    # the product law is the artifact, not the move vocabulary (receipt
-    # j-93d652: 13 standing sections, zero gap marks): a standing section
-    # without a gap mark is a bookkeeping drift — visible, not fatal
     return messages, contracts, errors
 
 
 def audit_gaps_md(path, gaps):
     text = path.read_text()
     sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
-    # the product law (the brief's done-when): at least one gap section
-    # must STAND after the rebuttal pass — zero standing gaps means the
-    # interviewer was too soft and the run fails
     if not any(REBUTTAL_LINE.search(s) and "rebuttal: stands" in s for s in sections):
         die("no gap stands after the rebuttal pass — at least one standing gap is the run's product")
-    # every section must name a declared topic in its header and carry
-    # exactly one rebuttal verdict line
     for s in sections:
         head = s.split("\n")[0]
         if not any(t in head for t in TOPICS):
@@ -237,8 +236,7 @@ def audit_explained_md(path):
     sections = {}
     current = None
     for line in text.split("\n"):
-        m = re.match(r"^##\s+", line)
-        if m:
+        if re.match(r"^##\s+", line):
             current = line
             sections[current] = []
         elif current is not None:
@@ -249,7 +247,7 @@ def audit_explained_md(path):
             die(f"explained.md must have exactly one section per topic; {t} found {len(hit)}")
         body = "\n".join(sections[hit[0]])
         if not CITATION.search(body):
-            die(f"explained.md section for {t} carries no citation (file:line) — the citations are the deliverable")
+            die(f"explained.md section for {t} carries no citation ({CITE_KIND}) — the citations are the deliverable")
 
 
 def audit_topic_map(path):
@@ -262,9 +260,7 @@ def audit_topic_map(path):
 def build_transcript(data_dir, messages, contracts, errors):
     by_file = {}
     for c in contracts:
-        by_file[c["file"]] = {
-            k: c[k] for k in ("topic", "level", "question", "grade", "cited", "citation_checked", "move", "gap_note")
-        }
+        by_file[c["file"]] = {k: c[k] for k in CONTRACT_KEYS}
     lines = []
     for m in messages:
         row = {k: m[k] for k in ("seq", "file", "from", "to", "type")}
@@ -279,26 +275,30 @@ def deliver(job_dir):
     day = date.today().isoformat()
     out = job_dir / "interviews" / day
     out.mkdir(parents=True, exist_ok=True)
-    names = ["pitch.md", "topic-map.md", "explained.md", "gaps.md", "transcript.jsonl"]
+    names = [d["path"] for d in CONTRACT["deliverables"]]
     for n in names:
-        shutil.copy2(job_dir / "data" / n, out / n)
-    say(f"delivered {', '.join(names)} -> interviews/{day}/")
+        shutil.copy2(job_dir / n, out / Path(n).name)
+    say(f"delivered {len(names)} deliverables -> interviews/{day}/")
     repo = os.environ.get("WHL_INTERVIEW_REPO")
     if repo:
         dest = Path(repo).expanduser() / "interviews" / f"{day}-{job_dir.name}"
         dest.mkdir(parents=True, exist_ok=True)
         for n in names:
-            shutil.copy2(job_dir / "data" / n, dest / n)
+            shutil.copy2(job_dir / n, dest / Path(n).name)
         say(f"mirrored to {dest}")
 
 
 def main():
+    global CONTRACT, BANK, TOPICS, TURNS, REBUTTAL_TURNS, LADDER, CITATION, CITE_KIND
+    CONTRACT, BANK = load_contract()
+    TOPICS = CONTRACT["topics"]
+    TURNS = CONTRACT["exchange"]["turns-per-topic"]
+    REBUTTAL_TURNS = CONTRACT["exchange"]["rebuttal-turns"]
+    LADDER = CONTRACT["exchange"]["ladder"]
+    CITATION = re.compile(CONTRACT["citations"]["pattern"])
+    CITE_KIND = "file:line"
     job_dir = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("WHL_AUDIT_DIR", ".")).resolve()
     if not (job_dir / "messages").is_dir():
-        # the door probes the counts hook at booking, before any exchange
-        # exists; a real run dir always carries messages/ (the engine
-        # creates it at start). A probe has nothing to audit — say so and
-        # count zero, never fail the booking.
         say("probe — no exchange in this dir yet, nothing to audit")
         print(json.dumps({"topics": 0, "graded_turns": 0, "contract_errors": 0, "gaps_standing": 0}))
         return
@@ -307,8 +307,7 @@ def main():
     deliver(job_dir)
     standing = (job_dir / "data" / "gaps.md").read_text().count("rebuttal: stands")
     say(f"PASS — {len(contracts)} graded turns, {len(errors)} logged contract error(s)")
-    # counts stdout is parsed strictly by the rail — one JSON line, last
-    print(json.dumps({"topics": len(TOPICS), "graded_turns": len(contracts), "contract_errors": len(errors), "gaps_standing": standing}))
+    print(json.dumps({"topics": len(TOPICS), "graded_turns": len(contracts), "contract_errors": len(errors), "gaps_standing": standing, "deliverables": len(CONTRACT["deliverables"])}))
 
 
 if __name__ == "__main__":

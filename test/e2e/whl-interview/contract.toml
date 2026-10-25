@@ -1,0 +1,68 @@
+# contract.toml — the ONE source of the interview's law (#200 pilot,
+# #205 forced). Everything below is rendered TWICE from this single
+# file and nothing else: (1) the generated law section inside each
+# member brief (hooks/render_contract.py), (2) the audit's checks
+# (hooks/audit.py reads this directly). A brief whose law section does
+# not match this file FAILS the audit — hand-edited prose can no
+# longer drift from the machine's demands (the attempt-3 disease).
+
+[contract]
+name = "whl-interview"
+
+# the fixed topic map — order is law, first-opened must climb it
+topics = [
+  "admission-jev",
+  "pane-supervision",
+  "spur-grammar",
+  "wakes",
+  "accounting",
+  "relay-protocol",
+]
+
+# #205 — guarantee a deliverable on every commission: every artifact
+# the wake points at is declared here, with its human-readable kind.
+# The audit refuses a run whose deliverable is missing or empty.
+# rail-built = produced by the audit itself (transcript), still
+# delivered, never demanded of the panes.
+[[contract.deliverables]]
+name = "pitch"
+path = "data/pitch.md"
+kind = "md"
+
+[[contract.deliverables]]
+name = "topic-map"
+path = "data/topic-map.md"
+kind = "md"
+
+[[contract.deliverables]]
+name = "explained"
+path = "data/explained.md"
+kind = "md"
+
+[[contract.deliverables]]
+name = "gaps"
+path = "data/gaps.md"
+kind = "md"
+
+[[contract.deliverables]]
+name = "transcript"
+path = "data/transcript.jsonl"
+kind = "jsonl"
+rail-built = true
+
+[contract.exchange]
+turns-per-topic = 6        # a topic stops at solid, 3 gap marks, or this
+rebuttal-turns = 2         # one rebuttal pass (a re-ask may spend the second)
+ladder = ["What", "How", "Why", "Break", "Boundary"]
+
+[contract.gaps]
+must-stand = 1             # zero standing gaps = the interviewer was too soft
+
+[contract.questions]
+bank = "questions.toml"    # every asked question must be banked (or appended first)
+append-only = true         # a retired question is marked, never erased
+
+[contract.citations]
+# a citation is a repo path, optionally :line — every explained.md
+# section carries at least one
+pattern = "[A-Za-z0-9_./~-]+\\.(?:ts|mts|mjs|js|md|toml|sh|py)(?::\\d+)?"
