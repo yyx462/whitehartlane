@@ -13,6 +13,7 @@ const door = join(import.meta.dirname, "..", "bin", "whitehartlane")
 
 function program(): string {
   const dir = mkdtempSync(join(tmpdir(), "levy-req-"))
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
   writeFileSync(
     join(dir, "workflow.toml"),
     [

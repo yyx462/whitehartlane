@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { parse as parseToml } from "smol-toml"
 import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
@@ -108,7 +109,7 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "roots.txt", "project.json"]) {
+  for (const name of ["actor.md", "task.txt", "roots.txt", "project.json", "contract.toml"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }
@@ -308,8 +309,24 @@ function book(
 // hard-deny root is stripped at scope construction, so a brief naming
 // its paths is refused here, not silently hard-denied mid-run — #77 at
 // both boundaries now).
-function uncoveredBriefPaths(source: string): string[] {
-  const scope = scopeFromDir(source)
+// #205 — the deliverable declaration reader: contract.toml's
+// [[contract.deliverables]] (name + path + kind). null = no
+// contract.toml; the door refuses both null and empty.
+function deliverablesOf(source: string): { name: string; path: string }[] | null {
+  const file = join(source, "contract.toml")
+  if (!existsSync(file)) return null
+  try {
+    const raw = parseToml(readFileSync(file, "utf8")) as { contract?: { deliverables?: { name?: unknown; path?: unknown }[] } }
+    const list = raw.contract?.deliverables ?? []
+    return list
+      .filter((d) => typeof d?.name === "string" && typeof d?.path === "string" && d.path.length > 0)
+      .map((d) => ({ name: String(d.name), path: String(d.path) }))
+  } catch {
+    return null
+  }
+}
+
+function uncoveredBriefPaths(source: string): string[] {  const scope = scopeFromDir(source)
   const texts: string[] = []
   for (const name of ["task.txt", "actor.md"]) {
     const f = join(source, name)
@@ -397,6 +414,21 @@ export function prepareRun(folder: string): RunReady | RunRefused {
     return {
       ok: false,
       why: `no [[stage]] entries in ${join(dir, "workflow.toml")} — a fan-out program declares its workers as stages (docs/STAGES.md, ADR 0014)`,
+      code: 1,
+    }
+  }
+  // #205 — guarantee a deliverable on every commission: the door
+  // refuses a program that declares none. The declaration is
+  // contract.toml's [[contract.deliverables]] (the same file the
+  // program's audit renders its checks from — one source); existence
+  // stays the program's own verdict hook's to judge, because unit ids
+  // and artifacts only exist mid-run. Sits AFTER the grammar and
+  // brief-path screens (the more specific refusal speaks first).
+  const deliverables = deliverablesOf(dir)
+  if (deliverables === null || deliverables.length === 0) {
+    return {
+      ok: false,
+      why: "no deliverable forced in contract.toml — every commission guarantees a human-readable deliverable (#205). Declare [[contract.deliverables]] (see test/e2e/whl-interview/contract.toml).",
       code: 1,
     }
   }

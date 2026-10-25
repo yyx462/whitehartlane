@@ -56,6 +56,8 @@ test("run refuses a stage-less fan-out program — one authoring story (ADR 0014
   assert.equal(listJobs().filter((job) => job.task === "bare").length, 0)
 })
 
+
+
 test("run books a Job from the three-lookups manifest and rejects a second while it runs", async () => {
   const dir = await copyExample("agentic-os-run-")
   const first = runCli(dir)
@@ -128,6 +130,7 @@ test("run books a kind=lab program and stages its detectors as absolute paths", 
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-labtoml-"))
   mkdirSync(join(dir, "hooks"), { recursive: true })
   writeFileSync(join(dir, "workflow.toml"), 'kind = "lab"\n\n[workflow]\nname = "lab"\nworker_kind = "opencode"\n\n[detectors]\nsignal = "node hooks/signal.mjs"\n')
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"actor-log\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
   writeFileSync(join(dir, "hooks", "signal.mjs"), "process.exit(0)\n")
   writeFileSync(join(dir, "actor.md"), "Tend the wave.\n")
   writeFileSync(join(dir, "roots.txt"), "/abs/target\n")
@@ -139,4 +142,38 @@ test("run books a kind=lab program and stages its detectors as absolute paths", 
   assert.equal(readFileSync(join(booked.job.dir, "roots.txt"), "utf8"), "/abs/target\n")
   const { abortJob } = await import("../src/adapters/store.ts")
   abortJob(booked.job, "test", 0, "cli")
+})
+
+// #205 — guarantee a deliverable on every commission: the OLD spur
+// shape (a valid program with NO contract.toml) is refused AT THE
+// SCREEN, and no job is formed. The declaration is contract.toml's
+// [[contract.deliverables]] — the same one source the program's audit
+// renders its checks from.
+test("run refuses a deliverable-less program at the screen — no job is formed (#205)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-nodl-"))
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    'kind = "coworker"\n[workflow]\nname = "old-spur"\nworker_kind = "opencode"\n[members.alpha]\ninitiates = true\n[members.beta]\n',
+  )
+  mkdirSync(join(dir, "members"), { recursive: true })
+  writeFileSync(join(dir, "members", "alpha.md"), "alpha")
+  writeFileSync(join(dir, "members", "beta.md"), "beta")
+  const before = listJobs().length
+  const refused = prepareRun(dir)
+  assert.equal(refused.ok, false)
+  if (!refused.ok) assert.match(refused.why, /no deliverable forced in contract\.toml/)
+  assert.equal(listJobs().filter((job) => job.task === "old-spur").length, 0, "no job is formed")
+  assert.equal(listJobs().length, before, "the screen books nothing")
+  // the fix is one file: declaring deliverables un-refuses it
+  writeFileSync(
+    join(dir, "contract.toml"),
+    "[[contract.deliverables]]\nname = \"exchange-record\"\npath = \"relay.json\"\nkind = \"json\"\n",
+  )
+  const ok = prepareRun(dir)
+  assert.equal(ok.ok, true, "a declared deliverable passes the screen")
+  // never leak the booked job into later tests
+  if (ok.ok) {
+    const { abortJob } = await import("../src/adapters/store.ts")
+    abortJob(ok.job, "test", 0, "cli")
+  }
 })

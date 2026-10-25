@@ -1160,6 +1160,13 @@ export async function runOrchestrator(input: {
     if (!existsSync(childToml)) {
       const childDir = dirname(childToml)
       mkdirSync(join(childDir, "members"), { recursive: true })
+      // #205 rides the delegation: a minted child is a program at its
+      // own door, and the door refuses deliverable-less programs — the
+      // exchange record is the delegated stage's declared product
+      writeFileSync(
+        join(childDir, "contract.toml"),
+        "# minted with the child (ADR 0016 will retire the mint whole)\n[[contract.deliverables]]\nname = \"exchange-record\"\npath = \"relay.json\"\nkind = \"json\"\n",
+      )
       const model = stage.model ?? manifest.workflow.model
       // j-5c1861: the minted child DECLARES its kind — always, for both
       // delegated topologies. The run door defaults an absent kind to
