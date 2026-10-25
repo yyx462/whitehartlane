@@ -8,6 +8,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { loadManifest } from "../doors/hooks.ts"
+import { contentHashOf } from "../doors/project.ts"
 import { allowGlobs, grantRoot } from "../core/permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
@@ -815,8 +816,29 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   appendEvent(job.sid, { actor: "orchestrator", kind: "job.retired", jid: job.id, receipt: job.receipt })
   // the wake names the true outcome — a failed job must not arrive
   // saying "done" (the spawner would read the all-clear and move on)
-  wakeFirstMate(job, receipt.status === "failed" ? "failed" : "done", job.receipt.report ?? null)
+  wakeFirstMate(job, failedWakeWhy(job, receipt.status), job.receipt.report ?? null)
   return job
+}
+
+// #197's second half — the repair-ticket hint: a failed run's wake
+// tells the commissioner the CHEAPEST next command when it can prove
+// one. The booking already carries the program's content hash; if the
+// source folder hashes differently now, the program was fixed after
+// the failure and `whl continue` re-runs the verdict on the same work
+// (proven live: j-93d652 re-reported green in ~30s, zero tokens).
+export function failedWakeWhy(job: JobRecord, status: string): string {
+  if (status !== "failed") return "done"
+  let why = "failed"
+  const src = job.spur?.source
+  const booked = job.spur?.content_hash
+  if (src && booked) {
+    try {
+      if (contentHashOf(src) !== booked) why += " — program changed since booking: `whl continue` re-runs the verdict on the same work"
+    } catch {
+      // the source folder vanished (a reaped worktree): the plain verdict is still honest
+    }
+  }
+  return why
 }
 
 export function abortJob(
