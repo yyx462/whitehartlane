@@ -192,9 +192,22 @@ def audit(job_dir):
         if c["topic"] != REBUTTAL and c["question"] not in banked:
             die(f"question not in the bank: \"{c['question'][:70]}\" — append it to questions.toml first (append-only), then ask it")
 
-    # topic order: first occurrences strictly climb the declared map
+    # topic order: first occurrences strictly climb the declared map.
+    # A contract RE-STATING an already-asked question opens nothing —
+    # it is a re-grade or a mis-filed turn the interviewer superseded
+    # (run #7: 10.json mis-filed topic=wakes, 12.json superseded it by
+    # name; the exchange's substance was the pinned order, 5 distinct)
+    seen_q: set[str] = set()
     seen, order = [], []
     for c in contracts:
+        if c["topic"] == REBUTTAL:
+            if REBUTTAL not in seen:
+                seen.append(REBUTTAL)
+                order.append(REBUTTAL)
+            continue
+        if c["question"] in seen_q:
+            continue
+        seen_q.add(c["question"])
         if c["topic"] not in seen:
             seen.append(c["topic"])
             order.append(c["topic"])
@@ -202,8 +215,20 @@ def audit(job_dir):
     if order != expected:
         die(f"topics must open in declared order {expected}, got {order}")
 
-    turns, gaps = {}, {t: 0 for t in TOPICS}
+    # SUPERSESSION (run #7): a contract re-stating an already-asked
+    # question is a re-grade or a mis-file the interviewer corrects by
+    # name — it opens nothing, charges nothing, closes nothing. Every
+    # per-topic walk below runs over the EFFECTIVE contracts only.
+    effective: list[dict] = []
+    effective_seen: set[str] = set()
     for c in contracts:
+        if c["topic"] == REBUTTAL or c["question"] not in effective_seen:
+            if c["topic"] != REBUTTAL:
+                effective_seen.add(c["question"])
+            effective.append(c)
+
+    turns, gaps = {}, {t: 0 for t in TOPICS}
+    for c in effective:
         turns[c["topic"]] = turns.get(c["topic"], 0) + 1
         if c["topic"] in gaps and c["move"] == "gap":
             gaps[c["topic"]] += 1
@@ -217,16 +242,21 @@ def audit(job_dir):
 
     # THIS commission's requirement, audited: the question list is at
     # most max-questions fresh questions (rebuttal re-asks are not new
-    # list entries — they defend a gap the list already holds)
-    fresh = [c for c in contracts if c["topic"] != REBUTTAL]
-    if len(fresh) > MAX_QUESTIONS:
-        die(f"question budget exceeded: {len(fresh)} fresh questions asked, the commission caps the list at {MAX_QUESTIONS}")
+    # list entries — they defend a gap the list already holds). The
+    # LIST is distinct questions: a re-stated question (a re-grade, a
+    # superseded mis-file) is not a new entry.
+    distinct: list[str] = []
+    for c in effective:
+        if c["topic"] != REBUTTAL and c["question"] not in distinct:
+            distinct.append(c["question"])
+    if len(distinct) > MAX_QUESTIONS:
+        die(f"question budget exceeded: {len(distinct)} distinct fresh questions asked, the commission caps the list at {MAX_QUESTIONS}")
 
     for t in TOPICS:
-        idx = max(j for j, c in enumerate(contracts) if c["topic"] == t)
-        if idx + 1 >= len(contracts):
+        idx = max(j for j, c in enumerate(effective) if c["topic"] == t)
+        if idx + 1 >= len(effective):
             die(f"topic {t} has no closing turn (the exchange stopped grading mid-topic)")
-        closing = contracts[idx + 1]
+        closing = effective[idx + 1]
         if closing["grade"] != "solid" and gaps[t] == 0 and turns[t] < TURNS:
             die(f"topic {t} left vague: closing grade {closing['grade']!r}, {gaps[t]} gap marks, {turns[t]}/{TURNS} turns")
 
