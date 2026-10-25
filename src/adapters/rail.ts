@@ -37,6 +37,7 @@ import {
   readEvents,
   renewLeaseOf,
   acquireLease,
+  LEASE_HELD_BY_LIVE_ORCHESTRATOR,
   saveJob,
   setPaneSession,
   writeWorkerPermissions,
@@ -260,15 +261,20 @@ export class Rail implements ShepPort {
       // Issue #123 — the orchestrator claims the lease at open: a
       // written, expiring record of WHO leads this job. Renewed on the
       // engine beat; expiry is sticky (no message needed on death).
+      // The mutex half (j-93d652 gap #2): a LIVE holder refuses us —
+      // one writer per job, so a double `whl continue` dies at the
+      // door instead of split-braining the exchange.
       try {
         acquireLease(job, `orchestrator pid=${process.pid}`)
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
       const booked = job
+      const holder = `orchestrator pid=${process.pid}`
       return {
         job: booked,
-        renew: () => renewLeaseOf(booked),
+        renew: () => renewLeaseOf(booked, holder),
         emit: (kind, payload) => {
           try {
             appendEvent(booked.sid, { actor: "orchestrator", jid: booked.id, kind, ...payload })

@@ -892,7 +892,42 @@ export function failJob(
 // exists for — timers grant the right to suspect, the census decides.
 export const LEASE_TTL_MS = 5 * 60_000
 
+// A holder pid from the lease record — "orchestrator pid=123". No
+// parseable pid means we cannot prove the holder dead, so it counts as
+// alive (conservative: one writer per job, always).
+export function leaseHolderPid(lease: { holder: string }): number | null {
+  const m = lease.holder.match(/pid=(\d+)/)
+  return m ? Number(m[1]) : null
+}
+
+function pidAlive(pid: number | null): boolean {
+  if (pid === null || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+export const LEASE_HELD_BY_LIVE_ORCHESTRATOR = "LEASE_HELD_BY_LIVE_ORCHESTRATOR"
+
+// The mutex half the interview found missing (j-93d652 gaps.md #2:
+// "double-continue split brain; the lease is not a mutex"): acquiring
+// over a LIVE holder refuses — a second `whl continue` must never
+// attach to a job an alive orchestrator is already beating. A holder
+// that is expired OR whose pid is dead may be stolen (epoch bumps).
 export function acquireLease(job: JobRecord, holder: string): void {
+  if (job.lease && job.lease.holder !== holder && !leaseExpired(job) && pidAlive(leaseHolderPid(job.lease))) {
+    appendEvent(job.sid, {
+      actor: "orchestrator",
+      kind: "lease.refused",
+      jid: job.id,
+      holder: job.lease.holder,
+      attemptedBy: holder,
+    })
+    throw new Error(`${LEASE_HELD_BY_LIVE_ORCHESTRATOR}: ${job.lease.holder} — one writer per job`)
+  }
   const epoch = (job.lease?.epoch ?? 0) + 1
   job.lease = {
     holder,
@@ -905,14 +940,19 @@ export function acquireLease(job: JobRecord, holder: string): void {
 }
 
 // Renewal is best-effort and cheap (one fs write per engine beat): the
-// lease record must never break the run it observes.
-export function renewLeaseOf(job: JobRecord): void {
-  if (!job.lease) return
+// lease record must never break the run it observes. It returns false
+// when the lease is no longer OURS — the holder or epoch moved under
+// us (a steal, a second orchestrator) — so the beating engine can stop
+// relaying instead of split-braining the job (the interview's #2 gap).
+export function renewLeaseOf(job: JobRecord, holder?: string): boolean {
+  if (!job.lease) return true
+  if (holder !== undefined && (job.lease.holder !== holder)) return false
   job.lease.renewed = new Date().toISOString()
   job.lease.expires = new Date(Date.now() + LEASE_TTL_MS).toISOString()
   try {
     saveJob(job)
   } catch {}
+  return true
 }
 
 // Expired past its TTL plus a grace period (one missed beat under load

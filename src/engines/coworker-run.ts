@@ -444,8 +444,17 @@ export async function runCoworker(
   while (!ended && Date.now() < deadline) {
     // the lease rides the beat (issue #123): one fs write per beat
     // keeps the expiring leadership claim fresh; a dead orchestrator
-    // simply stops renewing — absence of renewal is the signal
-    rail.ledger?.renew()
+    // simply stops renewing — absence of renewal is the signal.
+    // The mutex half: losing the lease mid-run (a steal, a second
+    // orchestrator) means this loop no longer owns the job — stop
+    // relays and exit SILENTLY (no report, no retire: the panes and
+    // the job now belong to the winner). Never split-brain it.
+    if (rail.ledger && rail.ledger.renew() === false) {
+      log("coworker: lease lost — another orchestrator owns this job; stopping relays")
+      rail.drainHook = null
+      rail.closeVerbose()
+      return null
+    }
     if (draining) {
       // ADR 5: no new deliveries; a member mid-turn ends its turn.
       // Permission asks, nudges, and dead checks stand down — the
