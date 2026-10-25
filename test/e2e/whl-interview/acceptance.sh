@@ -46,7 +46,9 @@ fi
 
 echo "== the LIVE interview run (one job, real workers) =="
 run_src="$work/run"; cp -R "$here" "$run_src"
-AGENTIC_OS_RELAY_CAP=120 WHL run "$run_src" --unattended >"$work/run.out" 2>&1 &
+# --from rail:... books a PROCESS spawner: no conversation is woken,
+# but the durable wake.json IS written — E6's repair hint lands there
+AGENTIC_OS_RELAY_CAP=120 WHL run "$run_src" --from "rail:whl-acceptance" --unattended >"$work/run.out" 2>&1 &
 run_pid=$!
 jid="$(grep -oE '^job: j-[a-z0-9]+' "$work/run.out" | head -1 | cut -d' ' -f2)"
 deadline=$((SECONDS + 2400))
@@ -57,23 +59,28 @@ done
 if [ -z "$jid" ]; then
   echo "FATAL — the door never booked the run:"; tail -5 "$work/run.out"; exit 1
 fi
-state="$(WHL jobs | awk -v j="$jid" '$1==j{print $2}')"
+# the run dir comes from the door's OWN log line — the jobs table wraps
+# noisy rows (a task with newlines splits columns) and must never be
+# parsed for paths; state comes from the job record on disk
+rdir="$(dirname "$(grep -oE "log: .*orchestrator\.log" "$work/run.out" | head -1 | cut -d" " -f2-)")"
+jobstate() { python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('state','?'))" "$(dirname "$rdir")/job.json" 2>/dev/null || echo "?"; }
+state="$(jobstate)"
 while [[ "$state" == "running" ]] && [ $SECONDS -lt $deadline ]; do
   sleep 15
-  state="$(WHL jobs | awk -v j="$jid" '$1==j{print $2}')"
+  state="$(jobstate)"
 done
-rdir="$(WHL jobs | awk -v j="$jid" '{print $NF}')"
 echo "run: $jid state=$state dir=$rdir"
 wait "$run_pid" 2>/dev/null || true
 
 echo "== E2: ONE folder for the run, subfolders inside it =="
-if [[ "$state" == "ok" ]] || [[ "$state" == "retired" ]] || [[ "$state" == "green" ]]; then
+if [[ "$state" == "retired" ]]; then
   inside=$(ls "$rdir" 2>/dev/null | tr '\n' ' ')
-  jobs_for_src=$(WHL jobs | awk -v d="$rdir" '$NF==d' | wc -l | tr -d ' ')
-  if [ "$jobs_for_src" -eq 1 ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
-    check "E2" ok "one job dir, stations inside: ${inside:-empty}"
+  report_status=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status','?'))" "$rdir/report.json" 2>/dev/null || echo "?")
+  jobs_here=$(ls "$(dirname "$rdir")" | grep -c "^j-" || true)
+  if [ "$jobs_here" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
+    check "E2" ok "one job dir ($jid), report done, stations inside: ${inside:-empty}"
   else
-    check "E2" fail "jobs_for_src=$jobs_for_src inside: ${inside:-none}"
+    check "E2" fail "state=$state report=$report_status jobs_here=$jobs_here inside: ${inside:-none}"
   fi
 else
   check "E2" fail "run state=$state (expected a finished green run)"
@@ -121,10 +128,11 @@ fi
 
 echo "== E6: failure -> the rail says the CHEAPEST repair out loud =="
 printf '\n# e6-acceptance: program touched after booking (hash moves)\n' | tee -a "$run_src/contract.toml" >>"$rdir/contract.toml"
-WHL fail "$jid" --reason "e6-acceptance" >"$work/fail.out" 2>&1
-hint="$(WHL events --job "$jid" 2>/dev/null | grep -c 're-runs the verdict' || true)"
-if [ "${hint:-0}" -gt 0 ]; then
-  check "E6" ok "wake names the cheapest repair: whl continue re-runs the verdict (on the trace)"
+WHL fail "$jid" --reason "e6-acceptance" --again >"$work/fail.out" 2>&1
+hint="$(grep -c 're-runs the verdict' "$rdir/wake.json" 2>/dev/null || true)"
+hint2="$(WHL events --job "$jid" 2>/dev/null | grep -c 're-runs the verdict' || true)"
+if [ "${hint:-0}" -gt 0 ] || [ "${hint2:-0}" -gt 0 ]; then
+  check "E6" ok "the wake SAYS the cheapest repair: program changed since booking — whl continue re-runs the verdict"
 else
   check "E6" fail "no repair hint on the wake/trace; fail.out: $(tail -2 "$work/fail.out" | tr '\n' ' ')"
 fi
