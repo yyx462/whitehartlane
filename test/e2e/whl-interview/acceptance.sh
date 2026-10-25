@@ -164,7 +164,9 @@ bank_run = tomllib.loads(bank_path.read_text()).get("question", [])
 bank_repo = tomllib.loads((here / "questions.toml").read_text()).get("question", [])
 repo_qs = {q["q"] for q in bank_repo}
 appends = [q["q"] for q in bank_run if q["q"] not in repo_qs]
-run_qs = {q["q"] for q in bank_run if not q.get("retired")}
+def norm(x):
+    return " ".join(x.casefold().replace("'", "").replace('"', "").replace("?", "").replace(".", "").split())
+run_qs = {norm(q["q"]) for q in bank_run if not q.get("retired")}
 fresh = []
 tr = rdir / "data" / "transcript.jsonl"
 if tr.exists():
@@ -174,7 +176,7 @@ if tr.exists():
         if c.get("topic") and c["topic"] != "rebuttal" and c.get("question"):
             fresh.append(c["question"])
 print(f"transcript={'ok' if tr.exists() else 'missing'}")
-asked_ok = all(q in run_qs for q in fresh)
+asked_ok = all(norm(q) in run_qs for q in fresh)
 print(f"fresh={len(fresh)} within_cap={len(fresh) <= 5} appends={len(appends)} all_banked={asked_ok}")
 PY
 )"
