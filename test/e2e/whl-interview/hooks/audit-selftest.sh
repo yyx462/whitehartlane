@@ -89,14 +89,14 @@ g.write_text("# Gaps\n\nNone found — everything checked out.\n")
 
 # 3. three consecutive malformed contracts — the one-re-ask law caps it
 m malformed-run "malformed 3 times in a row" '
-files = sorted((d / "messages" / "interviewer").glob("*.json"))[:3]
+files = sorted((d / "messages" / "interviewer").glob("*.json"), key=lambda p: int(p.name.split(".")[0]))[:3]
 for f in files:
     f.write_text(json.dumps({"from": "interviewer", "to": "interviewee", "type": "note",
                              "body": "question without a contract block"}))
 '
 
 # 4. a topic past the turn cap — the appended turns reuse a BANKED question
-m turn-cap "took 7 turns" '
+m turn-cap "took 6 turns (cap 2)" '
 import tomllib
 bank = tomllib.loads((d / "questions.toml").read_text())["question"]
 q = next(x["q"] for x in bank if x["topic"] == "admission-jev" and x["level"] == 4)
@@ -120,6 +120,25 @@ first = sorted((d / "messages" / "interviewer").glob("*.json"), key=lambda p: in
 txt = json.loads(first.read_text())
 txt["body"] = txt["body"].replace("\"topic\": \"admission-jev\"", "\"topic\": \"spur-grammar\"")
 first.write_text(json.dumps(txt))
+'
+
+# 5b. a SIXTH fresh question — over the commission's question budget
+# (one extra banked question on an already-opened topic: per-topic cap
+# 2 is respected, the budget is not)
+m budget-cap "question budget exceeded" '
+import tomllib
+bank = tomllib.loads((d / "questions.toml").read_text())["question"]
+q = next(x["q"] for x in bank if x["topic"] == "admission-jev" and x["level"] == 4)
+files = sorted((d / "messages").glob("*/*.json"))
+seq = max(int(f.name.split(".")[0]) for f in files)
+bt = chr(96)
+fence = bt * 3
+c = {"topic": "admission-jev", "level": 4, "question": q,
+     "grade": "partial", "cited": True, "citation_checked": "ok",
+     "move": "deeper", "gap_note": ""}
+(d / "messages" / "interviewer" / f"{seq + 1}.json").write_text(
+    json.dumps({"from": "interviewer", "to": "interviewee", "type": "note",
+                "body": "one more.\n\n" + fence + "turn-contract\n" + json.dumps(c) + "\n" + fence}))
 '
 
 # 6. an unbanked question — freestyling fails, append-first is the law
