@@ -99,6 +99,13 @@ Runs; the events trace pane shows every booked fact.
    `examples/coworker-spurs/steps-viz` (coworker),
    `examples/lab-spurs/lab-program` (the lab rail). Read ADR 0007
    (typed steps) and ADR 0009 (spur spelling) before inventing a shape.
+   Every brief names its deliverable — the artifact that station
+   hands back for the human to read (see Deliverables). A commission
+   that never said what to read at the end still gets one: the
+   guarantee is the levy's to enforce, not the commissioner's to
+   remember (receipt: the whl-interview session behind
+   `docs/zen/2026-10-25-zen-7.md` — four healthy levies, two full
+   interviews, not one artifact the commissioner could read).
 3. **Levy**: `whl run <folder> --from opencode:<your session id>` — never omit `--from`: the door refuses (a Job must wake somebody; `--unattended` is the explicit humanless exception, not the default).
    Your session id is in your own context (env/session metadata); if you
    genuinely cannot determine it, omit `--from` — the spur runs
@@ -124,12 +131,36 @@ Runs; the events trace pane shows every booked fact.
   mid-flight, the scaffold is wrong — fix the briefs, not your watch.
 - **Parked ≠ broken.** paused/aborted/orphaned are parks; the human
   (or you, when asked) types `whl continue` — nothing auto-continues.
+- **No deliverable, no done.** Every commission ends with ONE
+  readable artifact for the human (Deliverables below) — a report of
+  pointers is a failed report, whatever the brief said or forgot.
+
+## Deliverables (every commission ends with something to read)
+
+Whatever the task, the human ends holding one readable artifact — a
+diagram, an HTML page, a PNG — never a bare pointer. The taste is
+FIXED (stated reading preference; the worker re-derives nothing):
+
+| tier      | shape | when |
+| --------- | ----- | ---- |
+| default   | Mermaid `flowchart` (structure, topology) and/or `sequenceDiagram` (ordering, interaction) in the report itself | every report — real names, real numbers, one diagram answers one question |
+| html      | one focused HTML artifact, product-matching type and spacing, opened with `open` | the point needs density or interaction a diagram cannot carry |
+| showcase  | one yyx-terminal-diagrams PNG (2x, filed under `~/Pictures/term-diagrams/`) | the artifact IS the product — a walkthrough to forward, a team-facing explainer. Costly: one per commission, earned by the ask, never the default |
+| plain     | pseudocode / diff / table | the point is logic or a change, not a shape |
+
+Failed deliverables: unstyled HTML the user must tune, prose walls,
+pointer-only reports. Deeper reading preferences: `~/wiki/language/`
+(read the index first).
 
 ## Output contract
 
 The hand-back is exactly: the door's `job:`/`log:`/`trace:` lines, the
 spur id (`project/spur_id`), and the one-sentence hand-off. Later, when
-the wake arrives, relay `wake.json`'s message + report path verbatim.
+the wake arrives, relay `wake.json`'s message + report path verbatim,
+then name the deliverable: what to open, one line on what it shows. If
+the report carries no artifact, render the deliverable yourself from
+the report before handing over — a gap you forward is a gap you made;
+the missing requirement goes into the next spawn's briefs.
 If the wake (message or report) surfaces a defect in whl/WhiteHartLane
 itself — a contract programs keep re-tripping (heartbeat path ambiguity,
 hook stdout purity, run-dir vs source-dir) — file one issue per defect
