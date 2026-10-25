@@ -27,20 +27,36 @@ import type { AgentStatus } from "../ports/agent-host.ts"
 // lives (layer 3 of the policy ladder).
 const DOOR_ROOT = join(import.meta.dirname, "..", "..")
 
+// ADR 0016 slice 1 — the station hosting contract: a coworker STAGE in
+// a chain runs THIS engine in-process at stations/<S>/ instead of a
+// minted child job. The station passes its members (from the stage
+// declaration — the station is a folder, never program bytes), its
+// worker kind, and its retry cap; the engine owns briefs/, messages/,
+// work/, relay.json under the station dir exactly as a standalone run
+// owns them at the root.
+export type StationSpec = {
+  dir: string
+  members: import("./coworker.ts").Member[]
+  workerKind: string
+  retry?: number
+}
+
 export async function runCoworker(
   rail: Rail,
-  opts: { stallMs?: number; beatMs?: number; graceMs?: number } = {},
+  opts: { stallMs?: number; beatMs?: number; graceMs?: number; station?: StationSpec } = {},
 ): Promise<Report | null> {
-  const taskDir = rail.taskDir
+  const taskDir = opts.station?.dir ?? rail.taskDir
   const log = rail.log
   const ledger = rail.ledger
-  const toml = readFileSync(join(taskDir, "workflow.toml"), "utf8")
-  const members = parseMembers(toml)
+  // a hosted station carries its members in the spec (the stage
+  // declaration IS the program); a standalone run parses its own toml
+  const members = opts.station?.members ?? parseMembers(readFileSync(join(rail.taskDir, "workflow.toml"), "utf8"))
+  const toml = opts.station ? "" : readFileSync(join(rail.taskDir, "workflow.toml"), "utf8")
   if (members.length < 2) {
     throw new Error("coworker needs at least two [members.*]")
   }
   const manifest = rail.manifest()
-  const memberKind = manifest.workflow.worker_kind
+  const memberKind = opts.station?.workerKind ?? manifest.workflow.worker_kind
   const names = members.map((m) => m.name)
   if (!members.some((m) => m.initiates)) {
     throw new Error("coworker needs one member with initiates = true — otherwise everyone idles and the exchange never starts")
@@ -79,7 +95,9 @@ export async function runCoworker(
   // only counts. units/grade are fan-out/lab concepts — declared here
   // they are dead config, and a scaffold that copied them from a
   // fan-out example is one counts="true" away from a report-time death.
-  if (manifest.hooks.units || manifest.hooks.grade) {
+  // A hosted station reads the PARENT manifest — its units/grade belong
+  // to the chain's other stages, not dead config, so no warning.
+  if (!opts.station && (manifest.hooks.units || manifest.hooks.grade)) {
     log(
       "coworker ignores hooks.units/hooks.grade (the members are the units; only counts runs) — remove them from the spur toml",
     )
@@ -122,6 +140,8 @@ export async function runCoworker(
     // No explicit member model + a configured chooser = the judge picks
     // the birth model from the candidate order. A fresh member has no
     // fault history; the brief excerpt is the only evidence that matters.
+    // (A hosted station's members carry their pins in the spec — the
+    // parent toml's member tables never speak for them.)
     const birthPolicy = readModelsFile(taskDir, toml, DOOR_ROOT)
     if (!m.model && birthPolicy.chooser === "jev" && birthPolicy.order.length > 0) {
       const pick = chooseModel({
@@ -171,7 +191,7 @@ export async function runCoworker(
   // (default 1), counted per member, and the report carries the churn
   // so the levy can see it. Semantic outcomes — a stop, a capped
   // stall, a deny-cap block — are never retried: those are decisions.
-  const retryCap = manifest.workflow.retry ?? 1
+  const retryCap = opts.station?.retry ?? manifest.workflow.retry ?? 1
   const retriesUsed = new Map<string, number>()
   const respawnMember = (m: (typeof members)[number]): boolean => {
     const dir = sandboxOf.get(m.name) ?? join(taskDir, "sandboxes", m.name)

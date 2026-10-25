@@ -415,7 +415,7 @@ wave = "w1"
 })
 
 // ── coworker stages: delegation to a minted child program ─────────
-test("a coworker stage needs a levy port — refused before any booking", async () => {
+test("a coworker stage needs NO levy port — a non-hosting port fails the station honestly (ADR 0016 slice 1)", async () => {
   const dir = taskDir("coworker-noport")
   writeFileSync(
     join(dir, "workflow.toml"),
@@ -437,13 +437,25 @@ members = [
 ]
 `,
   )
-  await assert.rejects(
-    () => run(dir, fakeShep().port),
-    /wake steps \(and coworker stages, which delegate to a child program\) need a levy port/,
-  )
+  // no levyChild, no hostStation — the mint is dead; a shep port that
+  // cannot host conversations fails the station row with the reason
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: fakeShep().port,
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.equal(report.status, "failed")
+  const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
+  assert.match(byUnit.review, /needs a rail that hosts conversations/)
+  // and nothing was ever minted: no stages/ dialect for a conversation
+  assert.equal(existsSync(join(dir, "stages")), false)
 })
 
-test("coworker stage mints its child program, levies it once, wakes advance the chain", async () => {
+test("a coworker stage HOSTS its exchange in-process at stations/<id>/ — one job, no mint, no child (ADR 0016 slice 1)", async () => {
   const dir = taskDir("coworker-flow")
   writeFileSync(
     join(dir, "workflow.toml"),
@@ -471,35 +483,13 @@ topology = "gate"
 run = "true"
 `,
   )
-  const levies: Array<{ unitId: string; folder: string }> = []
-  const levyChild = (unitId: string, folder: string) => {
-    levies.push({ unitId, folder })
-    const jobDir = join(dir, "child-jobs", unitId)
-    mkdirSync(jobDir, { recursive: true })
-    writeFileSync(
-      join(jobDir, "job.json"),
-      JSON.stringify({
-        id: `j-${unitId}`,
-        sid: "s-child",
-        workflow: "coworker",
-        task: unitId,
-        dir: jobDir,
-        state: "running",
-        spawner: { tool: "rail", session_id: "s-parent", since: new Date().toISOString() },
-      }),
-    )
-    // the child exchange completes immediately: its end-of-job wake
-    writeFileSync(
-      join(jobDir, "wake.json"),
-      JSON.stringify({ outcome: "done", report: join(jobDir, "report.json"), at: new Date().toISOString() }),
-    )
-    return { ok: true as const, jid: `j-${unitId}`, jobDir, warnings: [] }
-  }
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
+  const hosted: Array<{ id: string; dir: string }> = []
   const shep = fakeShep()
   const report = await runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild,
+    hostStation: rehearsalHost("done", hosted),
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -507,28 +497,20 @@ run = "true"
     log: () => {},
   })
   assert.equal(report.status, "done")
-  // the child program was minted from the stage's members
-  const childToml = readFileSync(join(dir, "stages", "review", "workflow.toml"), "utf8")
-  // j-5c1861: the child DECLARES its kind — the run door defaults an
-  // absent kind to fan-out and refuses a stage-less fan-out (#176), so
-  // an unpinned coworker mint is exactly how the seam survived. The lab
-  // pin below (kind = "lab") is this seam's other half.
-  assert.match(childToml, /^kind = "coworker"$/m)
-  assert.equal(workflowKind(childToml), "coworker") // what the door reads
-  assert.match(childToml, /\[members\.alex\][\s\S]*initiates = true/)
-  assert.match(childToml, /\[members\.sam\][\s\S]*model = "zhipuai-coding-plan\/glm-5\.3"/)
-  assert.match(childToml, /model = "zhipuai-coding-plan\/glm-5\.3-flash"/) // inherited default
-  assert.equal(
-    readFileSync(join(dir, "stages", "review", "members", "sam.md"), "utf8"),
-    "review as sam\n",
-  )
-  // levied exactly once, into the minted folder
-  assert.deepEqual(levies, [{ unitId: "review", folder: join(dir, "stages", "review") }])
-  // NO worker pane was born for the coworker stage — the members are
-  // the child program's workers, not this rail's
+  // NO mint: the stages/ dialect never appears for a conversation
+  assert.equal(existsSync(join(dir, "stages", "review")), false)
+  // the station folder: the hosting contract's durable bytes
+  const station = join(dir, "stations", "review")
+  assert.ok(existsSync(join(station, "protocol.json")), "the station books itself on disk")
+  assert.ok(existsSync(join(station, "messages", "alex", "2.json")), "the exchange's mail lives at the station")
+  assert.ok(existsSync(join(station, "relay.json")), "the relay ledger is station-owned")
+  assert.ok(existsSync(join(station, "report.json")), "the exchange's report lands at the station")
+  assert.deepEqual(hosted, [{ id: "review", dir: station, preamble: undefined }])
+  // NO child job, NO member panes on this rail — the members are the
+  // hosted exchange's, born by the host
   assert.deepEqual(shep.spawned, ["w-draft"])
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.review, /^child j-review done/)
+  assert.match(byUnit.review, /^station review exchange done/)
 })
 
 // ── dry-run: worker_kind = "mock" births no agent ──────────────────
@@ -584,6 +566,32 @@ function autoWakeLevy(dir: string, outcome: string, levies: Array<{ unitId: stri
   }
 }
 
+// ADR 0016 slice 1 — the station rehearsal host: stands in for the
+// real exchange, writing the station's durable bytes (messages/, the
+// relay ledger, a station report) exactly as runCoworker would, and
+// resolving with the exchange's Report. Pins the HOSTING CONTRACT, not
+// any engine internals.
+function rehearsalHost(
+  outcome: "done" | "failed",
+  seen: Array<{ id: string; dir: string; preamble?: string }> = [],
+) {
+  return async (stage: Stage, stationDir: string): Promise<{ status: string; table: { unit: string; result: string }[] }> => {
+    seen.push({ id: stage.id, dir: stationDir, preamble: stage.preamble })
+    for (const who of ["alex", "sam"]) mkdirSync(join(stationDir, "messages", who), { recursive: true })
+    writeFileSync(
+      join(stationDir, "messages", "alex", "2.json"),
+      JSON.stringify({ from: "alex", to: "sam", type: "note", body: "the review stands" }),
+    )
+    writeFileSync(
+      join(stationDir, "messages", "sam", "3.json"),
+      JSON.stringify({ from: "sam", to: "alex", type: "stop", body: "goal reached" }),
+    )
+    writeFileSync(join(stationDir, "relay.json"), JSON.stringify({ delivered: ["alex/2.json"], refused: [] }))
+    writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: outcome, table: [] }))
+    return { status: outcome, table: [] }
+  }
+}
+
 test("lab stage mints a kind=lab child with actor.md + detectors, levied once", async () => {
   const dir = taskDir("lab-flow")
   writeFileSync(
@@ -627,9 +635,10 @@ run = "true"
   assert.match(byUnit.explore, /^child j-explore done/)
 })
 
-test("a coworker stage's check runs after the wake — green receipt, red check fails", async () => {
+test("a coworker stage's check runs after the HOSTED exchange — green exchange, red check fails", async () => {
   const dir = taskDir("coworker-check")
   writeFileSync(join(dir, "check.sh"), "echo checked >> trail.log\nexit 1\n")
+  writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
   writeFileSync(
     join(dir, "workflow.toml"),
     `[workflow]
@@ -655,7 +664,7 @@ brief = "after the exchange"
   const report = await runOrchestrator({
     taskDir: dir,
     shep: shep.port,
-    levyChild: autoWakeLevy(dir, "done", []),
+    hostStation: rehearsalHost("done"),
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -665,7 +674,7 @@ brief = "after the exchange"
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
   assert.match(byUnit.review, /stage check failed/)
-  // the check actually RAN (the receipt was green; the check made it red)
+  // the check actually RAN (the exchange was green; the check made it red)
   assert.equal(readFileSync(join(dir, "trail.log"), "utf8"), "checked\n")
   // downstream never spawned
   assert.deepEqual(shep.spawned, [])
@@ -705,10 +714,11 @@ topology = "gate"
 run = "true"
 `,
   )
+  const hostedPreamble: Array<{ id: string; dir: string; preamble?: string }> = []
   const report = await runOrchestrator({
     taskDir: dir,
     shep: fakeShep().port,
-    levyChild: autoWakeLevy(dir, "done", []),
+    hostStation: rehearsalHost("done", hostedPreamble),
     gateCheckMs: 50,
     logPollMs: 50,
     stallMs: 60_000,
@@ -722,13 +732,12 @@ run = "true"
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l) as { id: string; brief: string })
   assert.ok(units.every((u) => u.brief.startsWith("SHARED: output one JSON object per line.\n\n")))
-  // coworker: every minted member file carries the preamble
-  for (const name of ["alex", "sam"]) {
-    assert.match(
-      readFileSync(join(dir, "stages", "review", "members", `${name}.md`), "utf8"),
-      /^We are building the orders API\.\n\n/,
-    )
-  }
+  // coworker: the stage's preamble rides the hosting contract to the
+  // station (the default host prepends it to every member brief)
+  assert.deepEqual(
+    hostedPreamble.map((h) => ({ id: h.id, preamble: h.preamble })),
+    [{ id: "review", preamble: "We are building the orders API." }],
+  )
 })
 
 test("preamble on a one-mind stage refuses", () => {
