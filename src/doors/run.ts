@@ -109,7 +109,15 @@ export function stageRun(source: string, store: string): void {
 }
 
 function copyBeside(source: string, store: string): void {
-  for (const name of ["actor.md", "task.txt", "roots.txt", "project.json", "contract.toml", "questions.toml"]) {
+  // the question bank stages into the SHARED data/ shelf (ADR 0016
+  // slice 5: a member's write scope covers data/ and its own outbox
+  // only — the bank is the shelf's one append-only file)
+  const bank = join(source, "questions.toml")
+  if (existsSync(bank)) {
+    mkdirSync(join(store, "data"), { recursive: true })
+    writeFileSync(join(store, "data", "questions.toml"), readFileSync(bank))
+  }
+  for (const name of ["actor.md", "task.txt", "roots.txt", "project.json", "contract.toml"]) {
     const file = join(source, name)
     if (existsSync(file)) writeFileSync(join(store, name), readFileSync(file))
   }

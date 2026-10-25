@@ -62,10 +62,10 @@ ladder = ["What", "How", "Why", "Break", "Boundary"]
 must-stand = 1             # zero standing gaps = the interviewer was too soft
 
 [contract.questions]
-bank = "questions.toml"    # every asked question must be banked (or appended first)
-                           # at run time the STAGED copy beside the contract is the
-                           # live bank — members reach it at ../../questions.toml
-append-only = true         # a retired question is marked, never erased
+bank = "data/questions.toml"  # the bank lives on the shared data/ shelf;
+                              # every asked question must be banked (or
+                              # appended first) in the run's staged copy
+append-only = true            # a retired question is marked, never erased
 
 [contract.citations]
 # a citation is a repo path, optionally :line — every explained.md

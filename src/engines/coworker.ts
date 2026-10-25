@@ -258,7 +258,11 @@ export function interruptedMember(messages: Message[], delivered: string[], init
 }
 
 // The protocol every member brief carries: how to talk. The program's
-// brief stays task-pure; the rail appends the wire format.
+// brief stays task-pure; the rail appends the wire format. The SEND
+// TOOL is the only sanctioned sender (ADR 0016 slice 5 / zen 7): the
+// member's write scope covers its own outbox and nothing else in
+// messages/, so the tool is not just the blessed path — hand-writing
+// a peer's mailbox is out of scope by construction.
 export function memberProtocol(name: string, peers: string[], dir: string): string {
   return [
     "",
@@ -267,17 +271,14 @@ export function memberProtocol(name: string, peers: string[], dir: string): stri
     `A message from a peer arrives as a prompt from the rail, prefixed [relay].`,
     "You never poll messages/, never wait in a loop — the rail watches the",
     "folder and wakes you. Between prompts: work, or idle.",
-    "To reply, write a JSON file in YOUR outbox (absolute path):",
-    `${join(dir, "messages", name, "<seq>.json")}`,
-    `with {"from":"${name}","to":"<peer>","type":"note","body":"..."}.`,
-    "Your outbox folder is yours alone — NEVER write into a peer's outbox;",
-    "your identity is the folder the file lives in, and the rail refuses a",
-    "file whose from does not match its folder.",
-    "<seq> is the highest existing seq across EVERY outbox in messages/",
-    "(look at all of messages/ first, not just your own folder), plus one.",
-    'When the exchange has fully reached its goal, write type "stop" with a',
-    "one-paragraph summary as body, addressed to any peer. Never prompt or",
-    "message a peer any other way. Never write a peer's message file.",
+    "To send a message, use THE SEND TOOL (run it from your working dir):",
+    `  node ${join(dir, "tools", "send.mjs")} <peer> note|stop <body text>`,
+    "It files the message in YOUR outbox for you (your identity is your",
+    "sandbox folder — never bytes you type), assigns the sequence, and",
+    "refuses anything else. NEVER write into messages/ by hand and NEVER",
+    "a peer's outbox — those paths are outside your write scope.",
+    'When the exchange has fully reached its goal, send type "stop" with a',
+    "one-paragraph summary as body, addressed to any peer.",
     "Everything you build goes in the target tree the task names.",
   ].join("\n")
 }

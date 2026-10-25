@@ -68,12 +68,18 @@ def load_contract(job_dir=None):
     # interviewer actually appends to at ../../questions.toml from its
     # sandbox); the source program is the fallback (--verdict probes,
     # selftests that stage their own copies)
-    if job_dir is not None and (Path(job_dir) / "contract.toml").is_file():
+    # interviewer actually appends to at ../../data/questions.toml from
+    # its sandbox (the shared shelf — the one append-only file there)
+    if job_dir is not None and (Path(job_dir) / "data" / "questions.toml").is_file():
+        root = Path(job_dir)
+    elif job_dir is not None and (Path(job_dir) / "contract.toml").is_file():
         root = Path(job_dir)
     else:
         root = SOURCE_ROOT
     contract = tomllib.loads((root / "contract.toml").read_text())["contract"]
-    bank_file = root / "questions.toml"
+    bank_file = root / "data" / "questions.toml"
+    if not bank_file.exists():
+        bank_file = root / "questions.toml"
     bank = tomllib.loads(bank_file.read_text()).get("question", []) if bank_file.exists() else []
     return contract, bank
 

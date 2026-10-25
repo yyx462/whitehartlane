@@ -89,26 +89,37 @@ fi
 echo "== E3: send tool — own mailbox only, peers ro, rail ledger =="
 trace="$(WHL events --job "$jid" 2>/dev/null || true)"
 e3="$(python3 - "$rdir" <<'PY'
-import json, sys
+import json, os, sys
 from pathlib import Path
 rdir = Path(sys.argv[1])
 msgs = sorted(rdir.glob("messages/*/*.json"))
 own = [f for f in msgs if json.loads(f.read_text()).get("from") == f.parent.name]
 cross = [f for f in msgs if json.loads(f.read_text()).get("from") != f.parent.name]
-print(f"own={len(own) - len(cross)}/{len(msgs)} cross={len(cross)}")
+# the SCOPE law: a member's sandbox config grants its OWN outbox and
+# the data/ shelf, never a peer's outbox
+scopes = {}
+for cfg in sorted(rdir.glob("sandboxes/*/opencode.json")):
+    member = cfg.parent.name
+    ext = " ".join(json.loads(cfg.read_text()).get("permission", {}).get("external_directory", {}).keys())
+    scopes[member] = ext
+leak = [m for m, ext in scopes.items() if any(f"/messages/{p}" in ext for p in scopes if p != m)]
+tool = (rdir / "tools" / "send.mjs").is_file()
+protocol = all("send.mjs" in (rdir / "briefs" / f"{m}.md").read_text() for m in scopes) if scopes else False
+print(f"own={len(own) - len(cross)}/{len(msgs)} cross={len(cross)} scope_leak={len(leak)} tool={tool} protocol={protocol}")
 PY
 )"
 own_n="$(echo "$e3" | grep -oE 'own=[0-9]+/[0-9]+' | cut -d= -f2)"
 cross_n="$(echo "$e3" | grep -oE 'cross=[0-9]+' | cut -d= -f2)"
-ledger_n="$(echo "$trace" | grep -cE 'mail\.|message\.|relay\.' || true)"
-if [ "${cross_n:-1}" = "0" ] && [ "${own_n:-0}" != "0/0" ]; then
-  if [ "${ledger_n:-0}" -gt 0 ]; then
-    check "E3" ok "every message from its own mailbox ($own_n), rail ledger $ledger_n trace rows"
-  else
-    check "E3" pend "own-mailbox holds ($own_n, 0 cross-writes); the rail ledger + send TOOL land with #200 slice 5 (send tool)"
-  fi
+leak_n="$(echo "$e3" | grep -oE 'scope_leak=[0-9]+' | cut -d= -f2)"
+tool_ok="$(echo "$e3" | grep -oE 'tool=(True|False)' | cut -d= -f2)"
+proto_ok="$(echo "$e3" | grep -oE 'protocol=(True|False)' | cut -d= -f2)"
+ledger_n="$(echo "$trace" | grep -cE 'mail\.filed|mail\.delivered|\brelay\b' || true)"
+if [ "${cross_n:-1}" = "0" ] && [ "${leak_n:-1}" = "0" ] && [ "${tool_ok}" = "True" ] && [ "${proto_ok}" = "True" ] && [ "${ledger_n:-0}" -gt 0 ]; then
+  check "E3" ok "send tool staged + taught, own mailbox only ($own_n), no peer outbox in any scope, rail ledger $ledger_n rows"
+elif [ "${cross_n:-1}" != "0" ]; then
+  check "E3" fail "$e3 (cross-writes)"
 else
-  check "E3" fail "$e3"
+  check "E3" pend "$e3 ledger=$ledger_n — slice 5 pieces still landing"
 fi
 
 echo "== E4: prompts + audits generated from the ONE contract =="
@@ -142,7 +153,10 @@ e7="$(python3 - "$rdir" "$here" <<'PY'
 import json, sys, tomllib
 from pathlib import Path
 rdir, here = (Path(p) for p in sys.argv[1:3])
-bank_run = tomllib.loads((rdir / "questions.toml").read_text()).get("question", [])
+bank_path = rdir / "data" / "questions.toml"
+if not bank_path.exists():
+    bank_path = rdir / "questions.toml"
+bank_run = tomllib.loads(bank_path.read_text()).get("question", [])
 bank_repo = tomllib.loads((here / "questions.toml").read_text()).get("question", [])
 repo_qs = {q["q"] for q in bank_repo}
 appends = [q["q"] for q in bank_run if q["q"] not in repo_qs]

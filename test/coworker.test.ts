@@ -130,11 +130,12 @@ test("readMessages walks the outbox layout beside the legacy layout", () => {
   assert.match(bad[0].why, /outbox folder/)
 })
 
-test("memberProtocol sends members to their OWN outbox", () => {
+test("memberProtocol sends members through THE SEND TOOL — own outbox, peers out of scope", () => {
   const text = memberProtocol("backend", ["frontend"], "/run")
-  assert.match(text, /messages\/backend\/<seq>\.json/)
-  assert.match(text, /NEVER write into a peer's outbox/)
-  assert.match(text, /EVERY outbox/)
+  assert.match(text, /tools\/send\.mjs/)
+  assert.match(text, /node \/run\/tools\/send\.mjs <peer> note\|stop <body text>/)
+  assert.match(text, /NEVER write into messages\/ by hand/)
+  assert.match(text, /your identity is your\nsandbox folder/)
 })
 
 test("the relay plan delivers to the named pane only, then honors stop and cap", () => {
@@ -171,8 +172,9 @@ test("the relay plan delivers to the named pane only, then honors stop and cap",
 
 test("the member protocol names the wire format and forbids peer-writing", () => {
   const text = memberProtocol("backend", ["frontend"], "/run")
-  assert.match(text, /"from":"backend"/)
-  assert.match(text, /Never write a peer's message file/)
+  assert.match(text, /NEVER/)
+  assert.match(text, /a peer's outbox/)
+  assert.match(text, /outside your write scope/)
   assert.match(text, /messages/)
 })
 

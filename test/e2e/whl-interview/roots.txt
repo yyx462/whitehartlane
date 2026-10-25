@@ -1,4 +1,6 @@
 # Declared external roots (src/core/permission.ts readRootsTxt) — the
 # subject this interview interrogates. The briefs name this path; the
 # door refuses a run whose briefs name paths no root covers.
-~/projects/Agentic-Workspace/whitehartlane
+# ro (#214): members READ the repo for citations; the judge refuses
+# writes into it — the interview never edits its subject.
+ro ~/projects/Agentic-Workspace/whitehartlane
