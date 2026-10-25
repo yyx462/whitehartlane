@@ -9,14 +9,16 @@
 [contract]
 name = "whl-interview"
 
-# the fixed topic map — order is law, first-opened must climb it
+# the fixed topic map — order is law, first-opened must climb it.
+# THIS commission's requirement (ad-hoc, the commissioner's
+# translation, not a rail law): the question list is AT MOST 5 —
+# five topics, one fresh question each, the whole list from the bank.
 topics = [
   "admission-jev",
   "pane-supervision",
   "spur-grammar",
   "wakes",
   "accounting",
-  "relay-protocol",
 ]
 
 # #205 — guarantee a deliverable on every commission: every artifact
@@ -51,8 +53,9 @@ kind = "jsonl"
 rail-built = true
 
 [contract.exchange]
-turns-per-topic = 6        # a topic stops at solid, 3 gap marks, or this
-rebuttal-turns = 2         # one rebuttal pass (a re-ask may spend the second)
+turns-per-topic = 2        # a topic stops at solid, 3 gap marks, or this
+max-questions = 5          # THIS commission: the whole question list <= 5
+rebuttal-turns = 2         # one rebuttal pass (re-asks, not new questions)
 ladder = ["What", "How", "Why", "Break", "Boundary"]
 
 [contract.gaps]
@@ -60,6 +63,8 @@ must-stand = 1             # zero standing gaps = the interviewer was too soft
 
 [contract.questions]
 bank = "questions.toml"    # every asked question must be banked (or appended first)
+                           # at run time the STAGED copy beside the contract is the
+                           # live bank — members reach it at ../../questions.toml
 append-only = true         # a retired question is marked, never erased
 
 [contract.citations]

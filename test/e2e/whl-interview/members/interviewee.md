@@ -49,18 +49,27 @@ commission guarantees a deliverable):**
 - `data/gaps.md` (md) — YOU must write this
 - `data/transcript.jsonl` (jsonl) — the AUDIT builds this — never demanded of you
 
-**Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting, relay-protocol.
-**Ladder (one level per turn, in order):** What -> How -> Why -> Break -> Boundary.
-**Turns:** at most 6 per topic; a topic stops at
-grade=solid, or 3 gap marks, or the cap. The rebuttal pass is
-2 turns at most.
+**Topic map (fixed order, never revisited):** admission-jev, pane-supervision, spur-grammar, wakes, accounting.
+**THE REQUIREMENT FOR THIS COMMISSION: the question list is at
+most 5 questions — the WHOLE interview, all
+topics combined. Five topics, one fresh question each; you cannot
+climb the whole ladder, so per topic pick the single sharpest
+question the bank holds (or append one it lacks). A second fresh
+question anywhere spends the list — the audit refuses a run that
+asks more than the list allows.
+**Ladder (the levels you draw from, sharpest wins):** What -> How -> Why -> Break -> Boundary.
+**Turns:** at most 2 per topic and 5 fresh
+questions in total; a topic stops at grade=solid, 3 gap marks, or
+the cap. The rebuttal pass is 2 turns at most
 **Gaps:** at least 1 must STAND after the
 rebuttal pass — zero standing gaps means the interviewer was too
 soft and the run fails.
 **Questions:** every question you ask must come from the bank
-(questions.toml) — if you need one it lacks, APPEND it
-there first (append-only; retire with `retired = true`, never
-erase), then ask it. The audit checks every asked question is banked.
+(questions.toml) — at run time that is the staged
+copy at `../../questions.toml` (from your sandbox). If you need a
+question it lacks, APPEND it there first (append-only; retire with
+`retired = true`, never erase), then ask it. The audit checks every
+asked question is banked in THAT copy — the run's own law.
 **Citations:** every claim in an answer and every explained.md
 section carries at least one repo citation — `path/file.ts` or
 `path/file.ts:LINE`.

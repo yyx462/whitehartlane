@@ -81,22 +81,15 @@ def build(target):
     )
 
     outbox("interviewee", "The pitch is at ../../data/pitch.md — whl is a shell and supervisor.")
-    for i, t in enumerate(topics):
-        closing = "solid" if i > 0 else "partial"
-        outbox(
-            "interviewer",
-            fenced(contract_file(t, 1, q_for(t, 1), closing, "next" if i > 0 else "deeper")),
-        )
-        outbox("interviewee", f"{t} routes turns — src/engines/coworker.ts:161.")
-        extra = ""
+    # the <=5 commission's golden shape: ONE fresh question per topic
+    # (5 topics = the whole list), the gap riding its topic's only turn
+    for t in topics:
+        move, gap_note = "next", ""
         if t == GAPPED:
-            outbox(
-                "interviewer",
-                fenced(contract_file(t, 3, q_for(t, 3), "partial", "gap", gap_note="level-4 question answered at level-1 language")),
-            )
-            extra = " Not designed yet."
+            move, gap_note = "gap", "level-4 question answered at level-1 language"
+        outbox("interviewer", fenced(contract_file(t, 3, q_for(t, 3), "solid", move, gap_note=gap_note)))
+        extra = " Not designed yet." if t == GAPPED else ""
         outbox("interviewee", f"The mechanism: relayPlan filters delivered mail — coworker-run.ts:486.{extra}")
-        outbox("interviewer", fenced(contract_file(t, 2, q_for(t, 2), "partial", "deeper")))
 
     outbox(
         "interviewer",

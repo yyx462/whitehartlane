@@ -63,9 +63,18 @@ def die(why):
     sys.exit(1)
 
 
-def load_contract():
-    contract = tomllib.loads((SOURCE_ROOT / "contract.toml").read_text())["contract"]
-    bank = tomllib.loads((SOURCE_ROOT / "questions.toml").read_text()).get("question", [])
+def load_contract(job_dir=None):
+    # the run's law is the STAGED copy inside the job dir (the bank the
+    # interviewer actually appends to at ../../questions.toml from its
+    # sandbox); the source program is the fallback (--verdict probes,
+    # selftests that stage their own copies)
+    if job_dir is not None and (Path(job_dir) / "contract.toml").is_file():
+        root = Path(job_dir)
+    else:
+        root = SOURCE_ROOT
+    contract = tomllib.loads((root / "contract.toml").read_text())["contract"]
+    bank_file = root / "questions.toml"
+    bank = tomllib.loads(bank_file.read_text()).get("question", []) if bank_file.exists() else []
     return contract, bank
 
 
@@ -200,6 +209,13 @@ def audit(job_dir):
     if not 1 <= turns.get(REBUTTAL, 0) <= REBUTTAL_TURNS:
         die(f"the rebuttal pass is one turn (cap {REBUTTAL_TURNS}), got {turns.get(REBUTTAL, 0)}")
 
+    # THIS commission's requirement, audited: the question list is at
+    # most max-questions fresh questions (rebuttal re-asks are not new
+    # list entries — they defend a gap the list already holds)
+    fresh = [c for c in contracts if c["topic"] != REBUTTAL]
+    if len(fresh) > MAX_QUESTIONS:
+        die(f"question budget exceeded: {len(fresh)} fresh questions asked, the commission caps the list at {MAX_QUESTIONS}")
+
     for t in TOPICS:
         idx = max(j for j, c in enumerate(contracts) if c["topic"] == t)
         if idx + 1 >= len(contracts):
@@ -289,19 +305,20 @@ def deliver(job_dir):
 
 
 def main():
-    global CONTRACT, BANK, TOPICS, TURNS, REBUTTAL_TURNS, LADDER, CITATION, CITE_KIND
-    CONTRACT, BANK = load_contract()
-    TOPICS = CONTRACT["topics"]
-    TURNS = CONTRACT["exchange"]["turns-per-topic"]
-    REBUTTAL_TURNS = CONTRACT["exchange"]["rebuttal-turns"]
-    LADDER = CONTRACT["exchange"]["ladder"]
-    CITATION = re.compile(CONTRACT["citations"]["pattern"])
-    CITE_KIND = "file:line"
+    global CONTRACT, BANK, TOPICS, TURNS, REBUTTAL_TURNS, MAX_QUESTIONS, LADDER, CITATION, CITE_KIND
     if len(sys.argv) > 1 and sys.argv[1] == "--verdict":
         # #198 — the PRE-RETIRE probe: deliverables exist + briefs fresh.
         # Runs while the panes still live (the rail's verdict hook); red
         # hands the stop's author one revise round naming exactly this.
         # The full transcript law stays at report time (counts).
+        CONTRACT, BANK = load_contract(Path.cwd() if (Path.cwd() / "contract.toml").is_file() else None)
+        TOPICS = CONTRACT["topics"]
+        TURNS = CONTRACT["exchange"]["turns-per-topic"]
+        REBUTTAL_TURNS = CONTRACT["exchange"]["rebuttal-turns"]
+        MAX_QUESTIONS = CONTRACT["exchange"]["max-questions"]
+        LADDER = CONTRACT["exchange"]["ladder"]
+        CITATION = re.compile(CONTRACT["citations"]["pattern"])
+        CITE_KIND = "file:line"
         for d in CONTRACT["deliverables"]:
             if d.get("rail-built"):
                 continue
@@ -324,6 +341,16 @@ def main():
         say("probe — no exchange in this dir yet, nothing to audit")
         print(json.dumps({"topics": 0, "graded_turns": 0, "contract_errors": 0, "gaps_standing": 0}))
         return
+    # the run's own law: the STAGED contract + bank inside the job dir
+    # (what the interviewer actually appended to), source as fallback
+    CONTRACT, BANK = load_contract(job_dir)
+    TOPICS = CONTRACT["topics"]
+    TURNS = CONTRACT["exchange"]["turns-per-topic"]
+    REBUTTAL_TURNS = CONTRACT["exchange"]["rebuttal-turns"]
+    MAX_QUESTIONS = CONTRACT["exchange"]["max-questions"]
+    LADDER = CONTRACT["exchange"]["ladder"]
+    CITATION = re.compile(CONTRACT["citations"]["pattern"])
+    CITE_KIND = "file:line"
     messages, contracts, errors = audit(job_dir)
     build_transcript(job_dir / "data", messages, contracts, errors)
     deliver(job_dir)
