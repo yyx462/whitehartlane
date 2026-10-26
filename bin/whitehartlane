@@ -397,11 +397,20 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const runnerOk = existsSync(runner)
     say("runner door", runnerOk, runnerOk ? runner : `missing at ${runner} — rebuild: npm run build`)
     // the runner door on a program-less dir must refuse CLEANLY — the
-    // named fatal + rc=1 (it boots, books nothing harmful, refuses); a
-    // module crash exits with a stack and no fatal line
+    // named fatal + rc=1 (it boots, refuses); a module crash exits
+    // with a stack and no fatal line. The probe runs against an
+    // ISOLATED OS home: a diagnostic must book nothing on the install
+    // it is diagnosing (run #12's acceptance E2 counted two doctor
+    // probes as phantom commissions — j-521c0e, j-6c8170).
     const probeDir = mkdtempSync(join(tmpdir(), "whl-doctor-probe-"))
-    const probe = spawnSync(process.execPath, ["--experimental-strip-types", runner, probeDir], { encoding: "utf8", timeout: 20_000 })
+    const probeHome = mkdtempSync(join(tmpdir(), "whl-doctor-home-"))
+    const probe = spawnSync(process.execPath, ["--experimental-strip-types", runner, probeDir], {
+      encoding: "utf8",
+      timeout: 20_000,
+      env: { ...process.env, AGENTIC_OS_HOME: probeHome, AGENTIC_OS_NOTIFY: "0" },
+    })
     rmSync(probeDir, { recursive: true, force: true })
+    rmSync(probeHome, { recursive: true, force: true })
     const cleanRefusal = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.includes("fatal: no workflow.toml")
     say(
       "runner boots",
