@@ -467,3 +467,90 @@ test("a mid-ladder respawn restarts the nudge ladder fresh — the flight state 
   assert.match(exchange!.result, /alpha stalled past the nudge cap/)
   assert.match(report!.table.find((row) => row.unit === "retries")!.result, /alpha×1/)
 })
+
+// Issue #243 (j-dea2bd) — a provider fault is not silence either: a
+// member that burns a nudge inside a provider outage, gets switched to
+// a working model, and then idles (its answer landed in chat, not in a
+// message file) must face a FRESH ladder — not the one rung the outage
+// left it. The switch recovers the member, not just the model.
+test("a model switch mid-ladder restarts the nudge ladder fresh — the post-switch nudge teaches the channel", async () => {
+  const dir = await coworkerDir("coworker-court-switch-")
+  // alpha runs on a/one; the run-local ladder names its replacement
+  const toml = join(dir, "workflow.toml")
+  writeFileSync(toml, readFileSync(toml, "utf8").replace("initiates = true", 'initiates = true\nmodel = "a/one"'))
+  writeFileSync(join(dir, "models.json"), JSON.stringify({ mode: "auto", order: ["a/one", "a/two"] }))
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  const herdr = fakeHerdr()
+  const ledger = fakeLedger()
+  const rail = fakeRail(dir, herdr, ledger as never)
+  // the lane's rail surface (fault probe, in-session switch) shells
+  // out to the opencode CLI in production — shadow it with the
+  // scripted episode; runFaultLane itself stays the production code
+  let fault: { id: string; type: string } | null = null
+  const switches: string[] = []
+  Object.assign(rail, {
+    latestSessionFault: () => fault,
+    switchSessionModel: (_sid: string, model: string) => {
+      switches.push(model)
+      return { ok: true }
+    },
+  })
+  const nudgeTexts: string[] = []
+  let booked = false
+  let switched = false
+  herdr.onPrompt = (name, text, later) => {
+    if (name.startsWith("beta")) {
+      // first mail means the goal is reached — stop
+      later(() => {
+        writeFileSync(join(dir, "messages", "2-beta.json"), JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "goal reached" }))
+      })
+      return
+    }
+    if (!name.startsWith("alpha")) return
+    if (text.includes("Find the capital")) {
+      // the brief: the member works in silence — j-dea2bd's fixer had
+      // already pushed its PR and idled waiting on a peer, no file
+      return
+    }
+    if (text.includes("provider refused another turn")) {
+      // the replacement model answered in chat and idled — still no file
+      switched = true
+      return
+    }
+    if (text.includes("waits on you")) {
+      nudgeTexts.push(text)
+      if (nudgeTexts.length === 1) {
+        // the member answers the first nudge — the session books late
+        // (production's bookSessionLate lands after the birth row),
+        // and its provider refuses the turn: the fault the lane acts on
+        if (!booked) {
+          booked = true
+          ledger.attach("alpha-booked", "p-1", "alpha", { tool: "opencode", session_id: "s-alpha" } as never)
+        }
+        fault = { id: "f1", type: "provider.rate-limit" }
+        return
+      }
+      // heeds only the nudge that teaches the channel (j-dea2bd's
+      // member "closed the exchange" in chat on the final-nudge text)
+      if (switched && text.includes("write your message file")) {
+        later(() => {
+          writeFileSync(join(dir, "messages", "1-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "capital is Paris" }))
+        })
+      }
+    }
+  }
+  const report = await runCoworker(rail, { stallMs: 60, beatMs: 10 })
+
+  // the switch recovered the MEMBER: a fresh ladder, whose first nudge
+  // names the missing step, got the mail written and the exchange done
+  assert.equal(report?.status, "done", "the exchange finished through the switched member")
+  assert.deepEqual(switches, ["a/two"], "the lane switched the session in-place, once")
+  assert.equal(nudgeTexts.length, 2, "one pre-switch nudge + one post-switch nudge (a fresh budget, not the final rung)")
+  assert.match(nudgeTexts[1]!, /write your message file/, "the post-switch nudge carries the channel instruction")
+  const switchEvent = ledger.events.find((e) => e.kind === "model.switch")
+  assert.ok(switchEvent, "the switch booked on the trail")
+  assert.equal(switchEvent!.payload.ok, true)
+  assert.equal(switchEvent!.payload.to, "a/two")
+  const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as { delivered: string[] }
+  assert.ok(relayLedger.delivered.includes("1-alpha.json"), "the member's mail actually relayed")
+})

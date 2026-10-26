@@ -710,6 +710,13 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
       emit: (kind, payload) => ledger?.emit(kind, payload),
       resetClock: (n) => {
         if (ballOn.name === n) ballOn.since = Date.now()
+        // #243: a provider fault is not silence — the whole stall
+        // accounting starts fresh, not just the clock. Without this,
+        // a member that burned a nudge inside a provider outage is
+        // switched to a working model but keeps the burn, so the
+        // post-switch ladder is one "final" nudge then death (the
+        // respawn path's law above, now on the switch path too).
+        flightOf.set(n, freshFlight())
       },
       log,
     })
