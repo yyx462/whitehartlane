@@ -351,8 +351,9 @@ docs use the long name, you'll type the short one.
   `steps-viz`), `examples/fan-out-spurs/`, `examples/chain-spurs/` (two-hop
   hand-off), `examples/lab-spurs/` (`trivia-bench`, an eval harness).
 - **The window:** `http://127.0.0.1:8787` locally — the server binds
-  `0.0.0.0` by default, so the same UI is reachable over the tailnet at
-  this machine's tailnet IP. A viewer for runs, not a second OS.
+  loopback plus the tailnet IP when one is up (LAN interfaces are
+  refused; `HOST` env pins a single address). A viewer for runs, not a
+  second OS.
 
 ## The words
 
