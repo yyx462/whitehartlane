@@ -2352,30 +2352,39 @@ function kindColor(kind) {
 }
 
 function entChip(type, name, title) {
-  // class = shape (member/pane/msg), --ent-h = the identity's stable hue
-  return `<button class="ev-ent ev-${esc(type)}" style="--ent-h:${identityHue(identityKey(type, name))}" data-ev-ent="${esc(type)}:${esc(name)}" title="${esc(title || name)}">${esc(name)}</button>`;
+  // class = shape + hue lane, --ent-h = the exact hue inside the lane
+  return `<button class="ev-ent ev-${esc(type)}" style="--ent-h:${chipHue(type, name)}" data-ev-ent="${esc(type)}:${esc(name)}" title="${esc(title || name)}">${esc(name)}</button>`;
 }
 
-// identities seen in the loaded stream — a pane label (interviewer-mvp02oa0)
-// and a relay file (interviewer/2.json) both belong to member interviewer,
-// so they inherit its hue and one identity reads as one color down the log
+// entities seen in the loaded stream — members (member/from/to) and
+// models (model.switch from/to). A pane label (interviewer-mvp02oa0)
+// and a relay file (interviewer/2.json) belong to member interviewer,
+// so they inherit its slot and one identity reads as one color down
+// the log
 let EV_MEMBERS = new Set();
-function scanEvMembers(events) {
+let EV_MODELS = new Set();
+function scanEvEntities(events) {
   EV_MEMBERS = new Set();
+  EV_MODELS = new Set();
   for (const ev of events || []) {
     for (const m of [ev.member, ev.from, ev.to]) {
-      if (m) EV_MEMBERS.add(String(m));
+      if (m && ev.kind !== "model.switch") EV_MEMBERS.add(String(m));
+    }
+    if (ev.kind === "model.switch") {
+      for (const m of [ev.from, ev.to]) {
+        if (m) EV_MODELS.add(String(m));
+      }
     }
   }
 }
 
-// which identity a chip's color follows: members are themselves; a pane or
-// relay file hangs off the longest known member its name starts with
-// (interviewer-mvp02oa0 → interviewer, interviewer/2.json → interviewer);
-// anything else hashes as itself
+// which identity a chip's color follows: members and models are
+// themselves; a pane or relay file hangs off the longest known member
+// its name starts with (interviewer-mvp02oa0 → interviewer,
+// interviewer/2.json → interviewer); anything else hashes as itself
 function identityKey(type, name) {
   const n = String(name || "?");
-  if (type === "member") return n;
+  if (type === "member" || type === "model") return n;
   const sep = type === "msg" ? "/" : "-";
   let best = null;
   for (const m of EV_MEMBERS) {
@@ -2384,23 +2393,32 @@ function identityKey(type, name) {
   return best ?? n;
 }
 
-// identity → hue, guaranteed non-overlapping: the run's members split
-// the wheel evenly in sorted order (2 members → 180° apart, 3 → 120°),
-// so no two members can ever land on near-by color families — a hash
-// could. Starts at 210 (steel blue) to stay on-brand; unknown
-// identities (no member match) fall back to a golden-angle hash
-function identityHue(key) {
-  const members = [...EV_MEMBERS].sort();
-  const i = members.indexOf(String(key));
-  if (i !== -1) return (210 + Math.round((i * 360) / members.length)) % 360;
+// one DISJOINT hue lane per chip class — a pane can never share a
+// color family with a member, a file never with a model:
+//   member [190,120) azure→blue→violet   pane [310,110) magenta→red→orange
+//   msg    [60,60)  gold→green           model [120,70) green→teal→cyan
+// Inside its lane, an identity takes its sorted slot in the pool
+// (2 members → 60° apart, 3 → 40°…); unknown names hash within the lane.
+function laneHue(type, key, pool) {
+  const LANES = { member: [190, 120], pane: [310, 110], msg: [60, 60], model: [120, 70] };
+  const [start, width] = LANES[type] || [0, 360];
+  const i = pool.indexOf(String(key));
+  if (i !== -1) return Math.round(start + ((i + 0.5) * width) / pool.length) % 360;
   let h = 5381;
   for (let k = 0; k < key.length; k++) h = ((h * 33) ^ key.charCodeAt(k)) >>> 0;
-  return Math.round((h * 137.508) % 360);
+  return Math.round(start + (h % width)) % 360;
+}
+
+function chipHue(type, name) {
+  const key = identityKey(type, name);
+  if (type === "model") return laneHue(type, key, [...EV_MODELS].sort());
+  return laneHue(type, key, [...EV_MEMBERS].sort());
 }
 
 function evDetailHtml(ev) {
   const bits = [];
-  if (ev.from && ev.to) bits.push(`${entChip("member", ev.from, `member ${ev.from} — click to trace its mail`)} → ${entChip("member", ev.to, `member ${ev.to} — click to trace its mail`)}`);
+  const isModelFlow = ev.kind === "model.switch";
+  if (ev.from && ev.to) bits.push(`${entChip(isModelFlow ? "model" : "member", ev.from, isModelFlow ? `model ${ev.from}` : `member ${ev.from} — click to trace its mail`)} → ${entChip(isModelFlow ? "model" : "member", ev.to, isModelFlow ? `model ${ev.to}` : `member ${ev.to} — click to trace its mail`)}`);
   if (ev.file) bits.push(entChip("msg", ev.file, `relay message ${ev.file} — click to read it`));
   if (ev.member) bits.push(entChip("member", ev.member, `member ${ev.member} — click to trace its mail`));
   if (ev.label) bits.push(entChip("pane", ev.label, `pane ${ev.label} — click for the pane card`));
@@ -2522,7 +2540,7 @@ function eventsBodyHtml() {
   const sp = state.split;
   if (sp.eventsError && !sp.events) return paneEmpty(`events failed: ${esc(sp.eventsError)}`);
   if (!sp.events) return paneEmpty("loading events…");
-  scanEvMembers(sp.events);
+  scanEvEntities(sp.events);
   return evSplitShell(sp.events.map((ev, i) => evLine(ev, i)).join("") ||
     '<span class="muted" data-ev-empty>no events</span>', sp.evSideHtml || EV_SIDE_EMPTY);
 }
@@ -2530,7 +2548,7 @@ function eventsBodyHtml() {
 function eventsShellHtml(have) {
   const sp = state.split;
   const empty = `<span class="muted" data-ev-empty>${sp.es ? "connecting to live events…" : "loading events…"}</span>`;
-  if (have) scanEvMembers(sp.events);
+  if (have) scanEvEntities(sp.events);
   const lines = have ? (sp.events.map((ev, i) => evLine(ev, i)).join("") || empty) : empty;
   return `<div class="ev-live"><span class="ev-dot"></span>live` +
     `<span id="ev-reconnecting" class="hidden"> — reconnecting…</span></div>` +
@@ -2697,6 +2715,8 @@ function handleEvEnt(ref) {
   const name = ref.slice(i + 1);
   if (type === "member") renderMemberCard(name);
   else if (type === "pane") renderPaneCard(name);
+  else if (type === "model") renderModelCard(name);
+  else if (type === "record") selectEvent(Number(name));
   else if (type === "msg") {
     const ev = state.split && state.split.events || [];
     const rel = ev.find((e) => e.kind === "relay" && e.file === name);
@@ -2706,6 +2726,26 @@ function handleEvEnt(ref) {
     setEvSide(`${head}<div id="ev-msg" class="ev-msg"><div class="muted small">loading ${esc(name)}…</div></div>`);
     loadMessage(name);
   }
+}
+
+function renderModelCard(name) {
+  const sp = state.split;
+  const switches = (sp && sp.events || [])
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.kind === "model.switch" && (e.from === name || e.to === name));
+  const rows = switches.length ? switches.map(({ e, i }) =>
+    `<button class="ev-mailrow" data-ev-ent="record:${i}" title="${esc(fmtTs(e.ts))} — click for the full record">` +
+    `<span class="mono muted small">${esc(fmtShortTs(e.ts))}</span>` +
+    `<span class="ev-maildir mono">${esc(e.from || "–")} → ${esc(e.to)}</span>` +
+    `${e.unit ? `<span class="muted small">${esc(e.unit)}</span>` : ""}</button>`).join("")
+    : `<div class="muted small" style="padding:6px 0">no model.switch events touch this model</div>`;
+  setEvSide(`
+    <div class="ev-side-head">
+      <span class="ev-side-kind">model</span>
+      <b class="mono" style="font-size:14px">${esc(name)}</b>
+    </div>
+    <div class="node-pop-label">model switches (${switches.length})</div>
+    ${rows}`);
 }
 
 // ----- live events stream (running runs) -----

@@ -1574,14 +1574,19 @@ td.empty, .empty {
 .ev-dec.d-deny { color: var(--failed); }
 .ev-dec.d-deny-unneeded { color: var(--orphaned); }
 
-/* an entity inside the log — member, pane, relay file: click to trace.
-   The CLASS picks the SHAPE and the FILL WEIGHT, the IDENTITY picks the
-   COLOR: app.js stamps --ent-h, and the run's members split the hue
-   wheel evenly, so families never overlap (2 members → blue vs orange).
-   Fill ramps by class — member 100%, pane 50%, msg 0% of the max tint —
-   so the WHO is the loudest thing on the row and the dense relay-file
-   traffic stays quiet outlines. Chroma stays high (pastel washes read
-   as one blob) but lightness clamped per theme, so no hue goes neon. */
+/* an entity inside the log — member, pane, relay file, model: click to
+   trace. The CLASS picks the SHAPE, the FILL WEIGHT and the HUE LANE:
+   app.js stamps --ent-h inside a class-exclusive wheel arc
+   (member azure→violet · pane magenta→orange · msg gold→green · model
+   green→cyan), so no two classes can ever share a color family — the
+   pane interviewer-mvp02oa0 is magenta-side even though its member
+   interviewer is blue-side. Inside the lane, the identity takes its
+   sorted slot (2 members → 60° apart), so identities still differ.
+   Fill ramps by class — member 100%, pane/model 50%, msg 0% of the max
+   tint — so the WHO is the loudest thing on the row and the dense
+   relay-file traffic stays quiet outlines. Chroma stays high (pastel
+   washes read as one blob) but lightness clamped per theme, so no hue
+   goes neon. */
 .ev-ent {
   --ent-h: 222; /* hint examples with no identity — steel blue */
   --ent-fg: hsl(var(--ent-h) 62% 72%);
@@ -1601,8 +1606,9 @@ td.empty, .empty {
 [data-theme="light"] .ev-ent { --ent-fg: hsl(var(--ent-h) 58% 38%); }
 
 .ev-ent.ev-member { --ent-fill: 22%; border-radius: 999px; }          /* a who — pill, solid */
-.ev-ent.ev-pane   { --ent-fill: 11%; border-radius: 3px; }            /* a window — half tint */
-.ev-ent.ev-msg    { --ent-fill: 0%; border-radius: 6px 2px 6px 2px; } /* a file — outline */
+.ev-ent.ev-pane   { --ent-fill: 11%; border-radius: 3px; }            /* a window — rect, half */
+.ev-ent.ev-msg    { --ent-fill: 0%; border-radius: 6px 2px 6px 2px; } /* a file — tag, outline */
+.ev-ent.ev-model  { --ent-fill: 11%; border-radius: 0; }              /* a brain — square, half */
 
 .ev-ent:hover {
   border-color: var(--ent-fg);
@@ -1611,14 +1617,18 @@ td.empty, .empty {
 
 /* the split: log on the left, the traced record on the right */
 /* the events view is a perfect column: head + live badge natural, the
-   split takes the rest — the body itself never scrolls, each pane
-   scrolls alone (a global scroll made the record start mid-way).
-   .ev-fill is JS-toggled (renderRightBody) — :has kept only as a
-   fallback for direct loads; older Firefox/Safari lack :has entirely */
+   split takes the rest. The table pane and the trace pane are two
+   ISOLATED scrollers: ev-fill never drives the page scroll (the old
+   overflow:auto let min-heights push it past the viewport, and wheel
+   scroll-chaining slid the trace pane along with the table), and each
+   pane contains its own wheel at the edges. .ev-fill is JS-toggled
+   (renderRightBody) — :has kept only as a fallback for direct loads;
+   older Firefox/Safari lack :has entirely */
 .sp-body.ev-fill,
 .sp-body:has(> .ev-wrap) {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .ev-wrap {
@@ -1626,7 +1636,9 @@ td.empty, .empty {
   flex-direction: column;
   gap: 8px;
   flex: 1;
-  min-height: 380px;
+  /* yield early on short windows — the panes shrink, the page never
+     slides (380px used to force the ancestor scroller into the fight) */
+  min-height: 240px;
 }
 
 .ev-split {
@@ -1635,6 +1647,11 @@ td.empty, .empty {
   display: grid;
   /* left % · 12px grip · trace pane — inline-style driven by applyEvFold() */
   grid-template-columns: 62% 12px minmax(0, 1fr);
+  /* the one row is exactly this box, never its content — without the
+     minmax(0,1fr) the implicit row grows to the log's content height,
+     #ev-box never overflows, and the table ends up with no scroller of
+     its own (the page scroller slid both panes together instead) */
+  grid-template-rows: minmax(0, 1fr);
   gap: 0 10px;
 }
 
@@ -1678,6 +1695,7 @@ td.empty, .empty {
 
 .ev-log {
   min-width: 0;
+  min-height: 0; /* grid item — without it the log's content forces the row tall */
   display: flex;
   flex-direction: column;
 }
@@ -1686,11 +1704,14 @@ td.empty, .empty {
   flex: 1;
   min-height: 0;
   max-height: none;
+  /* the table's wheel stops here — never chains up to slide the trace pane */
+  overscroll-behavior: contain;
 }
 
 .ev-side {
   min-width: 0;
   overflow: auto;
+  overscroll-behavior: contain; /* same isolation for the trace pane's wheel */
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
