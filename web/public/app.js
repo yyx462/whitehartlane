@@ -2384,12 +2384,17 @@ function identityKey(type, name) {
   return best ?? n;
 }
 
-// stable identity → hue: djb2 hash spread by the golden angle, so near
-// hashes land on far-apart hues; the CSS clamps saturation/lightness
-// per theme, so no hue can go neon
+// identity → hue, guaranteed non-overlapping: the run's members split
+// the wheel evenly in sorted order (2 members → 180° apart, 3 → 120°),
+// so no two members can ever land on near-by color families — a hash
+// could. Starts at 210 (steel blue) to stay on-brand; unknown
+// identities (no member match) fall back to a golden-angle hash
 function identityHue(key) {
+  const members = [...EV_MEMBERS].sort();
+  const i = members.indexOf(String(key));
+  if (i !== -1) return (210 + Math.round((i * 360) / members.length)) % 360;
   let h = 5381;
-  for (let i = 0; i < key.length; i++) h = ((h * 33) ^ key.charCodeAt(i)) >>> 0;
+  for (let k = 0; k < key.length; k++) h = ((h * 33) ^ key.charCodeAt(k)) >>> 0;
   return Math.round((h * 137.508) % 360);
 }
 
