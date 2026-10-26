@@ -109,12 +109,16 @@ The umbrella over a step's final state — reached when its signal lands, whatev
 _Avoid_: settle (retired), complete, resolve, close
 
 **finished_by**:
-The manifest field typing a step by the signal that finishes it: `end` (a worker's log line), `check` (a command exits 0 — stdout ignored), `wake` (a child Job's receipt). ADR 0007.
+RETIRED (ADR 0014) — the field that typed a step by the signal that finished it: `end` (a worker's log line), `check` (a command exits 0), `wake` (a child Job's receipt). The `[[stage]]` dialect carries its cases in topology: unit stages finish on the worker's word, coworker/lab at the station, gate on its one-shot `run`.
 _Avoid_: settles (retired), returns, output, does
 
 **Check step**:
-A step where nothing works: a command is asked, exit 0 finishes it, nonzero means not-yet (re-asked on the gate debounce). Different contract from `[gates]` report detectors, which print `done` (ADR 0003).
+RETIRED as an authoring shape (ADR 0014) — a step where nothing works, polled until exit 0. Its two heirs: a stage `check` (judge — fires with its workforce alive) and a gate `run` (act — one-shot, at the frontier).
 _Avoid_: gate (ambiguous), poll, sensor
+
+**Stop ceremony**:
+How an exchange ends (run #17's law): a member's stop is accepted only when NOBODY is working (the drain rule — one spelling, never a fixed sleep), then the stage check runs while every pane still lives: red is ONE revise round at the stop's author carrying the check's stderr verbatim; a second red fails honestly. A station settles done only through its check — the receipt row proves it ran.
+_Avoid_: audit-after-retire, post-exchange check, settle window, quiet period
 
 **Unreachable**:
 A check whose earlier waves hold a failure — it can never be asked, so it cannot count against the run finishing. Terminal by rule; the run finishes honestly failed instead of waiting forever.

@@ -182,9 +182,11 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   ─────────────────────────────────────────────────────────────
   solo       one briefed worker     the simple link
   fan-out    N interchangeable      parallel shards/attempts; slots cap
-  coworker   roles that TALK        delegated child program, levied once
+  coworker   roles that TALK        hosted at stations/<id>/; its check
+                                   is the STOP CEREMONY (below)
   gate       nobody — the rail      run executes once; verify.sh lives here
-  lab        one ACTOR, observed    detectors (signal/end), delegated child
+  lab        one ACTOR, observed    hosted at stations/<id>/; signal/end
+                                   detectors observe
 
   brief taxonomy: stage brief (one mind) · roster brief (per worker)
   starting brief (a ROLE — the initiates member) · preamble (the
@@ -193,6 +195,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   verdict verbs: check = judge (stage's own hook) · run = act (rail
   does it) · grade = bind (task verifier, last unit stage by default)
   signal/end = observe (lab detectors)
+
+  verdict timing — a judge that can reach its author MUST: stage
+  checks fire while the workforce lives (solo/fan-out at each
+  worker's finish; coworker at the exchange's STOP — red hands the
+  check's stderr to the stop's author for ONE revise round, then an
+  honest fail; a hosted station's stop verdict is its stage check
+  ONLY, never the parent's [hooks] verdict). A gate's run is the one
+  deliberately COLD verdict — it fires at the frontier, after the
+  chain settles: use it to act (install, promote) and for the final
+  verify, never to judge a workforce you wanted fixable.
 
   model pins: a mind's pin = its nearest declaration —
   unit.model → stage.model → [workflow] model (fresh per stage)
