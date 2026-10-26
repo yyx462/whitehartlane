@@ -66,7 +66,7 @@ bash hooks/audit-selftest.sh
 | temperature (interviewer hot, author cold) | NOT expressible — a member pins `provider/model` only; both panes run the same model |
 | audit gate (`check`/gate stage) | the `counts` hook: runs at report time, stdout must be JSON, nonzero exit fails the report — the deterministic verdict rides the same path the rail already absolutizes |
 | audit BEFORE retire (#198) | the `verdict` hook: runs when the exchange sees a stop, while both panes still LIVE — red hands the stop's author ONE revise round carrying the hook's stderr verbatim (audit.py `--verdict` names the missing deliverable); a second red fails honestly with the verdict row on the report |
-| outputs under `interviews/<date>/` | members write `data/*.md` in the run tree; the audit builds `transcript.jsonl` deterministically and delivers everything to `interviews/<date>/` on PASS; set `WHL_INTERVIEW_REPO` to mirror into a repo checkout as `interviews/<date>-<job>/` |
+| outputs under `data/` | members write `data/*.md` in the run tree; the audit builds `transcript.jsonl` deterministically. `data/` is THE shelf — one home, no copies (the `interviews/<date>/` delivery shelf and the `WHL_INTERVIEW_REPO` mirror were cut 2026-10-26: bytes duplicated in the same run folder, read by nothing) |
 
 Two honest grammar gaps remain worked around here (per-member
 temperature; mid-flight body parsing — the rail reads envelopes, not

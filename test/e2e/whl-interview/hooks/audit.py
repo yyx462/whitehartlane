@@ -28,14 +28,14 @@ Checks, in order:
      verdict line per section; topic-map.md names every topic
   8. the exchange closed deliberately (>=1 stop, none carrying a block)
 
-On PASS: builds data/transcript.jsonl, delivers to interviews/<date>/,
-prints ONE JSON counts line (rail-parsed; human words go to stderr).
+On PASS: builds data/transcript.jsonl, prints ONE JSON counts line
+(rail-parsed; human words go to stderr). Deliverables live where they
+were written — data/ is the shelf; nothing is copied anywhere.
 """
 
 import json
 import os
 import re
-import shutil
 import sys
 import tomllib
 from datetime import date
@@ -339,23 +339,6 @@ def build_transcript(data_dir, messages, contracts, errors):
     (data_dir / "transcript.jsonl").write_text(json.dumps(out, indent=2) + "\n")
 
 
-def deliver(job_dir):
-    day = date.today().isoformat()
-    out = job_dir / "interviews" / day
-    out.mkdir(parents=True, exist_ok=True)
-    names = [d["path"] for d in CONTRACT["deliverables"]]
-    for n in names:
-        shutil.copy2(job_dir / n, out / Path(n).name)
-    say(f"delivered {len(names)} deliverables -> interviews/{day}/")
-    repo = os.environ.get("WHL_INTERVIEW_REPO")
-    if repo:
-        dest = Path(repo).expanduser() / "interviews" / f"{day}-{job_dir.name}"
-        dest.mkdir(parents=True, exist_ok=True)
-        for n in names:
-            shutil.copy2(job_dir / n, dest / Path(n).name)
-        say(f"mirrored to {dest}")
-
-
 def main():
     global CONTRACT, BANK, TOPICS, TURNS, REBUTTAL_TURNS, MAX_QUESTIONS, LADDER, CITATION, CITE_KIND
     if len(sys.argv) > 1 and sys.argv[1] == "--verdict":
@@ -405,7 +388,6 @@ def main():
     CITE_KIND = "file:line"
     messages, contracts, errors = audit(job_dir)
     build_transcript(job_dir / "data", messages, contracts, errors)
-    deliver(job_dir)
     standing = (job_dir / "data" / "gaps.md").read_text().count("rebuttal: stands")
     say(f"PASS — {len(contracts)} graded turns, {len(errors)} logged contract error(s)")
     print(json.dumps({"topics": len(TOPICS), "graded_turns": len(contracts), "contract_errors": len(errors), "gaps_standing": standing, "deliverables": len(CONTRACT["deliverables"])}))
