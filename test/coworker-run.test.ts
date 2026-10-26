@@ -325,6 +325,68 @@ test("a second verdict red ends honestly — the verdict row rides the failed re
   assert.match(row!.result, /verdict hook failed twice/)
 })
 
+// Run #17 — the stop-settle is WORKFORCE quiescence, not mail quiescence:
+// a stop accepted while another member is still working used to run the
+// verdict one beat later, auditing a half-written shelf. "Quiet enough
+// to end" is the drain path's rule: nobody is working. The interviewer
+// below only finishes (and only writes the FINAL section) AFTER the
+// interviewee's stop is on disk — so a verdict that fires while the
+// interviewer works CANNOT pass, deterministically.
+test("a stop waits for a still-working member before the verdict runs (run #17)", async () => {
+  const dir = await coworkerDir("coworker-quiesce-", 'verdict = "bash hooks/verdict.sh"')
+  mkdirSync(join(dir, "messages"), { recursive: true })
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  mkdirSync(join(dir, "data"), { recursive: true })
+  writeFileSync(
+    join(dir, "hooks", "verdict.sh"),
+    'set -euo pipefail\ngrep -q "FINAL" data/gaps.md || { echo "gaps.md incomplete: no FINAL section" >&2; exit 1; }\n',
+  )
+  const herdr = fakeHerdr()
+  const ledger = fakeLedger()
+  const rail = fakeRail(dir, herdr, ledger as never)
+  // the interviewee (alpha, initiates): mails the interviewer, then is
+  // done — note and stop land on the SAME beat, so the relay wakes beta
+  // and the stop fires while beta is mid-synthesis
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("alpha")) {
+      later(() => {
+        writeFileSync(join(dir, "messages", "1-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "note", body: "here is my answer" }))
+        writeFileSync(join(dir, "messages", "2-alpha.json"), JSON.stringify({ from: "alpha", to: "beta", type: "stop", body: "interviewee done" }))
+      })
+      return
+    }
+    if (name.startsWith("beta")) {
+      // the interviewer: working from the first mail, folding rebuttals
+      // into gaps.md. It writes the FINAL section only after it SEES the
+      // stop, then goes idle two chained beats later — past any one-beat
+      // settle sleep, so only a real quiescence wait can pass the hook.
+      herdr.phase[name] = "working"
+      writeFileSync(join(dir, "data", "gaps.md"), "gap 1: unrebuilt\n")
+      const step = (): void => {
+        if (!existsSync(join(dir, "messages", "2-alpha.json"))) {
+          later(step)
+          return
+        }
+        later(() => {
+          writeFileSync(join(dir, "data", "gaps.md"), "gap 1: refuted\ngap 2: FINAL stands\n")
+          later(() => {
+            herdr.phase[name] = "idle"
+          })
+        })
+      }
+      later(step)
+      return
+    }
+  }
+  const report = await runCoworker(rail, { stallMs: 1000, beatMs: 10 })
+  assert.equal(report?.status, "done", "the verdict ran only after the interviewer settled — it saw the FINAL section")
+  assert.equal(
+    ledger.events.filter((e) => e.kind === "verdict-reprompt").length,
+    0,
+    "no revise round fired — the shelf was complete when the hook read it",
+  )
+})
+
 
 // Issue #122 — a pane death is a transport fault, not a member's
 // answer: the rail respawns the member from its booked session, bounded

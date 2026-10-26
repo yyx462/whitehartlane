@@ -10,7 +10,7 @@ import assert from "node:assert/strict"
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { execFileSync, spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../../../src/engines/orchestrator.ts"
 
@@ -125,7 +125,20 @@ async function rehearse(name: string, planFixture: string) {
       JSON.stringify({ from: "capologist", to: "dof", type: "stop", body: "PASS — arithmetic exact" }),
     )
     writeFileSync(join(stationDir, "relay.json"), JSON.stringify({ delivered: ["dof/2.json"], refused: [] }))
-    return { status: "done", table: [] }
+    // the stop ceremony (#198's station twin): the stage's check
+    // (accept-plan.sh) runs AT the stop — the real engine runs it
+    // in-exchange before the members retire; the rehearsal runs the
+    // same bytes (cwd = the task dir — the station lives at
+    // <taskDir>/stations/<id>, two levels up) and leaves the same
+    // receipt row. Its side effect — the plan's promotion into data/
+    // and stages/scout/data/ — is the chain's delivery, not decoration.
+    const rc = spawnSync("bash", ["hooks/accept-plan.sh"], { cwd: dirname(dirname(stationDir)), encoding: "utf8" })
+    if (rc.status !== 0) {
+      return { status: "failed", table: [] }
+    }
+    const table = [{ unit: "check", result: "stage check passed (in-exchange)" }]
+    writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: "done", table }))
+    return { status: "done", table }
   }
   const report = await runOrchestrator({
     taskDir: dir, shep, hostStation: hostStation as never,
