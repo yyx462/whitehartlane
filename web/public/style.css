@@ -255,6 +255,16 @@ html, body {
   max-width: none;
 }
 
+/* the split view is viewport-locked: exactly the space under the top
+   nav (56px + 1px border) — the old `.split { height: calc(100vh -
+   150px) }` magic number under-estimated the real chrome and let the
+   DOCUMENT scroll, dragging the events header out of view */
+.view.fill {
+  height: calc(100vh - 57px);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .crumbs {
   display: flex;
   align-items: center;
@@ -609,6 +619,7 @@ td.empty, .empty {
   gap: 10px;
   font-size: 12px;
   color: var(--muted);
+  flex-shrink: 0;
 }
 
 .split-bar .grow { flex: 1; }
@@ -617,7 +628,7 @@ td.empty, .empty {
 
 .split {
   display: flex;
-  height: calc(100vh - 150px);
+  flex: 1 1 auto;
   min-height: 460px;
 }
 
@@ -634,12 +645,8 @@ td.empty, .empty {
 #split-left { flex: 0 0 45%; min-width: 320px; }
 #split-right { flex: 1 1 auto; }
 
-/* collapsed via the split-bar "◂ info" toggle — the right pane takes
-   the whole width; state persists in localStorage (ui4-split-folded) */
-.split.folded #split-left,
-.split.folded .split-grip { display: none; }
-
 .split-grip {
+  position: relative;
   flex: 0 0 7px;
   margin: 0 5px;
   border-radius: 4px;
@@ -647,6 +654,30 @@ td.empty, .empty {
   cursor: col-resize;
   touch-action: none;
 }
+
+/* the fold chevron rides the divider, vertically centered — visible in
+   both states, so a collapsed pane can always be pulled back */
+.split-fold {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.split-fold:hover { color: var(--accent); border-color: var(--accent); }
+
+.split.folded #split-left { display: none; }
 
 .split-grip:hover { background: var(--accent-dim); }
 
@@ -777,7 +808,9 @@ td.empty, .empty {
 /* the diagram fills the pane's height: when the body holds a
    .diagram-view it lays out as a column and the well takes whatever
    the meta line leaves — the canvas then matches it (fitCanvasSize's
-   wellH floor), so the pane never wastes its lower half */
+   wellH floor), so the pane never wastes its lower half.
+   .diagram-fill is JS-toggled (drawDiagram) — :has fallback only */
+.sp-body.diagram-fill,
 .sp-body:has(> .diagram-view) {
   display: flex;
   flex-direction: column;
@@ -1555,7 +1588,10 @@ td.empty, .empty {
 /* the split: log on the left, the traced record on the right */
 /* the events view is a perfect column: head + live badge natural, the
    split takes the rest — the body itself never scrolls, each pane
-   scrolls alone (a global scroll made the record start mid-way) */
+   scrolls alone (a global scroll made the record start mid-way).
+   .ev-fill is JS-toggled (renderRightBody) — :has kept only as a
+   fallback for direct loads; older Firefox/Safari lack :has entirely */
+.sp-body.ev-fill,
 .sp-body:has(> .ev-wrap) {
   display: flex;
   flex-direction: column;
@@ -1928,7 +1964,8 @@ td.empty, .empty {
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
   .brand-sub, .subnav { display: none; }
-  .split { flex-direction: column; height: auto; }
+  .view.fill { overflow: auto; }
+  .split { flex-direction: column; height: auto; flex: none; }
   .split-grip { display: none; }
   #split-left, #split-right { flex: 1 1 auto; min-width: 0; }
   #split-left .split-pane, #split-right.split-pane { max-height: 70vh; }

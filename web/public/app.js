@@ -814,18 +814,17 @@ function runWhere() {
 }
 
 function mountSplit(r, seq) {
-  viewEl.className = "view wide";
+  viewEl.className = "view wide fill";
   viewEl.innerHTML = `
     <div class="split-bar">
       <span class="small" style="font-weight:700">Spur Status</span>
       <span class="grow"></span>
       <span id="split-note" class="muted"></span>
-      <button class="btn ghost" id="split-collapse" title="hide the spur info pane">◂ info</button>
       <button class="btn ghost" id="split-reset" title="reset divider to 45% / 55%">Reset</button>
     </div>
     <div class="split" id="split">
       <section class="split-pane" id="split-left">${paneEmpty("loading…")}</section>
-      <div class="split-grip" id="split-grip" role="separator" aria-orientation="vertical" aria-label="Resize panes"></div>
+      <div class="split-grip" id="split-grip" role="separator" aria-orientation="vertical" aria-label="Resize panes"><button class="split-fold" id="split-fold" title="hide the spur info pane">◂</button></div>
       <section class="split-pane" id="split-right">${paneEmpty("loading…")}</section>
     </div>`;
   state.split = {
@@ -852,7 +851,7 @@ function initSplitLayout() {
   const left = $("#split-left");
   const grip = $("#split-grip");
   const note = $("#split-note");
-  const foldBtn = $("#split-collapse");
+  const foldBtn = $("#split-fold");
   let pct = parseFloat(localStorage.getItem(SPLIT_KEY));
   if (!(pct >= 20 && pct <= 80)) pct = 45;
   const folded = () => localStorage.getItem(SPLIT_FOLD_KEY) === "1";
@@ -861,7 +860,7 @@ function initSplitLayout() {
     root.classList.toggle("folded", off);
     if (!off) left.style.flex = `0 0 ${pct}%`;
     if (foldBtn) {
-      foldBtn.textContent = off ? "▸ info" : "◂ info";
+      foldBtn.textContent = off ? "▸" : "◂";
       foldBtn.title = off ? "show the spur info pane" : "hide the spur info pane";
     }
   };
@@ -872,6 +871,7 @@ function initSplitLayout() {
   noteUpdate();
   grip.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
+    if (e.target.closest("#split-fold") || folded()) return;
     try { grip.setPointerCapture(e.pointerId); } catch { /* ok */ }
     const move = (ev) => {
       const box = root.getBoundingClientRect();
@@ -903,7 +903,12 @@ function initSplitLayout() {
     root.dispatchEvent(new CustomEvent("pl-resized"));
   });
   root.addEventListener("pl-resized", () => {
-    redrawEdges();
+    // the well changed size (divider drag, fold, reset) — a diagram
+    // rendered against the old geometry (or a 0×0 hidden pane) must
+    // re-measure: centering and saved-position clamps live in the render
+    const sp = state.split;
+    if (sp && sp.defn && sp.route.tab === "diagram") renderDiagramBody();
+    else redrawEdges();
   });
 }
 
@@ -1072,6 +1077,7 @@ function renderRunsList() {
   const sp = state.split;
   const body = $("#left-body");
   if (!body) return;
+  body.classList.remove("diagram-fill");
   const g = findGroupKey(sp.route.dag);
   const runs = g ? (g.runs || []) : [];
   body.innerHTML = runs.length
@@ -1231,6 +1237,7 @@ function wakeBoxHtml(n) {
 }
 
 function drawDiagram(body, defn, dk) {
+  body.classList.add("diagram-fill");
   const nodes = defn.nodes || [];
   const edges = (defn.edges || []).filter((e) =>
     nodes.some((n) => n.id === e.from) && nodes.some((n) => n.id === e.to));
@@ -1241,8 +1248,11 @@ function drawDiagram(body, defn, dk) {
     const s = saved[n.id];
     pos[n.id] = Array.isArray(s) && s.length === 2 ? { x: Math.max(0, s[0]), y: Math.max(0, s[1]) } : defaults[n.id];
   });
-  const W = Math.max(...nodes.map((n) => pos[n.id].x + nodeFootprint(n).w + 22), 300) + 24;
-  const H = Math.max(...nodes.map((n) => pos[n.id].y + nodeFootprint(n).h), 200) + 24;
+  // canvas floors at the WELL (fitCanvasSize) — no arbitrary minimum:
+  // the canvas is exactly the available space unless the plot itself
+  // is genuinely bigger than it
+  const W = Math.max(...nodes.map((n) => pos[n.id].x + nodeFootprint(n).w), 0);
+  const H = Math.max(...nodes.map((n) => pos[n.id].y + nodeFootprint(n).h), 0);
   const staleBar = defn.stale ? `
     <div class="stale-bar" title="${esc(defn.stale.reason)}">
       <b>source folder gone</b> — showing the staged copy of run <span class="mono">${esc(defn.stale.fromRun)}</span>
@@ -1693,6 +1703,7 @@ function renderConfigBody() {
   const sp = state.split;
   const body = $("#left-body");
   if (!body) return;
+  body.classList.remove("diagram-fill");
   const dk = sp.route.dag;
   if (!dk) { body.innerHTML = paneEmpty("no spur selected"); return; }
   if (!sp.program || sp.program.dagKey !== dk) {
@@ -1932,6 +1943,9 @@ function renderRightBody() {
   const r = sp.route;
   const body = $("#right-body");
   if (!body) return;
+  // JS-toggled (not :has): older Firefox/Safari lack :has and would fall
+  // back to a global scroll over the whole events view
+  body.classList.toggle("ev-fill", r.rtab === "events");
   if (!r.run) {
     body.innerHTML = paneEmpty(r.legacy ? "pick a legacy run on the left" : "no runs yet — trigger one from the left");
     return;
