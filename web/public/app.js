@@ -13,6 +13,7 @@ const LEFT_TABS = ["diagram", "runs", "config"];
 const RIGHT_TABS = ["receipt", "report", "events"];
 const STATUSES = ["success", "failed", "aborted", "running", "paused", "orphaned"];
 const SPLIT_KEY = "ui4-split-pct";
+const EV_SPLIT_KEY = "ui4-ev-split-pct";
 
 const SORT_NAMES = {
   dag: "spur name",
@@ -760,6 +761,43 @@ async function copyText(text) {
   }
 }
 
+// the ⧉ chip rendered after copyable values (receipt dir/report, run id,
+// report.json `where`, file paths) — value rides in data-copy
+function copyBtnHtml(value, title) {
+  if (!value) return "";
+  const t = title || "copy to clipboard";
+  return `<button class="copy-btn" data-copy="${esc(value)}" data-copy-label="${esc(t.replace(/^copy /, ""))}" title="${esc(t)}">⧉</button>`;
+}
+
+async function copyToClipboard(text, label) {
+  if (!(await copyText(text))) {
+    showToast("copy blocked by the browser — clipboard needs a click first", "err");
+    return false;
+  }
+  showToast(`copied ${label}`);
+  return true;
+}
+
+function copyFileContent() {
+  const d = (state.split && state.split.fileData) || {};
+  if (d.binary || d.text == null) {
+    showToast("no text to copy — binary file", "err");
+    return;
+  }
+  copyToClipboard(d.text, d.truncated ? `first ${d.text.length} chars — viewer caps at 8 KB` : "file content");
+}
+
+// the run dir abs path — report.json `where` when present, else the job
+// record's dir (runs without a report yet still have a dir)
+function runWhere() {
+  const sp = state.split;
+  if (sp.report && typeof sp.report.where === "string") return sp.report.where;
+  const [sid, jid] = splitKey(sp.route.run || "");
+  if (!sid) return null;
+  const j = sp.job && sp.job.sid === sid && sp.job.id === jid ? sp.job : fallbackRun(sid, jid);
+  return j && typeof j.dir === "string" ? j.dir : null;
+}
+
 function mountSplit(r, seq) {
   viewEl.className = "view wide";
   viewEl.innerHTML = `
@@ -786,6 +824,7 @@ function mountSplit(r, seq) {
     report: null, reportNote: null,
     filePath: null, fileData: null, fileLoading: false, fileCache: {},
     events: null, eventsError: null, eventsLoadedKey: null,
+    evCollapsed: false,
     es: null, esKey: null,
   };
   initSplitLayout();
@@ -1806,9 +1845,12 @@ function renderRightHead() {
   const job = sp.job && sp.job.sid === sid && sp.job.id === jid ? sp.job : fb;
   const status = job ? (job.status || job.state) : null;
   const legacy = r.legacy || !r.dag;
+  const createdTs = job && job.created ? fmtTs(job.created) : null;
+  const idCopy = `${sid}/${jid}${createdTs ? ` · ${createdTs}` : ""}`;
   head.innerHTML = `
     <div class="sp-title-row">
       <h2 class="mono" style="font-size:15px">${esc(jid)}</h2>
+      ${copyBtnHtml(idCopy, "copy sid/jid + created time")}
       ${status ? stChip(status) : `<span class="muted small">…</span>`}
       ${legacy ? `<span class="chip kind" title="before spur identity">legacy</span>` : ""}
       <span class="grow"></span>
@@ -1841,6 +1883,9 @@ function renderRightBody() {
       loadRunDir(state.seq);
       return;
     }
+    // the job record carries dir — the abs-path copy chip needs it when
+    // report.json (`where`) hasn't been written yet
+    if (sp.jobLoadedKey !== r.run) loadJob(state.seq);
     body.innerHTML = reportBodyHtml();
     return;
   }
@@ -1856,6 +1901,7 @@ function renderRightBody() {
         box0.scrollTop + box0.clientHeight >= box0.scrollHeight - 60;
       const have = Array.isArray(sp.events);
       body.innerHTML = eventsShellHtml(have);
+      initEvSplit();
       const box = evScrollEl();
       if (box && nearBottom && have) box.scrollTop = box.scrollHeight;
       return;
@@ -1871,6 +1917,7 @@ function renderRightBody() {
       box0.scrollTop + box0.clientHeight >= box0.scrollHeight - 60;
     const wasTop = box0 ? box0.scrollTop : 0;
     body.innerHTML = eventsBodyHtml();
+    initEvSplit();
     const box = evScrollEl();
     if (box) box.scrollTop = nearBottom ? box.scrollHeight : wasTop;
   }
@@ -1892,7 +1939,7 @@ async function loadJob(seq) {
     sp.jobError = err.message;
     sp.jobLoadedKey = runKey;
   }
-  if (sp.route.rtab === "receipt") {
+  if (sp.route.rtab === "receipt" || sp.route.rtab === "report") {
     renderRightHead();
     renderRightBody();
   } else if (sp.route.rtab === "events" && sp.evSideMember) {
@@ -1916,7 +1963,7 @@ function receiptBodyHtml() {
       <dt>receipt</dt><dd class="${rc.status === "ok" ? "ok" : "warn"}">${esc(rc.status || "–")}</dd>
       <dt>panes</dt><dd>${rc.panesRemaining} remaining / ${rc.panesTotal} total</dd>
       <dt>units</dt><dd><span class="ok">${rc.unitsDone ?? 0} done</span> · <span class="bad">${rc.unitsFailed ?? 0} failed</span></dd>
-      <dt>report</dt><dd>${esc(rc.report || "–")}</dd>
+      <dt>report</dt><dd>${esc(rc.report || "–")}${copyBtnHtml(rc.report, "copy report path")}</dd>
       <dt>receipt finished</dt><dd>${esc(fmtTs(rc.finished))}</dd>`;
   } else if (job.abort) {
     outcome = `
@@ -1971,7 +2018,7 @@ function receiptBodyHtml() {
         <dt>duration</dt><dd>${esc(dur)}</dd>
         ${dagRow}
         <dt>panes</dt><dd><span class="bad">${job.panes?.dead ?? 0}</span> dead / ${job.panes?.total ?? 0} total</dd>
-        <dt>dir</dt><dd>${esc(job.dir || "–")}</dd>
+        <dt>dir</dt><dd>${esc(job.dir || "–")}${copyBtnHtml(job.dir, "copy run dir path")}</dd>
         ${Object.keys(labels).length ? `<dt>labels</dt><dd>${labelChips(labels)}</dd>` : ""}
       </dl>
     </section>
@@ -2036,7 +2083,8 @@ function reportPrettyHtml() {
   const kvRows = [];
   for (const [k, v] of Object.entries(rep)) {
     if (k === "table") continue;
-    kvRows.push(`<dt>${esc(k)}</dt><dd>${esc(typeof v === "string" ? v : JSON.stringify(v))}</dd>`);
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    kvRows.push(`<dt>${esc(k)}</dt><dd>${esc(s)}${k === "where" ? copyBtnHtml(s, "copy run dir (where)") : ""}</dd>`);
   }
   return `<div class="report-pretty">
     <div class="d-section"><h3>report.json</h3>
@@ -2060,10 +2108,14 @@ function filePanelHtml() {
   if (d.binary) notes.push("binary file — no text preview");
   if (d.truncated) notes.push(`truncated at ${d.text ? d.text.length + " chars" : "cap"}`);
   if (d.error) notes.push(d.error);
+  const where = runWhere();
+  const abs = where ? `${where.replace(/\/+$/, "")}/${sp.filePath}` : null;
   return `<div class="file-view">
     <div class="file-view-head">
       <span class="fpath">${esc(sp.filePath)}</span>
       ${d.bytes != null ? `<span class="tmeta">${d.bytes} B</span>` : ""}
+      ${copyBtnHtml(abs, abs ? "copy absolute path" : "")}
+      ${d.binary || d.text == null ? "" : `<button class="copy-btn" data-copy-file title="copy file content">⧉</button>`}
       ${notes.map((n) => `<span class="fnote">${esc(n)}</span>`).join("")}
     </div>
     ${d.binary ? "" : `<pre>${esc(d.text ?? "")}</pre>`}
@@ -2257,15 +2309,77 @@ function evHeadHtml() {
 }
 
 function evSplitShell(linesHtml, sideHtml) {
+  const sp = state.split;
+  const folded = sp.evCollapsed ? " ev-folded" : "";
   return `<div class="ev-wrap">
-    <div class="ev-split">
+    <div class="ev-split${folded}" id="ev-split">
       <div class="ev-log">
         ${evHeadHtml()}
         <div class="events tall" id="ev-box">${linesHtml}</div>
       </div>
+      <div class="ev-grip" id="ev-grip" role="separator" aria-orientation="vertical" aria-label="Resize event log and trace pane">
+        <button class="ev-fold" id="ev-fold" title="${sp.evCollapsed ? "expand trace pane" : "collapse trace pane"}">${sp.evCollapsed ? "▸" : "◂"}</button>
+      </div>
       <aside class="ev-side" id="ev-side">${sideHtml}</aside>
     </div>
   </div>`;
+}
+
+function evSplitPct() {
+  let pct = parseFloat(localStorage.getItem(EV_SPLIT_KEY));
+  if (!(pct >= 20 && pct <= 80)) pct = 62;
+  return pct;
+}
+
+// columns follow state — folded hides the trace pane entirely, unfolded
+// reads the persisted split pct. Safe to call anytime; no-ops off-tab.
+function applyEvFold() {
+  const split = $("#ev-split");
+  const fold = $("#ev-fold");
+  const sp = state.split;
+  if (!split) return;
+  split.classList.toggle("ev-folded", !!sp.evCollapsed);
+  split.style.gridTemplateColumns = sp.evCollapsed
+    ? "minmax(0, 1fr) 12px"
+    : `${evSplitPct()}% 12px minmax(0, 1fr)`;
+  if (fold) {
+    fold.textContent = sp.evCollapsed ? "▸" : "◂";
+    fold.title = sp.evCollapsed ? "expand trace pane" : "collapse trace pane";
+  }
+}
+
+// bind grip drag + fold toggle — the events shell is re-rendered on every
+// tick/stream append, so this re-runs after each render (fresh elements)
+function initEvSplit() {
+  const split = $("#ev-split");
+  const grip = $("#ev-grip");
+  const fold = $("#ev-fold");
+  const sp = state.split;
+  if (!split || !grip || !fold) return;
+  applyEvFold();
+  fold.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sp.evCollapsed = !sp.evCollapsed;
+    applyEvFold();
+  });
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("#ev-fold")) return;
+    try { grip.setPointerCapture(e.pointerId); } catch { /* ok */ }
+    const box = split.getBoundingClientRect();
+    const move = (ev) => {
+      if (sp.evCollapsed) return;
+      const w = Math.min(box.width - 292, Math.max(380, ev.clientX - box.left));
+      const pct = (w / box.width) * 100;
+      localStorage.setItem(EV_SPLIT_KEY, String(pct));
+      split.style.gridTemplateColumns = `${pct}% 12px minmax(0, 1fr)`;
+    };
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  });
 }
 
 const EV_SIDE_EMPTY = `<div class="ev-side-hint">
@@ -2790,6 +2904,19 @@ function bodyClick(e) {
     copyRunSel();
     return;
   }
+  const cp = e.target.closest("[data-copy]");
+  if (cp) {
+    e.preventDefault();
+    e.stopPropagation();
+    copyToClipboard(cp.dataset.copy, cp.dataset.copyLabel || "to clipboard");
+    return;
+  }
+  if (e.target.closest("[data-copy-file]")) {
+    e.preventDefault();
+    e.stopPropagation();
+    copyFileContent();
+    return;
+  }
   const evEnt = e.target.closest("[data-ev-ent]");
   if (evEnt) {
     e.preventDefault();
@@ -2800,7 +2927,20 @@ function bodyClick(e) {
   const evRow = e.target.closest("[data-evi]");
   if (evRow && !e.target.closest("button")) {
     e.preventDefault();
-    selectEvent(Number(evRow.dataset.evi));
+    const sp = state.split;
+    const i = Number(evRow.dataset.evi);
+    if (sp.evCollapsed) {
+      // folded pane: any row click re-expands, then shows the record
+      sp.evCollapsed = false;
+      applyEvFold();
+      selectEvent(i);
+    } else if (sp.evSel === i) {
+      // clicking the selected row again folds the pane away
+      sp.evCollapsed = true;
+      applyEvFold();
+    } else {
+      selectEvent(i);
+    }
     return;
   }
   const trig = e.target.closest("[data-trig]");
