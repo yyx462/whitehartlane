@@ -32,10 +32,6 @@ check() { # <id> <ok|fail|pend> <receipt>
 }
 
 jobcount() { WHL jobs 2>/dev/null | grep -c '^j-' || true; }
-# the run-folder law is per-RUN: the door books exactly ONE new job for
-# this commission (lineage sessions ACCUMULATE jobs across runs of the
-# same spur — counting the session's folders would count history)
-before_run=$(jobcount)
 
 echo "== E1: the old spur (no contract.toml) is refused, no job formed =="
 e1="$work/old-spur"; cp -R "$here" "$e1"; rm "$e1/contract.toml"
@@ -80,11 +76,32 @@ echo "== E2: ONE folder for the run, subfolders inside it =="
 if [[ "$state" == "retired" ]]; then
   inside=$(ls "$rdir" 2>/dev/null | tr '\n' ' ')
   report_status=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status','?'))" "$rdir/report.json" 2>/dev/null || echo "?")
-  jobs_new=$(( $(jobcount) - before_run ))
+  # THIS commission's jobs only: every job the door books records the
+  # program source it admitted (job.spur.source); this run's staged
+  # source lives under $work. A SHARED OS disk (other sessions,
+  # diagnostics — run #12 counted two doctor probes) must not move the
+  # count; same-source = same commission, and one commission = one job.
+  jobs_new=$(python3 - "$work" <<'PY'
+import json, os, sys
+from pathlib import Path
+work = Path(sys.argv[1]).resolve()
+root = Path(os.environ.get("AGENTIC_OS_HOME", os.path.expanduser("~/.local/share/agentic-os"))) / "sessions"
+count = 0
+if root.is_dir():
+    for jobFile in root.glob("*/jobs/*/job.json"):
+        try:
+            src = json.loads(jobFile.read_text()).get("spur", {}).get("source", "")
+        except Exception:
+            continue
+        if src and Path(src).is_relative_to(work):
+            count += 1
+print(count)
+PY
+)
   if [ "$jobs_new" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
-    check "E2" ok "one NEW job dir ($jid) for this run, report done, stations inside: ${inside:-empty}"
+    check "E2" ok "ONE job for this commission ($jid), report done, stations inside: ${inside:-empty}"
   else
-    check "E2" fail "state=$state report=$report_status new_jobs=$jobs_new inside: ${inside:-none}"
+    check "E2" fail "state=$state report=$report_status jobs_this_commission=$jobs_new inside: ${inside:-none}"
   fi
 else
   check "E2" fail "run state=$state (expected a finished green run)"

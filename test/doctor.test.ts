@@ -1,7 +1,7 @@
 // doctor.test.ts — the `whl doctor` verb: every check names what it
 // proves, reds exit non-zero. Runs against an ISOLATED OS disk (the
 // real disk's test orphans are not this suite's concern).
-import { mkdtempSync } from "node:fs"
+import { existsSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -23,4 +23,12 @@ test("doctor runs its checks green on a clean isolated disk", () => {
   assert.ok(lines.every((l) => l.startsWith("ok  ")), `all green on a clean disk:\n${lines.join("\n")}`)
   assert.match(r.stdout, /runner boots — refused a program-less dir by name/)
   assert.match(r.stdout, /doctor: \d+ checks green/)
+  // tenancy: a DIAGNOSTIC books nothing — the boot probe's job row
+  // lands in its throwaway home, never on the disk doctor is checking
+  // (run #12's E2 counted two doctor probes as phantom commissions)
+  assert.equal(
+    existsSync(join(process.env.AGENTIC_OS_HOME!, "sessions")),
+    false,
+    "doctor books zero job rows on the home it diagnosed",
+  )
 })
