@@ -1401,14 +1401,36 @@ td.empty, .empty {
 
 .fnote { font-size: 10.5px; color: var(--orphaned); }
 
+/* copy-to-clipboard chip — receipt dir/report, run id, report.json where,
+   file abs path + content */
+.copy-btn {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.kv dd .copy-btn { margin-left: 6px; vertical-align: 1px; }
+
 /* ---------- events: labeled log + trace side ---------- */
 /* four named columns — time · event · actor · run — then a detail
    column; the header row says what everything is */
 .ev-head, .ev-line {
   display: grid;
-  /* 104px: "MM-DD HH:MM:SS" is 14 mono chars (~101px at 12px) — a fixed
-     84px made the trailing seconds digit paint over the event column */
-  grid-template-columns: 104px minmax(92px, auto) minmax(64px, auto) 70px minmax(0, 1fr);
+  /* every column minmax(min, max): capped when there is room, squeezing
+     with ellipsis when the pane is narrow — alignment holds because all
+     rows share one template (104px fixed cols clipped RUN to "j" at
+     default widths) */
+  /* ts min 102px: "10-26 14:24:50" is 14 mono chars — anything less
+     clips the seconds digit into the event column */
+  grid-template-columns: minmax(102px, 104px) minmax(84px, 112px) minmax(48px, 94px) minmax(0, 70px) minmax(70px, 1fr);
   gap: 10px;
   align-items: baseline;
   font-size: 12px;
@@ -1428,6 +1450,8 @@ td.empty, .empty {
   white-space: nowrap;
 }
 
+.ev-head span { overflow: hidden; text-overflow: ellipsis; }
+
 .events {
   background: var(--well);
   border: 1px solid var(--line);
@@ -1444,7 +1468,8 @@ td.empty, .empty {
   padding: 0 8px;
   border-radius: 5px;
   cursor: pointer;
-  white-space: normal;
+  /* one line per row — the full record lives in the trace pane */
+  white-space: nowrap;
 }
 
 .ev-line:hover { background: var(--hover); }
@@ -1462,7 +1487,9 @@ td.empty, .empty {
 .ev-detail {
   min-width: 0;
   color: var(--muted);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   line-height: 1.9;
 }
 
@@ -1502,9 +1529,48 @@ td.empty, .empty {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(250px, 1fr);
-  gap: 10px;
+  /* left % · 12px grip · trace pane — inline-style driven by applyEvFold() */
+  grid-template-columns: 62% 12px minmax(0, 1fr);
+  gap: 0 10px;
 }
+
+.ev-grip {
+  position: relative;
+  cursor: col-resize;
+  border-radius: 4px;
+}
+
+.ev-grip::before {
+  content: "";
+  position: absolute;
+  inset: 8px 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.ev-grip:hover::before { background: var(--accent); }
+
+.ev-fold {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  width: 15px;
+  padding: 1px 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--well);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.ev-fold:hover { color: var(--accent); border-color: var(--accent); }
+
+.ev-split.ev-folded .ev-side { display: none; }
 
 .ev-log {
   min-width: 0;
