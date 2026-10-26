@@ -55,8 +55,10 @@ else
 fi
 cp "$work/golden-pristine/data/pitch.md" "$work/golden/data/pitch.md"
 [ -s "$work/golden/data/transcript.jsonl" ] || { echo "FAIL — transcript.jsonl not built"; exit 1; }
-[ -s "$work/golden/interviews/$(date +%F)/gaps.md" ] || { echo "FAIL — interviews/<date>/ not delivered"; exit 1; }
-pass_n=$((pass_n + 1)); echo "ok   — transcript built, all deliverables delivered to interviews/<date>/"
+# data/ is THE shelf — no copy ceremony (the delivery shelf was cut:
+# bytes duplicated inside the same run folder, read by nothing)
+[ ! -d "$work/golden/interviews" ] || { echo "FAIL — interviews/ copy shelf must not exist"; exit 1; }
+pass_n=$((pass_n + 1)); echo "ok   — transcript built, deliverables stay in data/ (no copy shelf)"
 
 m() { # <label> <why> <python-mutation>
   local d="$work/$1"
