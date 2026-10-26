@@ -14,8 +14,21 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PORT = Number(process.env.PORT || 8787);
-// bind the tailnet by default (Tailscale 100.x reach); set HOST=127.0.0.1 to go local-only
-const HOST = process.env.HOST || "0.0.0.0";
+// bind policy: HOST env wins outright (tests pin 127.0.0.1; a tunnel can
+// pin any address). Otherwise loopback + the tailnet IP when one is up —
+// the old 0.0.0.0 default served /api/run and delete on EVERY interface,
+// LAN Wi-Fi included. Tailnet addrs are CGNAT 100.64.0.0/10 (utun).
+// A tailnet addr that dies between detect and listen crashes the server;
+// launchd revives it and re-detects (KeepAlive is the job's contract).
+function tailnetAddress() {
+  for (const addrs of Object.values(os.networkInterfaces()))
+    for (const a of addrs || []) {
+      const [o1, o2] = String(a.address).split(".").map(Number);
+      if (a.family === "IPv4" && o1 === 100 && o2 >= 64 && o2 <= 127)
+        return a.address;
+    }
+  return null;
+}
 // the OS disk root: AGENTIC_OS_ROOT (window's own override) or
 // AGENTIC_OS_HOME (the store's name for the same root, src/store.ts)
 const OS_ROOT = process.env.AGENTIC_OS_ROOT || process.env.AGENTIC_OS_HOME ||
@@ -2288,7 +2301,7 @@ function safeDecode(res, seg) {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   let url;
   try {
     url = new URL(req.url, "http://localhost");
@@ -2307,15 +2320,22 @@ const server = http.createServer(async (req, res) => {
     log("error", url.pathname, e && e.stack ? e.stack : e);
     if (!res.headersSent) sendError(res, 500, "internal error");
   }
-});
+};
 
-server.listen(PORT, HOST, () => {
-  log(
-    "whitehartlane window server up:",
-    "http://" + HOST + ":" + PORT,
-    "| public:",
-    PUBLIC_DIR,
-    "| os disk:",
-    SESSIONS_DIR,
-  );
-});
+// one server per bind address; the handler is shared
+const tailnet = tailnetAddress();
+const BINDS = process.env.HOST
+  ? [process.env.HOST]
+  : ["127.0.0.1", ...(tailnet ? [tailnet] : [])];
+for (const bind of BINDS) {
+  http.createServer(handler).listen(PORT, bind, () => {
+    log(
+      "whitehartlane window server up:",
+      "http://" + bind + ":" + PORT,
+      "| public:",
+      PUBLIC_DIR,
+      "| os disk:",
+      SESSIONS_DIR,
+    );
+  });
+}
