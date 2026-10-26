@@ -1494,8 +1494,8 @@ export async function runOrchestrator(input: {
   // re-nursed parent resumes the SAME exchange, and a finished one
   // re-reports from the stop already delivered).
   const stationFlights = new Map<string, Promise<void>>()
-  const stationSettled = new Map<string, { status?: string; why?: string; parked?: boolean }>()
-  const defaultHostStation = (stage: { id: string; topology?: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; brief?: string; signal?: string; end?: string; preamble?: string }, dir: string): Promise<Report | null> => {
+  const stationSettled = new Map<string, { status?: string; why?: string; parked?: boolean; checkReceipt?: boolean }>()
+  const defaultHostStation = (stage: { id: string; topology?: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; brief?: string; signal?: string; end?: string; preamble?: string; check?: string }, dir: string): Promise<Report | null> => {
     const rail = input.shep as unknown as { inhabitPane?: unknown }
     if (typeof rail.inhabitPane !== "function") {
       throw new HookError(`station ${stage.id} needs a rail that hosts its engine (inhabitPane) — this shep port cannot`)
@@ -1534,7 +1534,16 @@ export async function runOrchestrator(input: {
       })
     }
     return runCoworker(rail as never as import("../adapters/rail.ts").Rail, {
-      station: { dir, members, workerKind: manifest.workflow.worker_kind },
+      station: {
+        dir,
+        members,
+        workerKind: manifest.workflow.worker_kind,
+        // The stage's own check runs IN-EXCHANGE at the stop (the
+        // station twin of #198's audit-before-retire), with the PARENT
+        // task dir as cwd — stage checks are authored parent-relative
+        // and promotion checks write into the parent's data/.
+        ...(stage.check ? { check: stage.check, checkCwd: input.taskDir } : {}),
+      },
     })
   }
   const execStation = (step: Step): boolean => {
@@ -1555,7 +1564,23 @@ export async function runOrchestrator(input: {
       }
       let pass = settled.status === "done"
       let checkRow = ""
-      if (pass && step.check) {
+      // A coworker stage's check ran IN-EXCHANGE at the stop (the
+      // engine's verdict path — #198's station twin: red got one revise
+      // round while the members still lived), so the parent never
+      // re-judges the same shelf. "Done" through a declared check
+      // REQUIRES the receipt row — a host that ends the exchange
+      // without running the check must not pass silently (its side
+      // effects, like artifact promotion, would be lost). A lab stage's
+      // check still runs parent-side (the actor's experiment has no
+      // exchange to re-enter — its revise round is a later slice).
+      if (pass && step.check && stage.topology === "coworker") {
+        if (settled.checkReceipt) {
+          checkRow = " — stage check passed (audited in-exchange)"
+        } else {
+          pass = false
+          checkRow = " — the host ended the exchange without running the stage check (a station settles done only through its check)"
+        }
+      } else if (pass && step.check) {
         try {
           execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
           checkRow = " — stage check passed"
@@ -1590,7 +1615,14 @@ export async function runOrchestrator(input: {
             // pause.
             stationSettled.set(step.id, { parked: true })
           } else {
-            stationSettled.set(step.id, { status: report.status, ...(report.status ? {} : { why: "no report from the station's engine" }) })
+            stationSettled.set(step.id, {
+              status: report.status,
+              // the in-exchange check's receipt: the engine leaves a
+              // "check" row when a declared stage check passed at the
+              // stop — the parent refuses "done" without it
+              checkReceipt: report.table.some((r) => r.unit === "check"),
+              ...(report.status ? {} : { why: "no report from the station's engine" }),
+            })
           }
         } catch (err) {
           stationSettled.set(step.id, { status: "failed", why: err instanceof HookError ? err.message : String(err) })

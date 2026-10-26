@@ -53,52 +53,69 @@ Runs; the events trace pane shows every booked fact.
    [workflow]
    name = "my-spur"
    spur_id = "my-spur"   # set it explicitly, or it is derived with a
-                         # loud warning (spur_id after ADR 0009; legacy
-                         # dag_id still reads, also with a warning)
+                         # loud warning (spur_id after ADR 0009)
    kind = "fan-out"      # or "coworker"
    slots = 2
+   worker_kind = "opencode"
 
-   [hooks]
-   units = "true"                    # steps define the units (ADR 0007)
-   grade = "bash hooks/grade.sh"
-   counts = "bash hooks/counts.sh"
+   [[stage]]
+   id = "shards"
+   topology = "fan-out"              # or solo (one briefed worker)
+   preamble = "SHARED: one JSON row per file."
+   units = [
+     { id = "csv", brief = "Parse ONLY *.csv in data/." },
+     { id = "parquet", brief = "Parse ONLY *.parquet in data/." },
+   ]
+   check = "bash hooks/shards-check.sh"  # optional: judges THIS stage
 
-   [[step]]
-   id = "g0"
-   finished_by = "end"               # a worker pane runs the step brief
-   wave = "w1"
+   [[stage]]
+   id = "review"                     # roles that TALK
+   topology = "coworker"
+   check = "bash hooks/review-check.sh"  # the STOP CEREMONY (below)
+   members = [
+     { name = "qa", brief = "…", initiates = true },
+     { name = "author", brief = "…" },
+   ]
 
-   [[step]]
-   id = "merged"
-   finished_by = "check"             # a command exits 0 — nothing works
-   check = "gh pr view g0-shared --json state | grep -q MERGED"
-   wave = "w2"
-
-   [[step]]
-   id = "child"
-   finished_by = "wake"              # a declared child program's receipt
-   folder = "./child-spur"
-   wave = "w3"
+   [[stage]]
+   id = "grade"
+   topology = "gate"                 # the rail ACTS — no workforce
+   run = "bash hooks/verify.sh"     # the final, deliberately cold verdict
    ```
 
-   Author's tie-breaker (ADR 0007): a deterministic sync check →
-   `check`; needs judgment → `end` (the brief says "verify and append
-   done/blocked"); a declared child program → `wake`. Waves are
-   grouping properties: a wave opens when every earlier wave finished,
-   and `end` steps within a wave run parallel under `slots`.
-   NO `dag.mjs`/`spur.mjs` in a fan-out/coworker spur folder — a
-   program file present makes it a LAB spur (a different rail).
-   Coworker needs `members/*.md`, one brief per member — a brief is a
-   prompt, write it like one. HOOKS ARE KIND-SCOPED: a coworker runs
-   ONLY `counts` (a real JSON-printing command — `counts = "true"` once
-   killed a run at report time, j-64e035); `units`/`grade` are
-   fan-out/lab concepts and are ignored — never scaffold them into a
-   coworker toml. Copy a shape from this checkout:
-   `examples/fan-out-spurs/staged-waves` (waves + a check),
-   `examples/fan-out-spurs/nested-wakes` (wake steps),
-   `examples/coworker-spurs/steps-viz` (coworker),
-   `examples/lab-spurs/lab-program` (the lab rail). Read ADR 0007
-   (typed steps) and ADR 0009 (spur spelling) before inventing a shape.
+   Author's tie-breaker (ADR 0014 — ONE authoring story, [[stage]];
+   the door REFUSES `[[step]]` tables and `hooks.units`): judge a
+   stage's own workforce → `check` on that stage; the rail must ACT
+   (install, promote, final verify) → a `gate` stage's `run`; minds
+   that must talk → coworker `members`; one mind composing probes →
+   lab. NO `dag.mjs`/`spur.mjs` in a fan-out/coworker spur folder —
+   the door refuses the step file (ADR 0014). Waves come free: a stage
+   opens when every earlier stage settled, and fan-out units run
+   parallel under `slots`.
+
+   VERDICT TIMING (the law): **a judge that can reach its author
+   MUST.** A stage `check` fires while the workforce still lives —
+   solo/fan-out at each worker's finish; coworker at the exchange's
+   STOP: red hands the check's stderr VERBATIM to the stop's author
+   for ONE revise round, panes still up; a second red fails honestly.
+   A hosted station's stop verdict is its stage check ONLY (a parent
+   `[hooks]` verdict never judges a station). A gate's `run` is the
+   one deliberately COLD verdict — after the chain settles; use it to
+   act or for the final word, NEVER to judge a workforce you wanted
+   fixable. If you are about to add a gate whose job is "check what
+   the exchange produced", stop: that check belongs on the stage.
+   Coworker needs `members/*.md` (or stage `members`), one brief per
+   member — a brief is a prompt, write it like one. HOOKS ARE
+   KIND-SCOPED: a standalone coworker runs `counts` and `verdict`
+   (both real commands — `counts = "true"` once killed a run at
+   report time, j-64e035); in a chain, the coworker STAGE's `check` is
+   the verdict — never scaffold `units`/`grade` into a coworker toml
+   and never expect a parent `[hooks]` verdict to judge a station.
+   Copy a shape from this checkout:
+   `examples/fan-out-spurs/staged-waves` (solo → gate → fan-out),
+   `examples/chain-spurs/hand-off` (a coworker stage in a chain),
+   `examples/lab-spurs/git-wave` (the lab rail). Read docs/STAGES.md
+   and ADR 0014 (one authoring story) before inventing a shape.
    Every brief names its deliverable — the artifact that station
    hands back for the human to read (see Deliverables). A commission
    that never said what to read at the end still gets one: the

@@ -181,7 +181,7 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
       }
       if (t.grade !== undefined) {
         throw new HookError(
-          `stage ${id} is topology coworker: grade does not apply — the task verifier binds to unit stages and gates, never to an exchange (check IS allowed: it runs after the child's wake, as the stage's own verdict on the members' joint output)`,
+          `stage ${id} is topology coworker: grade does not apply — the task verifier binds to unit stages and gates, never to an exchange (check IS allowed: it runs in-exchange at the stop, before the members retire — red gets one revise round at the stop's author — as the stage's own verdict on the members' joint output)`,
         )
       }
     }

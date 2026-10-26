@@ -81,8 +81,13 @@ ids) and `topology` (required).
 - `members` — required. Array of `{ name, brief, initiates?, model? }`;
   at least two; EXACTLY one `initiates = true` (the starting brief).
 - `preamble` — optional. Prepended to every member's brief file.
-- `check` — optional. Post-exchange verdict: runs after the child's
-  wake receipt — green receipt + red check fails the stage honestly.
+- `check` — optional. Post-exchange verdict: runs IN-EXCHANGE at the
+  stop, before the members retire (the station twin of #198's
+  audit-before-retire) — a red check's first stderr line goes back to
+  the stop's author for ONE revise round while the panes still live; a
+  second red ends the exchange honestly and fails the stage. The
+  check's cwd is the PARENT task dir (checks are authored
+  parent-relative; promotion checks write into the parent's data/).
 - `model` — optional. The child program's pin (defaults to the
   parent's; members may override per-member).
 
@@ -105,8 +110,9 @@ why ("refuse, never vanish") — there are no silently ignored fields.
 ## The four verdict verbs (do not confuse them)
 
 - **`check`** — *judge*: "did THIS stage's workforce do its job?" The
-  rail runs it on completion (per unit for worker stages; after the
-  wake receipt for coworker/lab). 120s cap.
+  rail runs it on completion (per unit for worker stages; for coworker,
+  in-exchange at the stop — before the members retire, one revise
+  round on red; for lab, after the experiment). 120s cap.
 - **`run`** — *act*: "rail, DO this." Gate-only, one-shot. 300s cap.
 - **`grade`** — *bind*: "does the TASK verifier ([hooks] grade =
   verify.sh) attach here?" Default: last unit stage only. It is a
@@ -166,9 +172,10 @@ The storage paths above carry delivery INTO a coworker/lab child: the
 child is staged from `stages/<id>/` at the levy (the frontier), so
 whatever earlier stages wrote under `stages/<id>/data/` rides along
 (fixed briefs, dynamic delivery — write there, the child reads `data/`).
-Delivery OUT of a child rides the stage's `check`: it runs in the
-parent after the wake receipt and resolves the child's job dir through
-the durable booking the wake machinery owns (`wakes/<id>.json`), so the
+Delivery OUT of a child rides the stage's `check`: it runs at the
+exchange's stop, IN-EXCHANGE — before the member panes retire, with
+one revise round on red — and resolves the child's job dir through the
+durable booking the wake machinery owns (`wakes/<id>.json`), so the
 child's artifacts land in the parent's `data/` — where a later gate can
 judge them. The worked receipt is the composite case
 (`test/e2e/transfer-window-v2/`): analysts shard into

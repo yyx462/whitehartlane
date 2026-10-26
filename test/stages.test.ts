@@ -5,6 +5,7 @@
 // verify.sh fires ONCE in the final gate — never after the install
 // unit mid-chain. "split" is dead: ordering is the workflow's job.
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -587,6 +588,22 @@ function rehearsalHost(
       JSON.stringify({ from: "sam", to: "alex", type: "stop", body: "goal reached" }),
     )
     writeFileSync(join(stationDir, "relay.json"), JSON.stringify({ delivered: ["alex/2.json"], refused: [] }))
+    // The stop ceremony (#198's station twin): an exchange with a
+    // declared stage check settles "done" only THROUGH it — the real
+    // engine runs the check at the stop, before the members retire; a
+    // rehearsal runs the same bytes here (cwd = the task dir — the
+    // station lives at <taskDir>/stations/<id>, two levels up) and
+    // leaves the same receipt row.
+    if (stage.check) {
+      const rc = spawnSync(stage.check, { cwd: dirname(dirname(stationDir)), shell: true, encoding: "utf8" })
+      if (rc.status !== 0) {
+        writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: "failed", table: [] }))
+        return { status: "failed", table: [] }
+      }
+      const table = [{ unit: "check", result: "stage check passed (in-exchange)" }]
+      writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: "done", table }))
+      return { status: "done", table }
+    }
     writeFileSync(join(stationDir, "report.json"), JSON.stringify({ status: outcome, table: [] }))
     return { status: outcome, table: [] }
   }
@@ -643,7 +660,7 @@ run = "true"
   assert.match(byUnit.explore, /^station explore done/)
 })
 
-test("a coworker stage's check runs after the HOSTED exchange — green exchange, red check fails", async () => {
+test("a coworker stage's check is the exchange's stop ceremony — red check fails the stage, downstream blocked", async () => {
   const dir = taskDir("coworker-check")
   writeFileSync(join(dir, "check.sh"), "echo checked >> trail.log\nexit 1\n")
   writeFileSync(join(dir, "contract.toml"), "[[contract.deliverables]]\nname = \"results\"\npath = \"units/*/result.md\"\nkind = \"md\"\n")
@@ -681,8 +698,10 @@ brief = "after the exchange"
   })
   assert.equal(report.status, "failed")
   const byUnit = Object.fromEntries(report.table.map((r) => [r.unit, r.result]))
-  assert.match(byUnit.review, /stage check failed/)
-  // the check actually RAN (the exchange was green; the check made it red)
+  // the check is part of settling the station now — a red check IS a
+  // failed exchange, never a green exchange judged afterwards
+  assert.match(byUnit.review, /^station review failed/)
+  // the check actually RAN — once, at the stop, through the host's ceremony
   assert.equal(readFileSync(join(dir, "trail.log"), "utf8"), "checked\n")
   // downstream never spawned
   assert.deepEqual(shep.spawned, [])

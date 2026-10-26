@@ -39,6 +39,22 @@ export type StationSpec = {
   members: import("./coworker.ts").Member[]
   workerKind: string
   retry?: number
+  // The station twin of #198's audit-before-retire: the coworker
+  // stage's own `check`, run IN-EXCHANGE at the stop while every
+  // member pane still lives — red hands the check's first stderr line
+  // to the stop's author for ONE revise round; a second red ends the
+  // exchange honestly (the verdict row rides the report, the parent
+  // fails the step). Before, the parent ran it AFTER the exchange
+  // returned — i.e. after every member pane was already retired, so a
+  // red check could only fail the step, never be fixed by the minds
+  // that caused it.
+  check?: string
+  // The check's cwd: the PARENT task dir (where the stage was
+  // declared), NOT the station dir — stage checks are authored
+  // parent-relative ("stations/<id>/data/...", "hooks/..."), and
+  // delivery-promotion checks (transfer-window's accept-plan.sh) write
+  // into the parent's data/. Absent = the station dir.
+  checkCwd?: string
 }
 
 export async function runCoworker(
@@ -481,8 +497,23 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   // then the red verdict rides the report honestly
   let verdictRuns = 0
   let verdictRed: string | null = null
+  // the station check's receipt: a green stage check leaves a row on
+  // the report — the parent refuses a "done" station without it (a
+  // host that skips the stop ceremony must not pass silently)
+  let stationCheckGreen = false
   let draining = false
   let drainUntil: number | null = null
+  // ONE spelling of "is the workforce settled?" — the drain path's
+  // rule: nobody is working. The stop path used to sleep one beat of
+  // mail quiet instead, and run #17's verdict audited a half-written
+  // shelf while the interviewer was still synthesizing. Every path
+  // that ends an exchange asks this same question; a second spelling
+  // here would drift again.
+  const anyWorking = (): boolean => members.some((m) => rail.workerStatus(m.name) === "working")
+  // the shared ceiling math (env → manifest → 10min), one spelling for
+  // the pause drain and the stop-settle below
+  const drainCeilingMs = (): number =>
+    Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || manifest.workflow.drain_timeout_ms || 10 * 60_000
   // SIGTERM is the drain (ADR 5): the hook goes to the Rail, whose
   // trapSignals owns the signal. Stop delivering, let a member
   // mid-turn end its turn, then park. Pending mail is NOT drained — it
@@ -493,9 +524,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   const dropOwnDrain = rail.installDrain(() => {
     if (ended !== null || draining) return
     draining = true
-    const ceiling =
-      Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || manifest.workflow.drain_timeout_ms || 10 * 60_000
-    drainUntil = drainDeadline(taskDir, Date.now(), ceiling)
+    drainUntil = drainDeadline(taskDir, Date.now(), drainCeilingMs())
     log(`coworker: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
   })
   // Station tenancy (ADR 0016): a hosted exchange sweeps exactly its
@@ -533,8 +562,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
       // ADR 5: no new deliveries; a member mid-turn ends its turn.
       // Permission asks, nudges, and dead checks stand down — the
       // park is taking over, bounded by the drain ceiling.
-      const anyWorking = members.some((m) => rail.workerStatus(m.name) === "working")
-      if (!anyWorking || (drainUntil !== null && Date.now() > drainUntil)) {
+      if (!anyWorking() || (drainUntil !== null && Date.now() > drainUntil)) {
         ended = "paused"
         break
       }
@@ -618,19 +646,43 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
       // is consumed, the exchange continues, the next stop re-runs the
       // hook. A second red ends the run honestly (#204 made the red
       // report honest; the verdict row rides it).
-      const verdictCmd = manifest.hooks.verdict
+      // The verdict command, one seam: a STATION's stop verdict is its
+      // stage check — ONLY (a station without a check settles on the
+      // members' stop, like a unit stage with no check declared). The
+      // parent program's [hooks] verdict belongs to the standalone
+      // shape alone: at a hosted stop it would run with the station as
+      // cwd at EVERY exchange's end — deleted, never fallen back to.
+      // A fallback here is exactly the residue that drifts back into
+      // the old design.
+      const verdictCmd = opts.station ? opts.station.check : manifest.hooks.verdict
       if (verdictCmd) {
-        // The stop-settle (j-53850f): a member's final artifact writes
-        // can land microseconds behind its stop message — the send and
-        // the write are separate tool calls in its session. One beat of
-        // quiescence before the hook reads the shelf lets the bytes
-        // land; the panes are still alive, so nothing is lost.
+        // Either way it runs BEFORE any pane retires, so a red can
+        // still reach its author.
+        const verdictCwd = opts.station?.check ? (opts.station.checkCwd ?? taskDir) : taskDir
+        // The stop-settle (j-53850f + run #17): the rail may see a stop
+        // while OTHER members are still working — run #17's
+        // interviewee stopped while the interviewer was mid-synthesis,
+        // and the fixed 5s sleep let the verdict audit a half-written
+        // gaps.md. "Quiet enough to end" is the DRAIN path's rule —
+        // nobody is working — never one beat of mail quiet. The wait
+        // rides the same drain ceiling, so a member stuck working
+        // cannot hang the exchange; then one beat more lets the stop's
+        // author flush its own final writes (j-53850f: the send and
+        // the write are separate tool calls in its session).
+        const settleUntil = drainDeadline(taskDir, Date.now(), drainCeilingMs())
+        while (anyWorking()) {
+          if (Date.now() > settleUntil) {
+            log("coworker: stop-settle ceiling passed with a member still working — running the verdict anyway")
+            break
+          }
+          await sleep(beatMs)
+        }
         await sleep(beatMs)
         verdictRuns += 1
         let verdictWhy = ""
         let verdictPass = false
         try {
-          execSync(verdictCmd, { cwd: taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          execSync(verdictCmd, { cwd: verdictCwd, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
           verdictPass = true
         } catch (err) {
           // the hook's OWN stderr line outranks execSync's generic
@@ -640,6 +692,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
           verdictWhy = firstStderr ?? (err instanceof Error ? err.message.split("\n")[0] : String(err)).split("\n")[0]
         }
         if (verdictPass) {
+          if (opts.station?.check) stationCheckGreen = true
           ended = plan.why ?? "stop"
           break
         }
@@ -748,6 +801,11 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   }
   if (verdictRed !== null) {
     rows.push({ unit: "verdict", result: `verdict hook failed twice: ${verdictRed.slice(0, 160)}`, pass: false })
+  }
+  // the station check's receipt (#198's station twin): "done" through a
+  // declared stage check leaves this row — execStation demands it
+  if (stationCheckGreen) {
+    rows.push({ unit: "check", result: "stage check passed (in-exchange)", pass: true })
   }
   // transport churn is visible, not silent (issue #122): the levy sees
   // who was respawned and how often
