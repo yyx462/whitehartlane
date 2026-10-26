@@ -646,12 +646,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
       // is consumed, the exchange continues, the next stop re-runs the
       // hook. A second red ends the run honestly (#204 made the red
       // report honest; the verdict row rides it).
-      const verdictCmd = opts.station?.check ?? manifest.hooks.verdict
+      // The verdict command, one seam: a STATION's stop verdict is its
+      // stage check — ONLY (a station without a check settles on the
+      // members' stop, like a unit stage with no check declared). The
+      // parent program's [hooks] verdict belongs to the standalone
+      // shape alone: at a hosted stop it would run with the station as
+      // cwd at EVERY exchange's end — deleted, never fallen back to.
+      // A fallback here is exactly the residue that drifts back into
+      // the old design.
+      const verdictCmd = opts.station ? opts.station.check : manifest.hooks.verdict
       if (verdictCmd) {
-        // The verdict command, one seam: a hosted station's stage
-        // `check` IS the verdict hook here; a standalone run keeps
-        // [hooks] verdict. Either way it runs BEFORE any pane retires,
-        // so a red can still reach its author.
+        // Either way it runs BEFORE any pane retires, so a red can
+        // still reach its author.
         const verdictCwd = opts.station?.check ? (opts.station.checkCwd ?? taskDir) : taskDir
         // The stop-settle (j-53850f + run #17): the rail may see a stop
         // while OTHER members are still working — run #17's

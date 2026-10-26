@@ -191,3 +191,67 @@ run = "true"
   assert.ok(row, "the station step rides the report")
   assert.match(row!.result, /audited in-exchange/, "the row names where the audit ran")
 })
+
+test("a hosted station NEVER runs the parent program's [hooks] verdict — deleted, not fallen back to", async () => {
+  const dir = join(process.env.AGENTIC_OS_HOME!, "no-fallback-")
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  // the parent-level verdict hook: the STANDALONE shape's stop verdict.
+  // If a station ever falls back to it, it would run at every hosted
+  // exchange's stop with the station as cwd — the old design's residue.
+  writeFileSync(join(dir, "hooks", "parent-verdict.sh"), 'set -euo pipefail\nprintf ran >> verdict-ran.txt\n')
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "station-no-check"
+worker_kind = "opencode"
+
+[hooks]
+verdict = "bash hooks/parent-verdict.sh"
+
+[[stage]]
+id = "review"
+topology = "coworker"
+
+[[stage.members]]
+name = "alex"
+brief = "tell sam the answer"
+initiates = true
+
+[[stage.members]]
+name = "sam"
+brief = "on alex's mail, stop the exchange"
+
+[[stage]]
+id = "grade"
+topology = "gate"
+run = "true"
+`,
+  )
+  const herdr = fakeHerdr()
+  const rail = fakeRail(dir, herdr, null)
+  const station = join(dir, "stations", "review")
+  herdr.onPrompt = (name, _text, later) => {
+    if (name.startsWith("alex")) {
+      later(() => mail(station, "alex", 1, "sam", "note", "the answer is 42"))
+      return
+    }
+    later(() => mail(station, "sam", 2, "alex", "stop", "done"))
+  }
+  const report = await runOrchestrator({
+    taskDir: dir,
+    shep: rail as never,
+    gateCheckMs: 50,
+    logPollMs: 50,
+    stallMs: 10_000,
+    beatMs: 50,
+    briefGraceMs: 60_000,
+    log: () => {},
+  })
+  assert.ok(report, "the chain finished with a report")
+  assert.equal(report.status, "done", "a station without a check settles on the members' stop")
+  assert.equal(
+    existsSync(join(dir, "verdict-ran.txt")),
+    false,
+    "the parent's [hooks] verdict never fired at the station's stop — that path is deleted",
+  )
+})
