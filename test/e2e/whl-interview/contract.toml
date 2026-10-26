@@ -26,28 +26,33 @@ topics = [
 # The audit refuses a run whose deliverable is missing or empty.
 # rail-built = produced by the audit itself (transcript, interview),
 # still delivered, never demanded of the panes.
-# TWO SHELVES by audience: data/ is the WORKING shelf (the bank the
-# interviewer appends to, the machine transcript); deliverables/ is the
-# HUMAN pack — the only folder a person reads, authored in place by
-# the members (no copy ceremony; one home per file — the #233 lesson).
+# TWO SHELVES by reader: data/ is the WORKING shelf — everything an
+# agent or hook touches (the bank, the member docs, the machine
+# transcript). deliverables/ is the HUMAN pack, and its law is strict:
+# a file lives there ONLY if no agent needs to read it — today that is
+# exactly one file, interview.md, rendered by the audit at report time
+# for the human's interview prep. The member docs stay in data/ (the
+# interviewer reads the pitch; the audit reads the other three), so
+# they are working files, not pack files.
+
 [[contract.deliverables]]
 name = "pitch"
-path = "deliverables/pitch.md"
+path = "data/pitch.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "topic-map"
-path = "deliverables/topic-map.md"
+path = "data/topic-map.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "explained"
-path = "deliverables/explained.md"
+path = "data/explained.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "gaps"
-path = "deliverables/gaps.md"
+path = "data/gaps.md"
 kind = "md"
 # ONE OWNER (run #6 taught: when both minds think the file is theirs,
 # the interviewee's freeform shape fails the audit the interviewer's
@@ -63,7 +68,7 @@ kind = "md"
 # rail-built = the audit renders this from messages/ at report time:
 # the mock-interview QA lecture (Interviewer:/Me: per turn, ladder
 # walks as mermaid) — the commission's prep pack, never demanded of
-# the panes
+# the panes, and read by no agent: the pack's only reader is the human
 rail-built = true
 
 [[contract.deliverables]]

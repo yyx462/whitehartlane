@@ -45,7 +45,7 @@ if (cd "$work/golden" && WHL_CONTRACT_DIR="$here/.." python3 "$here/audit.py" --
 else
   fail_n=$((fail_n + 1)); echo "FAIL — verdict probe should be green on golden"
 fi
-rm "$work/golden/deliverables/pitch.md"
+rm "$work/golden/data/pitch.md"
 if out=$(cd "$work/golden" && WHL_CONTRACT_DIR="$here/.." python3 "$here/audit.py" --verdict 2>&1); then
   fail_n=$((fail_n + 1)); echo "FAIL — verdict probe should bite on a missing deliverable"
 elif [[ "$out" == *"deliverable missing"* ]]; then
@@ -53,7 +53,7 @@ elif [[ "$out" == *"deliverable missing"* ]]; then
 else
   fail_n=$((fail_n + 1)); echo "FAIL — verdict probe bit for the wrong reason: $out"
 fi
-cp "$work/golden-pristine/deliverables/pitch.md" "$work/golden/deliverables/pitch.md"
+cp "$work/golden-pristine/data/pitch.md" "$work/golden/data/pitch.md"
 [ -s "$work/golden/data/transcript.jsonl" ] || { echo "FAIL — transcript.jsonl not built"; exit 1; }
 # the human pack: the QA lecture is rendered, Interviewer:/Me: per
 # turn, machine chrome stripped, ladder walks as mermaid diagrams
@@ -65,14 +65,16 @@ grep -q "^\*\*Me:\*\*" "$iv" || { echo "FAIL — interview.md has no Me: turns";
 grep -q "turn-contract" "$iv" && { echo "FAIL — interview.md must strip the turn-contract chrome"; exit 1; }
 grep -q "What still stands" "$iv" || { echo "FAIL — interview.md must end with the standing list"; exit 1; }
 pass_n=$((pass_n + 1)); echo "ok   — interview.md rendered: QA lecture, diagrams, standing list, chrome stripped"
-# two shelves by audience: the member docs live ONLY in deliverables/;
-# data/ holds the working shelf (bank + machine transcript) — no
-# copies, no strays
+# the pack's law: a file lives in deliverables/ ONLY if no agent needs
+# to read it — exactly ONE file today. The member docs (pitch is read
+# by the interviewer; the other three by the audit) are working files
+# and live in data/ with the bank and the machine transcript.
+[ "$(ls "$work/golden/deliverables")" = "interview.md" ] || { echo "FAIL — deliverables/ must hold exactly interview.md, found: $(ls "$work/golden/deliverables" | tr '\n' ' ')"; exit 1; }
 for f in pitch.md topic-map.md explained.md gaps.md; do
-  [ ! -e "$work/golden/data/$f" ] || { echo "FAIL — data/$f must not exist (the pack lives in deliverables/)"; exit 1; }
+  [ -s "$work/golden/data/$f" ] || { echo "FAIL — working file data/$f missing from the working shelf"; exit 1; }
 done
 [ ! -d "$work/golden/interviews" ] || { echo "FAIL — interviews/ copy shelf must not exist"; exit 1; }
-pass_n=$((pass_n + 1)); echo "ok   — two shelves: pack in deliverables/, working files in data/, no copies"
+pass_n=$((pass_n + 1)); echo "ok   — pack law holds: deliverables/ = interview.md alone; working files in data/"
 
 m() { # <label> <why> <python-mutation>
   local d="$work/$1"
@@ -89,7 +91,7 @@ PYEOF
 
 # 1. a missing deliverable fails the run (#205 — the commission's product)
 m missing-deliverable "deliverable" '
-(d / "deliverables" / "pitch.md").unlink()
+(d / "data" / "pitch.md").unlink()
 '
 
 # 2. zero standing gap sections = the interviewer was too soft
@@ -99,7 +101,7 @@ for f in sorted((d / "messages" / "interviewer").glob("*.json")):
     body = json.loads(f.read_text())["body"]
     if "gap" in body and "races" in body:
         f.unlink()
-g = d / "deliverables" / "gaps.md"
+g = d / "data" / "gaps.md"
 g.write_text("# Gaps\n\nNone found — everything checked out.\n")
 '
 
