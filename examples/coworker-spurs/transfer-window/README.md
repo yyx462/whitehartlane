@@ -1,5 +1,11 @@
 # transfer-window — the summer-2026 demo spur
 
+> **STALE (2026-10-27) — do not copy.** Pre-stage shape: the finance
+> desk hand-levies a `negotiation-room/` child (ADR 0016 replaced this
+> with in-process stations) and the exchange carries no stop ceremony.
+> Rewrite pending; the worked modern case is
+> `test/e2e/transfer-window-v2/`.
+
 A two-level demo that re-enacts the REAL August 2026 window, as a
 shootable video script and a runnable program folder.
 

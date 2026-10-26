@@ -15,7 +15,7 @@ tables, the `hooks.units` quick-mint, the `[gates]` detector table, the
 | `lab-spurs/git-wave` | a lab stage: the actor composes waves; a custom inline `end` detector |
 | `lab-spurs/trivia-bench` | a lab stage as an eval harness: rounds, actor-graded scorecard, model swap |
 | `coworker-spurs/pause-fixture` | a pure exchange in its native shape (`kind = "coworker"`, `[members.*]`) — the shape a coworker stage hosts; pause/continue smoke fixture |
-| `coworker-spurs/transfer-window` | the summer-2026 demo: a three-member exchange whose finance desk levies the `negotiation-room/` child + `workflow.broken.toml` failure take |
+| `coworker-spurs/transfer-window` | **STALE — do not copy** (pre-stage shape: hand-levied child, no stop ceremony; rewrite pending — the modern case is `test/e2e/transfer-window-v2/`) |
 
 A coworker stage's `check` is the STOP CEREMONY — it runs at the
 exchange's stop, before any member pane retires (one revise round on

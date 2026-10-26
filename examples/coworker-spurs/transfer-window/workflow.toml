@@ -1,10 +1,16 @@
-# transfer-window — the summer-2026 demo spur: a chairman (the levy,
-# elsewhere) commissions a three-member coworker exchange that re-enacts
-# the real window. Coach decides the profile, scout names three real
-# targets, finance levies the negotiation-room child spur and closes.
-# Reality check: Spurs signed Savio from Man City on 2026-08-25 for
-# £75m + £10m add-ons, after City beat them to Ndiaye (£65m, deadline
-# day) and Gakpo's wages priced him out. The briefs carry those numbers.
+# transfer-window — STALE (2026-10-27): pre-stage shape — the finance
+# desk levies a negotiation-room/ child by hand, the shape ADR 0016
+# replaced with in-process stations and the shape this checkout's
+# stop-ceremony law (a coworker stage's `check`) makes obsolete. Do
+# NOT copy this shape; kept until rewritten (the worked modern case is
+# test/e2e/transfer-window-v2/). The demo itself, for the record:
+# a chairman (the levy, elsewhere) commissions a three-member coworker
+# exchange that re-enacts the real window. Coach decides the profile,
+# scout names three real targets, finance levies the negotiation-room
+# child spur and closes. Reality check: Spurs signed Savio from Man
+# City on 2026-08-25 for £75m + £10m add-ons, after City beat them to
+# Ndiaye (£65m, deadline day) and Gakpo's wages priced him out. The
+# briefs carry those numbers.
 [workflow]
 name = "transfer-window"
 spur_id = "transfer-window"
