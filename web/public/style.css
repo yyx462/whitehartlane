@@ -1575,20 +1575,22 @@ td.empty, .empty {
 .ev-dec.d-deny-unneeded { color: var(--orphaned); }
 
 /* an entity inside the log — member, pane, relay file: click to trace.
-   The CLASS picks the SHAPE (member = pill, pane = rectangle, relay
-   file = tag), the IDENTITY picks the COLOR: app.js stamps --ent-h,
-   a stable per-identity hue (interviewer vs interviewee differ, and a
-   pane/file belonging to a member inherits its hue). Saturation and
-   lightness are clamped here per theme, so no hash hue can go neon —
-   they stay muted, on-brand, and readable in dark and light. */
+   The CLASS picks the SHAPE and the FILL WEIGHT, the IDENTITY picks the
+   COLOR: app.js stamps --ent-h, and the run's members split the hue
+   wheel evenly, so families never overlap (2 members → blue vs orange).
+   Fill ramps by class — member 100%, pane 50%, msg 0% of the max tint —
+   so the WHO is the loudest thing on the row and the dense relay-file
+   traffic stays quiet outlines. Chroma stays high (pastel washes read
+   as one blob) but lightness clamped per theme, so no hue goes neon. */
 .ev-ent {
   --ent-h: 222; /* hint examples with no identity — steel blue */
-  --ent-fg: hsl(var(--ent-h) 44% 68%);
+  --ent-fg: hsl(var(--ent-h) 62% 72%);
+  --ent-fill: 0%; /* bare/hint chips — outline */
   display: inline-block;
   padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--ent-fg) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ent-fg) 45%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--ent-fg) 10%, transparent);
+  background: color-mix(in srgb, var(--ent-fg) var(--ent-fill), transparent);
   color: var(--ent-fg);
   font-family: var(--mono);
   font-size: 11px;
@@ -1596,15 +1598,15 @@ td.empty, .empty {
   cursor: pointer;
 }
 
-[data-theme="light"] .ev-ent { --ent-fg: hsl(var(--ent-h) 46% 34%); }
+[data-theme="light"] .ev-ent { --ent-fg: hsl(var(--ent-h) 58% 38%); }
 
-.ev-ent.ev-member { border-radius: 999px; }           /* a who — pill */
-.ev-ent.ev-pane   { border-radius: 3px; }             /* a window — rectangle */
-.ev-ent.ev-msg    { border-radius: 6px 2px 6px 2px; } /* a file — tag */
+.ev-ent.ev-member { --ent-fill: 22%; border-radius: 999px; }          /* a who — pill, solid */
+.ev-ent.ev-pane   { --ent-fill: 11%; border-radius: 3px; }            /* a window — half tint */
+.ev-ent.ev-msg    { --ent-fill: 0%; border-radius: 6px 2px 6px 2px; } /* a file — outline */
 
 .ev-ent:hover {
   border-color: var(--ent-fg);
-  background: color-mix(in srgb, var(--ent-fg) 20%, transparent);
+  background: color-mix(in srgb, var(--ent-fg) 26%, transparent);
 }
 
 /* the split: log on the left, the traced record on the right */
