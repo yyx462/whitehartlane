@@ -7,6 +7,7 @@
 // returns its first stdout lines), the rail verbs (pause|abort|continue
 // via the door), and POST delete (removes a job dir outright).
 import http from "node:http";
+import crypto from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -40,6 +41,41 @@ const OS_ROOT = process.env.AGENTIC_OS_ROOT || process.env.AGENTIC_OS_HOME ||
     return fs.existsSync(old) && !fs.existsSync(next) ? old : next;
   })();
 const SESSIONS_DIR = path.join(OS_ROOT, "sessions");
+// the mutation token: every non-GET /api request must carry it as
+// `Authorization: Bearer <token>`. #230 narrowed the binds; the tailnet
+// bind is still reachable by every peer, and POST /api/run plus
+// PUT /api/program are code execution as this user. Minted once into
+// the OS disk (mode 0600); loopback callers get it from GET /api/boot.
+const TOKEN_FILE = path.join(OS_ROOT, "window.token");
+const TOKEN = (() => {
+  try {
+    const t = fs.readFileSync(TOKEN_FILE, "utf8").trim();
+    if (t) return t;
+  } catch {
+    /* first boot */
+  }
+  const t = crypto.randomBytes(32).toString("base64url");
+  fs.mkdirSync(OS_ROOT, { recursive: true });
+  fs.writeFileSync(TOKEN_FILE, t + "\n", { mode: 0o600 });
+  return t;
+})();
+
+// constant-time compare — no prefix oracle over the network. The length
+// check is public (crypto.timingSafeEqual throws on mismatched lengths;
+// token length leaks nothing usable).
+function bearerOk(req) {
+  const h = req.headers.authorization || "";
+  if (!h.startsWith("Bearer ")) return false;
+  const got = Buffer.from(h.slice(7));
+  const want = Buffer.from(TOKEN);
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+
+function isLoopback(addr) {
+  const a = String(addr || "").replace(/^::ffff:/, "");
+  return a === "127.0.0.1" || a === "::1";
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
 // the run door — env override, else this checkout's bin. No machine paths:
@@ -2086,6 +2122,23 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, port: PORT, osRoot: OS_ROOT, runDoor: RUN_DOOR, doorNode: process.execPath });
   }
 
+  // the boot dispenser: hands the mutation token to loopback callers
+  // only. Every local process can read window.token anyway (0600, same
+  // user) — this exists so the operator's browser is zero-config. A
+  // DNS-rebinding page hitting the loopback bind still carries its true
+  // Origin, so that check applies here too. Tailnet callers must
+  // already possess the token.
+  if (req.method === "GET" && pathname === "/api/boot") {
+    const origin = req.headers.origin;
+    if (origin && !OWN_ORIGINS.has(origin)) {
+      return sendError(res, 403, "origin not allowed: " + origin);
+    }
+    if (!isLoopback(req.socket.remoteAddress)) {
+      return sendError(res, 403, "token is only served to loopback callers");
+    }
+    return sendJson(res, 200, { token: TOKEN });
+  }
+
   if (req.method === "POST" && pathname === "/api/run") {
     let body;
     try {
@@ -2310,6 +2363,19 @@ const handler = async (req, res) => {
   }
   try {
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+      // reads stay open; every mutation proves possession of the token.
+      // An unauthenticated POST must have NO side effects — it is
+      // rejected before handleApi, so even the C06 cache-bust never
+      // runs for it.
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        if (!bearerOk(req)) {
+          return sendError(res, 401, "bearer token required (window.token in the OS disk root)");
+        }
+        const origin = req.headers.origin;
+        if (origin && !OWN_ORIGINS.has(origin)) {
+          return sendError(res, 403, "origin not allowed: " + origin);
+        }
+      }
       return await handleApi(req, res, url);
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -2327,6 +2393,14 @@ const tailnet = tailnetAddress();
 const BINDS = process.env.HOST
   ? [process.env.HOST]
   : ["127.0.0.1", ...(tailnet ? [tailnet] : [])];
+// browser pages may only mutate from the server's own origins. Origin
+// is browser-set (JS cannot forge it), so this kills CSRF — readBody
+// ignores Content-Type, a no-cors text/plain POST parses fine — and DNS
+// rebinding, where the rebound page CAN set headers but still carries
+// its true origin. curl sends no Origin; the token covers that vector.
+const OWN_ORIGINS = new Set(
+  ["127.0.0.1", "localhost", ...BINDS].map((h) => `http://${h}:${PORT}`),
+);
 for (const bind of BINDS) {
   http.createServer(handler).listen(PORT, bind, () => {
     log(
@@ -2336,6 +2410,8 @@ for (const bind of BINDS) {
       PUBLIC_DIR,
       "| os disk:",
       SESSIONS_DIR,
+      "| token:",
+      TOKEN_FILE,
     );
   });
 }

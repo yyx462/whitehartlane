@@ -53,8 +53,20 @@ function esc(s) {
   })[c]);
 }
 
+// the mutation token, dispensed by our own origin (GET /api/boot,
+// loopback callers only). Held in memory: a page opened from the
+// tailnet addr gets no token and the window degrades to read-only —
+// mutations 401 with the token's location in the message.
+let bootToken = null;
+
 async function fetchJSON(url, opts) {
-  const res = await fetch(url, opts);
+  const send = { ...opts };
+  if (send.method && send.method !== "GET" && bootToken) {
+    send.headers = Object.assign({}, send.headers, {
+      Authorization: "Bearer " + bootToken,
+    });
+  }
+  const res = await fetch(url, send);
   let body = {};
   try { body = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {
@@ -2937,6 +2949,18 @@ function updateClock() {
 }
 updateClock();
 setInterval(updateClock, 1000);
+
+// fetch the mutation token from our own origin before the first
+// mutation; failing here (remote origin, dispenser refused) is not
+// fatal — reads keep working, mutations surface their 401.
+(async () => {
+  try {
+    const b = await fetchJSON("/api/boot");
+    bootToken = b.token || null;
+  } catch {
+    /* read-only window */
+  }
+})();
 
 onRoute();
 tick();
