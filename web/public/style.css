@@ -1541,6 +1541,11 @@ td.empty, .empty {
   white-space: nowrap;
 }
 
+/* zebra rows, same vocabulary as the Runs list — a wall of uniform
+   rows is unreadable at event-stream density; :hover and .sel below
+   come later in source, so they win the equal-specificity tie */
+.ev-line:nth-child(even) { background: var(--stripe); }
+
 .ev-line:hover { background: var(--hover); }
 
 .ev-line.sel {
@@ -1569,21 +1574,38 @@ td.empty, .empty {
 .ev-dec.d-deny { color: var(--failed); }
 .ev-dec.d-deny-unneeded { color: var(--orphaned); }
 
-/* an entity inside the log — member, pane, relay file: click to trace */
+/* an entity inside the log — member, pane, relay file: click to trace.
+   The CLASS picks the SHAPE (member = pill, pane = rectangle, relay
+   file = tag), the IDENTITY picks the COLOR: app.js stamps --ent-h,
+   a stable per-identity hue (interviewer vs interviewee differ, and a
+   pane/file belonging to a member inherits its hue). Saturation and
+   lightness are clamped here per theme, so no hash hue can go neon —
+   they stay muted, on-brand, and readable in dark and light. */
 .ev-ent {
+  --ent-h: 222; /* hint examples with no identity — steel blue */
+  --ent-fg: hsl(var(--ent-h) 44% 68%);
   display: inline-block;
   padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ent-fg) 42%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--ent-fg) 10%, transparent);
+  color: var(--ent-fg);
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.7;
   cursor: pointer;
 }
 
-.ev-ent:hover { border-color: var(--accent); color: var(--text); }
+[data-theme="light"] .ev-ent { --ent-fg: hsl(var(--ent-h) 46% 34%); }
+
+.ev-ent.ev-member { border-radius: 999px; }           /* a who — pill */
+.ev-ent.ev-pane   { border-radius: 3px; }             /* a window — rectangle */
+.ev-ent.ev-msg    { border-radius: 6px 2px 6px 2px; } /* a file — tag */
+
+.ev-ent:hover {
+  border-color: var(--ent-fg);
+  background: color-mix(in srgb, var(--ent-fg) 20%, transparent);
+}
 
 /* the split: log on the left, the traced record on the right */
 /* the events view is a perfect column: head + live badge natural, the

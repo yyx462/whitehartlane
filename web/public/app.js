@@ -2352,7 +2352,45 @@ function kindColor(kind) {
 }
 
 function entChip(type, name, title) {
-  return `<button class="ev-ent" data-ev-ent="${esc(type)}:${esc(name)}" title="${esc(title || name)}">${esc(name)}</button>`;
+  // class = shape (member/pane/msg), --ent-h = the identity's stable hue
+  return `<button class="ev-ent ev-${esc(type)}" style="--ent-h:${identityHue(identityKey(type, name))}" data-ev-ent="${esc(type)}:${esc(name)}" title="${esc(title || name)}">${esc(name)}</button>`;
+}
+
+// identities seen in the loaded stream — a pane label (interviewer-mvp02oa0)
+// and a relay file (interviewer/2.json) both belong to member interviewer,
+// so they inherit its hue and one identity reads as one color down the log
+let EV_MEMBERS = new Set();
+function scanEvMembers(events) {
+  EV_MEMBERS = new Set();
+  for (const ev of events || []) {
+    for (const m of [ev.member, ev.from, ev.to]) {
+      if (m) EV_MEMBERS.add(String(m));
+    }
+  }
+}
+
+// which identity a chip's color follows: members are themselves; a pane or
+// relay file hangs off the longest known member its name starts with
+// (interviewer-mvp02oa0 → interviewer, interviewer/2.json → interviewer);
+// anything else hashes as itself
+function identityKey(type, name) {
+  const n = String(name || "?");
+  if (type === "member") return n;
+  const sep = type === "msg" ? "/" : "-";
+  let best = null;
+  for (const m of EV_MEMBERS) {
+    if (n.startsWith(m + sep) && (best === null || m.length > best.length)) best = m;
+  }
+  return best ?? n;
+}
+
+// stable identity → hue: djb2 hash spread by the golden angle, so near
+// hashes land on far-apart hues; the CSS clamps saturation/lightness
+// per theme, so no hue can go neon
+function identityHue(key) {
+  let h = 5381;
+  for (let i = 0; i < key.length; i++) h = ((h * 33) ^ key.charCodeAt(i)) >>> 0;
+  return Math.round((h * 137.508) % 360);
 }
 
 function evDetailHtml(ev) {
@@ -2471,14 +2509,15 @@ function initEvSplit() {
 const EV_SIDE_EMPTY = `<div class="ev-side-hint">
   <b>trace pane</b>
   <div>Click an event row for its full record — every field, transcript pointers included.</div>
-  <div>Click a <span class="ev-ent">member</span> chip to see its mail (what it sent and received).</div>
-  <div>Click a <span class="ev-ent">1-backend.json</span> chip to read the relayed message itself.</div>
+  <div>Click a <span class="ev-ent ev-member">member</span> chip to see its mail (what it sent and received).</div>
+  <div>Click a <span class="ev-ent ev-msg">1-backend.json</span> chip to read the relayed message itself.</div>
 </div>`;
 
 function eventsBodyHtml() {
   const sp = state.split;
   if (sp.eventsError && !sp.events) return paneEmpty(`events failed: ${esc(sp.eventsError)}`);
   if (!sp.events) return paneEmpty("loading events…");
+  scanEvMembers(sp.events);
   return evSplitShell(sp.events.map((ev, i) => evLine(ev, i)).join("") ||
     '<span class="muted" data-ev-empty>no events</span>', sp.evSideHtml || EV_SIDE_EMPTY);
 }
@@ -2486,6 +2525,7 @@ function eventsBodyHtml() {
 function eventsShellHtml(have) {
   const sp = state.split;
   const empty = `<span class="muted" data-ev-empty>${sp.es ? "connecting to live events…" : "loading events…"}</span>`;
+  if (have) scanEvMembers(sp.events);
   const lines = have ? (sp.events.map((ev, i) => evLine(ev, i)).join("") || empty) : empty;
   return `<div class="ev-live"><span class="ev-dot"></span>live` +
     `<span id="ev-reconnecting" class="hidden"> — reconnecting…</span></div>` +
@@ -2605,7 +2645,7 @@ function renderPaneCard(label) {
       <span class="ev-side-kind">pane</span>
       <b class="mono" style="font-size:14px">${esc(label)}</b>
     </div>
-    <div class="muted small" style="margin:6px 0 10px">a pane of member <button class="ev-ent" data-ev-ent="member:${esc(member)}">${esc(member)}</button> — click it for the mail</div>
+    <div class="muted small" style="margin:6px 0 10px">a pane of member ${entChip("member", member, `member ${member} — click to trace its mail`)} — click it for the mail</div>
     <div class="muted small">full pane facts (born/died, transcript pointer) live on the pane's birth event — click the matching <span class="mono">pane.born</span> row in the log.</div>`);
 }
 
