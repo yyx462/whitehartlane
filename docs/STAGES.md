@@ -112,7 +112,9 @@ why ("refuse, never vanish") — there are no silently ignored fields.
 - **`check`** — *judge*: "did THIS stage's workforce do its job?" The
   rail runs it on completion (per unit for worker stages; for coworker,
   in-exchange at the stop — before the members retire, one revise
-  round on red; for lab, after the experiment). 120s cap.
+  round on red; for lab, after the experiment). 120s cap. The check
+  runs with `WHL_UNIT` in its env naming the unit (or lab stage) it
+  judges — a per-unit hook knows its subject without scanning.
 - **`run`** — *act*: "rail, DO this." Gate-only, one-shot. 300s cap.
 - **`grade`** — *bind*: "does the TASK verifier ([hooks] grade =
   verify.sh) attach here?" Default: last unit stage only. It is a

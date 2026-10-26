@@ -3,7 +3,7 @@
 # is findings + coverage; the author-facing surface is feedback.
 [[contract.deliverables]]
 name = "verdict"
-path = "review/verdict.json"
+path = "data/review/verdict.json"
 kind = "json"
 
 [[contract.deliverables]]

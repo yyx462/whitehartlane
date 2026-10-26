@@ -186,6 +186,39 @@ and say so. Run-scoped workarounds (program-folder briefs, hooks) are
 the spur's to make; an OS fix is a ticket, never a mid-run edit of
 WhiteHartLane or this skill.
 
+## The PR review hook (every PR-generating stage's tail)
+
+`whl review` closes the PR→merge gap with the adversarial pre-merge
+rail (the program template: `templates/pr-review/` — read its README
+before customizing):
+
+```
+whl review <repo> --base main --head feat \
+           [--trace-dir <the authoring job's dir>] \
+           --from opencode:<your session id>
+```
+
+- One command: materializes the review program (intake gate → 4-lens
+  fan-out → prove gate → divide solo → merge gate) and levies it.
+  Docs-only diffs skip at the door (receipt, nothing levied).
+- The four lenses are fixed: `principles` (invariants + twin paths),
+  `tests` (adversarial test creation), `momentum` (the authoring trace
+  cross-check), `questions` (the repo's QUESTIONS.md).
+- The DECISION MODEL is mechanical: a finding blocks only with a repro
+  that fails on HEAD twice and classifies introduced/incomplete-fix
+  against BASE. Accept → the merge gate merges. Reject → the divide
+  stage maps each proven finding to the worker whose deliverable
+  claims its file (via `--trace-dir`) and writes ONE
+  `feedback/<name>.md` per party.
+- Your job as the levy when the wake lands: on reject, feed each
+  `feedback/<name>.md` verbatim into that worker's NEXT brief (the
+  refine round belongs to the AUTHORING program, not the review);
+  a worker answers a finding with code or a test, never prose, and
+  never edits the repros under `test/review/`.
+- The repo under review owns `INVARIANTS.md` + `QUESTIONS.md` at its
+  root; every escape becomes a new invariant. The weekly drill:
+  `PR_DRILL=1 test/e2e/pr-review/run-drill.sh <this checkout>`.
+
 ## Stop
 
 Levied and handed back → STOP. The next event in this session is the

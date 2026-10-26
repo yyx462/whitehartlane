@@ -26,3 +26,9 @@ promotes).
 The fan-out fixture the test suite runs (`test/util.ts`'s `EXAMPLE`) is
 `test/fixtures/three-lookups` — the converted form of the retired
 units-hook example.
+
+Not an example but a RAIL: `templates/pr-review/` — the adversarial
+pre-merge review program (`whl review <repo> --base … --head …`; the
+PR→merge gate with 4 lenses, a mechanical proof gate, and per-worker
+feedback division). Its drill: `PR_DRILL=1
+test/e2e/pr-review/run-drill.sh <this checkout>`.

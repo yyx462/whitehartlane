@@ -16,7 +16,7 @@
 # degrade to advisory with a receipt (never a silent skip).
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
-. "$prog/review/config.sh"
+. "$prog/data/review/config.sh"
 export REPO BASE_SHA HEAD_SHA PROG="$prog"
 
 node <<'EOF'
@@ -24,12 +24,12 @@ const { execSync } = require("node:child_process")
 const fs = require("node:fs")
 const path = require("node:path")
 const prog = process.env.PROG
-const head = path.join(prog, "review", "head")
-const base = path.join(prog, "review", "base")
+const head = path.join(prog, "data", "review", "head")
+const base = path.join(prog, "data", "review", "base")
 const die = (why) => { console.error(`prove: ${why}`); process.exit(1) }
 if (!fs.existsSync(head) || !fs.existsSync(base)) die("intake checkouts missing — did the intake gate run?")
 
-const diffFiles = new Set(fs.readFileSync(path.join(prog, "review", "files.txt"), "utf8").split("\n").filter(Boolean))
+const diffFiles = new Set(fs.readFileSync(path.join(prog, "data", "review", "files.txt"), "utf8").split("\n").filter(Boolean))
 const findings = []
 for (const unit of fs.readdirSync(path.join(prog, "units"))) {
   const f = path.join(prog, "units", unit, "findings.jsonl")
@@ -41,14 +41,18 @@ for (const unit of fs.readdirSync(path.join(prog, "units"))) {
 }
 if (findings.length === 0 && !fs.existsSync(path.join(prog, "units"))) die("no units dir — the lenses stage never ran")
 
-const LOAD_ERR = /Cannot find module|ERR_MODULE_NOT_FOUND|SyntaxError|ERR_UNSUPPORTED|ERR_UNKNOWN/
+// a load error surfaces in the runner's report (stdout) or stderr —
+// match both (a repro that cannot even load is bogus, never a verdict)
+const LOAD_ERR = /Cannot find (module|package)|ERR_MODULE_NOT_FOUND|SyntaxError|ERR_UNSUPPORTED|ERR_UNKNOWN/
+const CHILD_ENV = { ...process.env }
+delete CHILD_ENV.NODE_TEST_CONTEXT
 const to = (cmd, cwd) => {
   const timeout = execSync("command -v timeout >/dev/null 2>&1 && echo yes || echo no").toString().trim() === "yes" ? ["timeout", "60"] : []
   try {
-    execSync([...timeout, cmd].join(" "), { cwd, stdio: ["ignore", "pipe", "pipe"], timeout: 90_000 })
+    execSync([...timeout, cmd].join(" "), { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"], timeout: 90_000, encoding: "utf8" })
     return { code: 0, err: "" }
   } catch (e) {
-    return { code: e.status ?? 1, err: String(e.stderr ?? "") }
+    return { code: e.status ?? 1, err: `${e.stderr ?? ""}${e.stdout ?? ""}` }
   }
 }
 const runRepro = (tp, side) => {
@@ -103,11 +107,11 @@ const out = {
   advisory: advisory.map(({ _unit, _line, why, ...f }) => ({ ...f, why })),
   stats: { findings: findings.length, blocked: blocked.length, advisory: advisory.length, proven },
 }
-fs.writeFileSync(path.join(prog, "review", "verdict.json"), JSON.stringify(out, null, 2) + "\n")
+fs.writeFileSync(path.join(prog, "data", "review", "verdict.json"), JSON.stringify(out, null, 2) + "\n")
 const lines = ["# advisory — real but never blocking (P2/P3, unproven, pre-existing, bogus, flaky)", ""]
 for (const a of advisory) lines.push(`- [${a.severity}] ${a.id} (${a.lens}): ${a.claim} — ${a.why}`)
 if (advisory.length === 0) lines.push("- none")
-fs.writeFileSync(path.join(prog, "review", "advisory.md"), lines.join("\n") + "\n")
-fs.appendFileSync(path.join(prog, "review", "ledger.jsonl"), ledger.map((l) => JSON.stringify({ ts: new Date().toISOString(), head: process.env.HEAD_SHA, ...l })).join("\n") + "\n")
+fs.writeFileSync(path.join(prog, "data", "review", "advisory.md"), lines.join("\n") + "\n")
+fs.appendFileSync(path.join(prog, "data", "review", "ledger.jsonl"), ledger.map((l) => JSON.stringify({ ts: new Date().toISOString(), head: process.env.HEAD_SHA, ...l })).join("\n") + "\n")
 console.log(`prove: ${verdict} — ${blocked.length} blocking (${blocked.map((b) => b.id + ":" + b.outcome).join(", ") || "none"}), ${advisory.length} advisory`)
 EOF

@@ -7,12 +7,11 @@
 # is residue).
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
-fail() { echo "divide-check: $1" >&2; exit 1; }
-node <<'EOF' || exit 1
+NODE_TEST_CONTEXT= PROG="$prog" node <<'EOF' || exit 1
 const fs = require("node:fs")
 const path = require("node:path")
-const prog = process.env.PROG ?? path.resolve(process.argv[1] ?? ".", "..", "..")
-const v = JSON.parse(fs.readFileSync(path.join(prog, "review", "verdict.json"), "utf8"))
+const prog = process.env.PROG
+const v = JSON.parse(fs.readFileSync(path.join(prog, "data", "review", "verdict.json"), "utf8"))
 const fbDir = path.join(prog, "feedback")
 const files = fs.existsSync(fbDir) ? fs.readdirSync(fbDir).filter((f) => f.endsWith(".md") && f !== "MAP.md") : []
 const err = (m) => { console.error(`divide-check: ${m}`); process.exit(1) }

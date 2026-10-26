@@ -120,6 +120,14 @@ _Avoid_: gate (ambiguous), poll, sensor
 How an exchange ends (run #17's law): a member's stop is accepted only when NOBODY is working (the drain rule — one spelling, never a fixed sleep), then the stage check runs while every pane still lives: red is ONE revise round at the stop's author carrying the check's stderr verbatim; a second red fails honestly. A station settles done only through its check — the receipt row proves it ran.
 _Avoid_: audit-after-retire, post-exchange check, settle window, quiet period
 
+**Proof gate**:
+The pr-review rail's decision model (`whl review`, template `templates/pr-review/`): a finding blocks a merge ONLY with a repro test that fails on an assertion on HEAD twice and classifies against BASE — `introduced` (fails HEAD, passes BASE) or `incomplete-fix` (fails both, the diff touches the finding's file) block; `pre-existing`, `bogus`, `flaky`, `refuted`, unproven and P2/P3 are advisory and never block. A fact blocks; an opinion never does.
+_Avoid_: LLM judge, severity vote, confidence score
+
+**Responsibility divider**:
+The review's reject path: one mind reads the proven findings plus the AUTHORING run's trace (`--trace-dir`) and maps each finding to the worker whose deliverable claims its file — one `feedback/<name>.md` per party, their findings only, plus the please-check-and-refine contract. The mechanical floor (every blocked finding covered exactly once, none invented) is the divide stage's check; the wisdom of the mapping is judged by outcomes over time.
+_Avoid_: blame agent, reviewer round, post-mortem
+
 **Unreachable**:
 A check whose earlier waves hold a failure — it can never be asked, so it cannot count against the run finishing. Terminal by rule; the run finishes honestly failed instead of waiting forever.
 _Avoid_: deadlock, skipped (different concept)

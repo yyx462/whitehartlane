@@ -21,6 +21,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
+import { prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -171,6 +172,11 @@ async function main() {
     console.log(`whitehartlane — the door
 
   run <folder> [--from <tool>:<sid>]   commission a spur (the levy walks away)
+  review <repo> [--base <ref>] [--head <ref>] [--trace-dir <dir>]
+                                       materialize + levy the adversarial
+                                       pre-merge review (PR→merge gap:
+                                       proven findings block, accept
+                                       merges, reject divides feedback)
   jobs                                 the board
   events | audit | sweep | promote     observation and care
   pause | continue | regrade | fork    the resume ladder
@@ -282,6 +288,85 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     for (const w of ready.warnings) console.error(`warning: ${w}`)
     console.log(`log: ${ready.log}`)
     console.log(`trace: ${ready.trace}`)
+    return
+  }
+
+  if (cmd === "review") {
+    const args = process.argv.slice(3)
+    const val = (name) => {
+      const i = args.indexOf(`--${name}`)
+      return i !== -1 ? args[i + 1] : undefined
+    }
+    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from"])
+    const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
+    const spawner = spawnerFromArgs(args)
+    const unattended = args.includes("--unattended")
+    if (!positional) {
+      console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--title <s>] [--author <s>]")
+      console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>]")
+      console.error("                               [--from <tool>:<sid> | --unattended]")
+      process.exitCode = 2
+      return
+    }
+    const ready = prepareReview(
+      {
+        repo: positional,
+        base: val("base"),
+        head: val("head"),
+        title: val("title"),
+        author: val("author"),
+        mergeCmd: val("merge-cmd"),
+        traceDir: val("trace-dir"),
+        bodyFile: val("body-file"),
+        out: val("out"),
+        template: val("template"),
+      },
+      join(import.meta.dirname, "..", "templates"),
+    )
+    if (!ready.ok) {
+      console.error(reviewReceipt(ready))
+      process.exitCode = ready.code
+      return
+    }
+    if (ready.skipped) {
+      console.log(reviewReceipt(ready))
+      return
+    }
+    // the door's own admission screens judge the materialized program
+    // (grammar, deliverables, brief paths) — a broken template dies
+    // here, before anything is booked
+    const check = prepareRun(ready.dir, { check: true })
+    if (!check.ok) {
+      console.error(`review: the materialized program failed admission:\n${check.why}`)
+      process.exitCode = 1
+      return
+    }
+    if (!spawner && !unattended) {
+      console.log(reviewReceipt(ready))
+      return
+    }
+    const runReady = prepareRun(ready.dir)
+    if (!runReady.ok) {
+      console.error(`review: ${runReady.why}`)
+      process.exitCode = runReady.code
+      return
+    }
+    if (spawner) {
+      runReady.job.spawner = spawner
+      saveJob(runReady.job)
+    }
+    const spawned = spawnRunner(runReady.job, import.meta.dirname)
+    if (!spawned.ok) {
+      abortJob(runReady.job, spawned.why, 0, "cli")
+      console.error(`review: ${spawned.why}`)
+      process.exitCode = 1
+      return
+    }
+    console.log(`job: ${runReady.job.id}`)
+    console.log(`workflow: ${runReady.kind}`)
+    console.log(`verdict: will land at ${join(ready.dir, "data", "review", "verdict.json")} (the staged run dir carries it)`)
+    console.log(`log: ${runReady.log}`)
+    console.log(`trace: ${runReady.trace}`)
     return
   }
 

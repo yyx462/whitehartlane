@@ -7,7 +7,7 @@
 # The rail sets WHL_UNIT to the unit being judged.
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
-unit="${WHL_UNIT:?findings-check needs WHL_UNIT — the rail sets it at the unit's check}"
+unit="${WHL_UNIT:?findings-check needs WHL_UNIT — the rail sets it at the check of the unit being judged}"
 dir="$prog/units/$unit"
 fail() { echo "findings-check: $unit: $1" >&2; exit 1; }
 
@@ -15,7 +15,9 @@ fail() { echo "findings-check: $unit: $1" >&2; exit 1; }
 [ -f "$dir/findings.jsonl" ] || fail "findings.jsonl missing — write it even when empty (no findings is a claim your coverage must back)"
 [ -f "$dir/coverage.md" ] || fail "coverage.md missing — 'no findings' is ambiguous without the receipt of what you checked"
 
-node - "$dir/findings.jsonl" "$unit" <<'EOF' || exit 1
+# NODE_TEST_CONTEXT= : a hook's node must never inherit the test
+# runner's child protocol (it changes exit semantics under --test)
+NODE_TEST_CONTEXT= node - "$dir/findings.jsonl" "$unit" <<'EOF' || exit 1
 const [file, unit] = process.argv.slice(2)
 const lines = require("node:fs").readFileSync(file, "utf8").split("\n").filter((l) => l.trim())
 const req = ["id", "lens", "severity", "claim", "location"]
@@ -37,7 +39,7 @@ EOF
 
 # the coverage receipt: every decision traced, sites checked with
 # file:line. Thin coverage + empty findings = a lens that did not look.
-refs=$(grep -cE '[A-Za-z0-9._/-]+:[0-9]+' "$dir/coverage.md" || true)
+refs=$({ grep -oE '[A-Za-z0-9._/-]+:[0-9]+' "$dir/coverage.md" || true; } | wc -l | tr -d ' ')
 [ "$refs" -ge 3 ] || fail "coverage.md carries only $refs file:line references (need >=3) — an empty findings file with thin coverage is rejected"
 
 echo "findings-check: $unit ok"

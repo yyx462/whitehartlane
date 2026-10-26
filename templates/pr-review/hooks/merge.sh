@@ -6,8 +6,8 @@
 # The one place in the review that decides without a mind.
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
-. "$prog/review/config.sh"
-node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/review/verdict.json" \
+. "$prog/data/review/config.sh"
+node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
   | { read -r verdict
 case "$verdict" in
   accept)
@@ -21,8 +21,8 @@ case "$verdict" in
     echo "merge: accepted — $TITLE ($HEAD_SHA) merged"
     ;;
   reject)
-    n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/review/verdict.json")
-    echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at review/verdict.json" >&2
+    n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/data/review/verdict.json")
+    echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at data/review/verdict.json" >&2
     exit 1
     ;;
   *)
