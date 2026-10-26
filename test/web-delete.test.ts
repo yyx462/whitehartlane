@@ -4,7 +4,7 @@
 // unknown job is a 404, and a sibling job in the same session is
 // untouched. No booking, no CLI door — the endpoint owns the rm.
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { spawn } from "node:child_process"
@@ -63,8 +63,16 @@ async function waitHealthy(port: number): Promise<void> {
   throw new Error("server did not come up")
 }
 
-async function deleteJob(port: number, sid: string, jid: string): Promise<Response> {
-  return fetch(`http://127.0.0.1:${port}/api/job/${sid}/${jid}/delete`, { method: "POST" })
+// the server mints the mutation bearer into the fixture root on boot
+function tokenOf(root: string): string {
+  return readFileSync(join(root, "window.token"), "utf8").trim()
+}
+
+async function deleteJob(port: number, sid: string, jid: string, token: string): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/api/job/${sid}/${jid}/delete`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  })
 }
 
 test("delete removes a parked job's files, refuses a live run, leaves siblings alone", async (t) => {
@@ -88,21 +96,22 @@ test("delete removes a parked job's files, refuses a live run, leaves siblings a
   })
   t.after(() => child.kill())
   await waitHealthy(port)
+  const token = tokenOf(root)
 
   // unknown job -> 404
-  const missing = await deleteJob(port, SID, "j-nope00")
+  const missing = await deleteJob(port, SID, "j-nope00", token)
   assert.equal(missing.status, 404)
 
   // live run -> 409, and not one file moved
   const liveDir = join(root, "sessions", SID, "jobs", "j-live01")
-  const live = await deleteJob(port, SID, "j-live01")
+  const live = await deleteJob(port, SID, "j-live01", token)
   assert.equal(live.status, 409)
   const liveBody = (await live.json()) as { error?: string }
   assert.match(liveBody.error ?? "", /refusing/)
   assert.ok(existsSync(join(liveDir, "job.json")), "live job keeps its record")
 
   // parked job (aborted) -> 200, the whole job dir is gone
-  const parked = await deleteJob(port, SID, "j-park01")
+  const parked = await deleteJob(port, SID, "j-park01", token)
   assert.equal(parked.status, 200)
   const parkedBody = (await parked.json()) as { ok?: boolean; removed?: string[] }
   assert.equal(parkedBody.ok, true)
@@ -111,7 +120,7 @@ test("delete removes a parked job's files, refuses a live run, leaves siblings a
   assert.ok(!existsSync(join(root, "sessions", SID, "jobs", "j-park01", "run")), "staged run gone")
 
   // retired job -> 200 too (success/failed are fair game)
-  const done = await deleteJob(port, SID, "j-done01")
+  const done = await deleteJob(port, SID, "j-done01", token)
   assert.equal(done.status, 200)
   assert.ok(!existsSync(join(root, "sessions", SID, "jobs", "j-done01")))
 

@@ -86,8 +86,13 @@ test("a UI verb survives launchd's minimal PATH (j-389b25)", async (t) => {
   })
   t.after(() => child.kill())
   await waitHealthy(port)
+  // the mutation bearer the server minted into the fixture root
+  const token = readFileSync(join(root, "window.token"), "utf8").trim()
 
-  const res = await fetch(`http://127.0.0.1:${port}/api/job/${SID}/${jid}/abort`, { method: "POST" })
+  const res = await fetch(`http://127.0.0.1:${port}/api/job/${SID}/${jid}/abort`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  })
   const body = (await res.json()) as { ok?: boolean; error?: string }
   assert.equal(res.status, 200, `abort came back ${res.status}: ${JSON.stringify(body)}`)
   assert.equal(body.ok, true)

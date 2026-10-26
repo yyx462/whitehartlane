@@ -238,3 +238,7 @@ _Avoid_: failure notice, death certificate
 **Question bank**:
 The committed `questions.toml` a run inherits and grows: the interviewer asks banked questions, may append new ones (append-only; `retired = true`, never erasure), and the audit checks every asked question is banked. Makes "same questions every run" true by construction instead of by model discipline.
 _Avoid_: prompt library, FAQ
+
+**Boot dispenser**:
+`GET /api/boot` on the window server — the loopback-only handoff of the mutation bearer token to the window's own page. Every non-GET needs the token (`window.token`, 0600, OS disk root); the dispenser exists so the operator's browser is zero-config, not as a secret from the machine (local processes read the file anyway). Never answers a foreign Origin; a tailnet-opened page gets nothing and the window runs read-only.
+_Avoid_: auth endpoint, login, session

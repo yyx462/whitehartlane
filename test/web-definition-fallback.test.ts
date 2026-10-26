@@ -9,7 +9,7 @@
 // (`dag` block, `dag_id` key) — records written before the rename
 // must keep rendering (the server reads both spellings, always).
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { spawn } from "node:child_process"
@@ -123,6 +123,8 @@ test("a gone-source spur's definition falls back read-only to the newest staged 
   })
   t.after(() => child.kill())
   await waitHealthy(port)
+  // the mutation bearer the server minted into the fixture root
+  const token = readFileSync(join(root, "window.token"), "utf8").trim()
 
   const before = diskSnapshot(root)
 
@@ -149,7 +151,10 @@ test("a gone-source spur's definition falls back read-only to the newest staged 
   assert.deepEqual(def.hooks.map((h) => h.name), ["units"])
 
   // trigger keeps refusing — the source is the thing that runs
-  const trigRes = await fetch(`http://127.0.0.1:${port}/api/dags/p-webt/fb/trigger`, { method: "POST" })
+  const trigRes = await fetch(`http://127.0.0.1:${port}/api/dags/p-webt/fb/trigger`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  })
   assert.equal(trigRes.status, 400)
   const trigBody = (await trigRes.json()) as { error?: string }
   assert.match(trigBody.error ?? "", /folder does not exist/)
@@ -162,7 +167,7 @@ test("a gone-source spur's definition falls back read-only to the newest staged 
   assert.deepEqual(progBody.files, [])
   const putRes = await fetch(`http://127.0.0.1:${port}/api/program`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({ dag: "p-webt/fb", name: "workflow.toml", text: "x" }),
   })
   assert.equal(putRes.status, 400)

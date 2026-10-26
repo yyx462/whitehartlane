@@ -5,7 +5,7 @@
 // poll see the verb's effect. The polling UI stops paying a full OS
 // disk walk per GET.
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { spawn } from "node:child_process"
@@ -68,6 +68,8 @@ test("GETs share the scan within the TTL; any POST busts it for the next poll", 
   })
   t.after(() => child.kill())
   await waitHealthy(port)
+  // the mutation bearer the server minted into the fixture root
+  const token = readFileSync(join(root, "window.token"), "utf8").trim()
 
   const jobs = async () => ((await (await fetch(`http://127.0.0.1:${port}/api/jobs`)).json()) as { jobs?: { id: string }[] }).jobs ?? []
 
@@ -81,7 +83,10 @@ test("GETs share the scan within the TTL; any POST busts it for the next poll", 
   assert.equal((await jobs()).length, 1, "within the TTL the external write is not yet visible — one walk per window")
 
   // any POST busts before routing — even one that 404s afterwards
-  const bust = await fetch(`http://127.0.0.1:${port}/api/__cache_bust`, { method: "POST" })
+  const bust = await fetch(`http://127.0.0.1:${port}/api/__cache_bust`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  })
   assert.equal(bust.status, 404, "the busting POST itself may 404 — the bust already ran")
   assert.equal((await jobs()).length, 2, "after the bust the next poll sees the external write")
 })
