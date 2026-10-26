@@ -775,11 +775,13 @@ async function copyText(text) {
 }
 
 // the ⧉ chip rendered after copyable values (receipt dir/report, run id,
-// report.json `where`, file paths) — value rides in data-copy
-function copyBtnHtml(value, title) {
+// report.json `where`, file paths) — value rides in data-copy; an optional
+// label widens it into a text button (file panel: "⧉ path")
+function copyBtnHtml(value, title, label) {
   if (!value) return "";
   const t = title || "copy to clipboard";
-  return `<button class="copy-btn" data-copy="${esc(value)}" data-copy-label="${esc(t.replace(/^copy /, ""))}" title="${esc(t)}">⧉</button>`;
+  const text = label ? `⧉ ${esc(label)}` : "⧉";
+  return `<button class="copy-btn${label ? " copy-wide" : ""}" data-copy="${esc(value)}" data-copy-label="${esc(t.replace(/^copy /, ""))}" title="${esc(t)}">${text}</button>`;
 }
 
 async function copyToClipboard(text, label) {
@@ -2178,11 +2180,15 @@ function filePanelHtml() {
   const abs = where ? `${where.replace(/\/+$/, "")}/${sp.filePath}` : null;
   return `<div class="file-view">
     <div class="file-view-head">
-      <span class="fpath">${esc(sp.filePath)}</span>
-      ${d.bytes != null ? `<span class="tmeta">${d.bytes} B</span>` : ""}
-      ${copyBtnHtml(abs, abs ? "copy absolute path" : "")}
-      ${d.binary || d.text == null ? "" : `<button class="copy-btn" data-copy-file title="copy file content">⧉</button>`}
-      ${notes.map((n) => `<span class="fnote">${esc(n)}</span>`).join("")}
+      <div class="fvh-left">
+        <span class="fpath">${esc(sp.filePath)}</span>
+        ${d.bytes != null ? `<span class="tmeta">${d.bytes} B</span>` : ""}
+        ${notes.map((n) => `<span class="fnote">${esc(n)}</span>`).join("")}
+      </div>
+      <div class="fvh-actions">
+        ${copyBtnHtml(abs, abs ? "copy absolute path" : "", "path")}
+        ${d.binary || d.text == null ? "" : `<button class="copy-btn copy-wide copy-accent" data-copy-file title="copy file content">⧉ content</button>`}
+      </div>
     </div>
     ${d.binary ? "" : `<pre>${esc(d.text ?? "")}</pre>`}
   </div>`;

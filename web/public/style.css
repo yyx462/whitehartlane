@@ -1424,6 +1424,37 @@ td.empty, .empty {
 
 .kv dd .copy-btn { margin-left: 6px; vertical-align: 1px; }
 
+/* labeled variants — the file panel's top-right pair: ghost "path",
+   accent-tinted "content" so the two reads never blur together */
+.copy-btn.copy-wide { padding: 2px 9px; white-space: nowrap; }
+
+.copy-btn.copy-accent {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+}
+
+.copy-btn.copy-accent:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text);
+}
+
+.file-view-head .fvh-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.file-view-head .fvh-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 /* ---------- events: labeled log + trace side ---------- */
 /* four named columns — time · event · actor · run — then a detail
    column; the header row says what everything is */
