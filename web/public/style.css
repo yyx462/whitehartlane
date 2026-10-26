@@ -631,8 +631,13 @@ td.empty, .empty {
   border-radius: 8px;
 }
 
-#split-left { flex: 0 0 45%; }
+#split-left { flex: 0 0 45%; min-width: 320px; }
 #split-right { flex: 1 1 auto; }
+
+/* collapsed via the split-bar "◂ info" toggle — the right pane takes
+   the whole width; state persists in localStorage (ui4-split-folded) */
+.split.folded #split-left,
+.split.folded .split-grip { display: none; }
 
 .split-grip {
   flex: 0 0 7px;
@@ -1517,11 +1522,19 @@ td.empty, .empty {
 .ev-ent:hover { border-color: var(--accent); color: var(--text); }
 
 /* the split: log on the left, the traced record on the right */
+/* the events view is a perfect column: head + live badge natural, the
+   split takes the rest — the body itself never scrolls, each pane
+   scrolls alone (a global scroll made the record start mid-way) */
+.sp-body:has(> .ev-wrap) {
+  display: flex;
+  flex-direction: column;
+}
+
 .ev-wrap {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  height: calc(100vh - 235px);
+  flex: 1;
   min-height: 380px;
 }
 

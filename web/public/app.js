@@ -13,6 +13,7 @@ const LEFT_TABS = ["diagram", "runs", "config"];
 const RIGHT_TABS = ["receipt", "report", "events"];
 const STATUSES = ["success", "failed", "aborted", "running", "paused", "orphaned"];
 const SPLIT_KEY = "ui4-split-pct";
+const SPLIT_FOLD_KEY = "ui4-split-folded";
 const EV_SPLIT_KEY = "ui4-ev-split-pct";
 
 const SORT_NAMES = {
@@ -817,6 +818,7 @@ function mountSplit(r, seq) {
       <span class="small" style="font-weight:700">Spur Status</span>
       <span class="grow"></span>
       <span id="split-note" class="muted"></span>
+      <button class="btn ghost" id="split-collapse" title="hide the spur info pane">◂ info</button>
       <button class="btn ghost" id="split-reset" title="reset divider to 45% / 55%">Reset</button>
     </div>
     <div class="split" id="split">
@@ -848,11 +850,21 @@ function initSplitLayout() {
   const left = $("#split-left");
   const grip = $("#split-grip");
   const note = $("#split-note");
+  const foldBtn = $("#split-collapse");
   let pct = parseFloat(localStorage.getItem(SPLIT_KEY));
   if (!(pct >= 20 && pct <= 80)) pct = 45;
-  const apply = () => { left.style.flex = `0 0 ${pct}%`; };
+  const folded = () => localStorage.getItem(SPLIT_FOLD_KEY) === "1";
+  const apply = () => {
+    const off = folded();
+    root.classList.toggle("folded", off);
+    if (!off) left.style.flex = `0 0 ${pct}%`;
+    if (foldBtn) {
+      foldBtn.textContent = off ? "▸ info" : "◂ info";
+      foldBtn.title = off ? "show the spur info pane" : "hide the spur info pane";
+    }
+  };
   const noteUpdate = () => {
-    if (note) note.textContent = `divider ${Math.round(pct)}%`;
+    if (note) note.textContent = folded() ? "info pane hidden" : `divider ${Math.round(pct)}%`;
   };
   apply();
   noteUpdate();
@@ -861,7 +873,7 @@ function initSplitLayout() {
     try { grip.setPointerCapture(e.pointerId); } catch { /* ok */ }
     const move = (ev) => {
       const box = root.getBoundingClientRect();
-      const w = Math.min(box.width - 300, Math.max(300, ev.clientX - box.left));
+      const w = Math.min(box.width - 320, Math.max(320, ev.clientX - box.left));
       pct = (w / box.width) * 100;
       apply();
     };
@@ -878,6 +890,12 @@ function initSplitLayout() {
   $("#split-reset").addEventListener("click", () => {
     localStorage.removeItem(SPLIT_KEY);
     pct = 45;
+    apply();
+    noteUpdate();
+    root.dispatchEvent(new CustomEvent("pl-resized"));
+  });
+  if (foldBtn) foldBtn.addEventListener("click", () => {
+    localStorage.setItem(SPLIT_FOLD_KEY, folded() ? "0" : "1");
     apply();
     noteUpdate();
     root.dispatchEvent(new CustomEvent("pl-resized"));
@@ -1253,6 +1271,38 @@ function drawDiagram(body, defn, dk) {
       </div>
     </div>
     <div id="node-pop-slot"></div>`;
+  // the well is the whole world: center the default plot in it and pull
+  // saved positions (a layout saved on a bigger pane) back inside — no
+  // stranded nodes, no scroll just to reach a box (runs post-render;
+  // the well is only measurable once the body is in the DOM)
+  const view = body.querySelector(".diagram-view");
+  if (view && view.clientWidth) {
+    const wellW = view.clientWidth;
+    const wellH = view.clientHeight;
+    const usedSaved = new Set(nodes.filter((n) => {
+      const s = saved[n.id];
+      return Array.isArray(s) && s.length === 2;
+    }).map((n) => n.id));
+    const dflt = nodes.filter((n) => !usedSaved.has(n.id));
+    if (dflt.length) {
+      const spanW = Math.max(...dflt.map((n) => pos[n.id].x + nodeFootprint(n).w));
+      const spanH = Math.max(...dflt.map((n) => pos[n.id].y + nodeFootprint(n).h));
+      const dx = Math.max(0, (wellW - spanW) / 2);
+      const dy = Math.max(0, (wellH - spanH) / 2);
+      if (dx || dy) dflt.forEach((n) => { pos[n.id].x += dx; pos[n.id].y += dy; });
+    }
+    $$(".g-node", body).forEach((el) => {
+      const n = nodes.find((x) => x.id === el.dataset.node);
+      if (!n) return;
+      const p = pos[n.id];
+      if (usedSaved.has(n.id)) {
+        p.x = Math.max(0, Math.min(p.x, wellW - el.offsetWidth));
+        p.y = Math.max(0, Math.min(p.y, wellH - el.offsetHeight));
+      }
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+    });
+  }
   paintWakeBoxes();
   paintStepStates();
   redrawEdges();
@@ -1421,8 +1471,11 @@ function fitCanvasSize(boxes, floor) {
   let w = Math.max(floor.fpW || 0, floor.wellW || 0);
   let h = Math.max(floor.fpH || 0, floor.wellH || 0);
   for (const b of boxes || []) {
-    if (b.x + b.w + 24 > w) w = b.x + b.w + 24;
-    if (b.y + b.h + 24 > h) h = b.y + b.h + 24;
+    // zero margin: a box touching the edge must not grow the canvas —
+    // growth here fed back into the drag bound and crept the canvas
+    // (and its scrollbar) wider forever
+    if (b.x + b.w > w) w = b.x + b.w;
+    if (b.y + b.h > h) h = b.y + b.h;
   }
   return { w, h };
 }
@@ -1528,16 +1581,17 @@ function bindNodeDrag(dk) {
       const startX = e.clientX, startY = e.clientY;
       const ox = node.offsetLeft, oy = node.offsetTop;
       let moved = false;
-      // the drag is bounded on EVERY side: 0 at the top-left, and the
-      // max(footprint, well) at the bottom-right — no infinite right,
-      // no infinite bottom. The bound follows the well live, so
-      // dragging the split divider never strands a node beyond it.
-      const bound = () => {
-        const v = canvas.closest(".diagram-view");
-        const bx = Math.max(Number(canvas.dataset.fpW) || 0, v ? v.clientWidth : 0) - node.offsetWidth - 24;
-        const by = Math.max(Number(canvas.dataset.fpH) || 0, v ? v.clientHeight : 0) - node.offsetHeight - 24;
-        return { x: Math.max(bx, 0), y: Math.max(by, 0) };
-      };
+      // the drag is bounded on EVERY side by the canvas — which is the
+      // well exactly when the plot fits (fitCanvasSize floors at the
+      // well) — so a box can touch every edge: 0 at the top-left,
+      // canvas-minus-box at the bottom-right, no margin. Wider only
+      // when the plot itself is oversized, and then the bound follows
+      // the canvas live, so dragging the split divider never strands
+      // a node beyond it.
+      const bound = () => ({
+        x: Math.max(canvas.offsetWidth - node.offsetWidth, 0),
+        y: Math.max(canvas.offsetHeight - node.offsetHeight, 0),
+      });
       const move = (ev) => {
         if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true;
         const b = bound();
