@@ -279,7 +279,7 @@ export async function runLab(
   let draining = false
   let parked = false
   let drainUntil: number | null = null
-  rail.installDrain(() => {
+  const dropOwnDrain = rail.installDrain(() => {
     if (draining || parked) return
     draining = true
     const ceiling =
@@ -287,6 +287,23 @@ export async function runLab(
     drainUntil = drainDeadline(taskDir, Date.now(), ceiling)
     log(`lab: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
   })
+  // Station tenancy (ADR 0016): a hosted experiment sweeps exactly its
+  // OWN panes on the way out — the actor plus every mock this
+  // generation spawned (rail.retire is per-pane: no fleet tab, no
+  // pkill of the run dir). A hosted lab never calls retireAll.
+  const endOfExperimentSweep = (): void => {
+    dropOwnDrain()
+    if (opts.station) {
+      for (const [id, flight] of flights) {
+        if (flight.pane) rail.retire(paneName("mock", id))
+      }
+      rail.retire("actor")
+      log(`lab: retired the actor + ${[...flights.values()].filter((f) => f.pane).length} mock pane(s) — the parent's rail is untouched`)
+      return
+    }
+    rail.retireAll()
+    rail.closeVerbose()
+  }
   const deadline = Date.now() + 2 * 60 * 60_000
   while (Date.now() < deadline) {
     const signal = detectors?.signal
@@ -388,9 +405,7 @@ export async function runLab(
   // the bookings (the actor's and every in-flight mock's); a typed
   // continue resumes them. The door books the pause.
   if (parked) {
-    rail.drainHook = null
-    rail.retireAll()
-    rail.closeVerbose()
+    endOfExperimentSweep()
     log("lab: parked — paused; the actor's and in-flight mocks' sessions stay booked — continue resumes them")
     return null
   }
@@ -414,7 +429,6 @@ export async function runLab(
     (table) => runCounts(taskDir, rail.manifest(), table),
     stopped && rows.every((row) => row.pass) ? "done" : rows.length === 0 && stopped ? "done" : undefined,
   )
-  rail.retireAll()
-  rail.closeVerbose()
+  endOfExperimentSweep()
   return report
 }

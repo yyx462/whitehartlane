@@ -1296,7 +1296,7 @@ export async function runOrchestrator(input: {
         return
       }
       if (draining) {
-        if (inFlight.size === 0) {
+        if (inFlight.size === 0 && stationFlights.size === 0) {
           log("orchestrator: drained — parking paused")
           parked = true
           finished = true
@@ -1308,6 +1308,14 @@ export async function runOrchestrator(input: {
           for (const [id] of [...inFlight]) {
             input.shep.retire(`w-${id}`)
             inFlight.delete(id)
+          }
+          // a hosted exchange still burning past the PARENT's ceiling:
+          // its own drain was armed (LIFO) and its engine's ceiling
+          // governs its members — stop waiting on it; its sessions stay
+          // booked and a continue resumes the SAME station exchange
+          for (const id of [...stationFlights.keys()]) {
+            log(`station ${id}: past the parent's drain ceiling — parking with its sessions booked`)
+            stationFlights.delete(id)
           }
           parked = true
           finished = true
@@ -1486,7 +1494,7 @@ export async function runOrchestrator(input: {
   // re-nursed parent resumes the SAME exchange, and a finished one
   // re-reports from the stop already delivered).
   const stationFlights = new Map<string, Promise<void>>()
-  const stationSettled = new Map<string, { status: string; why?: string }>()
+  const stationSettled = new Map<string, { status?: string; why?: string; parked?: boolean }>()
   const defaultHostStation = (stage: { id: string; topology?: string; members?: { name: string; brief: string; initiates?: boolean; model?: string; temperature?: number }[]; brief?: string; signal?: string; end?: string; preamble?: string }, dir: string): Promise<Report | null> => {
     const rail = input.shep as unknown as { inhabitPane?: unknown }
     if (typeof rail.inhabitPane !== "function") {
@@ -1535,6 +1543,16 @@ export async function runOrchestrator(input: {
     const dir = join(input.taskDir, "stations", step.id)
     const settled = stationSettled.get(step.id)
     if (settled) {
+      if (settled.parked) {
+        // a parked station parks the RUN: no settle row (the exchange
+        // is unfinished, not failed), the parent's own pause path takes
+        // over — requestPause is idempotent, and the loop's park
+        // condition waits for stationFlights to empty first
+        stationFlights.delete(step.id)
+        log(`station ${step.id}: exchange parked — the run parks with it`)
+        requestPause()
+        return true
+      }
       let pass = settled.status === "done"
       let checkRow = ""
       if (pass && step.check) {
@@ -1564,7 +1582,16 @@ export async function runOrchestrator(input: {
       const flight = (async () => {
         try {
           const report = await host(stage, dir)
-          stationSettled.set(step.id, { status: report?.status ?? "failed", ...(report?.status ? {} : { why: "no report from the station's engine" }) })
+          if (report === null) {
+            // ADR 5 tenancy: null is PARKED, never failed — the hosted
+            // engine drained to its boundary (its drain ran LIFO under
+            // the parent's), sessions stay booked, and the PARENT parks
+            // with it. No row, no wake; the settle branch arms the run's
+            // pause.
+            stationSettled.set(step.id, { parked: true })
+          } else {
+            stationSettled.set(step.id, { status: report.status, ...(report.status ? {} : { why: "no report from the station's engine" }) })
+          }
         } catch (err) {
           stationSettled.set(step.id, { status: "failed", why: err instanceof HookError ? err.message : String(err) })
         }

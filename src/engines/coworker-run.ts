@@ -484,13 +484,33 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   // trapSignals owns the signal. Stop delivering, let a member
   // mid-turn end its turn, then park. Pending mail is NOT drained — it
   // waits in messages/ for the next run's relay.
-  rail.drainHook = () => {
+  // Station tenancy (ADR 0016): installDrain RETURNS a disposer — a
+  // hosted exchange removes ITS drain when it ends, leaving the
+  // parent's intact (the pre-tenancy assignment overwrote it).
+  const dropOwnDrain = rail.installDrain(() => {
     if (ended !== null || draining) return
     draining = true
     const ceiling =
       Number(process.env.AGENTIC_OS_DRAIN_MS ?? "") || manifest.workflow.drain_timeout_ms || 10 * 60_000
     drainUntil = drainDeadline(taskDir, Date.now(), ceiling)
     log(`coworker: pause requested — draining to quiescence (ceiling ${new Date(drainUntil).toISOString()})`)
+  })
+  // Station tenancy (ADR 0016): a hosted exchange sweeps exactly its
+  // OWN member panes on the way out (rail.retire is per-pane: shep
+  // retire + ledger kill, no fleet tab, no pkill). The parent's unit
+  // panes, its chrome, and the process-level guarantee over the run
+  // dir (rail.retireAll's pkill tail) are never a station's to touch —
+  // that pkill at a station boundary is what orphaned runs mid-flight
+  // on Linux (the early R6).
+  const endOfExchangeSweep = (): void => {
+    dropOwnDrain()
+    if (opts.station) {
+      for (const m of members) rail.retire(m.name)
+      log(`coworker: retired ${members.length} member pane(s) — the parent's rail is untouched`)
+      return
+    }
+    rail.retireAll()
+    rail.closeVerbose()
   }
   while (!ended && Date.now() < deadline) {
     // the lease rides the beat (issue #123): one fs write per beat
@@ -502,8 +522,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     // the job now belong to the winner). Never split-brain it.
     if (rail.ledger && rail.ledger.renew() === false) {
       log("coworker: lease lost — another orchestrator owns this job; stopping relays")
-      rail.drainHook = null
-      rail.closeVerbose()
+      dropOwnDrain()
+      if (!opts.station) rail.closeVerbose()
       return null
     }
     if (draining) {
@@ -702,9 +722,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   // ADR 5: parked — not a finish. No report; the delivery ledger and
   // messages/ carry the exchange; a typed continue resumes it.
   if (ended === "paused") {
-    rail.drainHook = null
-    rail.retireAll()
-    rail.closeVerbose()
+    endOfExchangeSweep()
     log(`coworker: parked — paused (${delivered.length} relayed; pending mail waits in messages/)`)
     return null
   }
@@ -767,7 +785,6 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     (table) => runCounts(taskDir, rail.manifest(), table),
     ended === "stop" && dead.length === 0 && unresolved.length === 0 && verdictRed === null ? "done" : undefined,
   )
-  rail.retireAll()
-  rail.closeVerbose()
+  endOfExchangeSweep()
   return report
 }

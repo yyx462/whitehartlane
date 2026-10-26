@@ -207,10 +207,10 @@ export class Rail implements ShepPort {
   private readonly faultMemo = new Map<string, { at: number; hit: { id: string; type: string } | null }>()
   private verbosePath: string | null = null
   private verbosePane: string | null = null
-  // the drain hook (ADR 5): every engine drains — each registers here
-  // via installDrain (fan-out at runOrchestrator start, coworker at
-  // birth, lab at boot); sessions stay booked either way
-  drainHook: (() => void) | null = null
+  // the drain seam (ADR 5): every engine drains — each registers via
+  // installDrain (fan-out at runOrchestrator start, coworker at
+  // birth, lab at boot); the stack + composite getter live at
+  // installDrain (station tenancy, ADR 0016)
   // permission sweep state (zen 6): asks per pane (display numbering),
   // deny-family answers per pane (cap spend — allows are free), asks
   // per pane+path, and verdict notes queued for a pane that could not
@@ -763,8 +763,36 @@ export class Rail implements ShepPort {
   // its hook here — fan-out at runOrchestrator start, coworker at
   // birth, lab at boot (every engine does; that is the parity). The
   // door stays kind-blind: it never decides signal semantics by shape.
-  installDrain(fn: () => void): void {
-    this.drainHook = fn
+  //
+  // Station tenancy (ADR 0016): the registration is a STACK, not a
+  // slot. A hosted station's engine pushes its drain ABOVE the
+  // parent's; the trap unwinds LIFO (the station ends its member
+  // turns, then the parent arms its own park) so both halves run on
+  // every SIGTERM. The returned disposer removes exactly that entry —
+  // the engine calls it when its flight ends, and the parent's drain
+  // is what remains. The pre-tenancy slot let a hosted engine erase
+  // the parent's park (and the engines' `rail.drainHook = ...`
+  // reach-ins made it worse); the getter makes those compile errors.
+  private readonly drainStack: Array<() => void> = []
+
+  installDrain(fn: () => void): () => void {
+    this.drainStack.push(fn)
+    return () => {
+      const i = this.drainStack.indexOf(fn)
+      if (i >= 0) this.drainStack.splice(i, 1)
+    }
+  }
+
+  // LIFO over every registered drain — the trap's body, and the seam
+  // tests drive directly (the lab-pause pattern).
+  drainNow(): void {
+    for (const fn of [...this.drainStack].reverse()) fn()
+  }
+
+  // Back-compat read of the composite drain (null when nothing is
+  // registered). READ-ONLY by design: assignment was the tenancy bug.
+  get drainHook(): (() => void) | null {
+    return this.drainStack.length > 0 ? () => this.drainNow() : null
   }
 
   // Issue #123 — one write per cycle keeps the job's leadership claim
