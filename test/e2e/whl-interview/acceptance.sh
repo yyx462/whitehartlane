@@ -19,7 +19,7 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 WHL() { node --experimental-strip-types "$repo/bin/whitehartlane" "$@"; }
-work="$(mktemp -d "${TMPDIR:-/tmp}/whl-accept-")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/whl-accept.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 fails=0
 
@@ -93,7 +93,7 @@ if root.is_dir():
             src = json.loads(jobFile.read_text()).get("spur", {}).get("source", "")
         except Exception:
             continue
-        if src and Path(src).is_relative_to(work):
+        if src and Path(src).resolve().is_relative_to(work):
             count += 1
 print(count)
 PY
