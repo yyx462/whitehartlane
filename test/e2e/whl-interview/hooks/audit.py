@@ -43,6 +43,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 import tomllib
 from datetime import date
 from pathlib import Path
@@ -368,15 +369,18 @@ def build_transcript(data_dir, messages, contracts, errors):
 
 
 def build_interview(job_dir, messages, contracts, errors):
-    """render deliverables/interview.md — the human pack's QA lecture.
+    """render deliverables/interview.md — the human pack's skeleton.
 
-    The mock-interview record: every turn in seq order as
-    Interviewer:/Me: prose (the turn-contract chrome stripped), each
-    topic opening with its ladder walk as a mermaid diagram — the
-    level asked, the grade each answer earned, where a gap was banked
-    — so a reader preparing for this interview sees the questioning
-    LOGIC beside the substance. Deterministic: built from messages/
-    and the same turn contracts the audit judged, nothing else.
+    The DETERMINISTIC layer only: layout and canonical fields. It wraps
+    the real prose (paragraph-aware, ~78 cols), renders each question
+    from its validated contract (the canonical text, not the body's
+    restatement), demotes the exchange's grading chatter to blockquote
+    notes, and states each topic's outcome in plain words. What it
+    deliberately does NOT do: editorial work — no summarizing, no
+    rewriting protocol utterances, no content diagrams (a plot of the
+    ANSWER needs a mind that understood the answer). Those belong to
+    the refining pass; this skeleton is its faithful input and the
+    fallback when no pass runs.
     """
     effective = effective_contracts(contracts)
     turns: dict[str, int] = {}
@@ -391,41 +395,36 @@ def build_interview(job_dir, messages, contracts, errors):
         idx = max(j for j, c in enumerate(effective) if c["topic"] == t)
         closing[t] = effective[idx + 1]["grade"] if idx + 1 < len(effective) else "?"
 
-    def mm(s):
-        # mermaid label sanitizer — determinism over beauty
-        s = " ".join(str(s).split()).replace('"', "'").replace("<", "‹").replace(">", "›")
-        return s[:60] + "…" if len(s) > 60 else s
+    def wrap(text, width=78, prefix=""):
+        paras = [q.strip() for q in re.split(r"\n\s*\n", str(text)) if q.strip()]
+        return "\n\n".join(textwrap.fill(q, width=width, initial_indent=prefix, subsequent_indent=prefix) for q in paras)
 
+    qtext = {c["file"]: c["question"] for c in contracts}
     out = [
         f"# The Interview — {CONTRACT['name']}",
         "",
-        f"*run {job_dir.name} · {date.today().isoformat()} · {len(contracts)} graded turns · {len(messages)} messages · {len(errors)} logged contract error(s)*",
+        f"*run {job_dir.name} · {date.today().isoformat()}*",
+        f"*{len(contracts)} graded turns · {len(messages)} messages · {len(errors)} logged contract error(s)*",
         "",
-        "> Your prep pack. The questions are the real ones in the real order;",
-        "> the answers are the author's actual replies. Each topic opens with",
-        "> its ladder walk — the level asked, the grade earned — so the",
-        "> questioning logic is visible beside the prose. What still stands",
-        "> open is listed at the end; full detail sits in gaps.md and",
-        "> explained.md beside this file.",
+        "> Your prep pack. Each topic: its outcome in one line, then the",
+        "> real questions (from the validated contracts) and the author's",
+        "> actual answers. The interviewer's grading chatter sits demoted",
+        "> as notes; the grade each answer earned is marked beneath it.",
+        "> What still stands open is listed at the end.",
         "",
         "## The climb at a glance",
         "",
-        "```mermaid",
-        "flowchart LR",
+        "| # | topic | asked | gaps | closed |",
+        "| - | ----- | ----- | ---- | ------ |",
     ]
     for i, t in enumerate(TOPICS):
-        out.append(f"    t{i + 1}[\"{mm(f'{i + 1} · {t} — {turns.get(t, 0)}Q · {gaps[t]} gap · closed {closing[t]}')}\"]")
-        if i:
-            out.append(f"    t{i} --> t{i + 1}")
-    out.append(f"    t{len(TOPICS) + 1}[\"rebuttal pass\"]")
-    out.append(f"    t{len(TOPICS)} --> t{len(TOPICS) + 1}")
-    out.append("```")
+        out.append(f"| {i + 1} | {t} | {turns.get(t, 0)} | {gaps[t]} | {closing[t]} |")
+    out.append(f"| — | rebuttal pass | {turns.get(REBUTTAL, 0)} | — | — |")
     out.append("")
 
     # an answer's verdict rides the NEXT contract-bearing note (every
     # contract grades the PREVIOUS answer — the brief's law), so the
     # annotation under each Me: line is read off the next contract
-    qtext = {c["file"]: c["question"] for c in contracts}
     by_seq = sorted(contracts, key=lambda c: c["seq"])
     verdict_after = {}
     for m in messages:
@@ -434,51 +433,51 @@ def build_interview(job_dir, messages, contracts, errors):
         nxt = next((c for c in by_seq if c["seq"] > m["seq"]), None)
         if nxt:
             cite = "" if nxt["citation_checked"] == "ok" else f" · citation {nxt['citation_checked']}"
-            note = f"graded {nxt['grade']} · {nxt['move']}{cite}"
-            verdict_after[m["file"]] = f"*({mm(note)})*"
-
-    def ladder_diagram(topic):
-        tc = [c for c in effective if c["topic"] == topic]
-        lines = ["```mermaid", "flowchart TD"]
-        for j, c in enumerate(tc):
-            warn = " · GAP ✗" if c["move"] == "gap" else ""
-            lines.append(f"    q{j + 1}[\"Q{j + 1} — {LADDER[c['level'] - 1]}{warn}\"]")
-            if j:
-                lines.append(f"    q{j} -->|{mm(tc[j]['grade'])}| q{j + 1}")
-        if tc:
-            lines.append(f"    q{len(tc)} -->|{mm(closing.get(topic, '?'))}| done[\"topic closed\"]")
-        lines.append("```")
-        return lines
+            verdict_after[m["file"]] = f"graded {nxt['grade']} · {nxt['move']}{cite}"
 
     section_of = {c["file"]: c["topic"] for c in effective}
+    first_of = {}
+    for c in effective:
+        first_of.setdefault(c["topic"], c)
     current = None
     opened = False
     for m in messages:
         if m["type"] == "stop":
-            out += ["", "## The verdict", "", m["body"].strip(), ""]
+            out += ["", "## The verdict", "", wrap(m["body"])]
             continue
         t = section_of.get(m["file"], current)
         if t is None:
             if not opened:
-                out += ["## The opening — the pitch", ""]
+                out += ["", "## The opening — the pitch", ""]
                 opened = True
         elif t != current:
             head = f"## {TOPICS.index(t) + 1}. {t}" if t in TOPICS else "## The rebuttal pass"
-            out += ["", head, ""]
             if t in TOPICS:
-                out += ladder_diagram(t) + [""]
+                lvl = LADDER[first_of[t]["level"] - 1]
+                out += ["", head, "", f"*({turns.get(t, 0)} question(s) · sharpest level: {lvl} · {gaps[t]} gap(s) banked · closed {closing[t]})*", ""]
+            else:
+                out += ["", head, ""]
             current = t
-        body = FENCE.sub("", m["body"]).strip() or qtext.get(m["file"], "(empty)")
-        speaker = "Interviewer" if m["from"] == "interviewer" else "Me"
-        out += [f"**{speaker}:** {body}", ""]
+        body = FENCE.sub("", m["body"]).strip()
+        if m["from"] == "interviewer" and m["file"] in qtext:
+            # the question, from its canonical contract text — never
+            # the body's restatement of it; wrapped narrower so the
+            # bold speaker prefix cannot push a line past 80
+            prefix = "**Interviewer:** "
+            out += [prefix + wrap(qtext[m["file"]], width=78 - len(prefix)), ""]
+            if body:
+                out += [wrap(body, width=72, prefix="> "), ""]
+        else:
+            prefix = "**Me:** "
+            out += [prefix + wrap(body or "(empty)", width=78 - len(prefix)), ""]
         note = verdict_after.get(m["file"])
         if note:
-            out += [note, ""]
+            out += [f"*({note})*", ""]
 
-    out += ["## What still stands", ""]
+    out += ["", "## What still stands", ""]
     gaps_text = deliverable_path(job_dir, "gaps").read_text()
     standing = [s.split("\n")[0].strip() for s in re.split(r"^## ", gaps_text, flags=re.MULTILINE)[1:] if "rebuttal: stands" in s]
-    out += ([f"- {h}" for h in standing] if standing else ["- (none — every gap was refuted)"])
+    out += ([f"- {h[:76]}" for h in standing] if standing else ["- (none — every gap was refuted)"])
     out += ["", "Working files, one shelf up in the run's `data/`: `gaps.md` (full gap", "detail) · `explained.md` (cited synthesis) · `pitch.md` (the one-page", "pitch) · `questions.toml` (the bank)."]
 
     path = deliverable_path(job_dir, "interview")

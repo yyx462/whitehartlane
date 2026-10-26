@@ -55,16 +55,20 @@ else
 fi
 cp "$work/golden-pristine/data/pitch.md" "$work/golden/data/pitch.md"
 [ -s "$work/golden/data/transcript.jsonl" ] || { echo "FAIL — transcript.jsonl not built"; exit 1; }
-# the human pack: the QA lecture is rendered, Interviewer:/Me: per
-# turn, machine chrome stripped, ladder walks as mermaid diagrams
+# the human pack: the readable skeleton — wrapped prose, canonical
+# questions, demoted grading notes, no run-mechanics plots (a plot of
+# the ANSWER needs a mind; deterministic code does layout only)
 iv="$work/golden/deliverables/interview.md"
 [ -s "$iv" ] || { echo "FAIL — deliverables/interview.md not rendered"; exit 1; }
 grep -q "^\*\*Interviewer:\*\*" "$iv" || { echo "FAIL — interview.md has no Interviewer: turns"; exit 1; }
 grep -q "^\*\*Me:\*\*" "$iv" || { echo "FAIL — interview.md has no Me: turns"; exit 1; }
-[ "$(grep -c '```mermaid' "$iv")" -ge 2 ] || { echo "FAIL — interview.md needs the overview + per-topic ladder diagrams"; exit 1; }
+grep -q "^| # | topic | asked | gaps | closed |" "$iv" || { echo "FAIL — interview.md needs the climb table"; exit 1; }
+grep -q "^\*(graded " "$iv" || { echo "FAIL — interview.md needs per-answer grade annotations"; exit 1; }
 grep -q "turn-contract" "$iv" && { echo "FAIL — interview.md must strip the turn-contract chrome"; exit 1; }
+grep -q '```mermaid' "$iv" && { echo "FAIL — the deterministic skeleton draws no plots (content plots are the refining pass's job)"; exit 1; }
+awk 'length > 80 { bad = 1 } END { exit bad }' "$iv" || { echo "FAIL — interview.md lines must wrap at <= 80 cols (walls are unreadable)"; exit 1; }
 grep -q "What still stands" "$iv" || { echo "FAIL — interview.md must end with the standing list"; exit 1; }
-pass_n=$((pass_n + 1)); echo "ok   — interview.md rendered: QA lecture, diagrams, standing list, chrome stripped"
+pass_n=$((pass_n + 1)); echo "ok   — interview.md rendered: wrapped skeleton, canonical questions, notes demoted, no walls"
 # the pack's law: a file lives in deliverables/ ONLY if no agent needs
 # to read it — exactly ONE file today. The member docs (pitch is read
 # by the interviewer; the other three by the audit) are working files
