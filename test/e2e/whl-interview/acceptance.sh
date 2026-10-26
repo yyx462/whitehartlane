@@ -98,8 +98,8 @@ if root.is_dir():
 print(count)
 PY
 )
-  if [ "$jobs_new" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ]; then
-    check "E2" ok "ONE job for this commission ($jid), report done, stations inside: ${inside:-empty}"
+  if [ "$jobs_new" -eq 1 ] && [ "$report_status" = "done" ] && [ -d "$rdir/messages" ] && [ -d "$rdir/data" ] && [ -d "$rdir/deliverables" ] && [ -s "$rdir/deliverables/interview.md" ]; then
+    check "E2" ok "ONE job for this commission ($jid), report done, both shelves inside (data/ works, deliverables/ reads), QA lecture rendered"
   else
     check "E2" fail "state=$state report=$report_status jobs_this_commission=$jobs_new inside: ${inside:-none}"
   fi

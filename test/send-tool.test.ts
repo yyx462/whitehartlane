@@ -83,6 +83,8 @@ test("birth stages the send tool + roster and scopes each mailbox to its owner",
     const peer = m === "alpha" ? "beta" : "alpha"
     assert.ok(!keys.includes(`/messages/${peer}`), `${m}'s scope must not name ${peer}'s outbox`)
     assert.ok(keys.includes("/data"), `${m} shares the data/ shelf`)
+    // the human pack is authored in place — same grant as data/
+    assert.ok(keys.includes("/deliverables"), `${m} shares the deliverables/ pack`)
   }
   // the rail-written ledger: every new mail accounted the beat it parses
   const filed = ledger.events.filter((e) => e.kind === "mail.filed")

@@ -133,6 +133,14 @@ function copyBeside(source: string, store: string): void {
   // read; it is staged beside the spur so the run is self-contained
   const data = join(source, "data")
   if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
+  // a program that declares deliverables under deliverables/ authors
+  // the HUMAN pack in place (one home per file — no copy ceremony), so
+  // the pack's folder is staged beside data/: members' first write
+  // lands in an existing dir, and the run tree shows its shape at birth
+  const declared = deliverablesOf(source)
+  if (declared?.some((d) => d.path.split("/")[0] === "deliverables")) {
+    mkdirSync(join(store, "deliverables"), { recursive: true })
+  }
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })

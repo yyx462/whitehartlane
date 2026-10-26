@@ -28,9 +28,13 @@ Checks, in order:
      verdict line per section; topic-map.md names every topic
   8. the exchange closed deliberately (>=1 stop, none carrying a block)
 
-On PASS: builds data/transcript.jsonl, prints ONE JSON counts line
-(rail-parsed; human words go to stderr). Deliverables live where they
-were written — data/ is the shelf; nothing is copied anywhere.
+On PASS: builds data/transcript.jsonl (the machine record) AND
+deliverables/interview.md (the human pack's QA lecture — every turn
+as Interviewer:/Me: prose, each topic opening with its ladder walk as
+a mermaid diagram), then prints ONE JSON counts line (rail-parsed;
+human words go to stderr). Two shelves by audience: data/ works,
+deliverables/ reads; each file has ONE home (no copy ceremony — the
+#233 lesson).
 """
 
 import json
@@ -61,6 +65,39 @@ def say(why):
 def die(why):
     say(f"FAIL — {why}")
     sys.exit(1)
+
+
+def norm(q: str) -> str:
+    # bank membership folds case, apostrophes, and punctuation — the
+    # check exists to stop FREESTYLING (inventing questions), not to
+    # punish a dropped possessive (run #10's two characters of
+    # morphology)
+    return " ".join(q.casefold().replace("'", "").replace('"', "").replace("?", "").replace(".", "").split())
+
+
+def effective_contracts(contracts):
+    # SUPERSESSION (run #7): a contract re-stating an already-asked
+    # question is a re-grade or a mis-file the interviewer corrects by
+    # name — it opens nothing, charges nothing, closes nothing. Every
+    # per-topic walk (the audit's checks AND the interview renderer)
+    # runs over the EFFECTIVE contracts only.
+    effective, seen = [], set()
+    for c in contracts:
+        if c["topic"] == REBUTTAL or norm(c["question"]) not in seen:
+            if c["topic"] != REBUTTAL:
+                seen.add(norm(c["question"]))
+            effective.append(c)
+    return effective
+
+
+def deliverable_path(job_dir, name):
+    # a deliverable's home is its DECLARED path — never a hardcoded
+    # shelf: the human docs live in deliverables/, the machine
+    # transcript in data/ (two shelves by audience)
+    for d in CONTRACT["deliverables"]:
+        if d["name"] == name:
+            return job_dir / d["path"]
+    raise KeyError(f"contract declares no deliverable named {name!r}")
 
 
 def load_contract(job_dir=None):
@@ -159,8 +196,6 @@ def extract_contracts(messages):
 
 
 def audit(job_dir):
-    data_dir = job_dir / "data"
-
     # #205 — deliverables first: the commission's product is the point
     kinds = {"md": ".md", "jsonl": ".jsonl", "html": ".html", "png": ".png"}
     for d in CONTRACT["deliverables"]:
@@ -200,9 +235,6 @@ def audit(job_dir):
     # FREESTYLING (inventing questions), not to punish a dropped
     # possessive (run #10: "a stage check" vs the banked "a stage's
     # check" — the same banked question, two characters of morphology)
-    def norm(q: str) -> str:
-        return " ".join(q.casefold().replace("'", "").replace('"', "").replace("?", "").replace(".", "").split())
-
     banked = {norm(q["q"]) for q in BANK if not q.get("retired")}
     for c in contracts:
         if c["topic"] != REBUTTAL and norm(c["question"]) not in banked:
@@ -235,13 +267,7 @@ def audit(job_dir):
     # question is a re-grade or a mis-file the interviewer corrects by
     # name — it opens nothing, charges nothing, closes nothing. Every
     # per-topic walk below runs over the EFFECTIVE contracts only.
-    effective: list[dict] = []
-    effective_seen: set[str] = set()
-    for c in contracts:
-        if c["topic"] == REBUTTAL or norm(c["question"]) not in effective_seen:
-            if c["topic"] != REBUTTAL:
-                effective_seen.add(norm(c["question"]))
-            effective.append(c)
+    effective = effective_contracts(contracts)
 
     turns, gaps = {}, {t: 0 for t in TOPICS}
     for c in effective:
@@ -276,9 +302,9 @@ def audit(job_dir):
         if closing["grade"] != "solid" and gaps[t] == 0 and turns[t] < TURNS:
             die(f"topic {t} left vague: closing grade {closing['grade']!r}, {gaps[t]} gap marks, {turns[t]}/{TURNS} turns")
 
-    audit_gaps_md(data_dir / "gaps.md", gaps)
-    audit_explained_md(data_dir / "explained.md")
-    audit_topic_map(data_dir / "topic-map.md")
+    audit_gaps_md(deliverable_path(job_dir, "gaps"), gaps)
+    audit_explained_md(deliverable_path(job_dir, "explained"))
+    audit_topic_map(deliverable_path(job_dir, "topic-map"))
     return messages, contracts, errors
 
 
@@ -339,6 +365,126 @@ def build_transcript(data_dir, messages, contracts, errors):
     (data_dir / "transcript.jsonl").write_text(json.dumps(out, indent=2) + "\n")
 
 
+def build_interview(job_dir, messages, contracts, errors):
+    """render deliverables/interview.md — the human pack's QA lecture.
+
+    The mock-interview record: every turn in seq order as
+    Interviewer:/Me: prose (the turn-contract chrome stripped), each
+    topic opening with its ladder walk as a mermaid diagram — the
+    level asked, the grade each answer earned, where a gap was banked
+    — so a reader preparing for this interview sees the questioning
+    LOGIC beside the substance. Deterministic: built from messages/
+    and the same turn contracts the audit judged, nothing else.
+    """
+    effective = effective_contracts(contracts)
+    turns: dict[str, int] = {}
+    gaps = {t: 0 for t in TOPICS}
+    for c in effective:
+        if c["topic"] in gaps:
+            turns[c["topic"]] = turns.get(c["topic"], 0) + 1
+            if c["move"] == "gap":
+                gaps[c["topic"]] += 1
+    closing = {}
+    for t in TOPICS:
+        idx = max(j for j, c in enumerate(effective) if c["topic"] == t)
+        closing[t] = effective[idx + 1]["grade"] if idx + 1 < len(effective) else "?"
+
+    def mm(s):
+        # mermaid label sanitizer — determinism over beauty
+        s = " ".join(str(s).split()).replace('"', "'").replace("<", "‹").replace(">", "›")
+        return s[:60] + "…" if len(s) > 60 else s
+
+    out = [
+        f"# The Interview — {CONTRACT['name']}",
+        "",
+        f"*run {job_dir.name} · {date.today().isoformat()} · {len(contracts)} graded turns · {len(messages)} messages · {len(errors)} logged contract error(s)*",
+        "",
+        "> Your prep pack. The questions are the real ones in the real order;",
+        "> the answers are the author's actual replies. Each topic opens with",
+        "> its ladder walk — the level asked, the grade earned — so the",
+        "> questioning logic is visible beside the prose. What still stands",
+        "> open is listed at the end; full detail sits in gaps.md and",
+        "> explained.md beside this file.",
+        "",
+        "## The climb at a glance",
+        "",
+        "```mermaid",
+        "flowchart LR",
+    ]
+    for i, t in enumerate(TOPICS):
+        out.append(f"    t{i + 1}[\"{mm(f'{i + 1} · {t} — {turns.get(t, 0)}Q · {gaps[t]} gap · closed {closing[t]}')}\"]")
+        if i:
+            out.append(f"    t{i} --> t{i + 1}")
+    out.append(f"    t{len(TOPICS) + 1}[\"rebuttal pass\"]")
+    out.append(f"    t{len(TOPICS)} --> t{len(TOPICS) + 1}")
+    out.append("```")
+    out.append("")
+
+    # an answer's verdict rides the NEXT contract-bearing note (every
+    # contract grades the PREVIOUS answer — the brief's law), so the
+    # annotation under each Me: line is read off the next contract
+    qtext = {c["file"]: c["question"] for c in contracts}
+    by_seq = sorted(contracts, key=lambda c: c["seq"])
+    verdict_after = {}
+    for m in messages:
+        if m["from"] != "interviewee" or m["type"] != "note":
+            continue
+        nxt = next((c for c in by_seq if c["seq"] > m["seq"]), None)
+        if nxt:
+            cite = "" if nxt["citation_checked"] == "ok" else f" · citation {nxt['citation_checked']}"
+            note = f"graded {nxt['grade']} · {nxt['move']}{cite}"
+            verdict_after[m["file"]] = f"*({mm(note)})*"
+
+    def ladder_diagram(topic):
+        tc = [c for c in effective if c["topic"] == topic]
+        lines = ["```mermaid", "flowchart TD"]
+        for j, c in enumerate(tc):
+            warn = " · GAP ✗" if c["move"] == "gap" else ""
+            lines.append(f"    q{j + 1}[\"Q{j + 1} — {LADDER[c['level'] - 1]}{warn}\"]")
+            if j:
+                lines.append(f"    q{j} -->|{mm(tc[j]['grade'])}| q{j + 1}")
+        if tc:
+            lines.append(f"    q{len(tc)} -->|{mm(closing.get(topic, '?'))}| done[\"topic closed\"]")
+        lines.append("```")
+        return lines
+
+    section_of = {c["file"]: c["topic"] for c in effective}
+    current = None
+    opened = False
+    for m in messages:
+        if m["type"] == "stop":
+            out += ["", "## The verdict", "", m["body"].strip(), ""]
+            continue
+        t = section_of.get(m["file"], current)
+        if t is None:
+            if not opened:
+                out += ["## The opening — the pitch", ""]
+                opened = True
+        elif t != current:
+            head = f"## {TOPICS.index(t) + 1}. {t}" if t in TOPICS else "## The rebuttal pass"
+            out += ["", head, ""]
+            if t in TOPICS:
+                out += ladder_diagram(t) + [""]
+            current = t
+        body = FENCE.sub("", m["body"]).strip() or qtext.get(m["file"], "(empty)")
+        speaker = "Interviewer" if m["from"] == "interviewer" else "Me"
+        out += [f"**{speaker}:** {body}", ""]
+        note = verdict_after.get(m["file"])
+        if note:
+            out += [note, ""]
+
+    out += ["## What still stands", ""]
+    gaps_text = deliverable_path(job_dir, "gaps").read_text()
+    standing = [s.split("\n")[0].strip() for s in re.split(r"^## ", gaps_text, flags=re.MULTILINE)[1:] if "rebuttal: stands" in s]
+    out += ([f"- {h}" for h in standing] if standing else ["- (none — every gap was refuted)"])
+    out += ["", "Full detail: `gaps.md` · cited synthesis: `explained.md` · the one-page pitch: `pitch.md` — all beside this file."]
+
+    path = deliverable_path(job_dir, "interview")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + "\n")
+    say(f"rendered {path.relative_to(job_dir)} ({len(messages)} messages, {len(effective)} effective turns)")
+
+
 def main():
     global CONTRACT, BANK, TOPICS, TURNS, REBUTTAL_TURNS, MAX_QUESTIONS, LADDER, CITATION, CITE_KIND
     if len(sys.argv) > 1 and sys.argv[1] == "--verdict":
@@ -388,7 +534,8 @@ def main():
     CITE_KIND = "file:line"
     messages, contracts, errors = audit(job_dir)
     build_transcript(job_dir / "data", messages, contracts, errors)
-    standing = (job_dir / "data" / "gaps.md").read_text().count("rebuttal: stands")
+    build_interview(job_dir, messages, contracts, errors)
+    standing = deliverable_path(job_dir, "gaps").read_text().count("rebuttal: stands")
     say(f"PASS — {len(contracts)} graded turns, {len(errors)} logged contract error(s)")
     print(json.dumps({"topics": len(TOPICS), "graded_turns": len(contracts), "contract_errors": len(errors), "gaps_standing": standing, "deliverables": len(CONTRACT["deliverables"])}))
 

@@ -38,8 +38,7 @@ def build(target):
     msgs = target / "messages"
     msgs.mkdir(parents=True, exist_ok=True)
     (target / "data").mkdir(parents=True, exist_ok=True)
-    # the source side rides along so the selftest can mutate it per case
-    (target / "data").mkdir(parents=True, exist_ok=True)
+    (target / "deliverables").mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE / "contract.toml", target / "contract.toml")
     shutil.copy2(SOURCE / "questions.toml", target / "data" / "questions.toml")
     if (target / "members").exists():
@@ -64,16 +63,16 @@ def build(target):
             json.dumps({"from": owner, "to": to, "type": typ, "body": body})
         )
 
-    (target / "data" / "pitch.md").write_text(
+    (target / "deliverables" / "pitch.md").write_text(
         "# whl, pitched\n\nA shell and supervisor for subagent work. Weakest part: accounting.\n"
     )
-    (target / "data" / "topic-map.md").write_text(
+    (target / "deliverables" / "topic-map.md").write_text(
         "# Topic map\n\n" + "\n".join(f"- {t}" for t in topics) + "\n"
     )
-    (target / "data" / "explained.md").write_text(
+    (target / "deliverables" / "explained.md").write_text(
         "".join(f"## {t}\n\nIt routes turns. See src/engines/coworker.ts:161 for the relay plan.\n\n" for t in topics)
     )
-    (target / "data" / "gaps.md").write_text(
+    (target / "deliverables" / "gaps.md").write_text(
         f"## {GAPPED}: gap bookkeeping — severity: medium\n\n"
         "Exposed by: what happens when the gap ledger races the stop?\n"
         "Why it fell short: level-4 answer stayed level-1.\n"
@@ -81,7 +80,7 @@ def build(target):
         "rebuttal: stands\n"
     )
 
-    outbox("interviewee", "The pitch is at ../../data/pitch.md — whl is a shell and supervisor.")
+    outbox("interviewee", "The pitch is at ../../deliverables/pitch.md — whl is a shell and supervisor.")
     # the <=5 commission's golden shape: ONE fresh question per topic
     # (5 topics = the whole list), the gap riding its topic's only turn
     for t in topics:
