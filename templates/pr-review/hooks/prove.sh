@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# prove — the decision model (a gate: the rail ACTS — runs every repro
+# and WRITES the verdict; exit 0 means "verdict produced", not "accept").
+#
+# The law (a fact blocks, an opinion never does): a P0/P1 finding
+# blocks the merge ONLY with a repro test that
+#   1. loads cleanly and fails on an assertion, on HEAD, TWICE
+#      (load error = bogus; pass-then-fail = flaky; passes = refuted),
+#   2. classifies against BASE:
+#        fails HEAD + passes BASE                     -> introduced    BLOCK
+#        fails both + the diff touches the finding's
+#        file (the change is implicated)              -> incomplete-fix BLOCK
+#        fails both + diff untouched                  -> pre-existing  advisory
+# Everything else — unproven, P2, P3 — is advisory and never blocks.
+# Gate cap is 300s: at most 12 repros are proven per review, the rest
+# degrade to advisory with a receipt (never a silent skip).
+set -euo pipefail
+prog="$(cd "$(dirname "$0")/.." && pwd)"
+. "$prog/review/config.sh"
+export REPO BASE_SHA HEAD_SHA PROG="$prog"
+
+node <<'EOF'
+const { execSync } = require("node:child_process")
+const fs = require("node:fs")
+const path = require("node:path")
+const prog = process.env.PROG
+const head = path.join(prog, "review", "head")
+const base = path.join(prog, "review", "base")
+const die = (why) => { console.error(`prove: ${why}`); process.exit(1) }
+if (!fs.existsSync(head) || !fs.existsSync(base)) die("intake checkouts missing — did the intake gate run?")
+
+const diffFiles = new Set(fs.readFileSync(path.join(prog, "review", "files.txt"), "utf8").split("\n").filter(Boolean))
+const findings = []
+for (const unit of fs.readdirSync(path.join(prog, "units"))) {
+  const f = path.join(prog, "units", unit, "findings.jsonl")
+  if (!fs.existsSync(f)) continue
+  for (const [n, line] of fs.readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).entries()) {
+    try { findings.push({ ...JSON.parse(line), _unit: unit, _line: n + 1 }) }
+    catch { findings.push({ id: `${unit}-malformed-${n + 1}`, lens: unit, severity: "P3", claim: line.slice(0, 120), location: { file: "" }, outcome: "malformed", _unit: unit }) }
+  }
+}
+if (findings.length === 0 && !fs.existsSync(path.join(prog, "units"))) die("no units dir — the lenses stage never ran")
+
+const LOAD_ERR = /Cannot find module|ERR_MODULE_NOT_FOUND|SyntaxError|ERR_UNSUPPORTED|ERR_UNKNOWN/
+const to = (cmd, cwd) => {
+  const timeout = execSync("command -v timeout >/dev/null 2>&1 && echo yes || echo no").toString().trim() === "yes" ? ["timeout", "60"] : []
+  try {
+    execSync([...timeout, cmd].join(" "), { cwd, stdio: ["ignore", "pipe", "pipe"], timeout: 90_000 })
+    return { code: 0, err: "" }
+  } catch (e) {
+    return { code: e.status ?? 1, err: String(e.stderr ?? "") }
+  }
+}
+const runRepro = (tp, side) => {
+  const r = to(`node --test ${JSON.stringify(tp)}`, side)
+  if (r.code === 0) return "pass"
+  if (LOAD_ERR.test(r.err)) return "load-error"
+  return "fail-assert"
+}
+
+const blocked = [], advisory = [], ledger = []
+let proven = 0
+const PROVE_CAP = 12
+for (const f of findings) {
+  const isBlockingSev = f.severity === "P0" || f.severity === "P1"
+  if (f.outcome === "malformed") { advisory.push({ ...f, why: "unparseable line — never blocks" }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "malformed" }); continue }
+  if (!isBlockingSev) { advisory.push({ ...f, why: `${f.severity}: advisory by severity` }); ledger.push({ ...f, why: `${f.severity}: advisory by severity` }); continue }
+  if (!f.repro?.test_path) { advisory.push({ ...f, why: `${f.severity} without repro — unproven` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "unproven" }); continue }
+  if (proven >= PROVE_CAP) { advisory.push({ ...f, why: `prove cap (${PROVE_CAP}) reached — degraded, rerun review` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "capped" }); continue }
+  const tp = f.repro.test_path
+  if (!fs.existsSync(path.join(head, tp))) { advisory.push({ ...f, why: `repro ${tp} does not exist in the HEAD checkout` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
+  proven++
+  const h1 = runRepro(tp, head)
+  if (h1 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
+  if (h1 === "pass") { advisory.push({ ...f, why: `repro PASSES on HEAD — finding refuted by its own test` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" }); continue }
+  const h2 = runRepro(tp, head)
+  if (h2 !== "fail-assert") { advisory.push({ ...f, why: `repro is flaky (first run failed, second ${h2})` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "flaky" }); continue }
+  // fails on HEAD, twice, on an assertion — now BASE decides the class
+  const baseTp = path.join(base, tp)
+  fs.mkdirSync(path.dirname(baseTp), { recursive: true })
+  fs.copyFileSync(path.join(head, tp), baseTp)
+  const b = runRepro(tp, base)
+  fs.rmSync(baseTp, { force: true })
+  if (b === "pass") {
+    blocked.push({ ...f, outcome: "introduced", proof: `repro fails on HEAD (x2), passes on BASE ${process.env.BASE_SHA.slice(0, 8)}` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "introduced" })
+  } else if (diffFiles.has(f.location?.file)) {
+    blocked.push({ ...f, outcome: "incomplete-fix", proof: `repro fails on BASE too AND the diff touches ${f.location.file} — the change is implicated (the twin-path class)` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "incomplete-fix" })
+  } else {
+    advisory.push({ ...f, why: `repro fails on BASE too and the diff never touches ${f.location?.file} — pre-existing, file a ticket, do not block` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "pre-existing" })
+  }
+}
+
+const verdict = blocked.length === 0 ? "accept" : "reject"
+const out = {
+  verdict,
+  repo: process.env.REPO,
+  base: process.env.BASE_SHA,
+  head: process.env.HEAD_SHA,
+  blocked: blocked.map(({ _unit, _line, ...f }) => f),
+  advisory: advisory.map(({ _unit, _line, why, ...f }) => ({ ...f, why })),
+  stats: { findings: findings.length, blocked: blocked.length, advisory: advisory.length, proven },
+}
+fs.writeFileSync(path.join(prog, "review", "verdict.json"), JSON.stringify(out, null, 2) + "\n")
+const lines = ["# advisory — real but never blocking (P2/P3, unproven, pre-existing, bogus, flaky)", ""]
+for (const a of advisory) lines.push(`- [${a.severity}] ${a.id} (${a.lens}): ${a.claim} — ${a.why}`)
+if (advisory.length === 0) lines.push("- none")
+fs.writeFileSync(path.join(prog, "review", "advisory.md"), lines.join("\n") + "\n")
+fs.appendFileSync(path.join(prog, "review", "ledger.jsonl"), ledger.map((l) => JSON.stringify({ ts: new Date().toISOString(), head: process.env.HEAD_SHA, ...l })).join("\n") + "\n")
+console.log(`prove: ${verdict} — ${blocked.length} blocking (${blocked.map((b) => b.id + ":" + b.outcome).join(", ") || "none"}), ${advisory.length} advisory`)
+EOF

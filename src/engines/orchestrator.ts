@@ -632,7 +632,11 @@ export function cycle(deps: CycleDeps): boolean {
           let pass = false
           let why = ""
           try {
-            execSync(plan.check!, { cwd: deps.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+            // WHL_UNIT: the check names its subject — a per-unit hook
+            // (the review rail's findings-check is the first customer)
+            // must know WHICH unit it judges; without it the hook can
+            // only scan every unit dir and guess the addressee.
+            execSync(plan.check!, { cwd: deps.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, WHL_UNIT: id } })
             pass = true
           } catch (err) {
             why = err instanceof Error ? err.message.split("\n")[0] : String(err)
@@ -1582,7 +1586,7 @@ export async function runOrchestrator(input: {
         }
       } else if (pass && step.check) {
         try {
-          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, WHL_UNIT: step.id } })
           checkRow = " — stage check passed"
         } catch (err) {
           pass = false
