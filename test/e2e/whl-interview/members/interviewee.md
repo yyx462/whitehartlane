@@ -22,7 +22,7 @@ THE LAW OF THIS INTERVIEW:
   races, bad input — not a feature description.
 
 START NOW, before any message arrives: write your pitch to
-../../deliverables/pitch.md (create the folder). One page: what whl is, its
+../../data/pitch.md (create the folder). One page: what whl is, its
 rails, and an honest map of its load-bearing parts — admission and the
 JEV model ladder, pane supervision (the flight bench and the courts),
 the spur/program grammar, the wake ladder, accounting (the events trace
@@ -45,10 +45,10 @@ never a file edit.
 **Deliverables — the run's product, checked for existence, size,
 and kind; a missing or empty one fails the run (#205: every
 commission guarantees a deliverable):**
-- `deliverables/pitch.md` (md) — YOU must write this
-- `deliverables/topic-map.md` (md) — YOU must write this
-- `deliverables/explained.md` (md) — YOU must write this
-- `deliverables/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
+- `data/pitch.md` (md) — YOU must write this
+- `data/topic-map.md` (md) — YOU must write this
+- `data/explained.md` (md) — YOU must write this
+- `data/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
   every gap section ends with exactly one line: `rebuttal: stands`
   or `rebuttal: refuted — <citation>` — any other shape fails the audit
 - `deliverables/interview.md` (md) — the AUDIT builds this — never demanded of you

@@ -7,8 +7,8 @@ it says what they claimed, and record that in citation_checked
 (ok | wrong | missing). Do not explore for them; your power is the
 outside view.
 
-Read the pitch at ../../deliverables/pitch.md (your first relay names it).
-Then write ../../deliverables/topic-map.md — one line per topic id, in
+Read the pitch at ../../data/pitch.md (your first relay names it).
+Then write ../../data/topic-map.md — one line per topic id, in
 order, exactly the five below (the audit pins this file to the declared map).
 Then interview the author over this FIXED topic map, in this order, one
 topic at a time:
@@ -65,14 +65,11 @@ fenced block, and make the prose around it short:
   (then move=next). Never exceed 6 turns on a topic. No praise, no
   summaries mid-loop.
 
-After topic 6: SYNTHESIS. The four files you write live in
-../../deliverables/ — the pack a human reads to prepare; every one of
-them is written for that cold reader, not for a machine. Write
-../../deliverables/explained.md — one section
+After topic 6: SYNTHESIS. Write ../../data/explained.md — one section
 per topic, each keeping the citations that survived checking, written
 so a cold reader could explain admission/JEV and pane supervision from
-it alone. Then write ../../deliverables/gaps.md — every gap mark that
-still stands, ranked by severity, one section per gap:
+it alone. Then write ../../data/gaps.md — every gap mark that still
+stands, ranked by severity, one section per gap:
   ## <topic-id>: <short name> — severity: high|medium|low
   Exposed by: <the question>.
   Why it fell short: <what the answer lacked>.
@@ -96,10 +93,10 @@ message (no turn-contract in it) with a one-paragraph verdict.
 **Deliverables — the run's product, checked for existence, size,
 and kind; a missing or empty one fails the run (#205: every
 commission guarantees a deliverable):**
-- `deliverables/pitch.md` (md) — YOU must write this
-- `deliverables/topic-map.md` (md) — YOU must write this
-- `deliverables/explained.md` (md) — YOU must write this
-- `deliverables/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
+- `data/pitch.md` (md) — YOU must write this
+- `data/topic-map.md` (md) — YOU must write this
+- `data/explained.md` (md) — YOU must write this
+- `data/gaps.md` (md) — the INTERVIEWER owns this file — no one else writes it
   every gap section ends with exactly one line: `rebuttal: stands`
   or `rebuttal: refuted — <citation>` — any other shape fails the audit
 - `deliverables/interview.md` (md) — the AUDIT builds this — never demanded of you

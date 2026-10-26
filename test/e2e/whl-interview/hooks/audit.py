@@ -32,9 +32,11 @@ On PASS: builds data/transcript.jsonl (the machine record) AND
 deliverables/interview.md (the human pack's QA lecture — every turn
 as Interviewer:/Me: prose, each topic opening with its ladder walk as
 a mermaid diagram), then prints ONE JSON counts line (rail-parsed;
-human words go to stderr). Two shelves by audience: data/ works,
-deliverables/ reads; each file has ONE home (no copy ceremony — the
-#233 lesson).
+human words go to stderr). Two shelves by reader: data/ is everything
+an agent or hook touches; deliverables/ is the human pack, and a file
+lives there ONLY if no agent needs to read it — exactly one file
+today, interview.md, rendered (never authored by a pane) and read by
+the human alone.
 """
 
 import json
@@ -477,7 +479,7 @@ def build_interview(job_dir, messages, contracts, errors):
     gaps_text = deliverable_path(job_dir, "gaps").read_text()
     standing = [s.split("\n")[0].strip() for s in re.split(r"^## ", gaps_text, flags=re.MULTILINE)[1:] if "rebuttal: stands" in s]
     out += ([f"- {h}" for h in standing] if standing else ["- (none — every gap was refuted)"])
-    out += ["", "Full detail: `gaps.md` · cited synthesis: `explained.md` · the one-page pitch: `pitch.md` — all beside this file."]
+    out += ["", "Working files, one shelf up in the run's `data/`: `gaps.md` (full gap", "detail) · `explained.md` (cited synthesis) · `pitch.md` (the one-page", "pitch) · `questions.toml` (the bank)."]
 
     path = deliverable_path(job_dir, "interview")
     path.parent.mkdir(parents=True, exist_ok=True)
