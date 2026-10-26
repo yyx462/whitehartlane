@@ -19,7 +19,17 @@ try {
   console.error(`orchestrator: refusing — ${err instanceof Error ? err.message : String(err)}`)
   process.exit(2)
 }
-const rail = new Rail({ argvDir, workflow: kind, programRoots })
+let rail
+try {
+  rail = new Rail({ argvDir, workflow: kind, programRoots })
+} catch (err) {
+  // A lease refusal (live holder — one writer per job, j-93d652 gap #2)
+  // exits here, before a single pane is born. stderr is the job's
+  // orchestrator.log: the refusal leaves a legible line beside the
+  // lease.refused event the store already booked.
+  console.error(`orchestrator: refusing — ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(3)
+}
 // an env-booked run without argv stages its program at the job dir,
 // not the cwd — re-derive there (the old lab bin did too)
 try {

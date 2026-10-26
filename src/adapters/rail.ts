@@ -264,9 +264,6 @@ export class Rail implements ShepPort {
         }
         this.log(`job ${job.id} self-opened on session ${job.sid} (no AGENTIC_OS_SID/JID passed)`)
       }
-      job.pid = process.pid
-      job.door = { rev: doorRev(), started: new Date().toISOString() }
-      saveJob(job)
       // Issue #123 — the orchestrator claims the lease at open: a
       // written, expiring record of WHO leads this job. Renewed on the
       // engine beat; expiry is sticky (no message needed on death).
@@ -279,6 +276,12 @@ export class Rail implements ShepPort {
         if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
+      // Stamp only after the door opened: a refused writer throws out
+      // of this function below and must leave the shared record as it
+      // loaded it (the old order wrote pid+door before asking the lock).
+      job.pid = process.pid
+      job.door = { rev: doorRev(), started: new Date().toISOString() }
+      saveJob(job)
       const booked = job
       const holder = `orchestrator pid=${process.pid}`
       return {
@@ -326,6 +329,14 @@ export class Rail implements ShepPort {
         },
       }
     } catch (err) {
+      // A lease refusal is the door closing, not the ledger failing:
+      // it escapes to the bin, which exits before a single pane is
+      // born. (Pre-fix this catch swallowed the refusal into "running
+      // without a Job record" — the second orchestrator then drove the
+      // task dir unledgered, and its retireAll pkill killed the live
+      // holder's fleet: the exact split brain the lease exists to
+      // prevent, j-93d652 gap #2.)
+      if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
       this.log(`ledger unavailable (${err instanceof Error ? err.message : String(err)}) — running without a Job record`)
       return null
     }
