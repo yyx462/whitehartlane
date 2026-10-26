@@ -1578,15 +1578,14 @@ td.empty, .empty {
    The CLASS picks the SHAPE and the FILL WEIGHT, the IDENTITY picks the
    COLOR: app.js stamps --ent-h, and the run's members split the hue
    wheel evenly, so families never overlap (2 members → blue vs orange).
-   Fill ramps by class — member 0%, pane 50%, msg 100% of the max tint —
-   so the three classes read apart even in peripheral vision, and the
-   solid msg chips turn every row into its member's color ribbon.
-   Saturation is kept high (pastel washes read as one blob) but
-   lightness clamped per theme, so no hue goes neon. */
+   Fill ramps by class — member 100%, pane 50%, msg 0% of the max tint —
+   so the WHO is the loudest thing on the row and the dense relay-file
+   traffic stays quiet outlines. Chroma stays high (pastel washes read
+   as one blob) but lightness clamped per theme, so no hue goes neon. */
 .ev-ent {
   --ent-h: 222; /* hint examples with no identity — steel blue */
   --ent-fg: hsl(var(--ent-h) 62% 72%);
-  --ent-fill: 0%; /* member — outline only */
+  --ent-fill: 0%; /* bare/hint chips — outline */
   display: inline-block;
   padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--ent-fg) 45%, transparent);
@@ -1601,9 +1600,9 @@ td.empty, .empty {
 
 [data-theme="light"] .ev-ent { --ent-fg: hsl(var(--ent-h) 58% 38%); }
 
-.ev-ent.ev-member { border-radius: 999px; }           /* a who — pill, outline */
-.ev-ent.ev-pane   { --ent-fill: 11%; border-radius: 3px; }  /* a window — half tint */
-.ev-ent.ev-msg    { --ent-fill: 22%; border-radius: 6px 2px 6px 2px; } /* a file — full tint */
+.ev-ent.ev-member { --ent-fill: 22%; border-radius: 999px; }          /* a who — pill, solid */
+.ev-ent.ev-pane   { --ent-fill: 11%; border-radius: 3px; }            /* a window — half tint */
+.ev-ent.ev-msg    { --ent-fill: 0%; border-radius: 6px 2px 6px 2px; } /* a file — outline */
 
 .ev-ent:hover {
   border-color: var(--ent-fg);
