@@ -17,21 +17,24 @@ fail() { echo "findings-check: $unit: $1" >&2; exit 1; }
 
 # NODE_TEST_CONTEXT= : a hook's node must never inherit the test
 # runner's child protocol (it changes exit semantics under --test)
+# NODE_TEST_CONTEXT= : a hook's node must never inherit the test
+# runner's child protocol (it changes exit semantics under --test)
 NODE_TEST_CONTEXT= node - "$dir/findings.jsonl" "$unit" <<'EOF' || exit 1
 const [file, unit] = process.argv.slice(2)
+const MODEL = `{"id":"${unit}-1","lens":"${unit}","severity":"P1","claim":"one sentence","location":{"file":"src/x.ts","line_start":1},"repro":{"test_path":"test/review/${unit}-1.test.ts","command":"node --test test/review/${unit}-1.test.ts"}}`
+const teach = (why) => { console.error(`findings-check: ${unit}: ${why}\nfindings-check: ${unit}: the required shape, one object per line (extra fields allowed):\n  ${MODEL}`); process.exit(1) }
 const lines = require("node:fs").readFileSync(file, "utf8").split("\n").filter((l) => l.trim())
 const req = ["id", "lens", "severity", "claim", "location"]
 for (const [n, line] of lines.entries()) {
   let f
-  try { f = JSON.parse(line) } catch { console.error(`findings-check: ${unit}: line ${n + 1} is not JSON`); process.exit(1) }
-  for (const k of req) if (!(k in f)) { console.error(`findings-check: ${unit}: line ${n + 1} missing field ${k}`); process.exit(1) }
-  if (f.lens !== unit) { console.error(`findings-check: ${unit}: line ${n + 1} lens is ${f.lens}, expected ${unit}`); process.exit(1) }
-  if (!String(f.id).startsWith(unit + "-")) { console.error(`findings-check: ${unit}: line ${n + 1} id ${f.id} must be prefixed ${unit}-`); process.exit(1) }
-  if (!["P0", "P1", "P2", "P3"].includes(f.severity)) { console.error(`findings-check: ${unit}: line ${n + 1} severity ${f.severity} not in P0..P3`); process.exit(1) }
-  if (!f.claim || !f.location?.file) { console.error(`findings-check: ${unit}: line ${n + 1} claim/location.file empty`); process.exit(1) }
+  try { f = JSON.parse(line) } catch { teach(`line ${n + 1} is not JSON`) }
+  for (const k of req) if (!(k in f)) teach(`line ${n + 1} missing field ${k}`)
+  if (f.lens !== unit) teach(`line ${n + 1} lens is '${f.lens}', expected exactly '${unit}'`)
+  if (!String(f.id).startsWith(unit + "-")) teach(`line ${n + 1} id '${f.id}' must be prefixed '${unit}-'`)
+  if (!["P0", "P1", "P2", "P3"].includes(f.severity)) teach(`line ${n + 1} severity '${f.severity}' not in P0..P3`)
+  if (!f.claim || !f.location?.file) teach(`line ${n + 1} claim/location.file empty`)
   if ((f.severity === "P0" || f.severity === "P1") && !f.repro?.test_path) {
-    console.error(`findings-check: ${unit}: ${f.id} is ${f.severity} without repro.test_path — downgrade to P2 or write the repro`)
-    process.exit(1)
+    teach(`${f.id} is ${f.severity} without repro.test_path — downgrade to P2 or write the repro`)
   }
 }
 console.log(`${lines.length} findings, shape ok`)

@@ -232,7 +232,7 @@ test("findings-check: shape law — the four refusals and the pass", () => {
     writeFileSync(join(p.dir, "units", "principles", "findings.jsonl"), finding({ lens: "tests", id: "tests-1" }))
     writeFileSync(join(p.dir, "units", "principles", "coverage.md"), "src/wait.ts:1 src/x.ts:2 src/y.ts:3\n")
   })
-  assert.match(hook("findings-check.sh", wrongLens.dir, { WHL_UNIT: "principles" }).out, /lens is tests/)
+  assert.match(hook("findings-check.sh", wrongLens.dir, { WHL_UNIT: "principles" }).out, /lens is 'tests'/)
 })
 
 test("prove: the six outcomes of the decision model", () => {

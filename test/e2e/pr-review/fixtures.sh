@@ -26,7 +26,8 @@ export function split(total: number, parts: number): number[] {
 }
 EOF
   cat > "$root/c1/INVARIANTS.md" <<'EOF'
-- INV-1 split is EXACT: sum(split(t, n)) === t for every t >= 0, n >= 1.
+- INV-1 split is EXACT for every integer total 0 <= t <= 2^53 and
+  every n >= 1: sum(split(t, n)) === t, every part >= 0.
 - INV-2 one function decides the split; no other site re-implements it.
 EOF
   printf '# ledger\n' > "$root/c1/README.md"
@@ -34,7 +35,7 @@ EOF
   git -C "$root/c1" checkout -qb fix
   cat > "$root/c1/src/split.ts" <<'EOF'
 // split a total into parts — the LAST part carries the remainder, so
-// the sum is always exact (INV-1)
+// the sum is always exact for totals up to 2^53 (INV-1)
 export function split(total: number, parts: number): number[] {
   const each = Math.floor(total / parts)
   const out = Array(parts).fill(each)
@@ -44,6 +45,7 @@ export function split(total: number, parts: number): number[] {
 EOF
   mkdir -p "$root/c1/test"
   cat > "$root/c1/test/split.test.ts" <<'EOF'
+import test from "node:test"
 import assert from "node:assert/strict"
 import { split } from "../src/split.ts"
 test("exact", () => assert.deepEqual(split(10, 3), [3, 3, 4]))
