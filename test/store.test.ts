@@ -30,6 +30,7 @@ const {
   acquireLease,
   renewLeaseOf,
   leaseExpired,
+  liveLeaseHolder,
   LEASE_TTL_MS,
 } = await import("../src/adapters/store.ts")
 
@@ -351,6 +352,9 @@ test("the lease is a mutex: live holders refuse, dead holders are stolen, lost r
   const job = createJob({ sid: sess.id, stoodUpBy: "standalone", workflow: "fan-out", task: "mutex", dir: "/tmp/lease-3" })
   // a LIVE holder: this very process
   acquireLease(job, `orchestrator pid=${process.pid}`)
+  // the door-side pre-check agrees (rebirthRunner refuses before it
+  // retires the parked generation's panes under the holder's feet)
+  assert.equal(liveLeaseHolder(job), `orchestrator pid=${process.pid}`)
   // a second orchestrator (launchd, pid=1, alive by definition) is refused
   assert.throws(() => acquireLease(job, "orchestrator pid=1"), /LEASE_HELD_BY_LIVE_ORCHESTRATOR/)
   assert.equal(job.lease?.epoch, 1, "a refusal never bumps the epoch")
@@ -359,6 +363,7 @@ test("the lease is a mutex: live holders refuse, dead holders are stolen, lost r
   const dead = spawnSync("sleep", ["0"]).pid ?? 0
   assert.ok(dead > 0)
   job.lease!.holder = `orchestrator pid=${dead}`
+  assert.equal(liveLeaseHolder(job), null, "a dead holder is no holder — the lease is takeable")
   acquireLease(job, "orchestrator pid=1")
   assert.equal(job.lease?.epoch, 2)
   // renewal by the deposed writer detects the loss; the holder renews clean

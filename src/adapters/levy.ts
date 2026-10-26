@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { abortJob, continueJob, killPane, saveJob, type JobRecord } from "./store.ts"
+import { abortJob, continueJob, killPane, liveLeaseHolder, saveJob, type JobRecord } from "./store.ts"
 
 export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
@@ -40,10 +40,20 @@ export function spawnRunner(
 }
 
 // The rebirth ceremony (ADR 5), one spelling for continue and refresh:
-// retire the previous generation's stragglers (a live pane from the
-// parked generation would double-write a unit dir), then hand the Job
-// to a fresh runner — which books the continue on the record.
+// refuse a live holder at the door, then retire the previous
+// generation's stragglers (a live pane from the parked generation
+// would double-write a unit dir), then hand the Job to a fresh runner —
+// which books the continue on the record.
 export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOutcome {
+  // The door refuses first (j-93d652 gap #2): retiring panes under a
+  // LIVE holder's feet is the damage a double continue does — fail
+  // fast, in the foreground, before a single pane dies. The child's
+  // acquireLease stays the authoritative backstop (races, direct door
+  // invocations).
+  const live = liveLeaseHolder(job)
+  if (live) {
+    return { ok: false, why: `a live orchestrator holds ${job.id} (${live}) — one writer per job; pause it first, or wait` }
+  }
   for (const pane of job.panes.filter((p) => p.died === undefined)) {
     try {
       execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })

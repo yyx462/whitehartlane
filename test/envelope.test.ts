@@ -133,6 +133,82 @@ test("rebirthRunner: retires the parked generation's stragglers, then books the 
   assert.ok(fresh.panes.every((p) => p.died !== undefined), "every straggler retired")
 })
 
+test("rebirthRunner: a live holder refuses at the door — no panes retired, no spawn", async () => {
+  const home = process.env.AGENTIC_OS_HOME!
+  const stub = stubDoor(home)
+  rmSync(join(home, "stub-ran"), { force: true })
+  const session = store.openSession({ cwd: home })
+  const job = store.createJob({
+    sid: session.id,
+    stoodUpBy: "standalone",
+    workflow: "fan-out",
+    task: "envelope-live-holder",
+    dir: mkdtempSync(join(tmpdir(), "envelope-live-holder-")),
+  })
+  store.attachPane(job, {
+    label: "w-u1",
+    unit: "w-u1",
+    parent: "orchestrator",
+    transcript: { tool: "pi", cwd: "/w", since: new Date().toISOString() },
+  })
+  // a LIVE foreign holder (launchd, pid=1, alive by definition)
+  store.acquireLease(job, "orchestrator pid=1")
+  const prev = process.env.AGENTIC_OS_ORCHESTRATOR
+  process.env.AGENTIC_OS_ORCHESTRATOR = stub
+  let out: ReturnType<typeof rebirthRunner>
+  try {
+    out = rebirthRunner(job, join(import.meta.dirname, "..", "bin"))
+  } finally {
+    if (prev !== undefined) process.env.AGENTIC_OS_ORCHESTRATOR = prev
+    else delete process.env.AGENTIC_OS_ORCHESTRATOR
+  }
+  assert.equal(out.ok, false)
+  assert.match(!out.ok ? out.why : "", /one writer per job/)
+  const fresh = store.loadJob(job.sid, job.id)!
+  assert.ok(fresh.panes.every((p) => p.died === undefined), "the holder's panes were not retired under it")
+  assert.equal(fresh.continues, undefined, "no continue booked")
+  assert.equal(existsSync(join(home, "stub-ran")), false, "no runner spawned")
+})
+
+test("openLedger: a lease refusal escapes the constructor — the record untouched, the run dies at the door", async () => {
+  const home = process.env.AGENTIC_OS_HOME!
+  const session = store.openSession({ cwd: home })
+  const job = store.createJob({
+    sid: session.id,
+    stoodUpBy: "standalone",
+    workflow: "fan-out",
+    task: "envelope-door-refusal",
+    dir: mkdtempSync(join(tmpdir(), "envelope-door-refusal-")),
+  })
+  store.acquireLease(job, "orchestrator pid=1")
+  const prevSid = process.env.AGENTIC_OS_SID
+  const prevJid = process.env.AGENTIC_OS_JID
+  process.env.AGENTIC_OS_SID = session.id
+  process.env.AGENTIC_OS_JID = job.id
+  try {
+    assert.throws(
+      () =>
+        new Rail({
+          log: () => {},
+          shepRunner: () => ({ status: 0, stdout: "" }),
+          herdrRunner: () => ({ status: 0, stdout: "" }),
+        }),
+      /LEASE_HELD_BY_LIVE_ORCHESTRATOR/,
+    )
+    // the refused writer leaves the shared record exactly as it loaded it
+    const fresh = store.loadJob(session.id, job.id)!
+    assert.equal(fresh.pid, undefined, "no pid stamped before the lock")
+    assert.equal(fresh.door, undefined, "no door stamp from a refused writer")
+    assert.equal(fresh.lease?.holder, "orchestrator pid=1", "the holder is untouched")
+    assert.equal(fresh.lease?.epoch, 1, "a refusal never bumps the epoch")
+  } finally {
+    if (prevSid !== undefined) process.env.AGENTIC_OS_SID = prevSid
+    else delete process.env.AGENTIC_OS_SID
+    if (prevJid !== undefined) process.env.AGENTIC_OS_JID = prevJid
+    else delete process.env.AGENTIC_OS_JID
+  }
+})
+
 test("trapSignals is kind-blind: SIGTERM drains through the registered hook, no exit", async () => {
   const rail = new Rail({
     argvDir: mkdtempSync(join(tmpdir(), "envelope-signals-")),

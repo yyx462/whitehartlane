@@ -952,6 +952,17 @@ function pidAlive(pid: number | null): boolean {
   }
 }
 
+// The door-side pre-check (the child's acquireLease stays authoritative
+// for races and direct door invocations): the current holder when it is
+// live, null when the lease is free to take. A reborn runner always
+// holds a new pid, so ANY live holder means the rebirth must refuse —
+// before it retires the parked generation's panes out from under the
+// holder's feet.
+export function liveLeaseHolder(job: JobRecord): string | null {
+  if (!job.lease || leaseExpired(job)) return null
+  return pidAlive(leaseHolderPid(job.lease)) ? job.lease.holder : null
+}
+
 export const LEASE_HELD_BY_LIVE_ORCHESTRATOR = "LEASE_HELD_BY_LIVE_ORCHESTRATOR"
 
 // The mutex half the interview found missing (j-93d652 gaps.md #2:
