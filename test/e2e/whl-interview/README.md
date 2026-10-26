@@ -66,7 +66,7 @@ bash hooks/audit-selftest.sh
 | temperature (interviewer hot, author cold) | NOT expressible — a member pins `provider/model` only; both panes run the same model |
 | audit gate (`check`/gate stage) | the `counts` hook: runs at report time, stdout must be JSON, nonzero exit fails the report — the deterministic verdict rides the same path the rail already absolutizes |
 | audit BEFORE retire (#198) | the `verdict` hook: runs when the exchange sees a stop, while both panes still LIVE — red hands the stop's author ONE revise round carrying the hook's stderr verbatim (audit.py `--verdict` names the missing deliverable); a second red fails honestly with the verdict row on the report |
-| outputs under `data/` | members write `data/*.md` in the run tree; the audit builds `transcript.jsonl` deterministically. `data/` is THE shelf — one home, no copies (the `interviews/<date>/` delivery shelf and the `WHL_INTERVIEW_REPO` mirror were cut 2026-10-26: bytes duplicated in the same run folder, read by nothing) |
+| two shelves by audience | `data/` is the WORKING shelf — the question bank the interviewer appends to plus the machine `transcript.jsonl`; `deliverables/` is the HUMAN pack, the only folder a person reads — pitch, topic-map, explained, gaps, and `interview.md` (rendered by the audit at report time: the QA lecture, Interviewer:/Me: per turn, per-topic ladder walks as mermaid, the standing-gaps list). One home per file, no copies (#233's lesson held when the pack was born: the pack is authored in place, never duplicated) |
 
 Two honest grammar gaps remain worked around here (per-member
 temperature; mid-flight body parsing — the rail reads envelopes, not

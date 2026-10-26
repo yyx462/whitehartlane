@@ -24,26 +24,30 @@ topics = [
 # #205 — guarantee a deliverable on every commission: every artifact
 # the wake points at is declared here, with its human-readable kind.
 # The audit refuses a run whose deliverable is missing or empty.
-# rail-built = produced by the audit itself (transcript), still
-# delivered, never demanded of the panes.
+# rail-built = produced by the audit itself (transcript, interview),
+# still delivered, never demanded of the panes.
+# TWO SHELVES by audience: data/ is the WORKING shelf (the bank the
+# interviewer appends to, the machine transcript); deliverables/ is the
+# HUMAN pack — the only folder a person reads, authored in place by
+# the members (no copy ceremony; one home per file — the #233 lesson).
 [[contract.deliverables]]
 name = "pitch"
-path = "data/pitch.md"
+path = "deliverables/pitch.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "topic-map"
-path = "data/topic-map.md"
+path = "deliverables/topic-map.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "explained"
-path = "data/explained.md"
+path = "deliverables/explained.md"
 kind = "md"
 
 [[contract.deliverables]]
 name = "gaps"
-path = "data/gaps.md"
+path = "deliverables/gaps.md"
 kind = "md"
 # ONE OWNER (run #6 taught: when both minds think the file is theirs,
 # the interviewee's freeform shape fails the audit the interviewer's
@@ -51,6 +55,16 @@ kind = "md"
 # answers the rebuttal pass. Shape is law: every gap section ends with
 # exactly one line — `rebuttal: stands` or `rebuttal: refuted — <citation>`.
 owner = "interviewer"
+
+[[contract.deliverables]]
+name = "interview"
+path = "deliverables/interview.md"
+kind = "md"
+# rail-built = the audit renders this from messages/ at report time:
+# the mock-interview QA lecture (Interviewer:/Me: per turn, ladder
+# walks as mermaid) — the commission's prep pack, never demanded of
+# the panes
+rail-built = true
 
 [[contract.deliverables]]
 name = "transcript"

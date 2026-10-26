@@ -139,12 +139,17 @@ export async function runCoworker(
     // member roots arrive tilde-form and expand inside.
     //
     // Mailbox law (slice 5): a member's write scope adds the shared
-    // data/ shelf and its OWN outbox only — peers' outboxes sit
-    // outside every scope, so a forged or misdirected write is out of
-    // scope by construction (the interview's gap #1, closed).
+    // data/ shelf, the shared deliverables/ pack, and its OWN outbox
+    // only — peers' outboxes sit outside every scope, so a forged or
+    // misdirected write is out of scope by construction (the
+    // interview's gap #1, closed). deliverables/ joins data/ as the
+    // second shared shelf: the HUMAN pack is authored in place (the
+    // #233 lesson — no copy ceremony, one home per file), which needs
+    // the same grant data/ has.
     rail.writePermissions(dir, [
       ...(m.roots ?? []),
       join(taskDir, "data"),
+      join(taskDir, "deliverables"),
       join(taskDir, "messages", m.name),
     ])
     let brief = ""
