@@ -552,7 +552,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const shep = spawnSync("shep", ["status"], { encoding: "utf8", timeout: 10_000 })
     say("shep panes", shep.status === 0, shep.status === 0 ? `${(shep.stdout.match(/^\s*\S+\s+\S+/gm) ?? []).length} pane row(s)` : `shep status rc=${shep.status} — is the multiplexer up?`)
     say("OS disk", jobs.length >= 0, `${jobs.length} job record(s) under ${process.env.AGENTIC_OS_HOME ?? "~/.local/share/whitehartlane"}`)
-    const leased = jobs.filter((j) => j.state === "running" && !pidAlive(j.pid))
+    // THE stale-booking oracle (store.ts bookingStale) — same answer
+    // as the sweep and the booking probe (r18 principles-11)
+    const leased = jobs.filter((j) => bookingStale(j, Date.now()))
     say("live jobs", leased.length === 0, leased.length === 0 ? "every running Job has a live orchestrator" : `${leased.length} running without a live pid — sweep parks them: whitehartlane sweep`)
     const gitOk = spawnSync("git", ["-C", process.cwd(), "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" })
     say("git tree", gitOk.status === 0, gitOk.status === 0 ? process.cwd() : "not a git checkout (fine for installs, suspicious for dev)")

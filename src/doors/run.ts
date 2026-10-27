@@ -29,6 +29,7 @@ import {
   findSessionByHost,
   findSessionBySpur,
   listJobs,
+  loadJob,
   openSession,
   bookingStale,
   orphanJob,
@@ -387,11 +388,16 @@ function book(
   // is the NORMAL shape of every booking — a young pid-less record
   // is a live intent, never an orphan).
   for (const job of listJobs(session.id)) {
-    // THE stale-booking oracle (store.ts bookingStale) — proven-dead
-    // pid, or pid-less past the booking grace. Young pid-less records
-    // are live intents, never orphans (r16 tests-10).
-    if (bookingStale(job, Date.now())) {
-      orphanJob(job, `booking probe: running Job is stale (pid ${job.pid ?? "none"} — dead or past the booking grace)`, job.panes?.length ?? 0)
+    // THE single-act law (the sweep's own twin ceremony): re-read the
+    // record from disk before orphaning — a concurrent `whl continue`
+    // may have revived it between this snapshot and the write (r18
+    // momentum-1: the probe clobbered a revived record to orphaned
+    // from its stale snapshot). The fresh record answers twice:
+    // still running, still stale → orphan.
+    const fresh = loadJob(session.id, job.id) ?? job
+    if (fresh.state !== "running") continue
+    if (bookingStale(fresh, Date.now())) {
+      orphanJob(fresh, `booking probe: running Job is stale (pid ${fresh.pid ?? "none"} — dead or past the booking grace)`, fresh.panes?.length ?? 0)
     }
   }
   const running = listJobs(session.id).filter((job) => job.state === "running").length
