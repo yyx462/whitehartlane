@@ -31,6 +31,11 @@ canary = false
 # long stretches — the 10-minute default stall ladder killed a lens
 # minutes before its done marker landed (r6, j-9f3d35). 30 min.
 stall_ms = 1800000
+# a pane that never BOARDS (no agent session) is transport class, not
+# silence — kill + respawn within minutes, never ride the 30-min
+# ceiling (j-4a0009, the third dead-at-birth). Sessions land ~5s
+# after spawn when healthy; 5 min is generous.
+born_ms = 300000
 
 [[stage]]
 id = "intake"

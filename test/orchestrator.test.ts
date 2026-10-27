@@ -810,3 +810,91 @@ test("a failed spawn arms a near-term retry wake — never the stall ladder (#16
     "every unit blocked honestly at the cap"
   )
 })
+
+// ── the birth judge (j-4a0009, the third dead-at-birth) ─────────────
+// A pane that spawns but never boards (no agent session) is transport
+// class: kill + respawn twice, then an honest close. Session existence
+// is the ONLY key — a boarded pane may sit log-silent indefinitely
+// (r6's momentum: 22 quiet minutes, then done).
+const stubFaults = (sessionOf: (id: string) => string | undefined, rebook?: (id: string) => string | undefined) =>
+  ({
+    sessionOf,
+    rebook,
+    cwdOf: () => "/tmp",
+    workerStatus: () => "unknown",
+    latestSessionFault: () => null,
+    switchSessionModel: () => {},
+    promptAgent: () => {},
+  }) as never as import("../../src/engines/orchestrator.ts").CycleDeps["faults"]
+
+test("a pane that never boards is reborn twice, then closed dead-at-birth (j-4a0009)", async () => {
+  const dir = await copyExample("orch-stall-")
+  let clock = 0
+  const { port, retired, wakes } = fakeShep()
+  const retries: { unit: string; attempts: number }[] = []
+  const base = deps(dir, port, {
+    now: () => clock,
+    bornMs: 1000,
+    stallMs: 60_000, // the ladder must NOT be the lane that fires
+    briefGraceMs: 60_000, // grace must not steal the seat in this test
+    faults: stubFaults(() => undefined, () => undefined),
+    onSpawnRetry: (unitId, attempts) => retries.push({ unit: unitId, attempts }),
+  })
+  cycle(base) // spawn all units
+  const units = Object.keys(readState(dir).pending ?? {}).length || 3
+
+  clock = 2000
+  cycle(base) // past bornMs, no session → rebirth 1
+  assert.equal(retired.length, units, "every unboarded pane is killed")
+  assert.equal(retries.length, units)
+  const rebornEvents = base.events.filter((e) => e.kind === "unit.reborn")
+  assert.equal(rebornEvents.length, units)
+
+  clock = 4000
+  cycle(base) // rebirth 2 (respawn succeeded; the COUNTER survived it)
+  assert.equal(retries.length, units * 2, "the rebirth count survives successful respawns")
+
+  clock = 6000
+  cycle(base) // cap: honest close, never a third empty pane
+  const dead = wakes.filter((w) => w.kind === "blocked" && w.detail.includes("dead at birth"))
+  assert.equal(dead.length, units, "blocked honestly as dead at birth")
+  assert.equal(retries.length, units * 2, "no respawn armed past the cap")
+})
+
+test("a boarded pane is NEVER reborn, however quiet (the r6 receipt)", async () => {
+  const dir = await copyExample("orch-stall-")
+  let clock = 0
+  const { port, retired, wakes } = fakeShep()
+  const base = deps(dir, port, {
+    now: () => clock,
+    bornMs: 1000,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    faults: stubFaults((id) => `ses-${id}`), // session booked: it boarded
+  })
+  cycle(base)
+  clock = 5000
+  cycle(base)
+  clock = 20_000
+  cycle(base) // long past bornMs, log silent — but boarded
+  assert.equal(retired.length, 0)
+  assert.equal(wakes.length, 0)
+  assert.equal(base.events.filter((e) => e.kind === "unit.reborn").length, 0)
+})
+
+test("a late boarder is saved by the re-resolve, not reborn", async () => {
+  const dir = await copyExample("orch-stall-")
+  let clock = 0
+  const { port, retired } = fakeShep()
+  const base = deps(dir, port, {
+    now: () => clock,
+    bornMs: 1000,
+    stallMs: 60_000,
+    briefGraceMs: 60_000,
+    faults: stubFaults(() => undefined, () => "ses-late"), // sessionOf missed it; rebook finds it
+  })
+  cycle(base)
+  clock = 3000
+  cycle(base)
+  assert.equal(retired.length, 0, "the second look booked the session — no rebirth")
+})

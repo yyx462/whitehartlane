@@ -174,6 +174,9 @@ export class Rail implements ShepPort {
   private readonly scopedFn: (name: string) => string
   // per-pane memory the permission sweep derives roots and context from
   private readonly cwdOf = new Map<string, string>()
+  // spawn-time worker kind per label — tryBookSession needs it to
+  // re-resolve a session (the birth judge's second look)
+  private readonly kindOf = new Map<string, string>()
 
   // #104 / #201: the worker's cumulative token usage, addressed by
   // NAME — the rail knows the sandbox cwd, the host knows its own
@@ -621,6 +624,7 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    this.kindOf.set(label, kind)
     // DRY-RUN (worker_kind = "mock"): no pane, no agent — the unit's
     // done line lands next to its brief and the cycle settles it
     // through the real path. Checks, gates, and grades all fire, so a
@@ -1095,6 +1099,29 @@ export class Rail implements ShepPort {
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id
+  }
+
+  // The birth judge's second look (j-4a0009): bookSessionLate ran at
+  // +5s only; a pane whose agent boarded slowly (or whose booking
+  // raced) deserves one IMMEDIATE re-resolve before it is judged dead
+  // at birth. Same resolution bookSessionLate uses, no timer.
+  tryBookSession(name: string): string | undefined {
+    const label = this.scopedName(name)
+    const briefPath = this.briefOf.get(label) ?? this.briefOf.get(name)
+    const marker = briefPath ? dirname(briefPath) : undefined
+    const cwd = this.cwdOf.get(label)
+    const kind = this.kindOf.get(label)
+    if (!cwd || !kind) return undefined
+    const since =
+      this.ledger?.job.panes
+        .filter((p) => p.label === label)
+        .sort((a, b) => a.born.localeCompare(b.born))
+        .map((p) => p.born)
+        .pop() ?? new Date().toISOString()
+    const sid =
+      (marker ? this.resolveLiveSession(kind, cwd, since, marker) : null) ?? this.resolveLiveSession(kind, cwd, since)
+    if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
+    return sid
   }
 
   bookSessionLate(name: string, kind: string, cwd: string, since: string): void {    setTimeout(() => {
