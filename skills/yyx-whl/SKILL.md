@@ -195,8 +195,10 @@ WhiteHartLane or this skill.
 
 ## The PR review hook (every PR-generating stage's tail)
 
-`whl review` — the adversarial pre-merge rail. The in-repo truth, always
-present and atomic with the door:
+`whl review` — the adversarial pre-merge rail. The ship gate's trigger
+surface is the in-repo skill **yyx-ship** (`skills/yyx-ship/SKILL.md`
+— resolves on every clone). The in-repo truth, always present and
+atomic with the door:
 
 - `whl review --help` — the manual: the spell, flags, refusals, hard rules
 - `templates/pr-review/README.md` — the deep shape (cost levers: its

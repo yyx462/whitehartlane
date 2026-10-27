@@ -178,6 +178,18 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       ? toml.replace(/^model\s*=.*$/m, () => pin)
       : toml.replace(/^(\[workflow\])$/m, (_m, head) => `${head}\n${pin}`)
     writeFileSync(join(dir, "workflow.toml"), next)
+    // INV-2 (refuse, never vanish — r15 tests-1): a template whose
+    // workflow.toml carries no [workflow] header (reachable via the
+    // first-class --template flag) gives both anchors nothing to
+    // anchor on — the write would no-op and the model vanishes with
+    // ok:true. Verify the pin LANDED; refuse with the fix otherwise.
+    if (!/^model\s*=/m.test(readFileSync(join(dir, "workflow.toml"), "utf8"))) {
+      return {
+        ok: false,
+        why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land and was NOT written (add a [workflow] table to the template, or pass --template pointing at one)`,
+        code: 2,
+      }
+    }
   }
 
   const title = args.title ?? `${head} → ${base}`

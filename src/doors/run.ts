@@ -30,6 +30,7 @@ import {
   findSessionBySpur,
   listJobs,
   openSession,
+  orphanJob,
   sessionsRoot,
   stampSpurKey,
   type JobRecord,
@@ -376,6 +377,34 @@ function book(
   const lineage = resolveLineageSession(dir, spurId.spurId)
   if ("refuse" in lineage) return { ok: false, why: lineage.refuse, code: 1 }
   const session = lineage.session
+  // momentum-8 (r15): a SIGKILLed orchestrator leaves its Job reading
+  // state:"running" FOREVER — only the live orchestrator finishes or
+  // aborts a job, and orphanJob had no production caller, so the
+  // manual's own recovery spell (`whl run <same dir> --unattended`)
+  // was refused at this exact door. The booking probe is that
+  // caller: a running Job whose orchestrator pid is dead is an
+  // ORPHAN — record it honestly, then book past it.
+  for (const job of listJobs(session.id)) {
+    if (job.state !== "running") continue
+    // The veto requires PROOF of liveness (r15 momentum-8): a Job with
+    // no orchestrator pid was abandoned before its runner started, and
+    // a Job whose pid is dead will never be finished by anyone else —
+    // both are ORPHANS, recorded here, and neither may veto the
+    // re-levy the manual prescribes.
+    if (job.pid) {
+      let alive = true
+      try {
+        process.kill(job.pid, 0)
+      } catch {
+        alive = false
+      }
+      if (alive) continue
+      orphanJob(job, `booking probe: orchestrator pid ${job.pid} is gone`)
+    } else {
+      console.error(`[probe-debug] orphaning NOPID ${job.id} state=${job.state}`)
+      orphanJob(job, "booking probe: no orchestrator pid recorded (abandoned booking)")
+    }
+  }
   const running = listJobs(session.id).filter((job) => job.state === "running").length
   const another = admitAnotherJob(running)
   if (!another.admit) {
