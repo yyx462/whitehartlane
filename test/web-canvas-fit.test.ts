@@ -10,9 +10,11 @@ import { resolve } from "node:path"
 import { runInNewContext } from "node:vm"
 import test from "node:test"
 
-// pre-existing red on master (fails on BASE too) — tracked in issue
-// #253; skipped so the widened suite stays honest: green means green
-const SKIP = { skip: "pre-existing red on master — issue #253" }
+// the widen surfaced this file's true state, verified per-test on
+// BASE (daa61ea) and HEAD: "right edge" and "dragging down" fail on
+// BOTH (pre-existing red — tracked in issue #253, skipped with that
+// receipt); the other three are GREEN on both and run as guards.
+const SKIP = { skip: "pre-existing red on master and HEAD — issue #253 (verified on BASE daa61ea)" }
 
 const START = "// fit-canvas:start"
 const END = "// fit-canvas:end"
@@ -42,7 +44,7 @@ test("a box dragged past the old right edge grows the canvas so its edges never 
   assert.equal(h, 500) // vertically nothing beat the footprint floor
 })
 
-test("a narrow diagram fills the well: clientWidth floors the width, left=0 is the well's true left edge", SKIP, () => {
+test("a narrow diagram fills the well: clientWidth floors the width, left=0 is the well's true left edge", () => {
   // footprint only 300x300 (a small chain) in a 1400px well: the canvas
   // spans the whole well — no centered dead margin to clamp inside of
   const { w, h } = fitCanvasSize(
@@ -53,7 +55,7 @@ test("a narrow diagram fills the well: clientWidth floors the width, left=0 is t
   assert.equal(h, 300)
 })
 
-test("the render-time footprint floors the size — a wake-box slot reservation never shrinks", SKIP, () => {
+test("the render-time footprint floors the size — a wake-box slot reservation never shrinks", () => {
   // hollow wake boxes render smaller than the slots drawDiagram
   // reserved (nodeFootprint); the canvas must not shrink below the
   // layout footprint even though every live box is well inside it
@@ -70,7 +72,7 @@ test("the render-time footprint floors the size — a wake-box slot reservation 
   assert.equal(empty.h, 260)
 })
 
-test("the well's height floors the canvas too — the pane never wastes its lower half", SKIP, () => {
+test("the well's height floors the canvas too — the pane never wastes its lower half", () => {
   // a short diagram (footprint 260 tall) in a tall well (700): the
   // canvas fills the well, not the content
   const { h } = fitCanvasSize([{ x: 10, y: 10, w: 150, h: 90 }], { fpW: 300, fpH: 260, wellW: 500, wellH: 700 })

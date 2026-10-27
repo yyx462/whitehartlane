@@ -189,6 +189,9 @@ export type OsEvent = {
 } & Record<string, unknown>
 
 export function homeRoot(): string {
+  // TWIN WARNING: scripts/review-trace.mjs replicates this exact
+  // resolution (a .mjs cannot import this TS module) — if you change
+  // the order or the spellings, change both (r13 tests-3).
   if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
   // ADR 0011: the disk default is ~/.local/share/whitehartlane; a legacy
   // agentic-os disk still wins while it is the only one that exists

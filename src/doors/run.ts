@@ -158,28 +158,50 @@ function copyBeside(source: string, store: string): void {
   const hooksHash = existsSync(join(source, "hooks"))
     ? contentHashOf(join(source, "hooks"))
     : ""
+  // EVERY program input copyBeside stages must join the identity
+  // (r13 principles-5/questions-1: questions.toml, task.txt, actor.md,
+  // roots.txt, project.json, contract.toml staged beside the program
+  // but hashed nowhere — a done unit folded forward across edited
+  // inputs, run 2's ledger claiming a settle its own inputs never
+  // made). A missing input hashes as its name only.
+  const beside = ["questions.toml", "task.txt", "actor.md", "roots.txt", "project.json", "contract.toml"]
+    .map((n) => {
+      const f = join(source, n)
+      if (!existsSync(f)) return `${n}:`
+      return `${n}:${createHash("sha1").update(readFileSync(f)).digest("hex")}`
+    })
+    .join("|")
   const identity = {
     source: resolve(source),
     workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
     hooks: hooksHash,
     data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data")) : "",
     members: existsSync(members) ? contentHashOf(members) : "",
+    beside,
   }
   writeFileSync(join(store, ".whl-program"), JSON.stringify(identity))
   const prior = newestPriorRun(store, identity)
   if (prior) {
     const settled = readState(prior)
-    // "completed" is per-shape: a review run completed when its cold
-    // gate wrote a verdict; a generic run when no unit is unsettled.
-    // A completed prior is a re-run by intent — fresh minds, nothing
-    // folds. An UNFINISHED prior (killed mid-chain, the dead-review
-    // shape) folds its done units and re-runs the rest.
+    // "completed" is per-shape and needs the prior's OWN unit count
+    // (r13 momentum-6: the fallback total = done+failed declared a
+    // fold-carrying prior with no units snapshot 'completed' and the
+    // chain's second re-levy folded nothing):
+    //   a REVIEW run completed when its cold gate wrote a verdict;
+    //   a GENERIC run completed when its units.jsonl exists and every
+    //   unit settled. No units snapshot → not completed → the fold
+    //   fires (unfinished by default — wrong-fresh beats wrong-replay).
     const priorVerdict = join(prior, "data", "review", "verdict.json")
-    const total = existsSync(join(prior, "units.jsonl"))
-      ? readFileSync(join(prior, "units.jsonl"), "utf8").trim().split("\n").filter(Boolean).length
-      : settled.done.length + settled.failed.length
+    const unitsJsonl = join(prior, "units.jsonl")
+    const unitsJsonlPresent = existsSync(unitsJsonl)
+    const total = unitsJsonlPresent
+      ? readFileSync(unitsJsonl, "utf8").trim().split("\n").filter(Boolean).length
+      : 0
     const settledCount = settled.done.length + settled.failed.length
-    const completed = existsSync(priorVerdict) || (total > 0 && settledCount >= total)
+    const isReview = existsSync(join(prior, "data", "review"))
+    const completed = isReview
+      ? existsSync(priorVerdict)
+      : unitsJsonlPresent && settledCount >= total
     if (completed) {
       logRunNote(store, "fold: prior run completed — fresh minds, nothing folded")
     } else {
@@ -200,7 +222,7 @@ function logRunNote(store: string, note: string): void {
 
 // the newest earlier staged run of the SAME program (identity marker
 // match), excluding the store being staged — the re-levy fold's source
-function newestPriorRun(store: string, identity: { source: string; workflow: string; hooks: string; data: string; members: string }): string | null {
+function newestPriorRun(store: string, identity: { source: string; workflow: string; hooks: string; data: string; members: string; beside: string }): string | null {
   const root = sessionsRoot()
   if (!existsSync(root)) return null
   const want = JSON.stringify(identity)

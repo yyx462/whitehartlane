@@ -12,7 +12,21 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-const AOS = join(homedir(), ".local/share/agentic-os/sessions")
+// WHERE THE OS-DISK TRACE LIVES — the twin of store.ts homeRoot()
+// (ADR 0011), which owns the decision; this .mjs cannot import that
+// TS module, so the ternary is replicated here. IF YOU CHANGE ONE,
+// CHANGE BOTH (r13 tests-3: hard-coding the legacy disk crashed with
+// ENOENT on the default layout and broke the README's any-machine
+// promise).
+function traceRoot() {
+  if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
+  const next = join(homedir(), ".local", "share", "whitehartlane")
+  const old = join(homedir(), ".local", "share", "agentic-os")
+  return existsSync(old) && !existsSync(next) ? old : next
+}
+
+const AOS = join(traceRoot(), "sessions")
+// the opencode DB is opencode's own XDG dir, not whl's decision
 const DB = join(homedir(), ".local/share/opencode/opencode.db")
 const only = process.argv.slice(2).filter((a) => !a.startsWith("--"))
 const JSON_OUT = process.argv.includes("--json")
