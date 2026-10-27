@@ -30,8 +30,8 @@ import {
   findSessionBySpur,
   listJobs,
   openSession,
+  bookingStale,
   orphanJob,
-  pidAlive,
   sessionsRoot,
   stampSpurKey,
   type JobRecord,
@@ -316,13 +316,6 @@ function provenanceOf(dir: string): Provenance {
   return p
 }
 
-// the booking probe's grace for pid-less running records: the runner
-// claims its pid within seconds of a live booking, so a record older
-// than this with no pid was abandoned before its runner started
-// (r16 tests-10: a YOUNG pid-less record is a live intent — never an
-// orphan; the cousin law: wrong-fresh beats wrong-replay)
-const BOOKING_GRACE_MS = 60_000
-
 function book(
   dir: string,
   kind: WorkflowKind,
@@ -394,12 +387,11 @@ function book(
   // is the NORMAL shape of every booking — a young pid-less record
   // is a live intent, never an orphan).
   for (const job of listJobs(session.id)) {
-    if (job.state !== "running") continue
-    const ageMs = Date.now() - Date.parse(job.created)
-    if (job.pid !== undefined && job.pid !== null && !pidAlive(job.pid)) {
-      orphanJob(job, `booking probe: orchestrator pid ${job.pid} is gone`, job.panes?.length ?? 0)
-    } else if (job.pid === undefined && ageMs > BOOKING_GRACE_MS) {
-      orphanJob(job, `booking probe: no orchestrator pid ${Math.round(ageMs / 1000)}s after booking (abandoned)`, job.panes?.length ?? 0)
+    // THE stale-booking oracle (store.ts bookingStale) — proven-dead
+    // pid, or pid-less past the booking grace. Young pid-less records
+    // are live intents, never orphans (r16 tests-10).
+    if (bookingStale(job, Date.now())) {
+      orphanJob(job, `booking probe: running Job is stale (pid ${job.pid ?? "none"} — dead or past the booking grace)`, job.panes?.length ?? 0)
     }
   }
   const running = listJobs(session.id).filter((job) => job.state === "running").length

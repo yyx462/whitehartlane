@@ -135,6 +135,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // leaving a half-built dir the replace-guard then refused to replace —
   // the recovery the message itself prescribed was dead-ended). A
   // docs-only diff never needs a model: nothing spawns, nothing pins.
+  //
+  // THE pin-plan (r17 principles-10/tests-1: "will the model pin land"
+  // was computed twice — pre-verify and write — with two different
+  // [workflow] anchors that disagreed on trailing whitespace). ONE
+  // computation here: the pinned template content is produced once,
+  // verified once, and the materialization writes exactly these bytes.
+  let pinnedWorkflowToml: string | undefined
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
     const hasTempPin = /\btemperature\s*=/.test(templateToml)
@@ -146,17 +153,19 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         code: 2,
       }
     }
-    // the pin-verify, PRE-materialization (r16 momentum-9/tests-13:
-    // the verify used to fire after mkdir+cpSync — the half-built-dir
-    // disease, third occurrence, reintroduced 50 lines below its own
-    // twin's fix). The write's outcome is computable from the template:
-    // the pin lands iff the template has a model line (replaced) or a
-    // [workflow] header (inserted after). Neither → refuse before mkdir.
-    if (typeof args.model === "string" && !/^model\s*=/m.test(templateToml) && !/^\[workflow\]\s*$/m.test(templateToml)) {
-      return {
-        ok: false,
-        why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land (add a [workflow] table to the template, or pass --template pointing at one)`,
-        code: 2,
+    if (typeof args.model === "string") {
+      const pin = `model = ${JSON.stringify(args.model)}`
+      pinnedWorkflowToml = /^model\s*=/m.test(templateToml)
+        ? templateToml.replace(/^model\s*=.*$/m, () => pin)
+        : /^\[workflow\][ \t]*$/m.test(templateToml)
+          ? templateToml.replace(/^(\[workflow\][ \t]*)$/m, (_m, head) => `${head}\n${pin}`)
+          : undefined // nowhere to land → the refusal below fires
+      if (pinnedWorkflowToml === undefined || !/^model\s*=/m.test(pinnedWorkflowToml)) {
+        return {
+          ok: false,
+          why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land (add a [workflow] table to the template, or pass --template pointing at one)`,
+          code: 2,
+        }
       }
     }
   }
@@ -181,18 +190,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin. The MISSING-model refusal lives at the door now
   // (pre-materialization, above) — this branch only writes the pin.
-  if (args.model) {
-    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
-    const pinned = /^model\s*=.*$/m.test(toml)
-    // FUNCTION replacement (r12 tests-4): a string replacement would
-    // interpolate `$&`-shaped model ids as patterns and corrupt the pin.
-    // The landing was VERIFIED pre-materialization (above) — no
-    // post-write refusal here, or the half-built dir returns.
-    const pin = `model = ${JSON.stringify(args.model)}`
-    const next = pinned
-      ? toml.replace(/^model\s*=.*$/m, () => pin)
-      : toml.replace(/^(\[workflow\])$/m, (_m, head) => `${head}\n${pin}`)
-    writeFileSync(join(dir, "workflow.toml"), next)
+  // the pin-plan was computed and verified PRE-materialization — the
+  // materialization writes exactly those bytes (r17 principles-10/
+  // tests-1: one computation, one anchor)
+  if (pinnedWorkflowToml !== undefined) {
+    writeFileSync(join(dir, "workflow.toml"), pinnedWorkflowToml)
   }
 
   const title = args.title ?? `${head} → ${base}`

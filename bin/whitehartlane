@@ -42,11 +42,14 @@ import {
   killPane,
   leaseExpired,
   listJobs,
+  bookingStale,
   loadJob,
   normalizeSpur,
+
   orphanJob,
   projectJob,
   readAllEvents,
+  pidAlive,
   readEvents,
   saveJob,
   wakeAudit,
@@ -89,17 +92,6 @@ function shepStatus() {
 // the runner seam (src/runners.ts): one place the external CLIs are
 // dialed — shared with the Rail, swappable when the substrate changes
 const herdrAt = defaultRunner("herdr")
-
-/** @param {number | undefined} pid */
-function pidAlive(pid) {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return err?.code === "EPERM"
-  }
-}
 
 /** @param {JobRecord} job */
 function unitsOf(job) {
@@ -577,7 +569,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       ...allLevyPanes().map((r) => r.pane),
     ])
     const bastards = live.filter((p) => !admitted.has(p.label))
-    const stalled = jobs.filter((job) => job.state === "running" && !pidAlive(job.pid))
+    const stalled = jobs.filter((job) => bookingStale(job, Date.now()))
     console.log(`panes live in shep: ${live.length}; admitted by Jobs: ${live.length - bastards.length}`)
     for (const pane of bastards) {
       console.log(`UNADMITTED ${pane.label} (${pane.pane}) — no booked birth; retire it: shep retire ${pane.label}`)
@@ -612,7 +604,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       // AGENTIC_OS_LEASE_ENFORCE=1 until beat density is proven across
       // quiet fan-out waits. Timers grant the right to suspect; the
       // census decides.
-      const pidGone = !pidAlive(job.pid)
+      const pidGone = bookingStale(job, Date.now())
       const leaseGone =
         process.env.AGENTIC_OS_LEASE_ENFORCE === "1" && leaseExpired(job)
       if (!pidGone && !leaseGone) {

@@ -961,6 +961,24 @@ export function pidAlive(pid: number | null): boolean {
   }
 }
 
+// THE stale-booking oracle — the one answer to "is this running Job
+// abandoned?", shared by the booking probe (run.ts) and the sweep
+// (bin) (r17 principles-8/tests-2: the probe and the sweep answered
+// it with two private rules). A running Job is stale iff its pid is
+// PROVEN dead, or it has no pid and is older than the booking grace
+// (the runner claims its pid within seconds of a live booking — a
+// young pid-less record is a live intent, never an orphan).
+export const BOOKING_GRACE_MS = 60_000
+export function bookingStale(
+  job: { state: string; pid?: number; created: string },
+  nowMs: number,
+  live = pidAlive,
+): boolean {
+  if (job.state !== "running") return false
+  if (job.pid !== undefined && job.pid !== null) return !live(job.pid)
+  return nowMs - Date.parse(job.created) > BOOKING_GRACE_MS
+}
+
 // The door-side pre-check (the child's acquireLease stays authoritative
 // for races and direct door invocations): the current holder when it is
 // live, null when the lease is free to take. A reborn runner always
