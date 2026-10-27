@@ -122,6 +122,23 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   if (files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
+  // the missing-model twin, BEFORE materialization but AFTER the skips
+  // (the #251 review's principles-2: it used to fire after mkdir+cpSync,
+  // leaving a half-built dir the replace-guard then refused to replace —
+  // the recovery the message itself prescribed was dead-ended). A
+  // docs-only diff never needs a model: nothing spawns, nothing pins.
+  {
+    const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    const hasTempPin = /\btemperature\s*=/.test(templateToml)
+    const hasModel = typeof args.model === "string" || /^model\s*=/m.test(templateToml)
+    if (hasTempPin && !hasModel) {
+      return {
+        ok: false,
+        why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`,
+        code: 2,
+      }
+    }
+  }
 
   const headShort = headSha.slice(0, 8)
   const slug = `${basename(repo)}-${head === headBranch && headBranch !== "HEAD" ? headBranch.replace(/[^a-zA-Z0-9-]/g, "-") : headShort}`
@@ -141,23 +158,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   cpSync(template, dir, { recursive: true })
   // the lens temperature pins need a model to ride (the host writes
   // provider.<p>.models.<id>.temperature): --model lands as the
-  // workflow pin; without one the host refuses temperature spawns, so
-  // the door refuses FIRST, with the fix in the message
+  // workflow pin. The MISSING-model refusal lives at the door now
+  // (pre-materialization, above) — this branch only writes the pin.
   if (args.model) {
     const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
     const pinned = /^model\s*=.*$/m.test(toml)
     const next = pinned ? toml.replace(/^model\s*=.*$/m, `model = ${JSON.stringify(args.model)}`) : toml.replace(/^(\[workflow\])$/m, `$1\nmodel = ${JSON.stringify(args.model)}`)
     writeFileSync(join(dir, "workflow.toml"), next)
-  } else {
-    // temperature pins without any model = the host refuses each spawn
-    // (never vanish); refuse at the DOOR instead, with the fix named
-    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
-    // mid-line pins count too ({ id = "x", temperature = 0.2, … })
-    const hasTempPin = /\btemperature\s*=/.test(toml)
-    const hasModel = /^model\s*=/m.test(toml)
-    if (hasTempPin && !hasModel) {
-      return { ok: false, why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`, code: 2 }
-    }
   }
 
   const title = args.title ?? `${head} → ${base}`

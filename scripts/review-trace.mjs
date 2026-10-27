@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // review-trace — the economics tracer for pr-review jobs (the 8-round
 // receipt machine). For every review job on this machine: wall time,
-// per-lens findings, tokens + cost (from the opencode DB, keyed by the
+// per-lens findings, token usage (from the opencode DB, keyed by the
 // unit sandbox directories), and cross-round duplicate findings keyed
 // by (file, invariant) — the measured answer to "where did the tokens
 // go and what did we re-buy".
@@ -73,8 +73,10 @@ for (const sid of readdirSync(AOS)) {
   }
 }
 
-// tokens + cost per unit sandbox — assistant rows in session_message
-// carry per-step token usage; session_v2.directory maps them to units
+// token usage per unit sandbox — assistant rows in session_message
+// carry per-step token usage; session_v2.directory maps them to units.
+// No cost column: the provider integration reports none, and an
+// unfed $0.00 is a claim, not a measurement (questions-1, r9).
 try {
   const rows = q(
     `select s.directory d, sum(cast(json_extract(sm.data,'$.tokens.input') as integer)) tin,` +
@@ -89,12 +91,11 @@ try {
     const m = r.d.match(/\/jobs\/([^/]+)\/run\/(?:units\/)?([^/]+)/)
     const j = jobs.find((x) => x.jid === m?.[1])
     if (!j || !m) continue
-    const t = j.toks[m[2]] ?? { kin: 0, kout: 0, kcache: 0, usd: 0, steps: 0 }
+    const t = j.toks[m[2]] ?? { kin: 0, kout: 0, kcache: 0, steps: 0 }
     j.toks[m[2]] = {
       kin: t.kin + (r.tin ?? 0),
       kout: t.kout + (r.tout ?? 0),
       kcache: t.kcache + (r.tcache ?? 0),
-      usd: +(t.usd).toFixed(3),
       steps: t.steps + (r.steps ?? 0),
     }
   }
@@ -121,17 +122,17 @@ if (JSON_OUT) {
 } else {
   for (const j of jobs) {
     const K = Object.values(j.toks).reduce(
-      (a, t) => ({ kin: a.kin + t.kin, kout: a.kout + t.kout, kcache: a.kcache + t.kcache, usd: +(a.usd + t.usd).toFixed(2) }),
-      { kin: 0, kout: 0, kcache: 0, usd: 0 },
+      (a, t) => ({ kin: a.kin + t.kin, kout: a.kout + t.kout, kcache: a.kcache + t.kcache }),
+      { kin: 0, kout: 0, kcache: 0 },
     )
     console.log(
       `${j.jid}  ${j.start.slice(5, 16)}  ${String(j.wall_min).padStart(5)}min  ${j.verdict.padEnd(8)} b${j.blocked ?? "-"}/a${j.advisory ?? "-"}  ` +
-        `in ${(K.kin / 1000).toFixed(0)}k out ${(K.kout / 1000).toFixed(0)}k cache ${(K.kcache / 1000).toFixed(0)}k $${K.usd.toFixed(2)}  ${j.title.slice(0, 46)}`,
+        `in ${(K.kin / 1000).toFixed(0)}k out ${(K.kout / 1000).toFixed(0)}k cache ${(K.kcache / 1000).toFixed(0)}k  ${j.title.slice(0, 46)}`,
     )
     for (const [u, d] of Object.entries(j.units)) {
       const t = j.toks[u]
       console.log(
-        `    ${u.padEnd(11)} f${String(d.findings).padStart(2)}  ${t ? `in ${(t.kin / 1000).toFixed(0)}k out ${(t.kout / 1000).toFixed(0)}k $${t.usd.toFixed(2)}` : "(no session — dead pane)"}`,
+        `    ${u.padEnd(11)} f${String(d.findings).padStart(2)}  ${t ? `in ${(t.kin / 1000).toFixed(0)}k out ${(t.kout / 1000).toFixed(0)}k` : "(no session — dead pane)"}`,
       )
     }
   }
