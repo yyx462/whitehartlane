@@ -1186,7 +1186,10 @@ export async function runOrchestrator(input: {
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
-  const stallMs = input.stallMs ?? DEFAULT_STALL_MS
+  // program-declared silence ceiling (workflow.stall_ms; the r6
+  // receipt — a review lens synthesizing over a big diff out-silences
+  // the 10-minute default and gets ruled stalled minutes before done)
+  const stallMs = input.stallMs ?? manifest.workflow.stall_ms ?? DEFAULT_STALL_MS
   const settleMode = input.settleMode ?? manifest.workflow.settle_mode ?? "marker"
   const fallbackLadder = input.fallbackLadder ?? manifest.workflow.fallback_ladder ?? true
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS

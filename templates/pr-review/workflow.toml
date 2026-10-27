@@ -27,6 +27,10 @@ spur_id = "pr-review"
 worker_kind = "opencode"
 slots = 4
 canary = false
+# review lenses read large diffs and synthesize marker-silent for
+# long stretches — the 10-minute default stall ladder killed a lens
+# minutes before its done marker landed (r6, j-9f3d35). 30 min.
+stall_ms = 1800000
 
 [[stage]]
 id = "intake"
