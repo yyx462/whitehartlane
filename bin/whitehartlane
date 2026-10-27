@@ -314,7 +314,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     responsible worker; verdict at data/review/verdict.json).
 
   the spell (from an agent session — tracked background shell):
-    bin/whl review <repo> --base master --head <branch> \\
+    whl review <repo> --base master --head <branch> \\
       --out <dir> --title "<pr title>" --model <provider/model> \\
       --merge-cmd "<cmd>" --unattended
 
