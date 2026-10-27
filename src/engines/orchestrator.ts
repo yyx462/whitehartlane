@@ -632,7 +632,11 @@ export function cycle(deps: CycleDeps): boolean {
           let pass = false
           let why = ""
           try {
-            execSync(plan.check!, { cwd: deps.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+            // WHL_UNIT: the check names its subject — a per-unit hook
+            // (the review rail's findings-check is the first customer)
+            // must know WHICH unit it judges; without it the hook can
+            // only scan every unit dir and guess the addressee.
+            execSync(plan.check!, { cwd: deps.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, WHL_UNIT: id } })
             pass = true
           } catch (err) {
             why = err instanceof Error ? err.message.split("\n")[0] : String(err)
@@ -1182,7 +1186,10 @@ export async function runOrchestrator(input: {
   const where = manifest.report?.where ?? input.taskDir
   const layout = input.layout ?? resolvedLayout(manifest)
   const slots = input.slots ?? manifest.workflow.slots ?? DEFAULT_SLOTS
-  const stallMs = input.stallMs ?? DEFAULT_STALL_MS
+  // program-declared silence ceiling (workflow.stall_ms; the r6
+  // receipt — a review lens synthesizing over a big diff out-silences
+  // the 10-minute default and gets ruled stalled minutes before done)
+  const stallMs = input.stallMs ?? manifest.workflow.stall_ms ?? DEFAULT_STALL_MS
   const settleMode = input.settleMode ?? manifest.workflow.settle_mode ?? "marker"
   const fallbackLadder = input.fallbackLadder ?? manifest.workflow.fallback_ladder ?? true
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
@@ -1534,6 +1541,11 @@ export async function runOrchestrator(input: {
       })
     }
     return runCoworker(rail as never as import("../adapters/rail.ts").Rail, {
+      // the program-declared silence ceiling (workflow.stall_ms) feeds
+      // BOTH engines — a station's members can synthesize marker-silent
+      // exactly like a fan-out lens (self-review r6b tests-1: parsed
+      // for every kind, consumed by one)
+      ...(manifest.workflow.stall_ms !== undefined ? { stallMs: manifest.workflow.stall_ms } : {}),
       station: {
         dir,
         members,
@@ -1582,7 +1594,7 @@ export async function runOrchestrator(input: {
         }
       } else if (pass && step.check) {
         try {
-          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          execSync(step.check, { cwd: input.taskDir, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, WHL_UNIT: step.id } })
           checkRow = " — stage check passed"
         } catch (err) {
           pass = false

@@ -134,6 +134,13 @@ Runs; the events trace pane shows every booked fact.
 
 ## Hard rules (each one fails review)
 
+- **Never drive whl untracked.** When YOU must wait on a whl run (the
+  e2e battery, the pr-review drill, any scripted levy-then-wait), run
+  it in your harness's tracked background shell so its finish wakes
+  you — never nohup/`&` detached. A whl-driving command you cannot
+  hear finishing is an information gap you made; the operator-side
+  twin of the `--from` law (receipt: pr-drill round 3, 2026-10-26 — a
+  detached run finished failing and the driving session sat idle).
 - **Never babysit.** No polling loops, no waiting on the orchestrator —
   the wake is the ONLY delivery. If you are a pane (a worker of another
   spur), the wake lands as a prompt in your own conversation, and your
@@ -185,6 +192,49 @@ on yyx462/whitehartlane (symptom / root cause / job id / run-dir pointer)
 and say so. Run-scoped workarounds (program-folder briefs, hooks) are
 the spur's to make; an OS fix is a ticket, never a mid-run edit of
 WhiteHartLane or this skill.
+
+## The PR review hook (every PR-generating stage's tail)
+
+`whl review` closes the PR→merge gap with the adversarial pre-merge
+rail (the program template: `templates/pr-review/` — read its README
+before customizing):
+
+```
+whl review <repo> --base main --head feat \
+           [--trace-dir <the authoring job's dir>] \
+           --from opencode:<your session id>
+```
+
+- One command: materializes the review program (intake gate → 4-lens
+  fan-out → prove gate → divide solo → merge gate) and levies it.
+  Docs-only diffs skip at the door (receipt, nothing levied).
+- The four lenses are fixed: `principles` (invariants + twin paths),
+  `tests` (adversarial test creation), `momentum` (the authoring trace
+  cross-check), `questions` (the repo's QUESTIONS.md).
+- The DECISION MODEL is mechanical: a finding blocks only with a repro
+  that fails on HEAD twice and classifies introduced/incomplete-fix
+  against BASE. Accept → the merge gate merges. Reject → the divide
+  stage maps each proven finding to the worker whose deliverable
+  claims its file (via `--trace-dir`) and writes ONE
+  `feedback/<name>.md` per party.
+- Your job as the levy when the wake lands: on reject, feed each
+  `feedback/<name>.md` verbatim into that worker's NEXT brief (the
+  refine round belongs to the AUTHORING program, not the review);
+  a worker answers a finding with code or a test, never prose, and
+  never edits the repros under `test/review/` — it ADOPTS them: the
+  fix commit copies its repro into the repo's own test suite,
+  assertion intact (a fix without its adopted test has not happened),
+  and `verdict.json adopt[]` lists regression tests to adopt now.
+- **A dead unit is not a dead review.** When a lens stalls or a pane
+  dies at birth, re-levy the SAME program dir
+  (`whl run <the review's program dir> --unattended`): the settled
+  ledger fold spares every done unit and respawns only the unfinished
+  one — never materialize a fresh program for a retry (that re-runs
+  every lens; receipt: r8, j-3f4065, three green lenses burned to
+  redo one).
+- The repo under review owns `INVARIANTS.md` + `QUESTIONS.md` at its
+  root; every escape becomes a new invariant. The weekly drill:
+  `PR_DRILL=1 test/e2e/pr-review/run-drill.sh <this checkout>`.
 
 ## Stop
 

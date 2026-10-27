@@ -236,6 +236,11 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         }
         if (row.initiates === true) member.initiates = true
         if (row.model !== undefined) member.model = str(row.model, `stage ${id} members[${row.name as string}].model`)
+        // CARRY it, never just validate it (self-review r6b principles-1/
+        // tests-4: the validator above refused garbage while this map
+        // silently dropped GOOD pins — the units[] twin of r3, sitting
+        // one screen away). Validated upstream in the same loop.
+        if (row.temperature !== undefined) member.temperature = row.temperature
         return member
       })
       if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)
@@ -261,11 +266,30 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         if (!SHEP_SAFE_ID.test(uid)) throw new HookError(`stage ${id} unit id is not shep-safe: ${uid}`)
         if (seen.has(uid)) throw new HookError(`stage unit repeats id ${uid}`)
         seen.add(uid)
-        const unit: { id: string; brief: string; model?: string } = {
+        const unit: { id: string; brief: string; model?: string; temperature?: number } = {
           id: uid,
           brief: str(row.brief, `stage ${id} units[${i}].brief`),
         }
         if (row.model !== undefined) unit.model = modelStr(row.model, `stage ${id} units[${i}].model`)
+        // the temperature pin (#212) used to VANISH here — accepted by
+        // the manifest type, dropped by this map, so the engine's
+        // settings plan (settingsPlanFromStages reads unit.temperature)
+        // always saw an empty map. INV-2: every validated field reaches
+        // an engine. Found by the pr-review self-review r3 (its lens
+        // quoted this exact block) — the review program is this field's
+        // first real customer (the lens temperature spread).
+        if (row.temperature !== undefined) {
+          // ONE validator, shared with the twin site (members[]) — the
+          // self-review r4's tests-1 caught this map accepting what the
+          // members site refuses: strings ("0.5"), booleans (true→1),
+          // negatives and out-of-range pins all shipped via Number()
+          // coercion. typeof number kills the coercions at the source.
+          const t = row.temperature
+          if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 2) {
+            throw new HookError(`stage ${id} units[${i}].temperature must be a number 0..2: ${String(t)} (per-mind model settings; opencode pins it in the sandbox config)`)
+          }
+          unit.temperature = t
+        }
         return unit
       })
     }
@@ -393,7 +417,7 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean }
+  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean; stall_ms?: number }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
   // only for coworker-run's legacy-toml warning (that file's concern)
   hooks: { units?: string; grade?: string; counts?: string; verdict?: string }
@@ -552,6 +576,18 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       throw new HookError(`workflow.retry must be an integer 0-3: ${workflow.retry}`)
     }
   }
+  // the stall ladder's silence ceiling, program-declared (the r6
+  // receipt: a review lens reading a large diff goes marker-silent for
+  // >10 minutes mid-synthesis and the default ladder ruled it stalled
+  // minutes before its done marker landed). Precedent: drain_timeout_ms.
+  // 10 min default; a program of long silent minds declares its own.
+  let stallMs: number | undefined
+  if (workflow.stall_ms !== undefined) {
+    stallMs = Number(workflow.stall_ms)
+    if (!Number.isInteger(stallMs) || stallMs < 60_000 || stallMs > 3_600_000) {
+      throw new HookError(`workflow.stall_ms must be an integer 60000-3600000 (ms): ${workflow.stall_ms}`)
+    }
+  }
   // completion-detection — the settle lane. "marker" (default) is the
   // worker-pen protocol, byte-identical to every run before this
   // option existed. "status-first" adds the platform pen: an idle
@@ -625,7 +661,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     throw new HookError('[gates] detectors are retired with the spur step file they served — the rail-acted verdict is a [[stage]] with topology = "gate" and run (docs/STAGES.md, ADR 0014)')
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
     hooks: {
       grade: optHook(hooks.grade, "hooks.grade"),
       counts: optHook(hooks.counts, "hooks.counts", {

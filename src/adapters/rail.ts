@@ -493,6 +493,26 @@ export class Rail implements ShepPort {
         return fresh
       }
     }
+    // The GONE tab is the last gap (#165's twin): herdr closes a tab
+    // whose last pane closed, so between stages the fleet's whole house
+    // can vanish — every pane retired, tab and all. A later stage's
+    // spawn must re-open the house, not die (the pr-review drill's
+    // divide stage: lenses retired, divider spawn failed 3× and blocked
+    // the chain on a cleanup race, j-d0fdc8). One attempt; a re-open
+    // that fails falls through to the loud failure below.
+    if (!seed && listed.status === 0 && this.fleetTab) {
+      this.log("fleet tab gone between stages — re-opening the column (a stage must not die because cleanup ran first)")
+      this.colUsed = false
+      this.openFleetTab(this.taskDir)
+      if (this.colPane && this.layout.tab !== "same") {
+        const pane = this.splitPane(this.colPane, "down", cwd, 0.5)
+        if (pane) {
+          this.transport.exec("pane", "close", this.colPane)
+          this.colUsed = true
+          return pane
+        }
+      }
+    }
     this.log(`pane split failed for the fleet column — no live anchor (tab ${this.fleetTab ?? "?"}; pane-list rc=${listed.status}${seed ? ", split failed" : ", tab empty"})`)
     return null
   }
@@ -613,11 +633,21 @@ export class Rail implements ShepPort {
     // Per-mind pin (issue #152 seam widening): a spawn carrying a pin
     // that differs from the manifest pin cannot ride the CLI
     // transport (it passes --kind only) — refuse honestly, never
-    // silently downgrade a worker to the wrong model.
-    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
-      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
-      this.log(`spawn refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
-      return false
+    // silently downgrade a worker to the wrong model. The temperature
+    // twin (self-review r6b questions-1): the shep path has no
+    // settings pass-through, so a declared pin would vanish — same
+    // refusal, same reason.
+    if (!(this.layout.tab === "new" && this.colPane)) {
+      if (model !== undefined && model !== this.workerModel) {
+        this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+        this.log(`spawn refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+        return false
+      }
+      if (temperature !== undefined) {
+        this.ledger?.emit("reject", { label, why: "per-unit temperature needs the fleet-pane path (the CLI transport drops it)" })
+        this.log(`spawn refused for ${label}: per-unit temperature ${temperature} needs the fleet-pane path (the CLI transport drops it)`)
+        return false
+      }
     }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
@@ -655,10 +685,17 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
-    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
-      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
-      this.log(`resume refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
-      return false
+    if (!(this.layout.tab === "new" && this.colPane)) {
+      if (model !== undefined && model !== this.workerModel) {
+        this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+        this.log(`resume refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+        return false
+      }
+      if (temperature !== undefined) {
+        this.ledger?.emit("reject", { label, why: "per-unit temperature needs the fleet-pane path (the CLI transport drops it)" })
+        this.log(`resume refused for ${label}: per-unit temperature ${temperature} needs the fleet-pane path (the CLI transport drops it)`)
+        return false
+      }
     }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)

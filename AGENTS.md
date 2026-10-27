@@ -35,6 +35,16 @@ meta.toml. -->
      (details: autojobs show agentic-os-window) before concluding a
      server-side fix "didn't land". -->
 
+<!-- whl-driving: any command that DRIVES whl (run/review, the e2e
+     battery, the pr-review drill) from an agent session runs in the
+     harness's TRACKED background shell, so the finish wakes the agent
+     that launched it — never nohup/`&` detached, where nobody hears
+     the end. Receipt: c1 drill round 3 (2026-10-26) — a nohup'd run
+     finished failing and the session sat idle for the rest of the
+     turn. This is the operator-side twin of the door's --from law: a
+     Job nobody hears finishing is an information gap, and so is a
+     whl-driving command you cannot hear. -->
+
 <!-- gwt worktrees: a spawned worktree is a fresh checkout with no
      node_modules — run `npm install` INSIDE the worktree before
      npm test (symptom: the whole suite dies with ERR_MODULE_NOT_FOUND

@@ -6,15 +6,43 @@
 // start sequence behind the brownout guard (stagger + retry), the
 // brief delivery, and the agent_status grammar parser (ONE parser —
 // the liveness consolidation's single verb feeds from here).
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { backoffBase, backoffMs, drawJitter, jitterBound, retries, sleepSync } from "./backoff.ts"
-import { splitModel, writeOpencodeModel, writeOpencodeModelSettings, writePiSettings } from "./store.ts"
+import { modelIn, splitModel, writeOpencodeModel, writeOpencodeModelSettings, writePiSettings } from "./store.ts"
 import { opencodeUsageOf } from "./transcripts.ts"
 import type { UsageRow } from "../ports/agent-host.ts"
 import type { AgentHost, AgentStatus, HostInhabitSpec } from "../ports/agent-host.ts"
 import type { CmdResult, Transport } from "../ports/transport.ts"
 
 const START_TIMEOUT_MS = 60_000
+
+// the run-root sandbox opencode.json (writeWorkerPermissions seeds it,
+// including its resolved model pin) — discovered the same way opencode
+// discovers project config: walk up from cwd. A config WITHOUT a model
+// (the coworker member sandbox — modelIn throws on the sandbox dir and
+// writes model-less) does NOT stop the walk: it SHADOWS nothing, we
+// keep climbing (r7's principles-1: the early return made a declared
+// workflow model unreachable and temperature spawns refused on a false
+// premise). Station layouts sit 4-6 dirs deep; cap at 8.
+function sandboxModelOf(cwd: string): string | undefined {
+  let d = cwd
+  for (let i = 0; i < 8; i++) {
+    const probe = join(d, "opencode.json")
+    if (existsSync(probe)) {
+      try {
+        const m = JSON.parse(readFileSync(probe, "utf8")).model
+        if (typeof m === "string" && m.length > 0) return m
+      } catch {
+        // unreadable config: keep climbing
+      }
+    }
+    const up = dirname(d)
+    if (up === d) break
+    d = up
+  }
+  return undefined
+}
 
 export class OpenCodeHost implements AgentHost {
   private readonly transport: Transport
@@ -42,20 +70,44 @@ export class OpenCodeHost implements AgentHost {
       const { provider, id } = splitModel(spec.model)
       tail.push("--approve", "--provider", provider, "--model", id)
       if (spec.temperature !== undefined) {
-        this.log(`temperature ${spec.temperature} requested for ${label} — pi settings carry no temperature key today; the pin rides opencode only`)
+        // refuse, never vanish (self-review r8b principles-1): the pin
+        // went LIVE for opencode this change — a pi program's declared
+        // pin must not silently ride the host default
+        this.log(`temperature ${spec.temperature} for ${label}: pi settings carry no temperature key — refusing spawn (drop the pin or use opencode)`)
+        return false
       }
-    } else if (spec.model && spec.kind === "opencode") {
+    } else if (spec.kind === "opencode") {
       // the root command dropped --model in the 2026-10 upgrade — a
       // passed flag crashes the TUI at birth (j-37bdc0: three start
       // timeouts, run dead). The pin rides the sandbox opencode.json
       // instead, symmetric with pi's settings write above.
-      writeOpencodeModel(spec.cwd, spec.model)
+      if (spec.model) writeOpencodeModel(spec.cwd, spec.model)
       if (spec.temperature !== undefined) {
-        writeOpencodeModelSettings(spec.cwd, spec.model, { temperature: spec.temperature })
+        // a model-LESS spawn used to drop the pin silently (the
+        // self-review r4's principles-1: the lens shape — temperature
+        // pins, no unit model — never wrote settings, and the
+        // README-advertised spread was fiction). Resolve against the
+        // SANDBOX opencode.json's own model pin (writeWorkerPermissions
+        // resolved unit → stage → workflow there); with no model
+        // anywhere, REFUSE the spawn — never vanish.
+        const m = spec.model ?? sandboxModelOf(spec.cwd) ?? modelIn(spec.cwd)
+        if (!m) {
+          this.log(`temperature ${spec.temperature} for ${label} has no model to pin against (no unit/stage/workflow model) — refusing spawn`)
+          return false
+        }
+        if (!spec.model) writeOpencodeModel(spec.cwd, m)
+        writeOpencodeModelSettings(spec.cwd, m, { temperature: spec.temperature })
       }
     }
     if (spec.resumeSession) tail.push("--session", spec.resumeSession)
     const startArgs = tail.length ? ["--", ...tail] : []
+    // NOTE (r4 divide-pane incident): worker panes must not inherit the
+    // human's interactive surface (global MCP/integrations can pop auth
+    // chrome no API exposes). Isolation lives in the SANDBOX config —
+    // writeWorkerPermissions re-declares every global MCP server with
+    // enabled:false — because herdr's agent start carries no --env and
+    // the opencode CLI carries no --config (OPENCODE_CONFIG cannot ride
+    // the spawn). See src/adapters/store.ts.
     // the brownout guard's second half (ADR 0010): a refused start is
     // not death — knock again with growing pauses. AGENTIC_OS_START_
     // TRIES / _BACKOFF_MS tune it.

@@ -1,0 +1,68 @@
+# pr-review — the adversarial pre-merge rail (template for `whl review`).
+#
+#   intake (gate)      → materialize what reviewers read (BASE/HEAD
+#                        checkouts, diff, pr.md, one shuffled hunk
+#                        order per lens)
+#   lenses (fan-out)   → 4 fresh minds, one lens each, NO author
+#                        transcript (fresh context is the whole point)
+#   prove (gate)       → the decision model: a P0/P1 blocks ONLY with
+#                        a repro that fails on HEAD twice and
+#                        classifies introduced/incomplete-fix against
+#                        BASE — a fact, not an opinion
+#   divide (solo)      → on reject: one mind reads the findings + the
+#                        AUTHORING run's trace (trace/) and splits
+#                        feedback per responsible worker; on accept:
+#                        a no-op
+#   merge (gate)       → accept: merge (MERGE_CMD or local git merge).
+#                        reject: exit 1 — the chain fails HONESTLY and
+#                        the wake says why. The one deliberately cold
+#                        verdict.
+#
+# Verdict-timing law: only merge is cold. The lenses' findings-check
+# fires while each lens still lives (one revise round on a shape
+# violation); prove/divide are acts, never judges of a workforce.
+[workflow]
+name = "pr-review"
+spur_id = "pr-review"
+worker_kind = "opencode"
+slots = 4
+canary = false
+# review lenses read large diffs and synthesize marker-silent for
+# long stretches — the 10-minute default stall ladder killed a lens
+# minutes before its done marker landed (r6, j-9f3d35). 30 min.
+stall_ms = 1800000
+
+[[stage]]
+id = "intake"
+topology = "gate"
+run = "bash hooks/intake.sh"
+
+[[stage]]
+id = "lenses"
+topology = "fan-out"
+grade = false
+preamble = "Read ../../data/REVIEWER.md first — it is the law for every lens. Then read ../../data/INVARIANTS.md (what right means here) and ../../data/QUESTIONS.md (the fixed questions). You are reviewing someone else's change: the repo under review is at ../../data/review/head (read-only except test/review/), the BASE it grew from at ../../data/review/base, the diff at ../../data/review/diff.patch. Your own hunk order is ../../data/review/order-<your-id>.txt — read the diff THERE, in that order. You do not have the author's reasoning and must not try to reconstruct it. OUTPUT CONTRACT (the shape is checked mechanically, and a violation costs you a revise round — copy it exactly): units/<your-id>/findings.jsonl holds ONE JSON OBJECT PER LINE, extra fields allowed, but with EXACTLY these required fields — {\"id\":\"<your-id>-1\",\"lens\":\"<your-id>\",\"severity\":\"P0|P1|P2|P3\",\"claim\":\"one sentence\",\"location\":{\"file\":\"src/x.ts\",\"line_start\":1},\"invariant\":\"INV-n (when one applies)\",\"scenario\":\"the path that breaks\",\"repro\":{\"test_path\":\"test/review/<your-id>-1.test.ts\",\"command\":\"node --test test/review/<your-id>-1.test.ts\",\"expected_failure\":\"what the assertion says\"}} — id is prefixed with YOUR unit id and lens IS your unit id (verbatim, no suffixes); every P0/P1 carries a repro whose test file you WROTE under ../../data/review/head/ and RAN; a finding you cannot make fail is P2 at most. Also in your unit dir: coverage.md (the receipt — decisions traced, sites checked with file:line, questions answered, what you declined to judge) and result.md (one line). An empty findings.jsonl is legal; a thin coverage.md with it is not."
+check = "bash hooks/findings-check.sh"
+units = [
+  { id = "principles", temperature = 0.2, brief = "Lens: PRINCIPLES + TWIN PATHS. For every decision the diff changes (one phrase each: 'when is a pane done', 'how long to wait'), grep the WHOLE repo for every other site making the same decision — synonyms: sleep, setTimeout, settle, retire, drain, idle, done, wait, timeout. Read each site in full, not the hunk. A decision living in two places is itself a finding even when they currently agree. Then walk ../../data/INVARIANTS.md line by line and try to violate each with this change. Read the repo's own direction docs (AGENTS.md, docs/prd/) and judge the change against them. For every P0/P1 write a failing repro test at ../../data/review/head/test/review/principles-<n>.test.ts and RUN it (cwd ../../data/review/head) — if you cannot make it fail, do not raise it." },
+  { id = "tests", temperature = 0.4, brief = "Lens: ADVERSARIAL TEST CREATION. Ignore style; your only job is tests that would notice the change being wrong. For each behavior the diff claims, list its realistic faults (the Meta-ACH move: empty input, zero, negative, duplicate, concurrent, mid-failure, resume-after-pause, reverted-half). Write a test per plausible fault at ../../data/review/head/test/review/tests-<n>.test.ts using the repo's existing test stack (or node:test if none). RUN each (cwd ../../data/review/head). A fault whose test FAILS on HEAD is a P0/P1 finding with that test as repro. A claim with NO test anywhere that would fail if the implementation were reverted is a finding too (Simon Willison's bar: proven to work). Do not modify tests the diff itself adds except to read them." },
+  { id = "momentum", temperature = 0.6, brief = "Lens: TRACE + MOMENTUM (the long trace). If ../../data/trace/ exists it is the authoring run's own trace: units/*/result.md (what each worker CLAIMS), events.jsonl / report.json (what actually happened — stalls, grade faults, blocked rows, churn). Cross-check the PR against it: files in the diff no unit claims; work claimed done the trace shows failed, stalled, or never run; a verdict the trace contradicts. If ../../data/trace/ does not exist, say so in coverage.md and judge against the repo's direction docs instead (AGENTS.md momentum block, docs/prd/*): does this change REPLACE the worst design or patch inside it? Then hunt timing/lifecycle assumptions in the diff itself: sleeps where state could be observed, settles that assume, orderings that only hold on the happy path. P0/P1 need a failing repro at ../../data/review/head/test/review/momentum-<n>.test.ts, RUN (cwd ../../data/review/head)." },
+  { id = "questions", temperature = 0.8, brief = "Lens: THE FIXED QUESTIONS. Answer EVERY question in ../../data/QUESTIONS.md, in order, in your coverage.md — each PASS / FAIL / N-A with one line of evidence (file:line). A FAIL becomes a finding only if you can name the provably affected code AND (for P0/P1) a failing repro at ../../data/review/head/test/review/questions-<n>.test.ts, RUN (cwd ../../data/review/head). The questions are deliberately mechanical: they are the floor under the fancier lenses, so answer them honestly rather than kindly — a PASS you cannot cite evidence for is a lie the next escape will expose." },
+]
+
+[[stage]]
+id = "prove"
+topology = "gate"
+run = "bash hooks/prove.sh"
+
+[[stage]]
+id = "divide"
+topology = "solo"
+grade = false
+brief = "You are the responsibility divider. Read ../../data/review/verdict.json. If verdict is accept: write result.md saying 'no feedback: accepted' and stop — create nothing else (if verdict.json carries adopt[] entries, list them in result.md: regression tests the author should adopt now). If reject: the blocked findings must reach exactly the workers that caused them. First, the evidence set — ../../data/trace/ is the AUTHORING run's trace when the PR came from a whl program (units/*/result.md and briefs say who did what; map each blocked finding's location.file to the unit whose deliverable claims that file; when two units plausibly share blame, the one whose claimed file matches wins, ties go to BOTH). NO trace/ is the NORMAL case for human-authored PRs — do not report it as a problem: route every finding to one file, feedback/author.md. WHERE THE FILES GO (the check enforces it — your cwd is units/divide/, and feedback written there is LOST): every feedback file is written at the RUN dir's feedback/ shelf, which from your cwd is ../../feedback/ — ../../feedback/<name>.md, one per responsible party, using the template in ../../data/REVIEWER.md (FEEDBACK TEMPLATE): their findings ONLY — id, severity, claim, location, scenario, the repro command, the proof outcome, the ADOPT instruction (the finding's repro test_path, to be copied into the repo's own test suite with the fix, assertion intact) — plus the please-check-and-refine contract. Write ../../feedback/MAP.md: one line per blocked finding, 'finding-id -> name (evidence: <the trace line or file that pinned it>)'. Every blocked finding appears in exactly one feedback file; feedback never invents findings the reviewers did not prove. Your result.md (in YOUR unit dir): the division in three lines."
+check = "bash hooks/divide-check.sh"
+
+[[stage]]
+id = "merge"
+topology = "gate"
+run = "bash hooks/merge.sh"

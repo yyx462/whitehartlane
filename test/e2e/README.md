@@ -116,3 +116,23 @@ loadManifest parses it (corpus pin), the mint mints it, the chain
 compiles it. The rehearsal seats both delegated stages through the
 levy port the test suite itself uses; the REAL ≤30-min run is the
 graduation exercise (ops-side, the driver's eval lane).
+
+## pr-review drill (OPT-IN: PR_DRILL=1) — the review rail's 5-case bench
+
+`PR_DRILL=1 test/e2e/pr-review/run-drill.sh <repo-checkout> [cases…]`
+builds five fixture repos (`fixtures.sh`) and runs the REAL review
+program against each — real lens agents, real repro runs, real merges:
+
+| case | shape | expected |
+| --- | --- | --- |
+| c1-clean | a correct fix, both twin sites updated | ACCEPT + the merge gate merges |
+| c2-twin | observed wait in one path, fixed sleep in its twin (the run-#17 class) | REJECT, `introduced` proven |
+| c3-tests | an untested edge the change breaks (empty input) | REJECT via the tests lens' repro |
+| c4-docs | docs-only diff | SKIP at the door — nothing levied |
+| c5-multiworker | two modules by two authors, one bug each | REJECT + feedback split by responsibility |
+
+Each case is a full `whl review` levy (4 lenses + divider ≈ 5 agent
+sessions; the whole drill is ~4 runs). This is also the seeded-recall
+bench: when a lens misses a planted bug, the fix belongs in
+INVARIANTS/QUESTIONS or the lens brief — never in the gate (the gate
+must stay mechanical).

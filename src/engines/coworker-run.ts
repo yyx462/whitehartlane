@@ -682,7 +682,11 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
         let verdictWhy = ""
         let verdictPass = false
         try {
-          execSync(verdictCmd, { cwd: verdictCwd, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"] })
+          // WHL_UNIT: every site that runs a stage check names its
+          // subject (the self-review's principles-1: the STAGES.md
+          // claim was false here — the in-exchange check judged the
+          // station unnamed). The station's id is the subject.
+          execSync(verdictCmd, { cwd: verdictCwd, timeout: 120_000, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, WHL_UNIT: opts.station ? opts.station.dir.split("/").pop()! : "station" } })
           verdictPass = true
         } catch (err) {
           // the hook's OWN stderr line outranks execSync's generic

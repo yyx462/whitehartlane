@@ -13,6 +13,7 @@ import { runCoworker } from "./coworker-run.ts"
 import { runLab } from "./lab.ts"
 import { runOrchestrator, worktreeChurnedSince } from "./orchestrator.ts"
 import { declareScope, readRootsTxt } from "../core/permission.ts"
+import { loadManifest } from "../doors/hooks.ts"
 import type { Rail } from "../adapters/rail.ts"
 import type { Report } from "../core/report.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
@@ -134,7 +135,19 @@ export function engineFor(
   orchestratorRoot: string,
   deps: EngineDeps = {},
 ): () => Promise<Report | null> {
-  if (kind === "coworker") return () => (deps.runCoworker ?? runCoworker)(rail)
+  if (kind === "coworker") {
+    // the program-declared silence ceiling rides EVERY dispatch (the
+    // self-review r8b momentum-2: the station seat consumed it, the
+    // whole-program shape — this one — dropped it and the exchange's
+    // nudge ladder stayed hardcoded)
+    let stallMs: number | undefined
+    try {
+      stallMs = loadManifest(rail.taskDir).workflow.stall_ms
+    } catch {
+      // unreadable manifest: the engine's own defaults speak
+    }
+    return () => (deps.runCoworker ?? runCoworker)(rail, stallMs !== undefined ? { stallMs } : {})
+  }
   if (kind === "lab") return () => (deps.runLab ?? runLab)(rail)
   return fanOutEngine(rail, orchestratorRoot, deps)
 }
