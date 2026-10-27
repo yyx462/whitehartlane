@@ -366,6 +366,73 @@ test("merge: the cold verdict — accept merges, reject exits 1 honestly", () =>
   rmSync(tmp, { recursive: true, force: true })
 })
 
+test("self-review round 1 fixes: multi-file orders stay block-safe; body-file refuses; nested assets is not docs", () => {
+  // multi-file diff: every order keeps each file's header glued to its
+  // own hunks (the self-review's three-lens finding — the old awk
+  // folded the next file's header into the previous hunk)
+  const tmp = mkdtempSync(join(tmpdir(), "aos-rev-multi-"))
+  const repo = join(tmp, "repo")
+  mkdirSync(join(repo, "src"), { recursive: true })
+  const g = (args: string) => execSync(`git ${args}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+  g("init -q -b main .")
+  g("config user.email t@t.local")
+  g("config user.name t")
+  writeFileSync(join(repo, "src", "one.ts"), "a\nb\nc\n")
+  writeFileSync(join(repo, "src", "two.ts"), "x\ny\nz\n")
+  g("add -A")
+  g("commit -qm base")
+  g("checkout -qb feat")
+  writeFileSync(join(repo, "src", "one.ts"), "a\nB\nc\nD\n")
+  writeFileSync(join(repo, "src", "two.ts"), "x\nY\nz\nW\n")
+  g("add -A")
+  g("commit -qm feat")
+  const p = progFixture((x) => {
+    const base = execSync("git rev-parse main", { cwd: repo, encoding: "utf8" }).trim()
+    const head = execSync("git rev-parse feat", { cwd: repo, encoding: "utf8" }).trim()
+    writeFileSync(join(x.dir, "data", "review", "config.sh"), `REPO='${repo}'\nBASE_BRANCH='main'\nBASE_SHA='${base}'\nHEAD_BRANCH='feat'\nHEAD_SHA='${head}'\nTITLE='t'\nAUTHOR=''\nMERGE_CMD=''\n`)
+  })
+  assert.equal(hook("intake.sh", p.dir).code, 0)
+  for (const lens of ["principles", "tests", "momentum", "questions"]) {
+    const order = readFileSync(join(p.dir, "data", "review", `order-${lens}.txt`), "utf8")
+    const diff = readFileSync(join(p.dir, "data", "review", "diff.patch"), "utf8")
+    assert.equal((order.match(/^diff --git/gm) ?? []).length, 2, `${lens}: both file headers present`)
+    assert.equal((order.match(/^@@/gm) ?? []).length, (diff.match(/^@@/gm) ?? []).length, `${lens}: every hunk present`)
+    // block-safety, by name: every file keeps exactly its own hunks —
+    // a hunk that drifted under another file's header (the old fold
+    // bug) changes the per-file counts even when totals match
+    const countsOf = (t: string) => {
+      const m = new Map<string, number>()
+      for (const b of t.split(/^diff --git /m).filter(Boolean)) {
+        const name = (b.match(/^a\/(\S+) b\//) ?? [])[1] ?? "?"
+        m.set(name, (b.match(/^@@/gm) ?? []).length)
+      }
+      return m
+    }
+    const want = countsOf(diff)
+    const got = countsOf(order)
+    assert.deepEqual([...got.entries()].sort(), [...want.entries()].sort(), `${lens}: per-file hunk counts match the diff`)
+    for (const [name, n] of got) assert.ok(n >= 1, `${lens}: ${name} has no hunk of its own (fold bug)`)
+  }
+  rmSync(tmp, { recursive: true, force: true })
+
+  // --body-file that does not exist REFUSES (never silently drops the claims)
+  const tmp2 = mkdtempSync(join(tmpdir(), "aos-rev-body-"))
+  const repo2 = fixtureRepo(join(tmp2, "repo"))
+  const bad = mat({ repo: repo2, base: "main", head: "feat", bodyFile: join(tmp2, "nope.md") })
+  assert.ok(!bad.ok && bad.code === 2, JSON.stringify(bad))
+  rmSync(tmp2, { recursive: true, force: true })
+
+  // a CODE file under a nested assets/ directory is NOT docs-only
+  const tmp3 = mkdtempSync(join(tmpdir(), "aos-rev-assets-"))
+  const repo3 = fixtureRepo(join(tmp3, "repo"))
+  mkdirSync(join(repo3, "src", "assets"), { recursive: true })
+  writeFileSync(join(repo3, "src", "assets", "gen.ts"), "export const g = 1\n")
+  execSync("git add -A && git commit -qm code-under-assets", { cwd: repo3 })
+  const code = mat({ repo: repo3, base: "main", head: "feat" })
+  assert.ok(code.ok && !code.skipped, "code under a nested assets/ dir must be reviewed")
+  rmSync(tmp3, { recursive: true, force: true })
+})
+
 test("intake: builds both checkouts, the diff, and one shuffled hunk order per lens", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-rev-intake-"))
   const repo = fixtureRepo(join(tmp, "repo"))

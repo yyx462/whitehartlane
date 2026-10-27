@@ -13,7 +13,7 @@ prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "intake: missing tool: $1" >&2; exit 1; }; }
-need git; need node; need awk
+need git; need node
 
 # idempotent re-entry (a regrade re-fires the gate): drop old
 # checkouts, THEN prune git's now-stale registrations (prune before rm
@@ -56,20 +56,34 @@ git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/fil
 
 # one shuffled hunk order per lens (Bugbot's randomized-order finding:
 # order changes what a model attends to first). Fixed seeds: the same
-# review is reproducible; different lenses still diverge.
+# review is reproducible; different lenses still diverge. The shuffle
+# is BLOCK-SAFE (the self-review's momentum-1/questions-1/tests-1, all
+# three proven): file headers stay glued to their own hunks — shuffling
+# "every line after the first @@" mangles multi-file diffs by folding
+# the next file's header into the previous hunk.
 shuffle_order() { # $1 seed
-  awk -v seed="$1" '
-    BEGIN { srand(seed); n = 0; pre = "" }
-    /^@@/ { n++; hunks[n] = $0 "\n"; next }
-    n == 0 { pre = pre $0 "\n"; next }
-    { hunks[n] = hunks[n] $0 "\n" }
-    END {
-      for (i = n; i > 1; i--) {
-        j = int(rand() * i) + 1; t = hunks[i]; hunks[i] = hunks[j]; hunks[j] = t
-      }
-      printf "%s", pre
-      for (i = 1; i <= n; i++) printf "%s", hunks[i]
-    }' "$prog/data/review/diff.patch"
+  node -e '
+    const seed = Number(process.argv[1])
+    const text = require("node:fs").readFileSync(0, "utf8")
+    let rng = seed
+    const rand = () => { rng = (rng * 1103515245 + 12345) % 2147483648; return rng / 2147483648 }
+    const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] } return a }
+    const files = []
+    let cur = null
+    for (const line of text.split("\n")) {
+      if (line.startsWith("diff --git ")) { cur = { head: [line], hunks: [] }; files.push(cur); continue }
+      if (cur === null) continue
+      if (line.startsWith("@@ ")) cur.hunks.push([line])
+      else if (cur.hunks.length > 0) cur.hunks[cur.hunks.length - 1].push(line)
+      else cur.head.push(line)
+    }
+    const out = []
+    for (const f of shuffle(files)) {
+      out.push(...f.head)
+      for (const h of shuffle(f.hunks)) out.push(...h)
+    }
+    console.log(out.join("\n"))
+  ' "$1" < "$prog/data/review/diff.patch"
 }
 i=0
 for lens in principles tests momentum questions; do

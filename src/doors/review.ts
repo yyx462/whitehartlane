@@ -40,7 +40,10 @@ export type ReviewReady =
   | { ok: false; why: string; code: 1 | 2 }
 
 const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
-const DOCS_PATH = /(^|\/)(docs?|doc|licence|license|assets|images)\//i
+// directory matches are TOP-LEVEL ONLY (^docs/…): a NESTED match
+// (src/assets/gen.ts) would classify code as docs and silently skip
+// its review — the self-review's tests-5 proven finding
+const DOCS_PATH = /^(docs?|doc|licence|license|assets|images)\//i
 
 const git = (repo: string, ...args: string[]): string =>
   execSync(`git -C ${JSON.stringify(repo)} ${args.join(" ")}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
@@ -120,7 +123,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the door's own law, not by a new one.
   mkdirSync(join(dir, "data", "review"), { recursive: true })
   writeFileSync(join(dir, "data", "review", "config.sh"), lines.join("\n") + "\n")
-  if (args.bodyFile && existsSync(args.bodyFile)) {
+  // refuse, never vanish (the self-review's tests-4): a --body-file
+  // that does not exist is a typo'd path, and silently ignoring it
+  // reviews a PR missing the claims the caller thought it carried
+  if (args.bodyFile && !existsSync(args.bodyFile)) {
+    return { ok: false, why: `--body-file ${args.bodyFile} does not exist`, code: 2 }
+  }
+  if (args.bodyFile) {
     copyFileSync(args.bodyFile, join(dir, "data", "review", "pr-body.md"))
   }
   // the reviewer's law + schema also ride data/ — staging carries
