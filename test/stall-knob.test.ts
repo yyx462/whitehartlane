@@ -38,3 +38,27 @@ test("stall_ms: parses, rides the manifest, and refuses out-of-range", () => {
   const none = loadManifest(program(mkdtempSync(join(tmpdir(), "aos-sk3-"))))
   assert.equal(none.workflow.stall_ms, undefined)
 })
+
+test("members[].temperature is CARRIED, not just validated (the r6b twin)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aos-sk4-"))
+  mkdirSync(join(dir, "hooks"), { recursive: true })
+  writeFileSync(
+    join(dir, "workflow.toml"),
+    `[workflow]
+name = "member-temp"
+worker_kind = "opencode"
+
+[[stage]]
+id = "exchange"
+topology = "coworker"
+members = [
+  { name = "alpha", brief = "a", initiates = true, temperature = 0.4 },
+  { name = "beta", brief = "b", temperature = 1.1 },
+]
+`,
+  )
+  const m = loadManifest(dir)
+  const stage = m.stages![0]
+  assert.equal(stage.members!.find((x) => x.name === "alpha")!.temperature, 0.4)
+  assert.equal(stage.members!.find((x) => x.name === "beta")!.temperature, 1.1)
+})

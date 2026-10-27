@@ -236,6 +236,11 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         }
         if (row.initiates === true) member.initiates = true
         if (row.model !== undefined) member.model = str(row.model, `stage ${id} members[${row.name as string}].model`)
+        // CARRY it, never just validate it (self-review r6b principles-1/
+        // tests-4: the validator above refused garbage while this map
+        // silently dropped GOOD pins — the units[] twin of r3, sitting
+        // one screen away). Validated upstream in the same loop.
+        if (row.temperature !== undefined) member.temperature = row.temperature
         return member
       })
       if (t.model !== undefined) stage.model = modelStr(t.model, `stage ${id} model`)

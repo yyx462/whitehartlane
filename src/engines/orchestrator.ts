@@ -1541,6 +1541,11 @@ export async function runOrchestrator(input: {
       })
     }
     return runCoworker(rail as never as import("../adapters/rail.ts").Rail, {
+      // the program-declared silence ceiling (workflow.stall_ms) feeds
+      // BOTH engines — a station's members can synthesize marker-silent
+      // exactly like a fan-out lens (self-review r6b tests-1: parsed
+      // for every kind, consumed by one)
+      ...(manifest.workflow.stall_ms !== undefined ? { stallMs: manifest.workflow.stall_ms } : {}),
       station: {
         dir,
         members,

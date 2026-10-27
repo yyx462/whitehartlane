@@ -633,11 +633,21 @@ export class Rail implements ShepPort {
     // Per-mind pin (issue #152 seam widening): a spawn carrying a pin
     // that differs from the manifest pin cannot ride the CLI
     // transport (it passes --kind only) — refuse honestly, never
-    // silently downgrade a worker to the wrong model.
-    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
-      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
-      this.log(`spawn refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
-      return false
+    // silently downgrade a worker to the wrong model. The temperature
+    // twin (self-review r6b questions-1): the shep path has no
+    // settings pass-through, so a declared pin would vanish — same
+    // refusal, same reason.
+    if (!(this.layout.tab === "new" && this.colPane)) {
+      if (model !== undefined && model !== this.workerModel) {
+        this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+        this.log(`spawn refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+        return false
+      }
+      if (temperature !== undefined) {
+        this.ledger?.emit("reject", { label, why: "per-unit temperature needs the fleet-pane path (the CLI transport drops it)" })
+        this.log(`spawn refused for ${label}: per-unit temperature ${temperature} needs the fleet-pane path (the CLI transport drops it)`)
+        return false
+      }
     }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
@@ -675,10 +685,17 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
-    if (model !== undefined && model !== this.workerModel && !(this.layout.tab === "new" && this.colPane)) {
-      this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
-      this.log(`resume refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
-      return false
+    if (!(this.layout.tab === "new" && this.colPane)) {
+      if (model !== undefined && model !== this.workerModel) {
+        this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
+        this.log(`resume refused for ${label}: per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)`)
+        return false
+      }
+      if (temperature !== undefined) {
+        this.ledger?.emit("reject", { label, why: "per-unit temperature needs the fleet-pane path (the CLI transport drops it)" })
+        this.log(`resume refused for ${label}: per-unit temperature ${temperature} needs the fleet-pane path (the CLI transport drops it)`)
+        return false
+      }
     }
     if (this.layout.tab === "new" && this.colPane) {
       const pane = this.splitForWorker(cwd)
