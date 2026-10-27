@@ -20,7 +20,7 @@
 import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import { parse as parseToml } from "smol-toml"
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
 
 export type ReviewArgs = {
   repo: string
@@ -62,32 +62,21 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 // first existing `model =` in the table's span is replaced, else the
 // pin is inserted right under the header. Returns undefined when the
 // template has no [workflow] table at all.
-function pinIntoWorkflowTable(templateToml: string, pin: string): string | undefined {
-  const lines = templateToml.split("\n")
-  // tolerant: a trailing comment or CRLF after the header is still the
-  // header (r20 tests-31)
-  const headerIdx = lines.findIndex((l) => /^\[workflow\]\s*(#.*)?$/.test(l.trim()))
-  if (headerIdx === -1) return undefined
-  let end = lines.length
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    // ANY new table context ends the span — [table] AND [[array-of-
-    // tables]] (r20 tests-31: [[stage]]'s model lines are its own)
-    if (/^\[/.test(lines[i].trim())) {
-      end = i
-      break
-    }
+// The pin's landing (r19 tests-1, r21 questions-4): INSIDE the
+// [workflow] table the run-time reads — whatever form declares it
+// (a literal header, dotted keys, an inline table). Parse → mutate →
+// re-serialize: every parseable form lands; comments in a third-party
+// template are the documented trade. Undefined only when the consumer
+// reads no [workflow] table at all.
+function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
+  try {
+    const parsed = parseToml(templateToml) as { workflow?: { model?: string } }
+    if (!parsed.workflow || typeof parsed.workflow !== "object") return undefined
+    parsed.workflow.model = model
+    return stringifyToml(parsed)
+  } catch (err) {
+    return undefined // unparseable: the caller's own parse-guard refuses
   }
-  for (let i = headerIdx + 1; i < end; i++) {
-    // indented keys belong to the table too (TOML allows leading
-    // whitespace; r20 tests-30: a blind ^anchor missed them and the
-    // insert duplicated the key into a non-parsing document)
-    if (/^[ \t]*model\s*=/.test(lines[i])) {
-      lines[i] = pin
-      return lines.join("\n")
-    }
-  }
-  lines.splice(headerIdx + 1, 0, pin)
-  return lines.join("\n")
 }
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
@@ -195,7 +184,14 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // --model — the consumer's read for the former, the argv for the
     // latter (r20 principles-12 kept the parser; this disjunct is the
     // supplied half — dropping it refused every --model call)
-    const hasModel = parsedTemplate?.workflow?.model !== undefined || typeof args.model === "string"
+    // "a model to ride" = a grammar-legal model DECLARED in the template
+    // (the run path's own grammar — an illegal template model like ""
+    // or a bare id is NOT a declared model: the temp-pin refusal fires
+    // and the operator's --model wins — r21 tests-1) OR supplied via
+    // --model (the argv half; r20 principles-12 kept the parser read
+    // for the template half)
+    const templateModel = parsedTemplate?.workflow?.model
+    const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
       return {
         ok: false,
@@ -209,8 +205,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       // the old regex verify while loadManifest read workflow.model =
       // undefined. Text-preserving landing + a parse of the result:
       // the verification is the consumer's own read.
-      const pin = `model = ${JSON.stringify(args.model)}`
-      pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, pin)
+      pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, args.model)
       let parsed: { workflow?: { model?: string } } | undefined
       try {
         parsed = pinnedWorkflowToml !== undefined

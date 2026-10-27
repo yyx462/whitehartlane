@@ -271,18 +271,30 @@ export class Rail implements ShepPort {
       // one writer per job, so a double `whl continue` dies at the
       // door instead of split-braining the exchange.
       try {
-        acquireLease(job, `orchestrator pid=${process.pid}`)
+        // The WRITE-SITE single-act law (r21 principles-13/r18
+        // momentum-1): the boot-time load is a snapshot; the disk is
+        // re-read HERE, at the write, before the lease or the pid/door
+        // stamp touch it. An ORPHANED record means the booking probe
+        // declared THIS boot abandoned while it was booting — the
+        // orphan receipt stands; the runner stands down and `whl
+        // continue` revives the commission properly.
+        const fresh = loadJob(sid0, jid0) ?? job
+        if (fresh.state === "orphaned") {
+          throw new Error(
+            `booking probe orphaned ${job.id} during this boot (no orchestrator pid within the grace) — the orphan receipt stands; run: whitehartlane continue ${job.id}`,
+          )
+        }
+        acquireLease(fresh, `orchestrator pid=${process.pid}`)
       } catch (err) {
         if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
-      // Stamp only after the door opened: a refused writer throws out
-      // of this function below and must leave the shared record as it
-      // loaded it (the old order wrote pid+door before asking the lock).
-      job.pid = process.pid
-      job.door = { rev: doorRev(), started: new Date().toISOString() }
-      saveJob(job)
-      const booked = job
+      // The stamp writes the FRESH record (the same single-act re-read
+      // the lease acquire used) — never the boot-time snapshot.
+      const booked = fresh
+      booked.pid = process.pid
+      booked.door = { rev: doorRev(), started: new Date().toISOString() }
+      saveJob(booked)
       const holder = `orchestrator pid=${process.pid}`
       return {
         job: booked,
