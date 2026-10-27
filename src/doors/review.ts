@@ -20,6 +20,7 @@
 import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
+import { parse as parseToml } from "smol-toml"
 
 export type ReviewArgs = {
   repo: string
@@ -54,6 +55,33 @@ const git = (repo: string, ...args: string[]): string =>
   execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim()
 
 const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'`
+
+// The pin's landing (r19 tests-1): INSIDE the [workflow] table the
+// run-time reads — never the first `model =` line in any other table.
+// Text-preserving: the header line and its whitespace survive; the
+// first existing `model =` in the table's span is replaced, else the
+// pin is inserted right under the header. Returns undefined when the
+// template has no [workflow] table at all.
+function pinIntoWorkflowTable(templateToml: string, pin: string): string | undefined {
+  const lines = templateToml.split("\n")
+  const headerIdx = lines.findIndex((l) => /^\[workflow\][ \t]*$/.test(l.trim()))
+  if (headerIdx === -1) return undefined
+  let end = lines.length
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    if (/^\[[^\]]*\][ \t]*$/.test(lines[i].trim())) {
+      end = i
+      break
+    }
+  }
+  for (let i = headerIdx + 1; i < end; i++) {
+    if (/^model\s*=/.test(lines[i])) {
+      lines[i] = pin
+      return lines.join("\n")
+    }
+  }
+  lines.splice(headerIdx + 1, 0, pin)
+  return lines.join("\n")
+}
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
   const repo = resolve(args.repo)
@@ -154,13 +182,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       }
     }
     if (typeof args.model === "string") {
+      // r19 tests-1: the landing must be inside the [workflow] table
+      // THE RUN-TIME READS — a `model =` line in any other table sailed
+      // the old regex verify while loadManifest read workflow.model =
+      // undefined. Text-preserving landing + a parse of the result:
+      // the verification is the consumer's own read.
       const pin = `model = ${JSON.stringify(args.model)}`
-      pinnedWorkflowToml = /^model\s*=/m.test(templateToml)
-        ? templateToml.replace(/^model\s*=.*$/m, () => pin)
-        : /^\[workflow\][ \t]*$/m.test(templateToml)
-          ? templateToml.replace(/^(\[workflow\][ \t]*)$/m, (_m, head) => `${head}\n${pin}`)
-          : undefined // nowhere to land → the refusal below fires
-      if (pinnedWorkflowToml === undefined || !/^model\s*=/m.test(pinnedWorkflowToml)) {
+      pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, pin)
+      const parsed = pinnedWorkflowToml !== undefined
+        ? parseToml(pinnedWorkflowToml) as { workflow?: { model?: string } }
+        : undefined
+      if (parsed?.workflow?.model !== args.model) {
         return {
           ok: false,
           why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land (add a [workflow] table to the template, or pass --template pointing at one)`,
