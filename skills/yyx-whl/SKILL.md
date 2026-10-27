@@ -225,6 +225,13 @@ whl review <repo> --base main --head feat \
   fix commit copies its repro into the repo's own test suite,
   assertion intact (a fix without its adopted test has not happened),
   and `verdict.json adopt[]` lists regression tests to adopt now.
+- **A dead unit is not a dead review.** When a lens stalls or a pane
+  dies at birth, re-levy the SAME program dir
+  (`whl run <the review's program dir> --unattended`): the settled
+  ledger fold spares every done unit and respawns only the unfinished
+  one — never materialize a fresh program for a retry (that re-runs
+  every lens; receipt: r8, j-3f4065, three green lenses burned to
+  redo one).
 - The repo under review owns `INVARIANTS.md` + `QUESTIONS.md` at its
   root; every escape becomes a new invariant. The weekly drill:
   `PR_DRILL=1 test/e2e/pr-review/run-drill.sh <this checkout>`.
