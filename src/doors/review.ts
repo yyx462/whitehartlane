@@ -32,6 +32,7 @@ export type ReviewArgs = {
   bodyFile?: string
   out?: string
   template?: string
+  model?: string
 }
 
 export type ReviewReady =
@@ -111,9 +112,39 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   const headShort = headSha.slice(0, 8)
   const slug = `${basename(repo)}-${head === headBranch && headBranch !== "HEAD" ? headBranch.replace(/[^a-zA-Z0-9-]/g, "-") : headShort}`
   const dir = args.out ? resolve(args.out) : join(repo, ".whl-review", slug)
-  rmSync(dir, { recursive: true, force: true })
+  // an unguarded rmSync on a caller-supplied path is a footgun (the
+  // self-review r4's momentum-1): a typo'd --out must refuse, never
+  // recursively delete whatever was there. Replacing OUR OWN
+  // materialized program (re-runs) stays allowed.
+  if (existsSync(dir)) {
+    const ours = existsSync(join(dir, "workflow.toml")) && existsSync(join(dir, "data", "review"))
+    if (!ours) {
+      return { ok: false, why: `--out ${dir} exists and is not a materialized review program — refusing to replace it (pass an empty dir, or the program dir from an earlier review)`, code: 2 }
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
   mkdirSync(dir, { recursive: true })
   cpSync(template, dir, { recursive: true })
+  // the lens temperature pins need a model to ride (the host writes
+  // provider.<p>.models.<id>.temperature): --model lands as the
+  // workflow pin; without one the host refuses temperature spawns, so
+  // the door refuses FIRST, with the fix in the message
+  if (args.model) {
+    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
+    const pinned = /^model\s*=.*$/m.test(toml)
+    const next = pinned ? toml.replace(/^model\s*=.*$/m, `model = ${JSON.stringify(args.model)}`) : toml.replace(/^(\[workflow\])$/m, `$1\nmodel = ${JSON.stringify(args.model)}`)
+    writeFileSync(join(dir, "workflow.toml"), next)
+  } else {
+    // temperature pins without any model = the host refuses each spawn
+    // (never vanish); refuse at the DOOR instead, with the fix named
+    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
+    // mid-line pins count too ({ id = "x", temperature = 0.2, … })
+    const hasTempPin = /\btemperature\s*=/.test(toml)
+    const hasModel = /^model\s*=/m.test(toml)
+    if (hasTempPin && !hasModel) {
+      return { ok: false, why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`, code: 2 }
+    }
+  }
 
   const title = args.title ?? `${head} → ${base}`
   const lines = [

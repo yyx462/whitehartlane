@@ -274,8 +274,15 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         // quoted this exact block) — the review program is this field's
         // first real customer (the lens temperature spread).
         if (row.temperature !== undefined) {
-          const t = Number(row.temperature)
-          if (!Number.isFinite(t)) throw new HookError(`stage ${id} units[${i}].temperature is not a number`)
+          // ONE validator, shared with the twin site (members[]) — the
+          // self-review r4's tests-1 caught this map accepting what the
+          // members site refuses: strings ("0.5"), booleans (true→1),
+          // negatives and out-of-range pins all shipped via Number()
+          // coercion. typeof number kills the coercions at the source.
+          const t = row.temperature
+          if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 2) {
+            throw new HookError(`stage ${id} units[${i}].temperature must be a number 0..2: ${String(t)} (per-mind model settings; opencode pins it in the sandbox config)`)
+          }
           unit.temperature = t
         }
         return unit

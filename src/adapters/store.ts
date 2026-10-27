@@ -6,7 +6,7 @@
 // projection of events; records are never deleted (zen 5: retired is a
 // state, not rm).
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
-import { spawnSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { loadManifest } from "../doors/hooks.ts"
 import { contentHashOf } from "../doors/project.ts"
 import { allowGlobs, grantRoot } from "../core/permission.ts"
@@ -1360,6 +1360,26 @@ export function addWorkerRoot(runDir: string, root: string): void {
 // writer owns only the file: temp scratch, the run's tree, and the
 // scope's roots ride along from session start, so a mktemp/git/pip
 // write never prompts.
+// A worker pane must never inherit the HUMAN's interactive surface:
+// global MCP servers and integrations can pop auth chrome ("connect to
+// integration") that no API field exposes, hanging an innocent pane
+// until a human clicks (the r4 divide-pane incident). Project config
+// overrides a global server by NAME via enabled:false (probe-tested
+// 2026-10-27: the sandbox opencode.json re-declaring the user's
+// servers neutralized them — `opencode mcp list` → "No MCP servers
+// configured"). Best-effort: an unparseable list changes nothing.
+let mcpNamesCache: string[] | null = null
+function globalMcpNames(): string[] {
+  if (mcpNamesCache !== null) return mcpNamesCache
+  try {
+    const out = execFileSync("opencode", ["mcp", "list"], { timeout: 20_000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+    mcpNamesCache = [...out.matchAll(/^[✓✖●○!x\s]+([A-Za-z0-9_.-]+)\s/gm)].map((m) => m[1])
+  } catch {
+    mcpNamesCache = []
+  }
+  return mcpNamesCache!
+}
+
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
     const config: Record<string, unknown> = {
@@ -1368,6 +1388,10 @@ export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []
     }
     const model = modelIn(runDir)
     if (model) config.model = model
+    const mcp = globalMcpNames()
+    if (mcp.length > 0) {
+      config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
+    }
     writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
   } catch {
     // permissions scoping is best-effort; the run works without it

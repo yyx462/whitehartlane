@@ -14,6 +14,8 @@ whl="$repo_checkout/bin/whl"
 
 bash "$(dirname "$0")/fixtures.sh" "$root"
 
+DRILL_MODEL="${DRILL_MODEL:-glm-5.3-flash}" # this machine's opencode default; override per environment
+
 fails=0
 declare -a receipt=()
 
@@ -37,7 +39,7 @@ run_case() {
   local name="$1" base="$2" head="$3" want="$4" trace_dir="${5:-}"
   local jobid
   jobid=$( "$whl" review "$root/$name" --base "$base" --head "$head" --out "$root/$name-prog" \
-      --title "$name drill" ${trace_dir:+--trace-dir "$trace_dir"} --unattended 2>&1 | awk '/^job:/{print $2}' )
+      --title "$name drill" ${DRILL_MODEL:+--model "$DRILL_MODEL"} ${trace_dir:+--trace-dir "$trace_dir"} --unattended 2>&1 | awk '/^job:/{print $2}' )
   if [ -z "$jobid" ]; then
     # no job levied — the only legal reason is the docs-only skip
     if [ "$want" = "skip" ]; then

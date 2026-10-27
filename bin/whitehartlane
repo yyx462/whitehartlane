@@ -302,7 +302,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
     if (!positional) {
-      console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--title <s>] [--author <s>]")
+      console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
       console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>]")
       console.error("                               [--from <tool>:<sid> | --unattended]")
       process.exitCode = 2
@@ -320,6 +320,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         bodyFile: val("body-file"),
         out: val("out"),
         template: val("template"),
+        model: val("model"),
       },
       join(import.meta.dirname, "..", "templates"),
     )
