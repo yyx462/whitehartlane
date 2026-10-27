@@ -107,6 +107,27 @@ Every PR-generating stage gets the same tail:
   (plant a known bug, count catches — the only honest recall measure
   when the same model family is on both sides).
 
+## Test inheritance (adopt-on-fix, never write-at-review)
+
+Reviewers NEVER write the repo under review — the HEAD checkout is
+evidence, and repros are the review's property so an author cannot
+"fix" a finding by rewriting its assertion (Greptile's measured
+failure). But the tests lens' output is too valuable to throw away
+(Meta ACH: 73% of generated tests were accepted by engineers), so the
+handover is ADOPTION:
+
+- `verdict.json adopt[]` lists every repro worth keeping:
+  - `kind: "regression"` — PASSED on HEAD: guards correct behavior
+    today, fails the day someone breaks it. Adopt immediately.
+  - `kind: "repro"` — proved a blocking finding: adopt INTO the fix
+    commit, assertion intact. A fix without its adopted test has not
+    happened.
+- The feedback files carry the adopt instruction per finding; the
+  next review re-runs adopted tests as part of the repo's own suite
+  (they live in the repo now, not under test/review/).
+- This is also the INVARIANT compounding loop: every adopted test is a
+  planted bug the next seeded drill must catch.
+
 ## Per-repo checklist
 
 The repo under review owns its own "what right means":

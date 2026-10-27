@@ -72,7 +72,7 @@ const runRepro = (tp, side) => {
   return "fail-assert"
 }
 
-const blocked = [], advisory = [], ledger = []
+const blocked = [], advisory = [], ledger = [], adopt = []
 let proven = 0
 const PROVE_CAP = 12
 for (const f of findings) {
@@ -94,7 +94,16 @@ for (const f of findings) {
   if (h1 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
   const h2 = runRepro(tp, head)
   if (h2 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD (second run)` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
-  if (h1 === "pass" && h2 === "pass") { advisory.push({ ...f, why: `repro PASSES on HEAD (both runs) — finding refuted by its own test` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" }); continue }
+  if (h1 === "pass" && h2 === "pass") {
+    advisory.push({ ...f, why: `repro PASSES on HEAD (both runs) — finding refuted by its own test` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" })
+    // a passing repro is a REGRESSION TEST: it guards the exact behavior
+    // the finding worried about and fails the day someone breaks it.
+    // Offered for adoption (the author copies it into the repo's own
+    // suite — reviewers never write the repo, authors adopt).
+    adopt.push({ id: f.id, test_path: tp, kind: "regression", note: "passes on HEAD — adopt into the repo's suite as-is" })
+    continue
+  }
   if (h1 !== h2) { advisory.push({ ...f, why: `repro is flaky (runs disagree: ${h1} then ${h2})` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "flaky" }); continue }
   // fails on HEAD, twice, on an assertion — now BASE decides the class
   const baseTp = path.join(base, tp)
@@ -111,6 +120,7 @@ for (const f of findings) {
   } else if (b === "pass") {
     blocked.push({ ...f, outcome: "introduced", proof: `repro fails on HEAD (x2), passes on BASE ${process.env.BASE_SHA.slice(0, 8)}` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "introduced" })
+    adopt.push({ id: f.id, test_path: tp, kind: "repro", note: "adopt INTO YOUR FIX COMMIT — the test that proves the bug; keep its assertion intact" })
   } else if (diffFiles.has(f.location?.file)) {
     blocked.push({ ...f, outcome: "incomplete-fix", proof: `repro fails on BASE too AND the diff touches ${f.location.file} — the change is implicated (the twin-path class)` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "incomplete-fix" })
@@ -128,6 +138,11 @@ const out = {
   head: process.env.HEAD_SHA,
   blocked: blocked.map(({ _unit, _line, ...f }) => f),
   advisory: advisory.map(({ _unit, _line, why, ...f }) => ({ ...f, why })),
+  // the inheritance handover (adopt-on-fix, never write-at-review):
+  // every repro that PASSED on HEAD is a regression test to adopt now;
+  // every blocking repro is the test to adopt WITH the fix — assertion
+  // intact, path per the repo's own conventions
+  adopt,
   stats: { findings: findings.length, blocked: blocked.length, advisory: advisory.length, proven },
 }
 fs.writeFileSync(path.join(prog, "data", "review", "verdict.json"), JSON.stringify(out, null, 2) + "\n")

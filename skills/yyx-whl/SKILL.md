@@ -221,7 +221,10 @@ whl review <repo> --base main --head feat \
   `feedback/<name>.md` verbatim into that worker's NEXT brief (the
   refine round belongs to the AUTHORING program, not the review);
   a worker answers a finding with code or a test, never prose, and
-  never edits the repros under `test/review/`.
+  never edits the repros under `test/review/` — it ADOPTS them: the
+  fix commit copies its repro into the repo's own test suite,
+  assertion intact (a fix without its adopted test has not happened),
+  and `verdict.json adopt[]` lists regression tests to adopt now.
 - The repo under review owns `INVARIANTS.md` + `QUESTIONS.md` at its
   root; every escape becomes a new invariant. The weekly drill:
   `PR_DRILL=1 test/e2e/pr-review/run-drill.sh <this checkout>`.

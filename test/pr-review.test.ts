@@ -309,6 +309,13 @@ test("prove: the six outcomes of the decision model", () => {
   const r = hook("prove.sh", p.dir)
   assert.equal(r.code, 0, `prove must exit 0 (verdict produced): ${r.out}`)
   const v = JSON.parse(readFileSync(join(p.dir, "data", "review", "verdict.json"), "utf8"))
+  // the inheritance handover: blocking repros adopt WITH the fix,
+  // refuted-but-passing repros are regression tests to adopt now
+  const adopt = Object.fromEntries(v.adopt.map((a: { id: string; kind: string }) => [a.id, a.kind]))
+  assert.equal(adopt["principles-1"], "repro")
+  assert.equal(adopt["principles-2"], "repro")
+  assert.equal(adopt["principles-6"], "regression")
+  assert.equal(v.adopt.length, 3)
   assert.equal(v.verdict, "reject")
   const byId = Object.fromEntries(v.blocked.map((b: { id: string }) => [b.id, b.outcome]))
   assert.equal(byId["principles-1"], "introduced")

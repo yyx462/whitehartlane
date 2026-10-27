@@ -74,9 +74,17 @@ to the files your work produced:
 
 Please check and refine:
 - fix exactly what each finding names, in the files you own;
-- do NOT modify the repro tests under test/review/ — they are the
-  review's property and the next review re-runs them;
+- ADOPT the test: copy the finding's repro from the review's checkout
+  into the repo's own test suite as part of your fix commit (the path
+  your repo's conventions dictate), keeping its assertion intact — a
+  fix without its adopted test has not happened;
+- do NOT modify the repros that remain under the review's test/review/
+  — they are the review's property and the next review re-runs them;
 - push, then ask for the review to re-run;
 - if you believe a finding is wrong, answer with code or a test —
   never prose alone.
+
+Tests that PASSED on HEAD (verdict.json adopt[], kind "regression")
+are yours to adopt immediately — they guard behavior that is correct
+today and fail the day someone breaks it.
 ```
