@@ -197,6 +197,12 @@ test("review verb: a head BEHIND its base refuses — the direction of review is
   const r = mat({ repo, base: "main", head: "feat" })
   assert.ok(!r.ok && r.code === 2, JSON.stringify(r))
   assert.match(r.why ?? "", /not ahead of base/)
+  // a substitution-shaped ref is a REF, not shell input (argv, no
+  // shell): git refuses it, nothing executes, no side-effect file
+  const marker = join(tmp, "pwned")
+  const inj = mat({ repo, base: `main; touch ${marker}`, head: "feat" })
+  assert.ok(!inj.ok, "an injection-shaped base must not resolve")
+  assert.ok(!existsSync(marker), "no shell ever saw the ref")
   rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -313,6 +319,9 @@ test("prove: the six outcomes of the decision model", () => {
     )
     const rows = [
       finding({ id: "principles-1", severity: "P0", invariant: "INV-1", repro: { test_path: "test/review/principles-1.test.ts" } }),
+      // normalized path: './src/wait.ts' must still count as diff-touched
+      // (shares principles-2's fails-both-sides repro)
+      finding({ id: "principles-12", severity: "P1", location: { file: "./src/wait.ts", line_start: 1 }, repro: { test_path: "test/review/principles-2.test.ts" } }),
       finding({ id: "principles-2", severity: "P1", invariant: "INV-1", repro: { test_path: "test/review/principles-2.test.ts" } }),
       finding({ id: "principles-3", severity: "P1", location: { file: "src/legacy.ts", line_start: 1 }, repro: { test_path: "test/review/principles-3.test.ts" } }),
       finding({ id: "principles-4", severity: "P0", repro: { test_path: "test/review/principles-4.test.ts" } }),
@@ -329,15 +338,18 @@ test("prove: the six outcomes of the decision model", () => {
   const r = hook("prove.sh", p.dir)
   assert.equal(r.code, 0, `prove must exit 0 (verdict produced): ${r.out}`)
   const v = JSON.parse(readFileSync(join(p.dir, "data", "review", "verdict.json"), "utf8"))
+  // path identity is normalized: './src/wait.ts' implicates the diff
+  const byId = Object.fromEntries(v.blocked.map((b: { id: string }) => [b.id, b.outcome]))
+  assert.equal(byId["principles-12"], "incomplete-fix", "a './'-prefixed location must not degrade a diff-implicated finding")
   // the inheritance handover: blocking repros adopt WITH the fix,
   // refuted-but-passing repros are regression tests to adopt now
   const adopt = Object.fromEntries(v.adopt.map((a: { id: string; kind: string }) => [a.id, a.kind]))
   assert.equal(adopt["principles-1"], "repro")
   assert.equal(adopt["principles-2"], "repro")
   assert.equal(adopt["principles-6"], "regression")
-  assert.equal(v.adopt.length, 3)
+  assert.equal(adopt["principles-12"], "repro")
+  assert.equal(v.adopt.length, 4)
   assert.equal(v.verdict, "reject")
-  const byId = Object.fromEntries(v.blocked.map((b: { id: string }) => [b.id, b.outcome]))
   assert.equal(byId["principles-1"], "introduced")
   assert.equal(byId["principles-2"], "incomplete-fix")
   assert.deepEqual(
@@ -355,7 +367,7 @@ test("prove: the six outcomes of the decision model", () => {
   assert.match(adv["principles-11"], /non-assertion/, "a crash is not a proven assertion")
   // the ledger carries one line per finding (the lens proof-rate metric)
   const ledger = readFileSync(join(p.dir, "data", "review", "ledger.jsonl"), "utf8").trim().split("\n")
-  assert.equal(ledger.length, 11)
+  assert.equal(ledger.length, 12)
   rmSync(p.dir, { recursive: true, force: true })
 })
 

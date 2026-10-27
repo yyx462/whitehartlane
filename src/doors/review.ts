@@ -17,7 +17,7 @@
 // the seed), copy the authoring run's trace (for the divide stage)
 // when --trace-dir is given. Then the door's own admission screens
 // judge the program (prepareRun in check mode — grammar, deliverables).
-import { execSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 
@@ -47,8 +47,11 @@ const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|giti
 // license FILES, so the directory whitelist stays minimal
 const DOCS_PATH = /^(docs?|doc)\//i
 
+// no shell, ever (self-review r5 tests-1: raw --base/--head used to
+// ride execSync strings — a substitution in a branch name would
+// execute on the levy host). Args go to git as an argv array.
 const git = (repo: string, ...args: string[]): string =>
-  execSync(`git -C ${JSON.stringify(repo)} ${args.join(" ")}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+  execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim()
 
 const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'`
 
@@ -94,7 +97,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the review would judge the wrong direction. Base must be an
   // ancestor of head; a stale branch rebases first.
   try {
-    execSync(`git -C ${JSON.stringify(repo)} merge-base --is-ancestor ${baseSha} ${headSha}`, { stdio: ["ignore", "ignore", "ignore"] })
+    execFileSync("git", ["-C", repo, "merge-base", "--is-ancestor", baseSha, headSha], { stdio: ["ignore", "ignore", "ignore"] })
   } catch {
     return { ok: false, why: `head ${head} is not ahead of base ${base} — merge or rebase base into head first (the review judges exactly base..head)`, code: 2 }
   }

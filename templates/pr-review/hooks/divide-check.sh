@@ -22,6 +22,11 @@ if (v.verdict === "accept") {
   if (files.length === 0) err("verdict is reject but feedback/ is empty — nobody was told")
   if (!fs.existsSync(path.join(fbDir, "MAP.md"))) err("feedback/MAP.md missing — the division must carry its evidence")
   const blockedIds = v.blocked.map((b) => b.id)
+  // the legal vocabulary (self-review r5 momentum-2): feedback names
+  // BLOCKED findings AND adopt[] handover ids (regression tests are
+  // refuted findings — banning them red the very template this change
+  // ships). One decision, one place: this set.
+  const legal = new Set([...blockedIds, ...(v.adopt ?? []).map((a) => a.id)])
   const seen = new Map()
   for (const f of files) {
     const text = fs.readFileSync(path.join(fbDir, f), "utf8")
@@ -29,9 +34,10 @@ if (v.verdict === "accept") {
       const n = (text.match(new RegExp(`\\b${id}\\b`, "g")) ?? []).length
       if (n > 0) seen.set(id, (seen.get(id) ?? 0) + 1)
     }
-    // invented findings: ids that look like findings but are not blocked
+    // invented findings: ids that look like findings but are neither
+    // blocked nor adoptable
     for (const m of text.matchAll(/\b(principles|tests|momentum|questions)-[a-z0-9-]+\b/g)) {
-      if (!blockedIds.includes(m[0])) err(`${f} mentions ${m[0]} which is not a blocked finding — feedback never invents`)
+      if (!legal.has(m[0])) err(`${f} mentions ${m[0]} which is neither blocked nor in the adopt handover — feedback never invents`)
     }
   }
   for (const id of blockedIds) {

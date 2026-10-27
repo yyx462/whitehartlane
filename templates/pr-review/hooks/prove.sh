@@ -29,7 +29,14 @@ const base = path.join(prog, "data", "review", "base")
 const die = (why) => { console.error(`prove: ${why}`); process.exit(1) }
 if (!fs.existsSync(head) || !fs.existsSync(base)) die("intake checkouts missing — did the intake gate run?")
 
-const diffFiles = new Set(fs.readFileSync(path.join(prog, "data", "review", "files.txt"), "utf8").split("\n").filter(Boolean))
+// file identity is NORMALIZED, never byte-exact (self-review r5
+// principles-1/tests-2, both proven: a lens spelling './src/wait.ts'
+// or 'src/engines/../doors/x.ts' defeated the diff-implication test
+// and flipped a proven bug's verdict to accept)
+const normFile = (p) => path.normalize(String(p ?? "").replace(/^\.\//, "")).replace(/^\.\/+/, "")
+const diffFiles = new Set(
+  fs.readFileSync(path.join(prog, "data", "review", "files.txt"), "utf8").split("\n").filter(Boolean).map(normFile),
+)
 const findings = []
 for (const unit of fs.readdirSync(path.join(prog, "units"))) {
   const f = path.join(prog, "units", unit, "findings.jsonl")
@@ -145,7 +152,7 @@ for (const f of findings) {
     blocked.push({ ...f, outcome: "introduced", proof: `repro fails on HEAD (x2), passes on BASE ${process.env.BASE_SHA.slice(0, 8)}` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "introduced" })
     adopt.push({ id: f.id, test_path: tp, kind: "repro", note: "adopt INTO YOUR FIX COMMIT — the test that proves the bug; keep its assertion intact" })
-  } else if (diffFiles.has(f.location?.file)) {
+  } else if (diffFiles.has(normFile(f.location?.file))) {
     blocked.push({ ...f, outcome: "incomplete-fix", proof: `repro fails on BASE too AND the diff touches ${f.location.file} — the change is implicated (the twin-path class)` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "incomplete-fix" })
     adopt.push({ id: f.id, test_path: tp, kind: "repro", note: "adopt INTO YOUR FIX COMMIT — the test that proves the bug; keep its assertion intact" })

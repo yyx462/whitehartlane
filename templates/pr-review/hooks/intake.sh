@@ -91,17 +91,23 @@ for lens in principles tests momentum questions; do
   shuffle_order "$((7 * i + 13))" > "$prog/data/review/order-$lens.txt"
 done
 
-# repro home + deps. Install is BUDGET-CAPPED: a repo whose install
-# cannot fit the gate's cap degrades honestly (repros that need deps
-# will fail to load and prove downgrades them to bogus/advisory —
+# repro home + deps. Install is BUDGET-CAPPED and runs BOTH SIDES IN
+# PARALLEL (self-review r5 momentum-1: 150s serial × 2 = 300s cannot
+# fit the gate's own 300s cap — the promised degradation was
+# unreachable and a slow install killed the whole review as infra).
+# A repo whose install cannot fit degrades honestly (repros that need
+# deps will fail to load and prove downgrades them to bogus/advisory —
 # never a silent wrong verdict).
 mkdir -p "$prog/data/review/head/test/review"
+install_pids=()
 for side in head base; do
   if [ -f "$prog/data/review/$side/package.json" ]; then
     if command -v timeout >/dev/null 2>&1; then TO="timeout 150"; else TO=""; fi
     (cd "$prog/data/review/$side" && $TO npm ci --prefer-offline --no-audit --no-fund >/dev/null 2>&1) \
-      || echo "$side: deps install degraded (repros needing node_modules will classify bogus, not block)" >> "$prog/data/review/intake.log"
+      || echo "$side: deps install degraded (repros needing node_modules will classify bogus, not block)" >> "$prog/data/review/intake.log" &
+    install_pids+=($!)
   fi
 done
+for pid in "${install_pids[@]:-}"; do wait "$pid" 2>/dev/null || true; done
 
 echo "intake ok: $(wc -l < "$prog/data/review/files.txt" | tr -d ' ') files, $(grep -c '^@@' "$prog/data/review/diff.patch" || true) hunks"
