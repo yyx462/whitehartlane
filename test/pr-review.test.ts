@@ -182,6 +182,18 @@ test("review verb: docs-only diff skips BEFORE anything is levied", () => {
   rmSync(tmp, { recursive: true, force: true })
 })
 
+test("review verb: a head BEHIND its base refuses — the direction of review is base..head", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-rev-stale-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // move main PAST feat's branch point: feat is now behind, and a
+  // two-dot diff would read as reversals of main's new commit
+  execSync("git checkout -q main && printf 'export const extra = 2\\n' > src/extra.ts && git add -A && git commit -qm ahead", { cwd: repo })
+  const r = mat({ repo, base: "main", head: "feat" })
+  assert.ok(!r.ok && r.code === 2, JSON.stringify(r))
+  assert.match(r.why ?? "", /not ahead of base/)
+  rmSync(tmp, { recursive: true, force: true })
+})
+
 // ── 3. the hooks ────────────────────────────────────────────────────
 type Prog = { dir: string; head: string; base: string }
 function progFixture(setup: (p: Prog) => void): Prog {
@@ -266,8 +278,21 @@ test("prove: the six outcomes of the decision model", () => {
       join(x.head, "test", "review", "principles-5.test.ts"),
       `import assert from "node:assert/strict"; import { existsSync, writeFileSync } from "node:fs"\nif (!existsSync(".flap")) { writeFileSync(".flap", "1"); assert.equal(1, 2, "first-run failure") }\n`,
     )
-    // refuted: passes on HEAD
+    // refuted: passes on HEAD — BOTH runs (a pass-then-fail repro is flaky,
+    // the self-review r2's principles-1)
     writeFileSync(join(x.head, "test", "review", "principles-6.test.ts"), `import assert from "node:assert/strict"\nassert.equal(1, 1)\n`)
+    // flaky the OTHER order: passes first, fails second (marker inverse)
+    writeFileSync(
+      join(x.head, "test", "review", "principles-8.test.ts"),
+      `import assert from "node:assert/strict"; import { existsSync, writeFileSync } from "node:fs"\nif (existsSync(".flap8")) assert.equal(1, 2, "second-run failure")\nelse writeFileSync(".flap8", "1")\n`,
+    )
+    // base-infra: fails HEAD twice, but the repro cannot LOAD on BASE
+    // (imports a helper that exists only beside it in head)
+    writeFileSync(join(x.head, "test", "review", "helper-only-in-head.mjs"), "export const one = 1\n")
+    writeFileSync(
+      join(x.head, "test", "review", "principles-9.test.ts"),
+      `import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; import { one } from "./helper-only-in-head.mjs"\nassert.ok(!/sleep\\(/.test(readFileSync("src/wait.ts", "utf8")), "INV-1")\nvoid one\n`,
+    )
     const rows = [
       finding({ id: "principles-1", severity: "P0", invariant: "INV-1", repro: { test_path: "test/review/principles-1.test.ts" } }),
       finding({ id: "principles-2", severity: "P1", invariant: "INV-1", repro: { test_path: "test/review/principles-2.test.ts" } }),
@@ -276,6 +301,8 @@ test("prove: the six outcomes of the decision model", () => {
       finding({ id: "principles-5", severity: "P1", repro: { test_path: "test/review/principles-5.test.ts" } }),
       finding({ id: "principles-6", severity: "P0", repro: { test_path: "test/review/principles-6.test.ts" } }),
       finding({ id: "principles-7", severity: "P2" }),
+      finding({ id: "principles-8", severity: "P1", repro: { test_path: "test/review/principles-8.test.ts" } }),
+      finding({ id: "principles-9", severity: "P1", repro: { test_path: "test/review/principles-9.test.ts" } }),
     ].join("\n")
     writeFileSync(join(x.dir, "units", "principles", "findings.jsonl"), rows)
   })
@@ -288,16 +315,18 @@ test("prove: the six outcomes of the decision model", () => {
   assert.equal(byId["principles-2"], "incomplete-fix")
   assert.deepEqual(
     v.advisory.map((a: { id: string }) => a.id).sort(),
-    ["principles-3", "principles-4", "principles-5", "principles-6", "principles-7"],
+    ["principles-3", "principles-4", "principles-5", "principles-6", "principles-7", "principles-8", "principles-9"],
   )
   const adv = Object.fromEntries(v.advisory.map((a: { id: string; why: string }) => [a.id, a.why]))
   assert.match(adv["principles-3"], /pre-existing/)
   assert.match(adv["principles-4"], /load/)
   assert.match(adv["principles-5"], /flaky/)
   assert.match(adv["principles-6"], /refuted/)
+  assert.match(adv["principles-8"], /flaky/, "pass-then-fail is FLAKY, never refuted")
+  assert.match(adv["principles-9"], /BASE/, "a BASE-side load error is infra, never a blocking verdict")
   // the ledger carries one line per finding (the lens proof-rate metric)
   const ledger = readFileSync(join(p.dir, "data", "review", "ledger.jsonl"), "utf8").trim().split("\n")
-  assert.equal(ledger.length, 7)
+  assert.equal(ledger.length, 9)
   rmSync(p.dir, { recursive: true, force: true })
 })
 

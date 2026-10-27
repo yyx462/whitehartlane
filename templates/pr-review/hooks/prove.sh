@@ -41,15 +41,25 @@ for (const unit of fs.readdirSync(path.join(prog, "units"))) {
 }
 if (findings.length === 0 && !fs.existsSync(path.join(prog, "units"))) die("no units dir — the lenses stage never ran")
 
+// the wall-clock budget (self-review r2 momentum-1): 12 repros × 3
+// runs × any per-run cap can exceed the rail's hard 300s gate, and a
+// gate killed mid-prove is an infra failure. Prove ALWAYS finishes:
+// past the budget, remaining repros degrade to time-capped advisory
+// with receipts — never a silent skip, never a killed gate.
+const START = Date.now()
+const BUDGET_MS = 240_000
 // a load error surfaces in the runner's report (stdout) or stderr —
 // match both (a repro that cannot even load is bogus, never a verdict)
 const LOAD_ERR = /Cannot find (module|package)|ERR_MODULE_NOT_FOUND|SyntaxError|ERR_UNSUPPORTED|ERR_UNKNOWN/
 const CHILD_ENV = { ...process.env }
 delete CHILD_ENV.NODE_TEST_CONTEXT
+// 20s per repro run (self-review r2: 60-90s hangs × 36 runs can never
+// fit the gate cap; a hung repro is one degraded finding, not a
+// killed gate)
 const to = (cmd, cwd) => {
-  const timeout = execSync("command -v timeout >/dev/null 2>&1 && echo yes || echo no").toString().trim() === "yes" ? ["timeout", "60"] : []
+  const timeout = execSync("command -v timeout >/dev/null 2>&1 && echo yes || echo no").toString().trim() === "yes" ? ["timeout", "20"] : []
   try {
-    execSync([...timeout, cmd].join(" "), { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"], timeout: 90_000, encoding: "utf8" })
+    execSync([...timeout, cmd].join(" "), { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"], timeout: 20_000, encoding: "utf8" })
     return { code: 0, err: "" }
   } catch (e) {
     return { code: e.status ?? 1, err: `${e.stderr ?? ""}${e.stdout ?? ""}` }
@@ -73,19 +83,32 @@ for (const f of findings) {
   if (proven >= PROVE_CAP) { advisory.push({ ...f, why: `prove cap (${PROVE_CAP}) reached — degraded, rerun review` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "capped" }); continue }
   const tp = f.repro.test_path
   if (!fs.existsSync(path.join(head, tp))) { advisory.push({ ...f, why: `repro ${tp} does not exist in the HEAD checkout` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
+  // the wall-clock budget: past it, remaining repros degrade with a
+  // receipt — the gate must ALWAYS finish inside the rail's 300s cap
+  if (Date.now() - START > BUDGET_MS) { advisory.push({ ...f, why: `prove time budget (${BUDGET_MS / 1000}s) spent — degraded, rerun review` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "time-capped" }); continue }
   proven++
+  // BOTH HEAD runs happen before any verdict (self-review r2
+  // principles-1): a pass-then-fail repro is FLAKY, not refuted —
+  // "passes on HEAD" is a claim about every run, not the first
   const h1 = runRepro(tp, head)
   if (h1 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
-  if (h1 === "pass") { advisory.push({ ...f, why: `repro PASSES on HEAD — finding refuted by its own test` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" }); continue }
   const h2 = runRepro(tp, head)
-  if (h2 !== "fail-assert") { advisory.push({ ...f, why: `repro is flaky (first run failed, second ${h2})` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "flaky" }); continue }
+  if (h2 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD (second run)` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
+  if (h1 === "pass" && h2 === "pass") { advisory.push({ ...f, why: `repro PASSES on HEAD (both runs) — finding refuted by its own test` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" }); continue }
+  if (h1 !== h2) { advisory.push({ ...f, why: `repro is flaky (runs disagree: ${h1} then ${h2})` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "flaky" }); continue }
   // fails on HEAD, twice, on an assertion — now BASE decides the class
   const baseTp = path.join(base, tp)
   fs.mkdirSync(path.dirname(baseTp), { recursive: true })
   fs.copyFileSync(path.join(head, tp), baseTp)
   const b = runRepro(tp, base)
   fs.rmSync(baseTp, { force: true })
-  if (b === "pass") {
+  if (b === "load-error") {
+    // BASE-side infra is NEVER a verdict (self-review r2 questions-1):
+    // a repro that cannot load on BASE (missing module — the degraded
+    // install path) says nothing about the change
+    advisory.push({ ...f, why: `repro fails to LOAD on BASE — infra, cannot classify; never blocks` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "base-infra" })
+  } else if (b === "pass") {
     blocked.push({ ...f, outcome: "introduced", proof: `repro fails on HEAD (x2), passes on BASE ${process.env.BASE_SHA.slice(0, 8)}` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "introduced" })
   } else if (diffFiles.has(f.location?.file)) {

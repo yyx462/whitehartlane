@@ -40,10 +40,11 @@ export type ReviewReady =
   | { ok: false; why: string; code: 1 | 2 }
 
 const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
-// directory matches are TOP-LEVEL ONLY (^docs/…): a NESTED match
-// (src/assets/gen.ts) would classify code as docs and silently skip
-// its review — the self-review's tests-5 proven finding
-const DOCS_PATH = /^(docs?|doc|licence|license|assets|images)\//i
+// directory matches are TOP-LEVEL docs/ ONLY (self-review r2 tests-1):
+// assets/, images/, licence/ DIRECTORIES can hold code in real repos
+// (assets/gen.ts) — the extensions above already cover real image and
+// license FILES, so the directory whitelist stays minimal
+const DOCS_PATH = /^(docs?|doc)\//i
 
 const git = (repo: string, ...args: string[]): string =>
   execSync(`git -C ${JSON.stringify(repo)} ${args.join(" ")}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
@@ -86,6 +87,15 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   if (headSha === baseSha) {
     return { ok: false, why: `head ${head} and base ${base} are the same commit (${headSha.slice(0, 8)})`, code: 2 }
+  }
+  // direction of review (self-review r2 momentum-2): a two-dot diff on
+  // a head that is BEHIND base shows the base's commits as reversals —
+  // the review would judge the wrong direction. Base must be an
+  // ancestor of head; a stale branch rebases first.
+  try {
+    execSync(`git -C ${JSON.stringify(repo)} merge-base --is-ancestor ${baseSha} ${headSha}`, { stdio: ["ignore", "ignore", "ignore"] })
+  } catch {
+    return { ok: false, why: `head ${head} is not ahead of base ${base} — merge or rebase base into head first (the review judges exactly base..head)`, code: 2 }
   }
   files = git(repo, "diff", "--name-only", baseSha, headSha).split("\n").filter(Boolean)
   if (files.length === 0) {
