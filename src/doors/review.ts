@@ -68,18 +68,6 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // #251 review's momentum-2: a bare id sailed through to die four
   // lenses late at provider resolution — the claim was false). Exactly
   // one slash, no whitespace: provider/model.
-  // ONE truthiness rule for a declared model (r10: four lenses caught
-  // `--model ""` slipping between two rules — the falsy short-circuit
-  // skipped the shape check while the twin counted typeof-string as
-  // present). undefined = absent; ANY string, empty included, must
-  // clear the shape or the door refuses here.
-  if (args.model !== undefined && !/^[^\s/]+\/[^\s/]+$/.test(args.model)) {
-    return {
-      ok: false,
-      why: `--model must be provider/model (exactly one /, no spaces): ${args.model} — bare ids are refused here, at the door, not four lenses late at provider resolution`,
-      code: 2,
-    }
-  }
   let headBranch: string
   try {
     headBranch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
@@ -127,6 +115,24 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   if (files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
+  // ONE truthiness rule for a declared model (r10: four lenses caught
+  // `--model ""` slipping between two rules — the falsy short-circuit
+  // skipped the shape check while the twin counted typeof-string as
+  // present). undefined = absent; ANY string, empty included, must
+  // clear the shape or the door refuses here. The shape is the model-id
+  // grammar itself (r12 tests-4: `$` passed the old class and the pin
+  // write interpolated it as a replace PATTERN — `$&` corrupted the
+  // TOML): provider/model of id characters only. SEATED AFTER the
+  // skips (r12 tests-5): a docs-only diff never spawns, never pins —
+  // a typo'd model must not turn a skip into an exit 2.
+  const MODEL_SHAPE = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
+  if (args.model !== undefined && !MODEL_SHAPE.test(args.model)) {
+    return {
+      ok: false,
+      why: `--model must be provider/model (id characters, exactly one /): ${args.model} — bare ids and shell-hostile characters are refused here, at the door, not four lenses late at provider resolution`,
+      code: 2,
+    }
+  }
   // the missing-model twin, BEFORE materialization but AFTER the skips
   // (the #251 review's principles-2: it used to fire after mkdir+cpSync,
   // leaving a half-built dir the replace-guard then refused to replace —
@@ -168,7 +174,12 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   if (args.model) {
     const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
     const pinned = /^model\s*=.*$/m.test(toml)
-    const next = pinned ? toml.replace(/^model\s*=.*$/m, `model = ${JSON.stringify(args.model)}`) : toml.replace(/^(\[workflow\])$/m, `$1\nmodel = ${JSON.stringify(args.model)}`)
+    // FUNCTION replacement (r12 tests-4): a string replacement would
+    // interpolate `$&`-shaped model ids as patterns and corrupt the pin
+    const pin = `model = ${JSON.stringify(args.model)}`
+    const next = pinned
+      ? toml.replace(/^model\s*=.*$/m, () => pin)
+      : toml.replace(/^(\[workflow\])$/m, (_m, head) => `${head}\n${pin}`)
     writeFileSync(join(dir, "workflow.toml"), next)
   }
 

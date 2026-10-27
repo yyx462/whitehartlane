@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -139,19 +139,29 @@ function copyBeside(source: string, store: string): void {
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
-  // ── the re-levy fold (momentum-3, r11) ─────────────────────────────
+  // ── the re-levy fold (momentum-3, r11; reshaped by r12) ────────────
   // The manual's hard rule — "re-levy the SAME program dir: the
-  // settled fold spares done units" — was unreachable: every booking
-  // staged a fresh dir and the settled fold is scoped to that dir, so
-  // a re-levy re-ran every lens (receipt: j-539d83 spawned all four at
-  // 15:49, the exact green-lens burn the rule denies). The program's
-  // IDENTITY (store-invariant content: workflow + data + members) is
-  // written as a marker; the newest prior staged run carrying it folds
-  // its DONE units — state cards + artifacts — into this booking.
-  // Failed/stalled units deliberately do NOT fold: a dead lens is the
-  // thing a re-levy exists to re-run.
+  // settled fold spares done units" — serves exactly ONE intent: a
+  // prior booking of THIS program dir died mid-chain. r12's three
+  // findings pinned the fold's true preconditions:
+  //   momentum-5/principles-4 — a COMPLETED prior run must not fold
+  //     (an identical-args re-review and the drill's second run want
+  //     fresh minds; replaying verdicts is the four-late death again)
+  //   momentum-4 — folded verdicts must be the new run's OWN hooks'
+  //     verdicts: hooks/ joins the identity, so changed hooks never
+  //     match and the unit re-runs
+  //   path, not content: kinship is the same program DIR re-levied,
+  //     never byte-identical strangers
+  // The precondition is conservative by design: a prior with no failed
+  // rows (a unit killed before its first card) does not fold — the
+  // full rail re-runs. Wrong-fresh beats wrong-replay.
+  const hooksHash = existsSync(join(source, "hooks"))
+    ? contentHashOf(join(source, "hooks"))
+    : ""
   const identity = {
+    source: resolve(source),
     workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
+    hooks: hooksHash,
     data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data")) : "",
     members: existsSync(members) ? contentHashOf(members) : "",
   }
@@ -159,17 +169,38 @@ function copyBeside(source: string, store: string): void {
   const prior = newestPriorRun(store, identity)
   if (prior) {
     const settled = readState(prior)
-    const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
-    for (const u of done) {
-      cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
-      checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+    // "completed" is per-shape: a review run completed when its cold
+    // gate wrote a verdict; a generic run when no unit is unsettled.
+    // A completed prior is a re-run by intent — fresh minds, nothing
+    // folds. An UNFINISHED prior (killed mid-chain, the dead-review
+    // shape) folds its done units and re-runs the rest.
+    const priorVerdict = join(prior, "data", "review", "verdict.json")
+    const total = existsSync(join(prior, "units.jsonl"))
+      ? readFileSync(join(prior, "units.jsonl"), "utf8").trim().split("\n").filter(Boolean).length
+      : settled.done.length + settled.failed.length
+    const settledCount = settled.done.length + settled.failed.length
+    const completed = existsSync(priorVerdict) || (total > 0 && settledCount >= total)
+    if (completed) {
+      logRunNote(store, "fold: prior run completed — fresh minds, nothing folded")
+    } else {
+      const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
+      for (const u of done) {
+        cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
+        checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+      }
+      if (done.length > 0) logRunNote(store, `fold: ${done.length} done unit(s) spared from ${prior}`)
     }
   }
 }
 
+// the fold's receipt, beside the program — a note, never a verdict
+function logRunNote(store: string, note: string): void {
+  appendFileSync(join(store, "fold.log"), `${new Date().toISOString()} ${note}\n`)
+}
+
 // the newest earlier staged run of the SAME program (identity marker
 // match), excluding the store being staged — the re-levy fold's source
-function newestPriorRun(store: string, identity: { workflow: string; data: string; members: string }): string | null {
+function newestPriorRun(store: string, identity: { source: string; workflow: string; hooks: string; data: string; members: string }): string | null {
   const root = sessionsRoot()
   if (!existsSync(root)) return null
   const want = JSON.stringify(identity)
