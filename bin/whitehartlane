@@ -293,6 +293,45 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
 
   if (cmd === "review") {
     const args = process.argv.slice(3)
+    // --help is a first-class verb here (the r-250 receipt: `whl review
+    // --help` treated the flag as a repo path and died with "not a git
+    // repository" — a CLI that cannot say its own spell is not a CLI)
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log(`whitehartlane review — the adversarial pre-merge rail
+
+  review <repo> --base <ref> --head <ref> --model <provider/model>
+        [--title <s>] [--author <s>] [--merge-cmd <cmd>] [--trace-dir <dir>]
+        [--body-file <f>] [--out <dir>] [--template <dir>]
+        [--from <tool>:<sid> | --unattended]
+
+  what it does
+    materializes templates/pr-review for BASE..HEAD of <repo> and
+    (with --from/--unattended) levies it: intake gate → 4 lenses
+    (principles / tests / momentum / questions, temperature-spread) →
+    prove gate (a finding blocks ONLY with a repro failing 2× on HEAD
+    and clean on base) → responsibility divide → cold merge gate
+    (accept merges — base drift refuses; reject divides feedback per
+    responsible worker; verdict at data/review/verdict.json).
+
+  the spell (from an agent session — tracked background shell):
+    bin/whl review <repo> --base master --head <branch> \\
+      --out <dir> --title "<pr title>" --model <provider/model> \\
+      --merge-cmd "<cmd>" --unattended
+
+  hard rules
+    - --model is REQUIRED as provider/model when the template's
+      temperature pins have nothing to ride (bare ids are refused)
+    - docs-only diffs skip at the door (receipt printed, exit 0)
+    - a dead/stalled unit is NOT a dead review: re-levy the SAME
+      program dir (whl run <dir> --unattended) — the settled fold
+      spares done units; never materialize a fresh program to retry
+    - reviewers never write the repo; tests are adopted by the fix
+      commit (verdict.json adopt[] lists them)
+
+  economics (tokens, duplicates, speed): templates/pr-review/ECONOMICS.md
+  trace past runs: node scripts/review-trace.mjs`)
+      return
+    }
     const val = (name) => {
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
