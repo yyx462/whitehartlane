@@ -36,7 +36,15 @@ for (const sid of readdirSync(AOS)) {
       const m = readFileSync(cfg, "utf8").match(/^TITLE=(.*)$/m)
       if (m) title = m[1].replace(/^['"]|['"]$/g, "")
     }
-    const v = existsSync(vpath) ? JSON.parse(readFileSync(vpath, "utf8")) : null
+    const v = existsSync(vpath)
+      ? (() => {
+          try {
+            return JSON.parse(readFileSync(vpath, "utf8"))
+          } catch {
+            return null // a torn verdict is the crash's own receipt — skip it
+          }
+        })()
+      : null
     // wall: first→last orchestrator log line
     const lines = readFileSync(log, "utf8").trim().split("\n")
     const ts = (l) => l.slice(0, 24)
@@ -49,7 +57,7 @@ for (const sid of readdirSync(AOS)) {
       for (const u of readdirSync(udir)) {
         const f = join(udir, u, "findings.jsonl")
         const findings = existsSync(f)
-          ? readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l))
+          ? readFileSync(f, "utf8").trim().split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } }) // a mid-write artifact is the crash this tool explains — skip it
           : []
         units[u] = {
           findings: findings.length,

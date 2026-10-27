@@ -68,7 +68,12 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // #251 review's momentum-2: a bare id sailed through to die four
   // lenses late at provider resolution — the claim was false). Exactly
   // one slash, no whitespace: provider/model.
-  if (args.model && !/^[^\s/]+\/[^\s/]+$/.test(args.model)) {
+  // ONE truthiness rule for a declared model (r10: four lenses caught
+  // `--model ""` slipping between two rules — the falsy short-circuit
+  // skipped the shape check while the twin counted typeof-string as
+  // present). undefined = absent; ANY string, empty included, must
+  // clear the shape or the door refuses here.
+  if (args.model !== undefined && !/^[^\s/]+\/[^\s/]+$/.test(args.model)) {
     return {
       ok: false,
       why: `--model must be provider/model (exactly one /, no spaces): ${args.model} — bare ids are refused here, at the door, not four lenses late at provider resolution`,
