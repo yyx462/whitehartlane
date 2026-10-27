@@ -195,13 +195,20 @@ WhiteHartLane or this skill.
 
 ## The PR review hook (every PR-generating stage's tail)
 
-`whl review` — the adversarial pre-merge rail. The agent-facing
-contract is the USER-level skill **yyx-ship** (the ship gate: spell,
-verdict handling, feedback division, test adoption, the re-levy law)
-— load it when reviewing. The door-shipped manual is
-`whl review --help`; the deep shape is `templates/pr-review/README.md`
-(economics: its ECONOMICS.md). One law for this manual: a dead unit
-re-levies the SAME program dir, never a fresh materialization.
+`whl review` — the adversarial pre-merge rail. The in-repo truth, always
+present and atomic with the door:
+
+- `whl review --help` — the manual: the spell, flags, refusals, hard rules
+- `templates/pr-review/README.md` — the deep shape (cost levers: its
+  ECONOMICS.md; past runs: `node scripts/review-trace.mjs`)
+
+On machines where the user-level skill library is installed, the
+ship-gate skill **yyx-ship** carries the agent-facing loop (verdict
+handling, feedback division, test adoption, the re-levy law) — load it
+when reviewing. Where it is absent, the two lines above ARE the
+contract. One law for this manual: a dead unit re-levies the SAME
+program dir, never a fresh materialization. The weekly drill:
+`PR_DRILL=1 test/e2e/pr-review/run-drill.sh <checkout>`.
 
 ## Stop
 

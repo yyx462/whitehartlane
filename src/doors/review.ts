@@ -64,6 +64,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   if (!existsSync(join(template, "workflow.toml"))) {
     return { ok: false, why: `no review template at ${template}`, code: 1 }
   }
+  // the manual's hard rule, enforced where the manual promised (the
+  // #251 review's momentum-2: a bare id sailed through to die four
+  // lenses late at provider resolution — the claim was false). Exactly
+  // one slash, no whitespace: provider/model.
+  if (args.model && !/^[^\s/]+\/[^\s/]+$/.test(args.model)) {
+    return {
+      ok: false,
+      why: `--model must be provider/model (exactly one /, no spaces): ${args.model} — bare ids are refused here, at the door, not four lenses late at provider resolution`,
+      code: 2,
+    }
+  }
   let headBranch: string
   try {
     headBranch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
