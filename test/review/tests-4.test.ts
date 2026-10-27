@@ -39,35 +39,38 @@ function fixtureRepo(where: string): string {
   return where
 }
 
-test("a $-bearing --model is refused at the door; a legal one lands verbatim (not replace-expanded)", () => {
-  // the r12 repro expected $-models to LAND (grammar permissive, write
-  // pattern-safe) — the tightened grammar is the better end state: a
-  // verbatim $& pin still dies four lenses late at provider resolution
-  // (the model exists nowhere), so garbage ids refuse at the door and
-  // the FUNCTION replacement keeps legal ids pattern-proof.
-  for (const model of ["prov/m$&d", "prov/m$1d", "pro$v/m$&d"]) {
+test("a $-bearing --model lands verbatim (the canonical grammar + pattern-safe write); a bare id refuses", () => {
+  // the canonical grammar is /^[^/\s]+\/[^/\s]+$/ — the same decision
+  // hooks.ts (×2), coworker.ts and jev/model-ladder.ts make (r14
+  // momentum-7/principles-6: my stricter outlier refused colon-bearing
+  // ids like ollama/qwen3:32b). $-bearing ids therefore LAND — and
+  // they land VERBATIM because the pin write is a function replacement
+  // (r12 tests-4's core: a string replacement would expand $&/$1).
+  // A bare id (no slash) still refuses at the door, as the manual says.
+  for (const model of ["prov/m$&d", "prov/m$1d", "pro$v/m$&d", "ollama/qwen3:32b"]) {
     const tmp = mkdtempSync(join(tmpdir(), "whl-tests4-"))
     try {
       const repo = fixtureRepo(join(tmp, "repo"))
       const out = join(tmp, "program")
       const r = prepareReview({ repo, base: "master", head: "feat", model, out }, join(ROOT, "templates"))
-      assert.equal(r.ok, false, `the door refuses ${JSON.stringify(model)} — shell-hostile characters are not model ids`)
-      assert.match((r as { why: string }).why, /provider\/model/)
+      assert.ok(r.ok, `the canonical grammar accepts ${JSON.stringify(model)} (got ${(r as { why?: string }).why})`)
+      const toml = readFileSync(join((r as { dir: string }).dir, "workflow.toml"), "utf8")
+      const pin = toml.match(/^model\s*=\s*(.*)$/m)?.[1]
+      assert.equal(
+        pin,
+        JSON.stringify(model),
+        `the pin must land verbatim, never replace-pattern-expanded (got ${pin})`,
+      )
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
   }
-  // a legal id lands VERBATIM through the replace path (pattern-proof)
   const tmp = mkdtempSync(join(tmpdir(), "whl-tests4-legal-"))
   try {
     const repo = fixtureRepo(join(tmp, "repo"))
-    const out = join(tmp, "program")
-    const model = "prov.in-put/m-o.d.el"
-    const r = prepareReview({ repo, base: "master", head: "feat", model, out }, join(ROOT, "templates"))
-    assert.ok(r.ok, (r as { why?: string }).why)
-    const toml = readFileSync(join((r as { dir: string }).dir, "workflow.toml"), "utf8")
-    const pin = toml.match(/^model\s*=\s*(.*)$/m)?.[1]
-    assert.equal(pin, JSON.stringify(model), "the pin lands verbatim, never replace-pattern-expanded")
+    const r = prepareReview({ repo, base: "master", head: "feat", model: "claude-sonnet-4" }, join(ROOT, "templates"))
+    assert.equal(r.ok, false, "a bare id refuses")
+    assert.match((r as { why: string }).why, /provider\/model/)
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

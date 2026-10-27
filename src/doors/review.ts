@@ -116,20 +116,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
   // ONE truthiness rule for a declared model (r10: four lenses caught
-  // `--model ""` slipping between two rules — the falsy short-circuit
-  // skipped the shape check while the twin counted typeof-string as
-  // present). undefined = absent; ANY string, empty included, must
-  // clear the shape or the door refuses here. The shape is the model-id
-  // grammar itself (r12 tests-4: `$` passed the old class and the pin
-  // write interpolated it as a replace PATTERN — `$&` corrupted the
-  // TOML): provider/model of id characters only. SEATED AFTER the
-  // skips (r12 tests-5): a docs-only diff never spawns, never pins —
-  // a typo'd model must not turn a skip into an exit 2.
-  const MODEL_SHAPE = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
-  if (args.model !== undefined && !MODEL_SHAPE.test(args.model)) {
+  // `--model ""` slipping between two rules). The shape is the REPO'S
+  // CANONICAL provider/model grammar — /^[^/\s]+\/[^/\s]+$/ — the same
+  // decision hooks.ts (×2), coworker.ts and jev/model-ladder.ts already
+  // make (r14 momentum-7/principles-6: a stricter outlier refused
+  // ollama/qwen3:32b, colon-bearing ids the repo accepts and spawns —
+  // one decision answered two opposite ways). Seated AFTER the skips
+  // (r12 tests-5): a docs-only diff never spawns, never pins.
+  if (args.model !== undefined && !/^[^/\s]+\/[^/\s]+$/.test(args.model)) {
     return {
       ok: false,
-      why: `--model must be provider/model (id characters, exactly one /): ${args.model} — bare ids and shell-hostile characters are refused here, at the door, not four lenses late at provider resolution`,
+      why: `--model must be provider/model (exactly one /, no whitespace): ${args.model} — bare ids are refused here, at the door, not four lenses late at provider resolution`,
       code: 2,
     }
   }

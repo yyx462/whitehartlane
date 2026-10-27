@@ -34,6 +34,10 @@ const JSON_OUT = process.argv.includes("--json")
 const q = (sql) => execFileSync("sqlite3", ["-json", DB, sql], { encoding: "utf8" }).trim()
 
 const jobs = []
+// a machine where no session has landed yet has NO sessions dir —
+// that is an empty report, not a crash (r14 tests-3: the raw ENOENT
+// falsified the any-machine promise at first contact)
+if (existsSync(AOS)) {
 for (const sid of readdirSync(AOS)) {
   const sdir = join(AOS, sid, "jobs")
   if (!existsSync(sdir)) continue
@@ -94,11 +98,15 @@ for (const sid of readdirSync(AOS)) {
     })
   }
 }
+}
 
 // token usage per unit sandbox — assistant rows in session_message
 // carry per-step token usage; session_v2.directory maps them to units.
 // No cost column: the provider integration reports none, and an
 // unfed $0.00 is a claim, not a measurement (questions-1, r9).
+// No DB (a machine where no lens ever ran) → no token columns, same
+// empty report.
+if (existsSync(DB))
 try {
   const rows = q(
     `select s.directory d, sum(cast(json_extract(sm.data,'$.tokens.input') as integer)) tin,` +
