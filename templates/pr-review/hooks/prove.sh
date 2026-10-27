@@ -48,9 +48,6 @@ if (findings.length === 0 && !fs.existsSync(path.join(prog, "units"))) die("no u
 // with receipts — never a silent skip, never a killed gate.
 const START = Date.now()
 const BUDGET_MS = 240_000
-// a load error surfaces in the runner's report (stdout) or stderr —
-// match both (a repro that cannot even load is bogus, never a verdict)
-const LOAD_ERR = /Cannot find (module|package)|ERR_MODULE_NOT_FOUND|SyntaxError|ERR_UNSUPPORTED|ERR_UNKNOWN/
 const CHILD_ENV = { ...process.env }
 delete CHILD_ENV.NODE_TEST_CONTEXT
 // 20s per repro run (self-review r2: 60-90s hangs × 36 runs can never
@@ -60,16 +57,30 @@ const to = (cmd, cwd) => {
   const timeout = execSync("command -v timeout >/dev/null 2>&1 && echo yes || echo no").toString().trim() === "yes" ? ["timeout", "20"] : []
   try {
     execSync([...timeout, cmd].join(" "), { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"], timeout: 20_000, encoding: "utf8" })
-    return { code: 0, err: "" }
+    return { code: 0, err: "", killed: false }
   } catch (e) {
-    return { code: e.status ?? 1, err: `${e.stderr ?? ""}${e.stdout ?? ""}` }
+    // killed = signal or cap (timeout/OOM): infra, never an answer
+    // (self-review r3 questions-1 — a hung repro used to land as
+    // "fail-assert" twice and BLOCK as a verdict)
+    return { code: e.status ?? 1, err: `${e.stderr ?? ""}${e.stdout ?? ""}`, killed: e.signal != null || e.status == null || e.status === 124 }
   }
 }
+// a load error is recognized by SHAPE AND ORDER, never a bare
+// string-match (self-review r3 tests-4 — a deterministic repro whose
+// ASSERTION MESSAGE quotes a module-error string used to demote to
+// bogus and flip the verdict to accept): AssertionError is checked
+// FIRST, and a load-error additionally requires that no test passed
+const isLoadError = (out) => !/^✔/m.test(out) && /ERR_MODULE_NOT_FOUND|Cannot find (module|package)|SyntaxError|ERR_UNSUPPORTED/.test(out)
 const runRepro = (tp, side) => {
   const r = to(`node --test ${JSON.stringify(tp)}`, side)
+  if (r.killed) return "killed"
   if (r.code === 0) return "pass"
-  if (LOAD_ERR.test(r.err)) return "load-error"
-  return "fail-assert"
+  if (/AssertionError/.test(r.err)) return "fail-assert"
+  if (isLoadError(r.err)) return "load-error"
+  // the schema's contract: a blocking repro fails on an ASSERTION — a
+  // runtime crash (ReferenceError, OOM-adjacent throws) is a broken
+  // repro, not a proven fact
+  return "runtime-error"
 }
 
 const blocked = [], advisory = [], ledger = [], adopt = []
@@ -93,7 +104,17 @@ for (const f of findings) {
   const h1 = runRepro(tp, head)
   if (h1 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
   const h2 = runRepro(tp, head)
-  if (h2 === "load-error") { advisory.push({ ...f, why: `repro fails to load on HEAD (second run)` }); ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "bogus" }); continue }
+  if (h1 === "killed" || h2 === "killed") {
+    // infra, never an answer (r3 questions-1): a hung or killed repro
+    advisory.push({ ...f, why: `repro was KILLED (timeout/signal) on HEAD — infra, never a verdict` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "killed-infra" })
+    continue
+  }
+  if (h1 === "runtime-error" || h2 === "runtime-error") {
+    advisory.push({ ...f, why: `repro fails on a non-assertion error — the contract is a failing ASSERTION; fix the repro` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "not-assertion" })
+    continue
+  }
   if (h1 === "pass" && h2 === "pass") {
     advisory.push({ ...f, why: `repro PASSES on HEAD (both runs) — finding refuted by its own test` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "refuted" })
@@ -116,6 +137,9 @@ for (const f of findings) {
     // a repro that cannot load on BASE (missing module — the degraded
     // install path) says nothing about the change
     advisory.push({ ...f, why: `repro fails to LOAD on BASE — infra, cannot classify; never blocks` })
+    ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "base-infra" })
+  } else if (b === "killed" || b === "runtime-error") {
+    advisory.push({ ...f, why: `repro ${b === "killed" ? "was killed" : "crashed on a non-assertion"} on BASE — infra, cannot classify; never blocks` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "base-infra" })
   } else if (b === "pass") {
     blocked.push({ ...f, outcome: "introduced", proof: `repro fails on HEAD (x2), passes on BASE ${process.env.BASE_SHA.slice(0, 8)}` })

@@ -261,11 +261,23 @@ function stagesFromRaw(raw: unknown): Stage[] | undefined {
         if (!SHEP_SAFE_ID.test(uid)) throw new HookError(`stage ${id} unit id is not shep-safe: ${uid}`)
         if (seen.has(uid)) throw new HookError(`stage unit repeats id ${uid}`)
         seen.add(uid)
-        const unit: { id: string; brief: string; model?: string } = {
+        const unit: { id: string; brief: string; model?: string; temperature?: number } = {
           id: uid,
           brief: str(row.brief, `stage ${id} units[${i}].brief`),
         }
         if (row.model !== undefined) unit.model = modelStr(row.model, `stage ${id} units[${i}].model`)
+        // the temperature pin (#212) used to VANISH here — accepted by
+        // the manifest type, dropped by this map, so the engine's
+        // settings plan (settingsPlanFromStages reads unit.temperature)
+        // always saw an empty map. INV-2: every validated field reaches
+        // an engine. Found by the pr-review self-review r3 (its lens
+        // quoted this exact block) — the review program is this field's
+        // first real customer (the lens temperature spread).
+        if (row.temperature !== undefined) {
+          const t = Number(row.temperature)
+          if (!Number.isFinite(t)) throw new HookError(`stage ${id} units[${i}].temperature is not a number`)
+          unit.temperature = t
+        }
         return unit
       })
     }
