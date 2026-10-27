@@ -89,7 +89,12 @@ check_split() {
 
 for c in $cases; do
   case "$c" in
-    c1) if run_case c1 main fix accept; then check_merge; else fails=$((fails + 1)); fi ;;
+    c1)
+      # an ACCEPT consumes the fixture (the merge gate moves main, and
+      # main..fix becomes empty) — rebuild it before every c1 run
+      rm -rf "$root/c1"
+      bash "$(dirname "$0")/fixtures.sh" "$root" >/dev/null
+      if run_case c1 main fix accept; then check_merge; else fails=$((fails + 1)); fi ;;
     c2) run_case c2 main fast-stop reject || fails=$((fails + 1)) ;;
     c3) run_case c3 main discount reject || fails=$((fails + 1)) ;;
     c4) run_case c4 main docs skip || fails=$((fails + 1)) ;;
