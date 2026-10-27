@@ -14,6 +14,15 @@ case "$verdict" in
     if [ -n "${MERGE_CMD:-}" ]; then
       sh -c "$MERGE_CMD" || { echo "merge: MERGE_CMD failed" >&2; exit 1; }
     else
+      # the review judged BASE_SHA..HEAD_SHA (self-review r8b
+      # momentum-1): a base BRANCH that moved since intake would land
+      # unreviewed commits inside the accepted merge — re-observe the
+      # label and refuse on drift
+      now_base=$(git -C "$REPO" rev-parse "$BASE_BRANCH")
+      if [ "$now_base" != "$BASE_SHA" ]; then
+        echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
+        exit 1
+      fi
       git -C "$REPO" checkout -q "$BASE_BRANCH" || { echo "merge: cannot checkout $BASE_BRANCH" >&2; exit 1; }
       git -C "$REPO" merge --no-ff --no-edit -m "pr-review: accept $TITLE" "$HEAD_SHA" \
         || { echo "merge: git merge failed (conflicts? base moved?)" >&2; exit 1; }

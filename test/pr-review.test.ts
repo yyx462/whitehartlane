@@ -433,6 +433,13 @@ test("merge: the cold verdict — accept merges, reject exits 1 honestly", () =>
   assert.match(onMain, /pr-review: accept/)
   const mergedParents = execSync("git rev-list --parents -n 1 main", { cwd: repo, encoding: "utf8" }).trim().split(" ")
   assert.equal(mergedParents.length, 3, "a --no-ff merge commit (two parents)")
+  // base drift between review and merge REFUSES (r8b momentum-1):
+  // unreviewed commits must not ride the accepted merge
+  execSync("git checkout -q main && git reset -q --hard HEAD~1 && printf 'moved\n' > MOVED.md && git add -A && git commit -qm base-moved", { cwd: repo })
+  writeFileSync(join(p.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: "accept", blocked: [], advisory: [] }))
+  const drift = hook("merge.sh", p.dir)
+  assert.notEqual(drift.code, 0)
+  assert.match(drift.out, /moved/)
   rmSync(tmp, { recursive: true, force: true })
 })
 

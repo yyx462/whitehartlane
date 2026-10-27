@@ -70,7 +70,11 @@ export class OpenCodeHost implements AgentHost {
       const { provider, id } = splitModel(spec.model)
       tail.push("--approve", "--provider", provider, "--model", id)
       if (spec.temperature !== undefined) {
-        this.log(`temperature ${spec.temperature} requested for ${label} — pi settings carry no temperature key today; the pin rides opencode only`)
+        // refuse, never vanish (self-review r8b principles-1): the pin
+        // went LIVE for opencode this change — a pi program's declared
+        // pin must not silently ride the host default
+        this.log(`temperature ${spec.temperature} for ${label}: pi settings carry no temperature key — refusing spawn (drop the pin or use opencode)`)
+        return false
       }
     } else if (spec.kind === "opencode") {
       // the root command dropped --model in the 2026-10 upgrade — a
