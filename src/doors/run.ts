@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -7,6 +8,7 @@ import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
+import { checkpoint, readState } from "../core/state.ts"
 import {
   contentHashOf,
   duplicateStageIds,
@@ -28,6 +30,7 @@ import {
   findSessionBySpur,
   listJobs,
   openSession,
+  sessionsRoot,
   stampSpurKey,
   type JobRecord,
   type Provenance,
@@ -136,6 +139,60 @@ function copyBeside(source: string, store: string): void {
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
+  // ── the re-levy fold (momentum-3, r11) ─────────────────────────────
+  // The manual's hard rule — "re-levy the SAME program dir: the
+  // settled fold spares done units" — was unreachable: every booking
+  // staged a fresh dir and the settled fold is scoped to that dir, so
+  // a re-levy re-ran every lens (receipt: j-539d83 spawned all four at
+  // 15:49, the exact green-lens burn the rule denies). The program's
+  // IDENTITY (store-invariant content: workflow + data + members) is
+  // written as a marker; the newest prior staged run carrying it folds
+  // its DONE units — state cards + artifacts — into this booking.
+  // Failed/stalled units deliberately do NOT fold: a dead lens is the
+  // thing a re-levy exists to re-run.
+  const identity = {
+    workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
+    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data")) : "",
+    members: existsSync(members) ? contentHashOf(members) : "",
+  }
+  writeFileSync(join(store, ".whl-program"), JSON.stringify(identity))
+  const prior = newestPriorRun(store, identity)
+  if (prior) {
+    const settled = readState(prior)
+    const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
+    for (const u of done) {
+      cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
+      checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+    }
+  }
+}
+
+// the newest earlier staged run of the SAME program (identity marker
+// match), excluding the store being staged — the re-levy fold's source
+function newestPriorRun(store: string, identity: { workflow: string; data: string; members: string }): string | null {
+  const root = sessionsRoot()
+  if (!existsSync(root)) return null
+  const want = JSON.stringify(identity)
+  let best: { dir: string; m: number } | null = null
+  for (const sid of readdirSync(root)) {
+    const jdir = join(root, sid, "jobs")
+    if (!existsSync(jdir)) continue
+    for (const jid of readdirSync(jdir)) {
+      const run = join(jdir, jid, "run")
+      const marker = join(run, ".whl-program")
+      if (!existsSync(marker)) continue
+      if (readFileSync(marker, "utf8") !== want) continue
+      if (resolve(run) === resolve(store)) continue
+      let m = 0
+      try {
+        m = statSync(marker).mtimeMs
+      } catch {
+        continue
+      }
+      if (!best || m > best.m) best = { dir: run, m }
+    }
+  }
+  return best?.dir ?? null
 }
 
 // The lineage resolution, ONE spelling (deep seam: book() and the
