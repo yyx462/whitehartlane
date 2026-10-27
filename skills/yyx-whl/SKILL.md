@@ -134,6 +134,13 @@ Runs; the events trace pane shows every booked fact.
 
 ## Hard rules (each one fails review)
 
+- **Never drive whl untracked.** When YOU must wait on a whl run (the
+  e2e battery, the pr-review drill, any scripted levy-then-wait), run
+  it in your harness's tracked background shell so its finish wakes
+  you — never nohup/`&` detached. A whl-driving command you cannot
+  hear finishing is an information gap you made; the operator-side
+  twin of the `--from` law (receipt: pr-drill round 3, 2026-10-26 — a
+  detached run finished failing and the driving session sat idle).
 - **Never babysit.** No polling loops, no waiting on the orchestrator —
   the wake is the ONLY delivery. If you are a pane (a worker of another
   spur), the wake lands as a prompt in your own conversation, and your
