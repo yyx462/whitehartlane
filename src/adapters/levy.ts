@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { abortJob, continueJob, killPane, liveLeaseHolder, saveJob, type JobRecord } from "./store.ts"
+import { abortJob, continueJob, killPane, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
 
 export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
@@ -34,8 +34,16 @@ export function spawnRunner(
     },
   })
   child.unref()
-  job.pid = child.pid
-  saveJob(job)
+  // r20 momentum-11: save the FRESH record — the door's in-memory copy
+  // may be stale (the booking probe may have orphaned this very Job
+  // while this spawn beat was in flight); clobbering it with the stale
+  // object resurrects the orphan flip into a second live writer. The
+  // pid lands on whatever the disk now holds; an orphaned record keeps
+  // its orphan receipt (the runner is live — `whl continue` revives it
+  // with the booked pid).
+  const fresh = loadJob(job.sid, job.id) ?? job
+  fresh.pid = child.pid
+  saveJob(fresh)
   return { ok: true, pid: child.pid }
 }
 

@@ -968,7 +968,12 @@ export function pidAlive(pid: number | null): boolean {
 // PROVEN dead, or it has no pid and is older than the booking grace
 // (the runner claims its pid within seconds of a live booking — a
 // young pid-less record is a live intent, never an orphan).
-export const BOOKING_GRACE_MS = 60_000
+// the booking grace aligns with the lease TTL (r20 momentum-11): a
+// spawn beat on a cold machine can outlast a minute, and a record
+// orphaned mid-spawn is resurrected by the runner's own stale save —
+// the repo's existing answer to "how long until a live holder is
+// suspect" is the honest bound
+export const BOOKING_GRACE_MS = LEASE_TTL_MS
 export function bookingStale(
   job: { state: string; pid?: number; created: string },
   nowMs: number,

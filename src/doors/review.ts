@@ -64,17 +64,24 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 // template has no [workflow] table at all.
 function pinIntoWorkflowTable(templateToml: string, pin: string): string | undefined {
   const lines = templateToml.split("\n")
-  const headerIdx = lines.findIndex((l) => /^\[workflow\][ \t]*$/.test(l.trim()))
+  // tolerant: a trailing comment or CRLF after the header is still the
+  // header (r20 tests-31)
+  const headerIdx = lines.findIndex((l) => /^\[workflow\]\s*(#.*)?$/.test(l.trim()))
   if (headerIdx === -1) return undefined
   let end = lines.length
   for (let i = headerIdx + 1; i < lines.length; i++) {
-    if (/^\[[^\]]*\][ \t]*$/.test(lines[i].trim())) {
+    // ANY new table context ends the span — [table] AND [[array-of-
+    // tables]] (r20 tests-31: [[stage]]'s model lines are its own)
+    if (/^\[/.test(lines[i].trim())) {
       end = i
       break
     }
   }
   for (let i = headerIdx + 1; i < end; i++) {
-    if (/^model\s*=/.test(lines[i])) {
+    // indented keys belong to the table too (TOML allows leading
+    // whitespace; r20 tests-30: a blind ^anchor missed them and the
+    // insert duplicated the key into a non-parsing document)
+    if (/^[ \t]*model\s*=/.test(lines[i])) {
       lines[i] = pin
       return lines.join("\n")
     }
@@ -164,16 +171,31 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the recovery the message itself prescribed was dead-ended). A
   // docs-only diff never needs a model: nothing spawns, nothing pins.
   //
-  // THE pin-plan (r17 principles-10/tests-1: "will the model pin land"
-  // was computed twice — pre-verify and write — with two different
-  // [workflow] anchors that disagreed on trailing whitespace). ONE
-  // computation here: the pinned template content is produced once,
-  // verified once, and the materialization writes exactly these bytes.
+  // THE pin-plan (r17 principles-10/tests-1: one computation, one
+  // anchor; r19 tests-1: verified by the parser; r20 principles-12/
+  // tests-30/tests-31: EVERY model question is answered by the
+  // consumer's own smol-toml read — hasModel, the landing, and the
+  // verify — never by a table-blind regex; malformed TOML is a code-2
+  // door refusal, never an escaped stack).
   let pinnedWorkflowToml: string | undefined
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    let parsedTemplate: { workflow?: { model?: string } }
+    try {
+      parsedTemplate = parseToml(templateToml) as { workflow?: { model?: string } }
+    } catch (err) {
+      return {
+        ok: false,
+        why: `the template's workflow.toml is not valid TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template or pass --template pointing at a valid one`,
+        code: 2,
+      }
+    }
     const hasTempPin = /\btemperature\s*=/.test(templateToml)
-    const hasModel = typeof args.model === "string" || /^model\s*=/m.test(templateToml)
+    // "a model to ride" = declared in the template OR supplied via
+    // --model — the consumer's read for the former, the argv for the
+    // latter (r20 principles-12 kept the parser; this disjunct is the
+    // supplied half — dropping it refused every --model call)
+    const hasModel = parsedTemplate?.workflow?.model !== undefined || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
       return {
         ok: false,
@@ -189,9 +211,22 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       // the verification is the consumer's own read.
       const pin = `model = ${JSON.stringify(args.model)}`
       pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, pin)
-      const parsed = pinnedWorkflowToml !== undefined
-        ? parseToml(pinnedWorkflowToml) as { workflow?: { model?: string } }
-        : undefined
+      let parsed: { workflow?: { model?: string } } | undefined
+      try {
+        parsed = pinnedWorkflowToml !== undefined
+          ? parseToml(pinnedWorkflowToml) as { workflow?: { model?: string } }
+          : undefined
+      } catch (err) {
+        // r20 tests-30: the pin's landing can produce bytes the run-
+        // time cannot parse (e.g. a duplicated model key the template's
+        // own indentation hid) — a door refusal naming the template,
+        // never an escaped TomlError
+        return {
+          ok: false,
+          why: `the model pin's landing does not parse as TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template's [workflow] table or pass --template pointing at a valid one`,
+          code: 2,
+        }
+      }
       if (parsed?.workflow?.model !== args.model) {
         return {
           ok: false,
