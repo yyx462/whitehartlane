@@ -19,17 +19,22 @@ const START_TIMEOUT_MS = 60_000
 
 // the run-root sandbox opencode.json (writeWorkerPermissions seeds it,
 // including its resolved model pin) — discovered the same way opencode
-// discovers project config: walk up from cwd
+// discovers project config: walk up from cwd. A config WITHOUT a model
+// (the coworker member sandbox — modelIn throws on the sandbox dir and
+// writes model-less) does NOT stop the walk: it SHADOWS nothing, we
+// keep climbing (r7's principles-1: the early return made a declared
+// workflow model unreachable and temperature spawns refused on a false
+// premise). Station layouts sit 4-6 dirs deep; cap at 8.
 function sandboxModelOf(cwd: string): string | undefined {
   let d = cwd
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     const probe = join(d, "opencode.json")
     if (existsSync(probe)) {
       try {
         const m = JSON.parse(readFileSync(probe, "utf8")).model
-        return typeof m === "string" ? m : undefined
+        if (typeof m === "string" && m.length > 0) return m
       } catch {
-        return undefined
+        // unreadable config: keep climbing
       }
     }
     const up = dirname(d)

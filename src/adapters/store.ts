@@ -1373,7 +1373,11 @@ function globalMcpNames(): string[] {
   if (mcpNamesCache !== null) return mcpNamesCache
   try {
     const out = execFileSync("opencode", ["mcp", "list"], { timeout: 20_000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-    mcpNamesCache = [...out.matchAll(/^[✓✖●○!x\s]+([A-Za-z0-9_.-]+)\s/gm)].map((m) => m[1])
+    // the CLI decorates rows ("✓**  name  connected") — glyph, bold
+    // markers, spaces; the name is the first token after them (r7's
+    // momentum-1: without '*' in the skip class the regex matched
+    // NOTHING and the isolation failed OPEN, silently)
+    mcpNamesCache = [...out.matchAll(/^[✓✖●○!x\s*]+([A-Za-z0-9_.-]+)\s/gm)].map((m) => m[1])
   } catch {
     mcpNamesCache = []
   }
