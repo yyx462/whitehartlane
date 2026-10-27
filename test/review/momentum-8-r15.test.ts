@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+import { listJobs, saveJob } from "../../src/adapters/store.ts"
 
 // the unit ledger rides the OS-disk trace — this repro points
 // AGENTIC_OS_HOME at its own temp disk so no real session is touched
@@ -64,7 +65,15 @@ test("the manual's re-levy spell books after a killed run — a dead Job record 
 
     // the manual's hard rule, verbatim: re-levy the SAME program dir.
     // `whl run <prog> --unattended` is prepareRun(prog) again — nothing
-    // else, no continue/abort detour is in the spell.
+    // else, no continue/abort detour is in the spell. The fixture
+    // simulates the kill + the operator's reaction time: the run's Job
+    // record stays state:"running" with no orchestrator pid, and TIME
+    // PASSES (the booking grace) before the operator re-levies.
+    for (const j of listJobs()) {
+      if (j.state !== "running") continue
+      j.created = new Date(Date.now() - 5 * 60_000).toISOString()
+      saveJob(j)
+    }
     const relevy = prepareRun(prog)
     assert.equal(
       relevy.ok,

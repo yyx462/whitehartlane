@@ -945,7 +945,13 @@ export function leaseHolderPid(lease: { holder: string }): number | null {
   return m ? Number(m[1]) : null
 }
 
-function pidAlive(pid: number | null): boolean {
+// THE canonical liveness oracle (one decision, one site — the booking
+// probe in run.ts imports this; r16 questions-3/tests-11: a hand-rolled
+// try/catch reads EPERM as death and orphans a live orchestrator).
+// Unparseable/missing pid counts ALIVE (conservative: one writer per
+// job, always); EPERM counts ALIVE (a live process this uid may not
+// signal); only a proven-gone pid is dead.
+export function pidAlive(pid: number | null): boolean {
   if (pid === null || pid <= 0) return true
   try {
     process.kill(pid, 0)

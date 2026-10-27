@@ -70,7 +70,11 @@ re-bought every round.
 
 - **Re-levy, never re-materialize** (already the skill's hard rule) —
   the r6/r8 receipts: ~0.9M input re-burned on green lenses. The
-  spell is `whl run <same program dir> --unattended`.
+  spell is `whl run <same program dir> --unattended`; if the door
+  refuses because the killed run's Job still reads running (a SIGKILL
+  leaves it that way), `whl sweep` orphans the dead run first — the
+  booking probe (r16) records the orphan and the re-levy books past
+  it, the re-levy fold (r16) sparing the done units.
 - **Kill the killed-round class** — r5's 1.26M died mid-exploration
   because a manual kill landed after the lenses were deep in. An
   abort should checkpoint unit state so a re-levy resumes, not

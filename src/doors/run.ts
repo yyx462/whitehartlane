@@ -31,6 +31,7 @@ import {
   listJobs,
   openSession,
   orphanJob,
+  pidAlive,
   sessionsRoot,
   stampSpurKey,
   type JobRecord,
@@ -315,6 +316,13 @@ function provenanceOf(dir: string): Provenance {
   return p
 }
 
+// the booking probe's grace for pid-less running records: the runner
+// claims its pid within seconds of a live booking, so a record older
+// than this with no pid was abandoned before its runner started
+// (r16 tests-10: a YOUNG pid-less record is a live intent — never an
+// orphan; the cousin law: wrong-fresh beats wrong-replay)
+const BOOKING_GRACE_MS = 60_000
+
 function book(
   dir: string,
   kind: WorkflowKind,
@@ -377,32 +385,21 @@ function book(
   const lineage = resolveLineageSession(dir, spurId.spurId)
   if ("refuse" in lineage) return { ok: false, why: lineage.refuse, code: 1 }
   const session = lineage.session
-  // momentum-8 (r15): a SIGKILLed orchestrator leaves its Job reading
-  // state:"running" FOREVER — only the live orchestrator finishes or
-  // aborts a job, and orphanJob had no production caller, so the
-  // manual's own recovery spell (`whl run <same dir> --unattended`)
-  // was refused at this exact door. The booking probe is that
-  // caller: a running Job whose orchestrator pid is dead is an
-  // ORPHAN — record it honestly, then book past it.
+  // momentum-8 (r15) + the r16 probe findings: a SIGKILLed
+  // orchestrator leaves its Job reading state:"running" forever, and
+  // THE BOOKING PROBE is orphanJob's production caller — with the
+  // store's canonical oracle (pidAlive: EPERM and unparseable pids
+  // count ALIVE) and a booking grace for the window between
+  // createJob and the runner's pid event (r16 tests-10: that window
+  // is the NORMAL shape of every booking — a young pid-less record
+  // is a live intent, never an orphan).
   for (const job of listJobs(session.id)) {
     if (job.state !== "running") continue
-    // The veto requires PROOF of liveness (r15 momentum-8): a Job with
-    // no orchestrator pid was abandoned before its runner started, and
-    // a Job whose pid is dead will never be finished by anyone else —
-    // both are ORPHANS, recorded here, and neither may veto the
-    // re-levy the manual prescribes.
-    if (job.pid) {
-      let alive = true
-      try {
-        process.kill(job.pid, 0)
-      } catch {
-        alive = false
-      }
-      if (alive) continue
-      orphanJob(job, `booking probe: orchestrator pid ${job.pid} is gone`)
-    } else {
-      console.error(`[probe-debug] orphaning NOPID ${job.id} state=${job.state}`)
-      orphanJob(job, "booking probe: no orchestrator pid recorded (abandoned booking)")
+    const ageMs = Date.now() - Date.parse(job.created)
+    if (job.pid !== undefined && job.pid !== null && !pidAlive(job.pid)) {
+      orphanJob(job, `booking probe: orchestrator pid ${job.pid} is gone`, job.panes?.length ?? 0)
+    } else if (job.pid === undefined && ageMs > BOOKING_GRACE_MS) {
+      orphanJob(job, `booking probe: no orchestrator pid ${Math.round(ageMs / 1000)}s after booking (abandoned)`, job.panes?.length ?? 0)
     }
   }
   const running = listJobs(session.id).filter((job) => job.state === "running").length

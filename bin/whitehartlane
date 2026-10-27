@@ -324,7 +324,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     - docs-only diffs skip at the door (receipt printed, exit 0)
     - a dead/stalled unit is NOT a dead review: re-levy the SAME
       program dir (whl run <dir> --unattended) — the settled fold
-      spares done units; never materialize a fresh program to retry
+      spares done units; never materialize a fresh program to retry.
+      If the door refuses because the killed run's Job still reads
+      running (a SIGKILL leaves it that way): run "whl sweep" to
+      orphan the dead run, then re-levy
     - reviewers never write the repo; tests are adopted by the fix
       commit (verdict.json adopt[] lists them)
 

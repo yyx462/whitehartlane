@@ -25,4 +25,6 @@ door:
 
 The loop: review → reject → divide feedback → fix + adopt tests →
 re-review → accept → merge. A dead unit re-levies the SAME program
-dir, never a fresh materialization.
+dir, never a fresh materialization. If the door refuses because the
+killed run's Job still reads running (a SIGKILL leaves it that way):
+`whl sweep` orphans the dead run, then re-levy.
