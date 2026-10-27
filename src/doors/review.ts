@@ -33,6 +33,8 @@ export type ReviewArgs = {
   out?: string
   template?: string
   model?: string
+  /** the gate's lens roster (review-gate.ts); omit = all four lenses */
+  roster?: string[]
 }
 
 export type ReviewReady =
@@ -40,12 +42,12 @@ export type ReviewReady =
   | { ok: true; dir: null; skipped: true; why: string; files: number }
   | { ok: false; why: string; code: 1 | 2 }
 
-const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
+export const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
 // directory matches are TOP-LEVEL docs/ ONLY (self-review r2 tests-1):
 // assets/, images/, licence/ DIRECTORIES can hold code in real repos
 // (assets/gen.ts) — the extensions above already cover real image and
 // license FILES, so the directory whitelist stays minimal
-const DOCS_PATH = /^(docs?|doc)\//i
+export const DOCS_PATH = /^(docs?|doc)\//i
 
 // no shell, ever (self-review r5 tests-1: raw --base/--head used to
 // ride execSync strings — a substitution in a branch name would
@@ -128,6 +130,31 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   mkdirSync(dir, { recursive: true })
   cpSync(template, dir, { recursive: true })
+  // the gate's roster (review-gate.ts): a subset materializes ONLY
+  // those lens units — one decision, made once at the door (ADR 0014:
+  // a chain cannot shed units mid-run, so the roster is pre-flight).
+  // The filter is line-surgical on the units block; an EMPTY roster
+  // refuses (that is a skip, not a review with no lenses).
+  if (args.roster && args.roster.length < 4) {
+    if (args.roster.length === 0) {
+      return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
+    }
+    const keep = new Set(args.roster)
+    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
+    const lines = toml.split("\n")
+    const start = lines.findIndex((l) => l.startsWith("units = ["))
+    if (start === -1) {
+      return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
+    }
+    let end = start
+    while (end < lines.length && lines[end].trim() !== "]") end++
+    const kept = lines.slice(start + 1, end).filter((l) => {
+      const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
+      return !m || keep.has(m[1])
+    })
+    lines.splice(start + 1, end - start - 1, ...kept)
+    writeFileSync(join(dir, "workflow.toml"), lines.join("\n"))
+  }
   // the lens temperature pins need a model to ride (the host writes
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin; without one the host refuses temperature spawns, so

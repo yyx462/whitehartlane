@@ -86,7 +86,10 @@ shuffle_order() { # $1 seed
   ' "$1" < "$prog/data/review/diff.patch"
 }
 i=0
-for lens in principles tests momentum questions; do
+# the roster is the materialized units, never the hardcoded four (the
+# gate materializes subsets); dead order files for absent lenses were
+# harmless dead weight — this reads the truth instead
+for lens in $(sed -n '/^units = \[/,/^\]/p' "$prog/workflow.toml" | grep -o '{ id = "[a-z]*"' | sed 's/.*id = "//;s/"//'); do
   i=$((i+1))
   shuffle_order "$((7 * i + 13))" > "$prog/data/review/order-$lens.txt"
 done

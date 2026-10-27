@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { prepareReview, reviewReceipt } from "../src/doors/review.ts"
+import { gateReceipt, runGate } from "../src/doors/review-gate.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -297,16 +298,37 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from"])
+    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
     const spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
+    const gateOnly = args.includes("--gate-only")
     if (!positional) {
       console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
-      console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>]")
+      console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>] [--gate-only]")
       console.error("                               [--from <tool>:<sid> | --unattended]")
       process.exitCode = 2
       return
+    }
+    // the gate runs FIRST (review-gate.ts): facts → one `jev run`
+    // (four noul, one per lens) → roster + dropout audit + ledger row.
+    // Fail-safe: jev unreachable → every lens runs. WHL_GATE=off is
+    // the kill-switch (legacy full-rail behavior).
+    let gateRoster = undefined
+    if (process.env.WHL_GATE !== "off") {
+      const baseRef = val("base") ?? "master"
+      const headRef = val("head") ?? "HEAD"
+      try {
+        const g = runGate(resolve(positional), baseRef, headRef)
+        console.log(gateReceipt(g.features, g.decision))
+        if (g.decision.action === "skip") return // receipt + ledger row; nothing levied
+        if (gateOnly) return // decided + ledger row; the caller levies
+        if (g.decision.roster.length < 4) gateRoster = g.decision.roster
+      } catch (err) {
+        // the gate must never BLOCK a review (that would be a new
+        // failure mode in front of the rail) — a broken gate reviews
+        console.error(`gate: broken (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fail-safe: full rail`)
+      }
     }
     const ready = prepareReview(
       {
@@ -321,6 +343,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         out: val("out"),
         template: val("template"),
         model: val("model"),
+        roster: gateRoster,
       },
       join(import.meta.dirname, "..", "templates"),
     )
