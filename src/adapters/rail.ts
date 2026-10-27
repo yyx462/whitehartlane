@@ -634,6 +634,16 @@ export class Rail implements ShepPort {
       this.log(`dry-run: ${label} settled by mock — no pane, no agent`)
       return true
     }
+    // issue #249 — the unit sandbox inherits NOTHING: pre-seed the same
+    // isolation the run root carries (scoped permissions, every global
+    // MCP server neutralized) BEFORE the host's read-modify-write adds
+    // the model pin. Without this the unit's nearest config carried
+    // only the model, and opencode merged the operator's INTERACTIVE
+    // global config for everything else — its integration surface
+    // could block the brief's send (j-4a0009: a pane lived its whole
+    // life behind the "Connect an integration" modal; one in four
+    // panes lost that race)
+    this.writePermissions(cwd)
     // Per-mind pin (issue #152 seam widening): a spawn carrying a pin
     // that differs from the manifest pin cannot ride the CLI
     // transport (it passes --kind only) — refuse honestly, never

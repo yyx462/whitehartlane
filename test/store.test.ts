@@ -382,3 +382,20 @@ test("orphanJob single-acts: a second sweep on a flipped record no-ops", () => {
   assert.equal(second.state, "orphaned")
   assert.equal(job.orphan?.reason, "orchestrator pid 424242 gone", "one orphan record, not two")
 })
+
+test("writeWorkerPermissions MERGES: pins survive the re-seed, isolation force-wins (#249)", async () => {
+  const { writeWorkerPermissions, writeOpencodeModelSettings } = await import("../src/adapters/store.ts")
+  const dir = mkdtempSync(join(tmpdir(), "agentic-os-merge-"))
+  // generation 1: the pre-seed, then the host's read-modify-write
+  writeWorkerPermissions(dir)
+  writeOpencodeModelSettings(dir, "zhipuai-coding-plan/glm-5.3-flash", { temperature: 0.6 })
+  // generation 2: the pre-seed runs again (a respawn reuses the dir)
+  writeWorkerPermissions(dir)
+  const oc = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"))
+  assert.equal(
+    oc.provider["zhipuai-coding-plan"].models["glm-5.3-flash"].temperature,
+    0.6,
+    "the pin survives the re-seed — a respawn never loses its temperature",
+  )
+  assert.equal(oc.mcp["sql-buddy"].enabled, false, "isolation force-wins over any prior config")
+})

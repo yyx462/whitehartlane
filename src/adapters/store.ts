@@ -1386,17 +1386,31 @@ function globalMcpNames(): string[] {
 
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
+    const cfgPath = join(runDir, "opencode.json")
+    // MERGE, never clobber (issue #249): a unit dir may already carry
+    // the model pin and provider settings from an earlier generation —
+    // the isolation keys (permission, mcp) FORCE-win, everything else
+    // the sandbox earned survives the re-seed
+    const prior = existsSync(cfgPath)
+      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
+      : {}
     const config: Record<string, unknown> = {
+      ...prior,
       $schema: "https://opencode.ai/config.json",
       permission: { external_directory: allowGlobs([runDir, ...extraRoots]) },
     }
-    const model = modelIn(runDir)
-    if (model) config.model = model
+    try {
+      const model = modelIn(runDir)
+      if (model) config.model = model
+    } catch {
+      // a sandbox dir with no discoverable model stays model-less —
+      // the isolation write must survive that (the whole point)
+    }
     const mcp = globalMcpNames()
     if (mcp.length > 0) {
       config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
     }
-    writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
+    writeFileSync(cfgPath, `${JSON.stringify(config, null, 2)}\n`)
   } catch {
     // permissions scoping is best-effort; the run works without it
   }
