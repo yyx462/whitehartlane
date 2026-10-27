@@ -123,6 +123,12 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   if (args.bodyFile && existsSync(args.bodyFile)) {
     copyFileSync(args.bodyFile, join(dir, "data", "review", "pr-body.md"))
   }
+  // the reviewer's law + schema also ride data/ — staging carries
+  // hooks/ + data/ only, and every brief references data/REVIEWER.md
+  // (the c2 divider caught their absence the honest way)
+  for (const doc of ["REVIEWER.md", "SCHEMA.md"]) {
+    copyFileSync(join(template, doc), join(dir, "data", doc))
+  }
   // the repo's own checklists are the live ones; the template's are seeds
   for (const [repoFile, seed, dest] of [
     ["INVARIANTS.md", "INVARIANTS.template.md", "INVARIANTS.md"],
