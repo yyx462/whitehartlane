@@ -124,6 +124,7 @@ for (const f of findings) {
   } else if (diffFiles.has(f.location?.file)) {
     blocked.push({ ...f, outcome: "incomplete-fix", proof: `repro fails on BASE too AND the diff touches ${f.location.file} — the change is implicated (the twin-path class)` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "incomplete-fix" })
+    adopt.push({ id: f.id, test_path: tp, kind: "repro", note: "adopt INTO YOUR FIX COMMIT — the test that proves the bug; keep its assertion intact" })
   } else {
     advisory.push({ ...f, why: `repro fails on BASE too and the diff never touches ${f.location?.file} — pre-existing, file a ticket, do not block` })
     ledger.push({ id: f.id, lens: f.lens, severity: f.severity, outcome: "pre-existing" })
