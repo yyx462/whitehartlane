@@ -31,7 +31,7 @@ wait_job() {
   return 1
 }
 
-verdict_of() { node -e 'try{const v=require(process.argv[1]+"/review/verdict.json");console.log(v.verdict)}catch{console.log("none")}' "$1"; }
+verdict_of() { node -e 'try{const v=require(process.argv[1]+"/data/review/verdict.json");console.log(v.verdict)}catch{console.log("none")}' "$1"; }
 
 run_case() {
   local name="$1" base="$2" head="$3" want="$4" trace_dir="${5:-}"

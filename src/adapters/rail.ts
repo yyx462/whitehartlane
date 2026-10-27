@@ -493,6 +493,26 @@ export class Rail implements ShepPort {
         return fresh
       }
     }
+    // The GONE tab is the last gap (#165's twin): herdr closes a tab
+    // whose last pane closed, so between stages the fleet's whole house
+    // can vanish — every pane retired, tab and all. A later stage's
+    // spawn must re-open the house, not die (the pr-review drill's
+    // divide stage: lenses retired, divider spawn failed 3× and blocked
+    // the chain on a cleanup race, j-d0fdc8). One attempt; a re-open
+    // that fails falls through to the loud failure below.
+    if (!seed && listed.status === 0 && this.fleetTab) {
+      this.log("fleet tab gone between stages — re-opening the column (a stage must not die because cleanup ran first)")
+      this.colUsed = false
+      this.openFleetTab(this.taskDir)
+      if (this.colPane && this.layout.tab !== "same") {
+        const pane = this.splitPane(this.colPane, "down", cwd, 0.5)
+        if (pane) {
+          this.transport.exec("pane", "close", this.colPane)
+          this.colUsed = true
+          return pane
+        }
+      }
+    }
     this.log(`pane split failed for the fleet column — no live anchor (tab ${this.fleetTab ?? "?"}; pane-list rc=${listed.status}${seed ? ", split failed" : ", tab empty"})`)
     return null
   }
