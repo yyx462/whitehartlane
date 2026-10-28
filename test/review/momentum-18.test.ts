@@ -85,7 +85,11 @@ if (!benchOrder({ faults: true }).includes("birth")) {
       const spawned = rail.spawnWorker("w-api-v2", "opencode", briefPath, cwd)
       assert.equal(spawned, true, "sanity: the api-v2 pane spawns through the fake transport")
       seedSession(DB, cwd, new Date().toISOString(), v2Dir, "ses-a2")
-      assert.equal(rail.tryBookSession("w-api-v2"), "ses-a2", "sanity: api-v2's session books")
+      // gate-r9: the rebook speaks the BARE unit id (the birth judge's
+      // b.id — the production contract since r4; the w- form here was
+      // the pre-r9 dual-spelling habit, and the single-spelling lookup
+      // correctly double-prefixes it)
+      assert.equal(rail.tryBookSession("api-v2"), "ses-a2", "sanity: api-v2's session books")
       assert.equal(rail.bookedSessionOf("api-v2"), "ses-a2", "sanity: api-v2 reads as boarded")
 
       // THE BUG: api never spawned, never boarded — it has no pane row

@@ -83,7 +83,9 @@ test("the birth judge's rebook resolves a resumed pane's session too — resumeW
     assert.equal(okSpawn, true, "sanity: the spawn-path pane spawns")
     seedSession(DB, runA, new Date().toISOString(), join(runA, "units", "france"), "ses-a")
     assert.equal(
-      railA.tryBookSession("w-france"),
+      // gate-r9: the rebook speaks the BARE unit id (the birth judge's
+      // b.id — the production contract; the w- form was the pre-r9 habit)
+      railA.tryBookSession("france"),
       "ses-a",
       "sanity: the rebook resolves the session for a SPAWNED pane (kindOf was set at spawn)",
     )
@@ -101,7 +103,7 @@ test("the birth judge's rebook resolves a resumed pane's session too — resumeW
     assert.equal(okResume, true, "sanity: the resumed pane spawns through the same fake transport")
     seedSession(DB, runB, new Date().toISOString(), join(runB, "units", "japan"), "ses-b")
 
-    const rebooked = railB.tryBookSession("w-japan")
+    const rebooked = railB.tryBookSession("japan") // bare id — the judge's spelling (gate-r9)
     assert.equal(
       rebooked,
       "ses-b",

@@ -13,7 +13,7 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, join, resolve } from "node:path"
+import { basename, dirname, join, relative, resolve } from "node:path"
 import { isProviderFault, parseModelRef } from "../jev/model-ladder.ts"
 import { landMockUnit, loadManifest, type Layout, type Manifest } from "../doors/hooks.ts"
 import { drop, note, place, type Board } from "../core/lanes.ts"
@@ -568,6 +568,20 @@ export class Rail implements ShepPort {
     } catch {
       return null
     }
+  }
+
+  // A MARKERED resolve answers both path spellings the first-user
+  // message can carry (gate-r9 tests-300): the absolute brief dir AND
+  // its cwd-relative form — briefs and prompts speak relative paths
+  // ("units/w-api", "../../data/review/…"), and a marker that only
+  // matched absolutes never matched anything real, silently handing
+  // every booking to the marker-less newest-wins fallback — the
+  // cross-booking j-78ca43's marker was written to prevent.
+  private resolveMarkedSession(kind: string, cwd: string, since: string, marker: string): string | null {
+    const abs = this.resolveLiveSession(kind, cwd, since, marker)
+    if (abs !== null) return abs
+    const rel = relative(cwd, marker)
+    return rel !== marker ? this.resolveLiveSession(kind, cwd, since, rel) : null
   }
 
   // Start an agent in an existing pane, record it, submit the brief.
@@ -1158,14 +1172,15 @@ export class Rail implements ShepPort {
   // just-wired lane dead while its claim said "forwarded".
   bookedSessionOf(name: string): string | undefined {
     if (!this.ledger) return undefined
-    // EXACT match on both spellings (gate-r6 momentum-18: the
-    // startsWith(`${n}-`) suffix tolerance returned ANOTHER unit's
-    // session when one id is a dash-prefix of another — api vs api-v2
-    // — judging a never-boarded pane 'boarded' and riding the full
-    // stall ceiling; suffix panes are not a fan-out shape)
-    const spellings = new Set([name, `w-${name}`])
+    // THE ONE SPELLING (gate-r9 tests-300): fan-out panes attach the
+    // spawn name verbatim — the cycle passes `w-${unit.id}` at BOTH
+    // spawn sites (orchestrator spawn and resumeSpawn) — so the w-
+    // form is not a variant, it is THE form. The bare disjunct was
+    // pure collision surface: a unit literally named w-api made
+    // lookup("api") answer w-api's panes and lookup("w-api") answer
+    // api's — the momentum-18 class surviving one spelling later.
     const latest = this.ledger.job.panes
-      .filter((p) => p.unit !== undefined && p.transcript && spellings.has(p.unit!))
+      .filter((p) => p.unit === `w-${name}` && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id
@@ -1180,22 +1195,32 @@ export class Rail implements ShepPort {
   // the bare id — resolve BOTH spellings, and remember which one hit
   // (setSession must speak the pane's own label).
   tryBookSession(name: string): string | undefined {
-    const bare = this.scopedName(name)
-    const withW = this.scopedName(`w-${name}`)
-    const briefPath = this.briefOf.get(bare) ?? this.briefOf.get(withW) ?? this.briefOf.get(name)
+    // THE ONE SPELLING (gate-r9 tests-300): spawn state (cwdOf/kindOf/
+    // briefOf) is keyed at spawn under scopedFn(`w-${id}`) — BOTH spawn
+    // sites pass the w- form — so the re-resolve scopes exactly that.
+    // The dual bare/withW resolution was the w-prefixed-id collision
+    // (unit "w-api" vs unit "api") one layer down.
+    const label = this.scopedName(`w-${name}`)
+    const briefPath = this.briefOf.get(label) ?? this.briefOf.get(name)
     const marker = briefPath ? dirname(briefPath) : undefined
-    const cwd = this.cwdOf.get(bare) ?? this.cwdOf.get(withW)
-    const kind = this.kindOf.get(bare) ?? this.kindOf.get(withW)
+    const cwd = this.cwdOf.get(label)
+    const kind = this.kindOf.get(label)
     if (!cwd || !kind) return undefined
-    const label = this.kindOf.get(bare) !== undefined ? bare : withW
     const since =
       this.ledger?.job.panes
         .filter((p) => p.label === label)
         .sort((a, b) => a.born.localeCompare(b.born))
         .map((p) => p.born)
         .pop() ?? new Date().toISOString()
-    const sid =
-      (marker ? this.resolveLiveSession(kind, cwd, since, marker) : null) ?? this.resolveLiveSession(kind, cwd, since)
+    // gate-r9 tests-300: when a MARKER exists, it is the discriminator —
+    // resolveOpencode's own doctrine (transcripts.ts: no candidate carries
+    // the marker → NO id; the caller retries) forbids the marker-less
+    // newest-wins fallback, which cross-booked a dash-prefix sibling's
+    // session onto this pane's row. The fallback survives only for the
+    // no-brief shape (nothing to discriminate with).
+    const sid = marker
+      ? this.resolveMarkedSession(kind, cwd, since, marker)
+      : this.resolveLiveSession(kind, cwd, since)
     if (sid) this.ledger?.setSession(label, sid)
     return sid
   }
@@ -1203,9 +1228,14 @@ export class Rail implements ShepPort {
   bookSessionLate(name: string, kind: string, cwd: string, since: string): void {    setTimeout(() => {
       const briefPath = this.briefOf.get(this.scopedName(name)) ?? this.briefOf.get(name)
       const marker = briefPath ? dirname(briefPath) : undefined
-      const sid =
-        (marker ? this.resolveLiveSession(kind, cwd, since, marker) : null) ??
-        this.resolveLiveSession(kind, cwd, since)
+      // the same marker doctrine as tryBookSession (gate-r9 tests-300):
+      // a marker exists → it is the discriminator; a null marker-resolve
+      // means "not resolvable yet" (the message race resolveOpencode
+      // documents) — the marker-less newest-wins fallback cross-booked
+      // siblings sharing a cwd. The fallback survives only with no brief.
+      const sid = marker
+        ? this.resolveMarkedSession(kind, cwd, since, marker)
+        : this.resolveLiveSession(kind, cwd, since)
       if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
     }, 5_000).unref()
   }

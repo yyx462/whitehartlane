@@ -678,7 +678,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     throw new HookError('[gates] detectors are retired with the spur step file they served — the rail-acted verdict is a [[stage]] with topology = "gate" and run (docs/STAGES.md, ADR 0014)')
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, born_ms: bornMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, born_ms: bornMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}), ...(workflow.settle_mode !== undefined ? { settle_mode: workflow.settle_mode } : {}), ...(workflow.fallback_ladder !== undefined ? { fallback_ladder: workflow.fallback_ladder } : {}) },
     hooks: {
       grade: optHook(hooks.grade, "hooks.grade"),
       counts: optHook(hooks.counts, "hooks.counts", {

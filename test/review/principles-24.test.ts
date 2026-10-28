@@ -91,10 +91,11 @@ test("the fault lane's and birth judge's session lookups match the ledger's own 
     const spawned = rail.spawnWorker("w-france", "opencode", briefPath, cwd)
     assert.equal(spawned, true, "sanity: the pane spawns through the fake transport")
 
-    // the session the agent minted is REAL and resolvable — addressed by
-    // the writer's spelling, both of the diff's readers work
+    // the session the agent minted is REAL and resolvable — the rebook
+    // speaks the BARE unit id (the birth judge's b.id; gate-r9 — the
+    // w- form was the pre-r9 dual-spelling habit)
     seedSession(DB, cwd, new Date().toISOString(), unitDir, "ses-1")
-    const booked = rail.tryBookSession("w-france")
+    const booked = rail.tryBookSession("france")
     assert.equal(booked, "ses-1", "sanity: tryBookSession resolves + books the session under the writer's own key")
     const row = rail.ledger!.job.panes.find((p) => p.unit === "w-france")
     assert.ok(row, "sanity: the ledger's pane row carries unit 'w-france' (the writer's spelling)")
