@@ -1158,14 +1158,14 @@ export class Rail implements ShepPort {
   // just-wired lane dead while its claim said "forwarded".
   bookedSessionOf(name: string): string | undefined {
     if (!this.ledger) return undefined
-    const spellings = [name, `w-${name}`]
+    // EXACT match on both spellings (gate-r6 momentum-18: the
+    // startsWith(`${n}-`) suffix tolerance returned ANOTHER unit's
+    // session when one id is a dash-prefix of another — api vs api-v2
+    // — judging a never-boarded pane 'boarded' and riding the full
+    // stall ceiling; suffix panes are not a fan-out shape)
+    const spellings = new Set([name, `w-${name}`])
     const latest = this.ledger.job.panes
-      .filter(
-        (p) =>
-          p.unit !== undefined &&
-          p.transcript &&
-          spellings.some((n) => p.unit === n || p.unit!.startsWith(`${n}-`)),
-      )
+      .filter((p) => p.unit !== undefined && p.transcript && spellings.has(p.unit!))
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id

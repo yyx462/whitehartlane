@@ -178,6 +178,33 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
 // units block exists or a value cannot be re-serialized.
 function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   const lines = toml.split("\n")
+  // the [[stage.units]] array-of-tables form (gate-r6 tests-102: the
+  // door's parse and intake's reader both bless this form — the strip
+  // refused it with 'no units block'): drop whole blocks whose id is
+  // not in the roster
+  if (!lines.some((l) => l.startsWith("units = ["))) {
+    let changed = false
+    let saw = false
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\[\[stage\.units\]\]/.test(lines[i].trim())) continue
+      saw = true
+      let end = i + 1
+      while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
+      const id = lines
+        .slice(i, end)
+        .map((l) => l.trim().match(/^id = "([a-z]+)"/)?.[1])
+        .find(Boolean)
+      if (id !== undefined && !keep.has(id)) {
+        lines.splice(i, end - i)
+        changed = true
+        i--
+      } else {
+        i = end - 1
+      }
+    }
+    if (!saw) return null
+    return changed ? lines.join("\n") : toml
+  }
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].startsWith("units = [")) continue
     // single-line inline array: the closing ] rides the same line —
