@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { abortJob, continueJob, killPane, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
+import { abortJob, bookingStale, continueJob, killPane, listJobs, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
 
 export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
@@ -61,6 +61,21 @@ export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOu
   const live = liveLeaseHolder(job)
   if (live) {
     return { ok: false, why: `a live orchestrator holds ${job.id} (${live}) — one writer per job; pause it first, or wait` }
+  }
+  // r25 principles-22 — THE successor screen, seated at the SHARED
+  // ceremony both revival verbs land on (refresh's drain-rebirth,
+  // continue's rebirth): a live successor booking on this lineage
+  // session vetoes the rebirth — two live writers on one program dir
+  // is the split brain the booking probe's veto exists to prevent.
+  // One seat, not one per caller.
+  const successor = listJobs().find(
+    (j) => j.id !== job.id && j.sid === job.sid && j.state === "running" && !bookingStale(j, Date.now()),
+  )
+  if (successor) {
+    return {
+      ok: false,
+      why: `a successor booking (${successor.id}) is live on this program dir — reviving ${job.id} beside it is two live writers; abort the successor first`,
+    }
   }
   for (const pane of job.panes.filter((p) => p.died === undefined)) {
     try {

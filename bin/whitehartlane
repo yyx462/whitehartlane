@@ -723,7 +723,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const reborn = rebirthRunner(fresh, import.meta.dirname)
     if (!reborn.ok) {
       console.error(`refresh: ${reborn.why}`)
-      process.exitCode = 1
+      // a successor-conflict refusal is the one-writer veto speaking —
+      // exit 2, the same code `whl continue` refuses with on this
+      // exact store (r25 principles-22's repro pins the code)
+      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
       return
     }
     console.log(`refreshed ${fresh.id} (pid ${reborn.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
@@ -786,23 +789,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
-    // r23 questions-5 — the continue verb routes through the ONE-WRITER
-    // owner: a mate answering this Job's own "continue or abort it"
-    // wake must not revive it beside a successor booking the booking
-    // probe just admitted. Kinship is the LINEAGE SESSION (r24: every
-    // booking mints its own run dir — j.dir is never equal across
-    // bookings; the session, keyed by the program dir, is). A live
-    // (running, non-stale) Job on this lineage session vetoes.
-    const successor = jobs.find(
-      (j) => j.id !== job.id && j.sid === job.sid && j.state === "running" && !bookingStale(j, Date.now()),
-    )
-    if (successor) {
-      console.error(
-        `continue: a successor booking (${successor.id}) is live on this program dir — the stale-orphan wake is stale too; abort the successor or discard this Job`,
-      )
-      process.exitCode = 2
-      return
-    }
+    // r23 questions-5 / r25 principles-22 — the successor screen lives
+    // at the SHARED rebirth ceremony (rebirthRunner, levy.ts), which
+    // both revival verbs land on. The lineage session is the kinship
+    // (every booking mints its own run dir — j.dir is never equal).
     // #201 row 8: an edited declaration must not continue in silence —
     // the booking carries the program's content hash; a source that
     // hashes differently now means the rebirth runs DIFFERENT program
@@ -826,11 +816,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       }
     }
     // one rebirth ceremony (straggler retire + fresh runner + booked
-    // continue) — the same verb `refresh` lands on after its drain
+    // continue) — the same verb `refresh` lands on after its drain.
     const reborn = rebirthRunner(job, import.meta.dirname)
     if (!reborn.ok) {
       console.error(`continue: ${reborn.why}`)
-      process.exitCode = 1
+      // a successor-conflict refusal is the one-writer veto speaking —
+      // exit 2 (r24 momentum-12's repro pins the code on this store)
+      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
       return
     }
     console.log(`continued ${job.id} (pid ${reborn.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)
