@@ -9,7 +9,7 @@ import { copyExample } from "./util.ts"
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "agentic-os-run-"))
 
 const { prepareRun } = await import("../src/doors/run.ts")
-const { listJobs } = await import("../src/adapters/store.ts")
+const { listJobs, saveJob } = await import("../src/adapters/store.ts")
 
 const bin = join(import.meta.dirname, "..", "bin", "whitehartlane")
 const stub = join(process.env.AGENTIC_OS_HOME, "engine-stub.mjs")
@@ -77,6 +77,11 @@ test("run books a Job from the three-lookups manifest and rejects a second while
   assert.equal(existsSync(join(dir, "units.jsonl")), false)
   assert.equal(job.state, "running")
   assert.equal(job.workflow, "fan-out")
+  // a LIVE run carries a live orchestrator pid (the runner books it via
+  // the pid event) — the fiction must match production, or the booking
+  // probe reads this run as abandoned and orphans it (r15 momentum-8)
+  job.pid = process.pid
+  saveJob(job)
   const hooked = readFileSync(join(job.dir, "workflow.toml"), "utf8")
   assert.match(hooked, /grade = "bash \//)
   const second = runCli(dir)

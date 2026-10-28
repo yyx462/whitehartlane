@@ -42,11 +42,14 @@ import {
   killPane,
   leaseExpired,
   listJobs,
+  bookingStale,
   loadJob,
   normalizeSpur,
+
   orphanJob,
   projectJob,
   readAllEvents,
+  pidAlive,
   readEvents,
   saveJob,
   wakeAudit,
@@ -89,17 +92,6 @@ function shepStatus() {
 // the runner seam (src/runners.ts): one place the external CLIs are
 // dialed — shared with the Rail, swappable when the substrate changes
 const herdrAt = defaultRunner("herdr")
-
-/** @param {number | undefined} pid */
-function pidAlive(pid) {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return err?.code === "EPERM"
-  }
-}
 
 /** @param {JobRecord} job */
 function unitsOf(job) {
@@ -293,6 +285,48 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
 
   if (cmd === "review") {
     const args = process.argv.slice(3)
+    // --help is a first-class verb here (the r-250 receipt: `whl review
+    // --help` treated the flag as a repo path and died with "not a git
+    // repository" — a CLI that cannot say its own spell is not a CLI)
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log(`whitehartlane review — the adversarial pre-merge rail
+
+  review <repo> --base <ref> --head <ref> --model <provider/model>
+        [--title <s>] [--author <s>] [--merge-cmd <cmd>] [--trace-dir <dir>]
+        [--body-file <f>] [--out <dir>] [--template <dir>]
+        [--from <tool>:<sid> | --unattended]
+
+  what it does
+    materializes templates/pr-review for BASE..HEAD of <repo> and
+    (with --from/--unattended) levies it: intake gate → 4 lenses
+    (principles / tests / momentum / questions, temperature-spread) →
+    prove gate (a finding blocks ONLY with a repro failing 2× on HEAD
+    and clean on base) → responsibility divide → cold merge gate
+    (accept merges — base drift refuses; reject divides feedback per
+    responsible worker; verdict at data/review/verdict.json).
+
+  the spell (from an agent session — tracked background shell):
+    whl review <repo> --base master --head <branch> \\
+      --out <dir> --title "<pr title>" --model <provider/model> \\
+      --merge-cmd "<cmd>" --unattended
+
+  hard rules
+    - --model is REQUIRED as provider/model when the template's
+      temperature pins have nothing to ride (bare ids are refused)
+    - docs-only diffs skip at the door (receipt printed, exit 0)
+    - a dead/stalled unit is NOT a dead review: re-levy the SAME
+      program dir (whl run <dir> --unattended) — the settled fold
+      spares done units; never materialize a fresh program to retry.
+      If the door refuses because the killed run's Job still reads
+      running (a SIGKILL leaves it that way): run "whl sweep" to
+      orphan the dead run, then re-levy
+    - reviewers never write the repo; tests are adopted by the fix
+      commit (verdict.json adopt[] lists them)
+
+  economics (tokens, duplicates, speed): templates/pr-review/ECONOMICS.md
+  trace past runs: node scripts/review-trace.mjs`)
+      return
+    }
     const val = (name) => {
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
@@ -518,7 +552,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const shep = spawnSync("shep", ["status"], { encoding: "utf8", timeout: 10_000 })
     say("shep panes", shep.status === 0, shep.status === 0 ? `${(shep.stdout.match(/^\s*\S+\s+\S+/gm) ?? []).length} pane row(s)` : `shep status rc=${shep.status} — is the multiplexer up?`)
     say("OS disk", jobs.length >= 0, `${jobs.length} job record(s) under ${process.env.AGENTIC_OS_HOME ?? "~/.local/share/whitehartlane"}`)
-    const leased = jobs.filter((j) => j.state === "running" && !pidAlive(j.pid))
+    // THE stale-booking oracle (store.ts bookingStale) — same answer
+    // as the sweep and the booking probe (r18 principles-11)
+    const leased = jobs.filter((j) => bookingStale(j, Date.now()))
     say("live jobs", leased.length === 0, leased.length === 0 ? "every running Job has a live orchestrator" : `${leased.length} running without a live pid — sweep parks them: whitehartlane sweep`)
     const gitOk = spawnSync("git", ["-C", process.cwd(), "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" })
     say("git tree", gitOk.status === 0, gitOk.status === 0 ? process.cwd() : "not a git checkout (fine for installs, suspicious for dev)")
@@ -535,7 +571,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       ...allLevyPanes().map((r) => r.pane),
     ])
     const bastards = live.filter((p) => !admitted.has(p.label))
-    const stalled = jobs.filter((job) => job.state === "running" && !pidAlive(job.pid))
+    const stalled = jobs.filter((job) => bookingStale(job, Date.now()))
     console.log(`panes live in shep: ${live.length}; admitted by Jobs: ${live.length - bastards.length}`)
     for (const pane of bastards) {
       console.log(`UNADMITTED ${pane.label} (${pane.pane}) — no booked birth; retire it: shep retire ${pane.label}`)
@@ -570,7 +606,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       // AGENTIC_OS_LEASE_ENFORCE=1 until beat density is proven across
       // quiet fan-out waits. Timers grant the right to suspect; the
       // census decides.
-      const pidGone = !pidAlive(job.pid)
+      const pidGone = bookingStale(job, Date.now())
       const leaseGone =
         process.env.AGENTIC_OS_LEASE_ENFORCE === "1" && leaseExpired(job)
       if (!pidGone && !leaseGone) {
@@ -687,7 +723,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const reborn = rebirthRunner(fresh, import.meta.dirname)
     if (!reborn.ok) {
       console.error(`refresh: ${reborn.why}`)
-      process.exitCode = 1
+      // a successor-conflict refusal is the one-writer veto speaking —
+      // exit 2, the same code `whl continue` refuses with on this
+      // exact store (r25 principles-22's repro pins the code)
+      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
       return
     }
     console.log(`refreshed ${fresh.id} (pid ${reborn.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
@@ -750,6 +789,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
+    // r23 questions-5 / r25 principles-22 — the successor screen lives
+    // at the SHARED rebirth ceremony (rebirthRunner, levy.ts), which
+    // both revival verbs land on. The lineage session is the kinship
+    // (every booking mints its own run dir — j.dir is never equal).
     // #201 row 8: an edited declaration must not continue in silence —
     // the booking carries the program's content hash; a source that
     // hashes differently now means the rebirth runs DIFFERENT program
@@ -773,11 +816,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       }
     }
     // one rebirth ceremony (straggler retire + fresh runner + booked
-    // continue) — the same verb `refresh` lands on after its drain
+    // continue) — the same verb `refresh` lands on after its drain.
     const reborn = rebirthRunner(job, import.meta.dirname)
     if (!reborn.ok) {
       console.error(`continue: ${reborn.why}`)
-      process.exitCode = 1
+      // a successor-conflict refusal is the one-writer veto speaking —
+      // exit 2 (r24 momentum-12's repro pins the code on this store)
+      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
       return
     }
     console.log(`continued ${job.id} (pid ${reborn.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)

@@ -149,6 +149,12 @@ export function waitChange(dir: string, ms: number): Promise<void> {
   })
 }
 
+// The stand-down refusal marker (r26 tests-4) — the same escape
+// pattern as the lease refusal: a message prefix thrown at the write
+// site, rethrown by openLedger's outer catch so the boot DIES instead
+// of degrading into an unledgered drive-on.
+export const STAND_DOWN = "STAND_DOWN"
+
 const WORKER_SHARE = 0.5
 
 export class Rail implements ShepPort {
@@ -270,19 +276,41 @@ export class Rail implements ShepPort {
       // The mutex half (j-93d652 gap #2): a LIVE holder refuses us —
       // one writer per job, so a double `whl continue` dies at the
       // door instead of split-braining the exchange.
+      // The WRITE-SITE single-act law (r21 principles-13/r18
+      // momentum-1): the boot-time load is a snapshot; the disk is
+      // re-read HERE, at the write, before the lease or the pid/door
+      // stamp touch it.
+      let fresh = job
       try {
-        acquireLease(job, `orchestrator pid=${process.pid}`)
+        fresh = loadJob(sid0, jid0) ?? job
+        acquireLease(fresh, `orchestrator pid=${process.pid}`)
       } catch (err) {
         if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
-      // Stamp only after the door opened: a refused writer throws out
-      // of this function below and must leave the shared record as it
-      // loaded it (the old order wrote pid+door before asking the lock).
-      job.pid = process.pid
-      job.door = { rev: doorRev(), started: new Date().toISOString() }
-      saveJob(job)
-      const booked = job
+      // The stand-down law, seated AFTER the lease round-trip — and
+      // answering for EVERY parked state (r23 principles-14: orphaned
+      // alone missed pause/abort flips in the snapshot→write gap — an
+      // abort booked in the window was stamped and driven to
+      // completion). THIS boot stands down unless the record still
+      // reads running on disk: any parked/dead receipt (pause, abort,
+      // orphan) stands, and `whl continue` owns the revival.
+      if (fresh.state !== "running") {
+        // the STAND_DOWN prefix makes this refuse like the lease
+        // refusal (r26 tests-4): raised inside the outer try, it must
+        // be rethrown by the outer catch — swallowed, it became
+        // "running without a Job record" and drove the program to
+        // completion unledgered, the exact opposite of standing down.
+        throw new Error(
+          `${STAND_DOWN}: the Job flipped to ${fresh.state} during this boot (a pause/abort/orphan receipt stands) — run: whitehartlane continue ${job.id}`,
+        )
+      }
+      // The stamp writes the FRESH record (the same re-read the lease
+      // acquire used) — never the boot-time snapshot.
+      const booked = fresh
+      booked.pid = process.pid
+      booked.door = { rev: doorRev(), started: new Date().toISOString() }
+      saveJob(booked)
       const holder = `orchestrator pid=${process.pid}`
       return {
         job: booked,
@@ -337,6 +365,11 @@ export class Rail implements ShepPort {
       // holder's fleet: the exact split brain the lease exists to
       // prevent, j-93d652 gap #2.)
       if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
+      // the stand-down refuses the same way (r26 tests-4): the boot
+      // MUST die here — swallowed, it became "running without a Job
+      // record" and drove the staged program to completion unledgered,
+      // the exact opposite of standing down
+      if (err instanceof Error && err.message.startsWith(STAND_DOWN)) throw err
       this.log(`ledger unavailable (${err instanceof Error ? err.message : String(err)}) — running without a Job record`)
       return null
     }

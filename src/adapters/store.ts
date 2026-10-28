@@ -189,6 +189,9 @@ export type OsEvent = {
 } & Record<string, unknown>
 
 export function homeRoot(): string {
+  // TWIN WARNING: scripts/review-trace.mjs replicates this exact
+  // resolution (a .mjs cannot import this TS module) — if you change
+  // the order or the spellings, change both (r13 tests-3).
   if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
   // ADR 0011: the disk default is ~/.local/share/whitehartlane; a legacy
   // agentic-os disk still wins while it is the only one that exists
@@ -942,7 +945,13 @@ export function leaseHolderPid(lease: { holder: string }): number | null {
   return m ? Number(m[1]) : null
 }
 
-function pidAlive(pid: number | null): boolean {
+// THE canonical liveness oracle (one decision, one site — the booking
+// probe in run.ts imports this; r16 questions-3/tests-11: a hand-rolled
+// try/catch reads EPERM as death and orphans a live orchestrator).
+// Unparseable/missing pid counts ALIVE (conservative: one writer per
+// job, always); EPERM counts ALIVE (a live process this uid may not
+// signal); only a proven-gone pid is dead.
+export function pidAlive(pid: number | null): boolean {
   if (pid === null || pid <= 0) return true
   try {
     process.kill(pid, 0)
@@ -950,6 +959,29 @@ function pidAlive(pid: number | null): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "EPERM"
   }
+}
+
+// THE stale-booking oracle — the one answer to "is this running Job
+// abandoned?", shared by the booking probe (run.ts) and the sweep
+// (bin) (r17 principles-8/tests-2: the probe and the sweep answered
+// it with two private rules). A running Job is stale iff its pid is
+// PROVEN dead, or it has no pid and is older than the booking grace
+// (the runner claims its pid within seconds of a live booking — a
+// young pid-less record is a live intent, never an orphan).
+// the booking grace aligns with the lease TTL (r20 momentum-11): a
+// spawn beat on a cold machine can outlast a minute, and a record
+// orphaned mid-spawn is resurrected by the runner's own stale save —
+// the repo's existing answer to "how long until a live holder is
+// suspect" is the honest bound
+export const BOOKING_GRACE_MS = LEASE_TTL_MS
+export function bookingStale(
+  job: { state: string; pid?: number; created: string },
+  nowMs: number,
+  live = pidAlive,
+): boolean {
+  if (job.state !== "running") return false
+  if (job.pid !== undefined && job.pid !== null) return !live(job.pid)
+  return nowMs - Date.parse(job.created) > BOOKING_GRACE_MS
 }
 
 // The door-side pre-check (the child's acquireLease stays authoritative
@@ -964,7 +996,6 @@ export function liveLeaseHolder(job: JobRecord): string | null {
 }
 
 export const LEASE_HELD_BY_LIVE_ORCHESTRATOR = "LEASE_HELD_BY_LIVE_ORCHESTRATOR"
-
 // The mutex half the interview found missing (j-93d652 gaps.md #2:
 // "double-continue split brain; the lease is not a mutex"): acquiring
 // over a LIVE holder refuses — a second `whl continue` must never
