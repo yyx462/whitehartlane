@@ -36,6 +36,14 @@ export type ReviewArgs = {
   model?: string
   /** the gate's lens roster (review-gate.ts); omit = all four lenses */
   roster?: string[]
+  /**
+   * a dropout-audit levy (gate-r2 momentum-15): the gate judged skip
+   * but the dropout sample escalated to a full review — the docs-only
+   * pre-flight skip does NOT apply (the audit exists to measure the
+   * skipped class; a skipped audit can produce no verdict, no label,
+   * no greens, and the rate pins at 1.0 forever).
+   */
+  auditLevy?: boolean
 }
 
 export type ReviewReady =
@@ -77,14 +85,21 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 // `^units = [` anchor matched nothing, and every model-pinned review
 // derived ZERO lens order files on the normal path). The parser is
 // the VERIFIER, not the writer: this function performs surgical line
-// edits (the [workflow] table's span, or the dotted-key form), and
-// the caller re-parses the result to prove workflow.model landed.
-// Comments, key order, and inline-table layouts survive verbatim.
+// edits, and the caller re-parses the result to prove workflow.model
+// landed. Arms, in order (gate-r2 principles-15/tests-2 — every form
+// the consumer parses must land):
+//   1. a [workflow] header block — interior spaces tolerated
+//      ("[ workflow ]" is legal TOML)
+//   2. dotted keys (workflow.model = "…" / workflow.* siblings)
+//   3. a single-line inline table (workflow = { … }) — that ONE line
+//      is reconstructed from the parse (scalars only); everything
+//      else in the document survives verbatim
 function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
   const pin = `model = ${JSON.stringify(model)}`
   const lines = templateToml.split("\n")
-  // 1) the [workflow] table header (tolerant: trailing comment/space)
-  const headerIdx = lines.findIndex((l) => /^\[workflow\]\s*(#.*)?$/.test(l.trim()))
+  // 1) the [workflow] table header — tolerant: interior spaces and a
+  // trailing comment (gate-r2 tests-41: "[ workflow ]" parses fine)
+  const headerIdx = lines.findIndex((l) => /^\[\s*workflow\s*\]\s*(#.*)?$/.test(l.trim()))
   if (headerIdx !== -1) {
     let end = lines.length
     for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -102,8 +117,7 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
     lines.splice(headerIdx + 1, 0, pin)
     return lines.join("\n")
   }
-  // 2) dotted-key form (workflow.model = "…" at top level — no header
-  // line, the consumer's parser reads it fine; gate-r1 kept this arm)
+  // 2) dotted-key form (workflow.model = "…" at top level)
   const dotted = /^workflow\.model\s*=/
   for (let i = 0; i < lines.length; i++) {
     if (dotted.test(lines[i])) {
@@ -116,7 +130,42 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
     lines.splice(firstDotted, 0, pin.replace(/^model = /, "workflow.model = "))
     return lines.join("\n")
   }
-  return undefined // no [workflow] table in any form — the caller's parse-verify refuses
+  // 3) single-line inline table (workflow = { k = v, … }) — gate-r2
+  // principles-15: smol-toml parses a complete workflow table from
+  // these bytes; refusing was a false premise. The ONE line is rebuilt
+  // from the parse (scalars only — nested values are not a form this
+  // arm rewrites); the rest of the document is untouched.
+  const inlineIdx = lines.findIndex((l) => /^[ \t]*workflow[ \t]*=[ \t]*\{.*\}[ \t]*(#.*)?$/.test(l))
+  if (inlineIdx !== -1) {
+    try {
+      const parsed = parseToml(templateToml) as { workflow?: Record<string, unknown> }
+      const wf = parsed.workflow
+      if (!wf || typeof wf !== "object") return undefined
+      const scalar = (v: unknown): string | undefined => {
+        if (typeof v === "string") return JSON.stringify(v)
+        if (typeof v === "number" || typeof v === "boolean") return String(v)
+        return undefined // nested structures: not this arm's form
+      }
+      const entries: string[] = []
+      let modelLanded = false
+      for (const [k, v] of Object.entries(wf)) {
+        const s = scalar(v)
+        if (s === undefined) return undefined
+        if (k === "model") {
+          entries.push(`model = ${JSON.stringify(model)}`)
+          modelLanded = true
+        } else {
+          entries.push(`${k} = ${s}`)
+        }
+      }
+      if (!modelLanded) entries.push(`model = ${JSON.stringify(model)}`)
+      lines[inlineIdx] = `workflow = { ${entries.join(", ")} }`
+      return lines.join("\n")
+    } catch {
+      return undefined
+    }
+  }
+  return undefined // no arm landed — the caller's refusal names the true premise
 }
 
 // The roster's surgical filter (review-gate.ts subset materialization):
@@ -135,6 +184,21 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   })
   lines.splice(start + 1, end - start - 1, ...kept)
   return lines.join("\n")
+}
+
+// A model-less dropout audit's untuned materialization (gate-r2
+// momentum-15): remove `temperature = <num>` keys from unit lines —
+// the pins are tuning that needs a model to ride; without one the
+// lenses spawn on the host default, untuned (stated in the receipt).
+function stripTemperaturePins(toml: string): string {
+  return toml
+    .split("\n")
+    .map((l) =>
+      /\{\s*id\s*=/.test(l)
+        ? l.replace(/,\s*temperature\s*=\s*[0-9]+(\.[0-9]+)?/g, "").replace(/temperature\s*=\s*[0-9]+(\.[0-9]+)?\s*,\s*/g, "")
+        : l,
+    )
+    .join("\n")
 }
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
@@ -193,8 +257,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   // The docs-only skip is a PRE-FLIGHT, not a chain stage: a declared
   // chain cannot shed its units mid-run (ADR 0014), so the skip has to
-  // happen before anything is booked. Receipt, not silence.
-  if (files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
+  // happen before anything is booked. Receipt, not silence. EXCEPT a
+  // dropout-audit levy (gate-r2 momentum-15): the gate escalated this
+  // docs-only diff precisely to measure the skip — skipping the audit
+  // dead-ends the dropout (no verdict, no label, greens never accrue).
+  if (!args.auditLevy && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
   // ONE truthiness rule for a declared model (r10: four lenses caught
@@ -276,10 +343,20 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     const templateModel = parsedTemplate?.workflow?.model
     const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
-      return {
-        ok: false,
-        why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`,
-        code: 2,
+      if (args.auditLevy === true && args.model === undefined) {
+        // a MODEL-LESS dropout audit (gate-r2 momentum-15): refusing
+        // here dead-ends the audit — an audit nobody levies measures
+        // nothing, the skip region stays unmeasured, and the rate pins
+        // at 1.0 forever. The pins are TUNING, not law: strip them and
+        // the lenses spawn on the host default, untuned. The bin's
+        // receipt says so.
+        templateToml = stripTemperaturePins(templateToml)
+      } else {
+        return {
+          ok: false,
+          why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`,
+          code: 2,
+        }
       }
     }
     if (typeof args.model === "string") {
@@ -308,7 +385,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       if (parsed?.workflow?.model !== args.model) {
         return {
           ok: false,
-          why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land (add a [workflow] table to the template, or pass --template pointing at one)`,
+          why: `the template's workflow.toml has no [workflow] table the door can pin text-preservingly (a [workflow] header block, dotted workflow.* keys, or a single-line inline table — re-serializing the whole document would mangle the units layout): rewrite the table in one of those forms, or pass --template pointing at one`,
           code: 2,
         }
       }

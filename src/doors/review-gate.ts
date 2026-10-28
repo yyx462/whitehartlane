@@ -24,10 +24,10 @@
 // verdict.json for its headSha, read from its own home (append-only
 // decisions; labels are facts where they live).
 import { execFileSync } from "node:child_process"
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { homedir, tmpdir } from "node:os"
-import { basename, join } from "node:path"
-import { sessionsRoot } from "../adapters/store.ts"
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, dirname, join } from "node:path"
+import { homeRoot, sessionsRoot } from "../adapters/store.ts"
 import { DOCS_ONLY, DOCS_PATH } from "./review.ts"
 
 export const LENSES = ["principles", "tests", "momentum", "questions"] as const
@@ -67,8 +67,14 @@ const TEST_PATH = /(^|\/)(tests?|spec|__tests__)\//i
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/i
 const CODE_SMALL_CHURN = 150
 
+// the ledger lives under THE store's own root (gate-r2 tests-1: the
+// hard-wired ~/.local/share/agentic-os path ignored homeRoot()'s
+// ownership — on the ADR 0011 whitehartlane default disk or any
+// AGENTIC_OS_HOME root the parent did not exist, appendLedgerRow threw
+// ENOENT, and the bin demoted the whole gate to "broken — fail-safe:
+// full rail" on EVERY review: the gate silently never engaged there)
 export const ledgerPath = (): string =>
-  process.env.WHL_GATE_LEDGER ?? join(homedir(), ".local", "share", "agentic-os", "review-gate.jsonl")
+  process.env.WHL_GATE_LEDGER ?? join(homeRoot(), "review-gate.jsonl")
 
 export function classify(files: string[], churn: number): GateClass {
   if (files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) return "docs_only"
@@ -134,6 +140,9 @@ type LedgerRow = {
 }
 
 export function appendLedgerRow(row: Omit<LedgerRow, "ts">, path = ledgerPath()): void {
+  // the parent is created at write time (gate-r2 tests-1): a first
+  // decision on a fresh machine must mint the ledger, not ENOENT
+  mkdirSync(dirname(path), { recursive: true })
   appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), ...row }) + "\n")
 }
 

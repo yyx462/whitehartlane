@@ -349,6 +349,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // Fail-safe: jev unreachable → every lens runs. WHL_GATE=off is
     // the kill-switch (legacy full-rail behavior).
     let gateRoster = undefined
+    let gateAudit = false
     if (process.env.WHL_GATE !== "off") {
       const baseRef = val("base") ?? "master"
       const headRef = val("head") ?? "HEAD"
@@ -359,6 +360,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // ledger records the judgment; the ESCALATION still levies)
         if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
         if (gateOnly) return // decided + ledger row; the caller levies
+        gateAudit = g.decision.audit === true
+        if (gateAudit && !val("model")) {
+          console.log("review: dropout audit without --model — temperature pins dropped; the lenses run on the host default, untuned")
+        }
         if (g.decision.action === "review" && g.decision.roster.length < 4) gateRoster = g.decision.roster
       } catch (err) {
         // the gate must never BLOCK a review (that would be a new
@@ -380,6 +385,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         template: val("template"),
         model: val("model"),
         roster: gateRoster,
+        // a dropout-audit levy reaches the RAIL (gate-r2 momentum-15):
+        // the docs-only pre-flight skip must not eat the audit — the
+        // audit exists to measure the skipped class
+        auditLevy: gateAudit,
       },
       join(import.meta.dirname, "..", "templates"),
     )
@@ -401,10 +410,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 1
       return
     }
-    if (!spawner && !unattended) {
+    if (!spawner && !unattended && !gateAudit) {
       console.log(reviewReceipt(ready))
       return
     }
+    // a dropout AUDIT self-levies (gate-r2 momentum-15): an audit
+    // nobody runs measures nothing — the whole point is the verdict
     const runReady = prepareRun(ready.dir)
     if (!runReady.ok) {
       console.error(`review: ${runReady.why}`)

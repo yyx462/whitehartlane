@@ -384,7 +384,7 @@ test("orphanJob single-acts: a second sweep on a flipped record no-ops", () => {
 })
 
 test("writeWorkerPermissions MERGES: pins survive the re-seed, isolation force-wins (#249)", async () => {
-  const { writeWorkerPermissions, writeOpencodeModelSettings } = await import("../src/adapters/store.ts")
+  const { writeWorkerPermissions, writeOpencodeModelSettings, globalMcpNames } = await import("../src/adapters/store.ts")
   const dir = mkdtempSync(join(tmpdir(), "agentic-os-merge-"))
   // generation 1: the pre-seed, then the host's read-modify-write
   writeWorkerPermissions(dir)
@@ -397,5 +397,22 @@ test("writeWorkerPermissions MERGES: pins survive the re-seed, isolation force-w
     0.6,
     "the pin survives the re-seed — a respawn never loses its temperature",
   )
-  assert.equal(oc.mcp["sql-buddy"].enabled, false, "isolation force-wins over any prior config")
+  // inventory-AGNOSTIC (gate-r2 questions-1): the operator's global
+  // MCP set is a MACHINE fact, not a repo one — this suite must be
+  // green under any `opencode mcp list` (a stub on PATH, a machine
+  // with different servers, an empty inventory). The law itself is
+  // unchanged: every name the isolation write saw is re-declared
+  // disabled.
+  const listed = globalMcpNames()
+  if (listed.length === 0) {
+    assert.ok(!oc.mcp || Object.keys(oc.mcp).length === 0, "an empty inventory isolates nothing — no mcp block")
+  } else {
+    for (const name of listed) {
+      assert.equal(
+        oc.mcp?.[name]?.enabled,
+        false,
+        `isolation force-wins: global server '${name}' re-declared disabled`,
+      )
+    }
+  }
 })

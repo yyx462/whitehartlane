@@ -1400,7 +1400,7 @@ export function addWorkerRoot(runDir: string, root: string): void {
 // servers neutralized them — `opencode mcp list` → "No MCP servers
 // configured"). Best-effort: an unparseable list changes nothing.
 let mcpNamesCache: string[] | null = null
-function globalMcpNames(): string[] {
+export function globalMcpNames(): string[] {
   if (mcpNamesCache !== null) return mcpNamesCache
   try {
     const out = execFileSync("opencode", ["mcp", "list"], { timeout: 20_000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
