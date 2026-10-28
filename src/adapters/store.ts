@@ -996,7 +996,6 @@ export function liveLeaseHolder(job: JobRecord): string | null {
 }
 
 export const LEASE_HELD_BY_LIVE_ORCHESTRATOR = "LEASE_HELD_BY_LIVE_ORCHESTRATOR"
-
 // The mutex half the interview found missing (j-93d652 gaps.md #2:
 // "double-continue split brain; the lease is not a mutex"): acquiring
 // over a LIVE holder refuses — a second `whl continue` must never

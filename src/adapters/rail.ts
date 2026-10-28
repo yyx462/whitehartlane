@@ -149,6 +149,12 @@ export function waitChange(dir: string, ms: number): Promise<void> {
   })
 }
 
+// The stand-down refusal marker (r26 tests-4) — the same escape
+// pattern as the lease refusal: a message prefix thrown at the write
+// site, rethrown by openLedger's outer catch so the boot DIES instead
+// of degrading into an unledgered drive-on.
+export const STAND_DOWN = "STAND_DOWN"
+
 const WORKER_SHARE = 0.5
 
 export class Rail implements ShepPort {
@@ -290,8 +296,13 @@ export class Rail implements ShepPort {
       // reads running on disk: any parked/dead receipt (pause, abort,
       // orphan) stands, and `whl continue` owns the revival.
       if (fresh.state !== "running") {
+        // the STAND_DOWN prefix makes this refuse like the lease
+        // refusal (r26 tests-4): raised inside the outer try, it must
+        // be rethrown by the outer catch — swallowed, it became
+        // "running without a Job record" and drove the program to
+        // completion unledgered, the exact opposite of standing down.
         throw new Error(
-          `the Job flipped to ${fresh.state} during this boot (a pause/abort/orphan receipt stands) — run: whitehartlane continue ${job.id}`,
+          `${STAND_DOWN}: the Job flipped to ${fresh.state} during this boot (a pause/abort/orphan receipt stands) — run: whitehartlane continue ${job.id}`,
         )
       }
       // The stamp writes the FRESH record (the same re-read the lease
@@ -354,6 +365,11 @@ export class Rail implements ShepPort {
       // holder's fleet: the exact split brain the lease exists to
       // prevent, j-93d652 gap #2.)
       if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
+      // the stand-down refuses the same way (r26 tests-4): the boot
+      // MUST die here — swallowed, it became "running without a Job
+      // record" and drove the staged program to completion unledgered,
+      // the exact opposite of standing down
+      if (err instanceof Error && err.message.startsWith(STAND_DOWN)) throw err
       this.log(`ledger unavailable (${err instanceof Error ? err.message : String(err)}) — running without a Job record`)
       return null
     }

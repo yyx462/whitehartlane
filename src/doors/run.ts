@@ -232,8 +232,20 @@ function copyBeside(source: string, store: string): void {
     } else {
       const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
       for (const u of done) {
-        cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
-        checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+        // the fold is an OPTIMIZATION (r26 tests-1): an unreadable unit
+        // dir must never abort the booking. cpSync-recursive is
+        // NATIVELY fatal on an unreadable dir (libc++ filesystem_error
+        // terminates the process — a JS try/catch cannot see it), so
+        // the dir is PROBED with readdirSync first (a JS-catchable
+        // EACCES); a unit that fails the probe or the copy simply
+        // re-runs — no phantom booking, no native abort.
+        try {
+          readdirSync(join(prior, "units", u))
+          cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
+          checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+        } catch (err) {
+          logRunNote(store, `fold: unit ${u} unreadable (${err instanceof Error ? (err as NodeJS.ErrnoException).code ?? err.message.split("\n")[0] : String(err)}) — re-running it`)
+        }
       }
       if (done.length > 0) logRunNote(store, `fold: ${done.length} done unit(s) spared from ${prior}`)
     }
