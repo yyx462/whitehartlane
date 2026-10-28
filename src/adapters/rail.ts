@@ -732,6 +732,13 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    // gate-r4 principles-25: the resumed pane's KIND books too —
+    // tryBookSession's guard (`!cwd || !kind`) structurally refused
+    // the birth judge's one-last-look for every resumed pane, and a
+    // late-boarding resume was judged dead at birth despite boarding
+    // (the judge's own r6 doctrine: boarded — however quiet — is
+    // spared; session existence is the only key)
+    this.kindOf.set(label, session.tool)
     if (!(this.layout.tab === "new" && this.colPane)) {
       if (model !== undefined && model !== this.workerModel) {
         this.ledger?.emit("reject", { label, why: `per-unit model ${model} needs the fleet-pane path (CLI transport carries one pin)` })
@@ -1135,10 +1142,24 @@ export class Rail implements ShepPort {
   // lane's session lookup — the same shape the conversation engine
   // inlines for members): panes book under the unit name, transcripts
   // carry the host session id, the newest born wins.
+  //
+  // gate-r4 principles-24 — the identity is DUAL-SPELLED by design:
+  // the ledger's unit column attaches the spawn name verbatim
+  // (`w-<id>` — the cycle spawns w-${unit.id}) while the fault lane
+  // and the birth judge speak the BARE unit id. The lookup answers
+  // both spellings (the usageOf/briefOf dual-get pattern) — a miss
+  // here computed fault=null for every fan-out pane and left the
+  // just-wired lane dead while its claim said "forwarded".
   bookedSessionOf(name: string): string | undefined {
     if (!this.ledger) return undefined
+    const spellings = [name, `w-${name}`]
     const latest = this.ledger.job.panes
-      .filter((p) => (p.unit === name || p.unit?.startsWith(`${name}-`)) && p.transcript)
+      .filter(
+        (p) =>
+          p.unit !== undefined &&
+          p.transcript &&
+          spellings.some((n) => p.unit === n || p.unit!.startsWith(`${n}-`)),
+      )
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id
@@ -1148,13 +1169,19 @@ export class Rail implements ShepPort {
   // +5s only; a pane whose agent boarded slowly (or whose booking
   // raced) deserves one IMMEDIATE re-resolve before it is judged dead
   // at birth. Same resolution bookSessionLate uses, no timer.
+  // gate-r4 principles-24: the spawn state (cwdOf/kindOf/briefOf) is
+  // keyed by the pane label scopedFn(`w-<id>`) while the judge passes
+  // the bare id — resolve BOTH spellings, and remember which one hit
+  // (setSession must speak the pane's own label).
   tryBookSession(name: string): string | undefined {
-    const label = this.scopedName(name)
-    const briefPath = this.briefOf.get(label) ?? this.briefOf.get(name)
+    const bare = this.scopedName(name)
+    const withW = this.scopedName(`w-${name}`)
+    const briefPath = this.briefOf.get(bare) ?? this.briefOf.get(withW) ?? this.briefOf.get(name)
     const marker = briefPath ? dirname(briefPath) : undefined
-    const cwd = this.cwdOf.get(label)
-    const kind = this.kindOf.get(label)
+    const cwd = this.cwdOf.get(bare) ?? this.cwdOf.get(withW)
+    const kind = this.kindOf.get(bare) ?? this.kindOf.get(withW)
     if (!cwd || !kind) return undefined
+    const label = this.kindOf.get(bare) !== undefined ? bare : withW
     const since =
       this.ledger?.job.panes
         .filter((p) => p.label === label)
@@ -1163,7 +1190,7 @@ export class Rail implements ShepPort {
         .pop() ?? new Date().toISOString()
     const sid =
       (marker ? this.resolveLiveSession(kind, cwd, since, marker) : null) ?? this.resolveLiveSession(kind, cwd, since)
-    if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
+    if (sid) this.ledger?.setSession(label, sid)
     return sid
   }
 

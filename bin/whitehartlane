@@ -28,7 +28,7 @@ import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
 import { regradeJob } from "../src/doors/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/adapters/levy-pane.ts"
-import { rebirthRunner, runnerDoor, spawnRunner } from "../src/adapters/levy.ts"
+import { rebirthExitCode, rebirthRunner, runnerDoor, spawnRunner } from "../src/adapters/levy.ts"
 import { readState } from "../src/core/state.ts"
 import { seedSessionFile } from "../src/adapters/transcripts.ts"
 import { admitFork } from "../src/jev/policy.ts"
@@ -762,7 +762,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       // a successor-conflict refusal is the one-writer veto speaking —
       // exit 2, the same code `whl continue` refuses with on this
       // exact store (r25 principles-22's repro pins the code)
-      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
+      process.exitCode = rebirthExitCode(reborn.why) // ONE classifier (levy.ts) — gate-r4 tests-60
       return
     }
     console.log(`refreshed ${fresh.id} (pid ${reborn.pid}, ×${fresh.continues ?? 1}) — new door, sessions resumed — log: ${join(fresh.dir, "orchestrator.log")}`)
@@ -858,7 +858,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       console.error(`continue: ${reborn.why}`)
       // a successor-conflict refusal is the one-writer veto speaking —
       // exit 2 (r24 momentum-12's repro pins the code on this store)
-      process.exitCode = /successor booking/.test(reborn.why) ? 2 : 1
+      process.exitCode = rebirthExitCode(reborn.why) // ONE classifier (levy.ts) — gate-r4 tests-60
       return
     }
     console.log(`continued ${job.id} (pid ${reborn.pid}, ×${job.continues ?? 1}) — unfinished units resume from booked sessions — log: ${join(job.dir, "orchestrator.log")}`)

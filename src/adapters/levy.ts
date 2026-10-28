@@ -52,6 +52,14 @@ export function spawnRunner(
 // generation's stragglers (a live pane from the parked generation
 // would double-write a unit dir), then hand the Job to a fresh runner —
 // which books the continue on the record.
+// The rebirth refusal's exit code — ONE decision, one site (gate-r4
+// tests-60: the /successor booking/ classifier lived as a regex at
+// both bin revival verbs; one decision answered twice drifts). A
+// successor conflict is the one-writer veto speaking: exit 2.
+export function rebirthExitCode(why: string): number {
+  return /successor booking/.test(why) ? 2 : 1
+}
+
 export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOutcome {
   // The door refuses first (j-93d652 gap #2): retiring panes under a
   // LIVE holder's feet is the damage a double continue does — fail
