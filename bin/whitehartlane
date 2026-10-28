@@ -355,9 +355,11 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       try {
         const g = runGate(resolve(positional), baseRef, headRef)
         console.log(gateReceipt(g.features, g.decision))
-        if (g.decision.action === "skip") return // receipt + ledger row; nothing levied
+        // a skip STANDS only when unaudited (gate-r1 momentum-2: the
+        // ledger records the judgment; the ESCALATION still levies)
+        if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
         if (gateOnly) return // decided + ledger row; the caller levies
-        if (g.decision.roster.length < 4) gateRoster = g.decision.roster
+        if (g.decision.action === "review" && g.decision.roster.length < 4) gateRoster = g.decision.roster
       } catch (err) {
         // the gate must never BLOCK a review (that would be a new
         // failure mode in front of the rail) — a broken gate reviews

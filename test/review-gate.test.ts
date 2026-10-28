@@ -78,13 +78,13 @@ test("decideGate: all-low ps → skip on a decayed class; a fresh class audits e
   assert.equal(skip.action, "skip")
   assert.equal(skip.audit, false)
   const audited = decideGate(mkFeatures(), ps, decayed, 0.1) // roll under rate → run anyway
-  assert.equal(audited.action, "review")
+  assert.equal(audited.action, "skip") // the JUDGMENT stays skip; the escalation is the flag
   assert.equal(audited.audit, true)
   assert.match(audited.why, /dropout/)
   // fresh class: rate 1.0 — even roll 0.999 audits (the skip region is
   // never unmeasured while the class has no greens)
   const fresh = decideGate(mkFeatures(), ps, STATS0, 0.999)
-  assert.equal(fresh.action, "review")
+  assert.equal(fresh.action, "skip") // judgment skip; the ledger row must say so (momentum-2)
   assert.equal(fresh.audit, true)
 })
 
@@ -197,10 +197,12 @@ test("runGate: docs-only skips (ledger'd), and audits while the class is fresh",
   g("add -A")
   g("commit -qm docs2")
   // fresh docs_only class → rate 1.0 → every skip is audited → with
-  // roll forced high the audit still fires (rate 1.0 always wins)
+  // roll forced high the audit still fires (rate 1.0 always wins).
+  // The JUDGMENT is skip; the audit flag is the escalation (the fixed
+  // contract — the ledger row must record the judgment, momentum-2)
   const { features, decision } = runGate(repo, "main", "docs-branch")
   assert.equal(features.klass, "docs_only")
-  assert.equal(decision.action, "review")
+  assert.equal(decision.action, "skip")
   assert.equal(decision.audit, true)
   assert.match(decision.why, /dropout audit of docs_only/)
 })

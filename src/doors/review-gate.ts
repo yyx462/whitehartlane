@@ -255,10 +255,17 @@ export function decideGate(
   if (f.klass === "docs_only") {
     // the one mechanical rule, kept by construction: the blocking
     // class (code twins) cannot live in a docs-only diff — but the
-    // dropout still audits it (a lying doc is a real, if P2, finding)
+    // dropout still audits it (a lying doc is a real, if P2, finding).
+    // action records the JUDGMENT ("skip"), audit the ESCALATION —
+    // gate-r1 momentum-2: audited skips recorded action:"review", so
+    // classStats (action!=="skip" → ignore) never counted them, greens
+    // never accrued, and the rate could never decay below 1.0 — the
+    // gate could NEVER loosen, dead code where the manual promises
+    // "loosens as greens accumulate". The ledger now tells the truth;
+    // the levy (bin) reads action + audit.
     const audit = roll < stats.rate
     return audit
-      ? { action: "review", roster: [...LENSES], ps: null, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit of docs_only — full rail" }
+      ? { action: "skip", roster: [...LENSES], ps: null, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit of docs_only — full rail" }
       : { action: "skip", roster: [], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong" }
   }
   if (ps === null) {
@@ -267,9 +274,10 @@ export function decideGate(
   // a MISSING probability is never a reason to drop a lens (fail-safe)
   const roster = LENSES.filter((l) => (ps[l] ?? 1) >= LENS_KEEP_THRESHOLD)
   if (roster.length === 0) {
+    // same law as docs_only: the JUDGMENT is skip; the audit escalates
     const audit = roll < stats.rate
     return audit
-      ? { action: "review", roster: [...LENSES], ps, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit — jev said skip, the sample says run" }
+      ? { action: "skip", roster: [...LENSES], ps, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit — jev said skip, the sample says run" }
       : { action: "skip", roster: [], ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev: no lens clears the bar" }
   }
   return { action: "review", roster, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `jev roster (${roster.join(",")})` }

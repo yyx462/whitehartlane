@@ -20,7 +20,7 @@
 import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
+import { parse as parseToml } from "smol-toml"
 
 export type ReviewArgs = {
   repo: string
@@ -70,15 +70,53 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 // re-serialize: every parseable form lands; comments in a third-party
 // template are the documented trade. Undefined only when the consumer
 // reads no [workflow] table at all.
+// The pin's landing — TEXT-PRESERVING, never a re-serialization
+// (gate-r1 momentum-1/principles-14/questions-2: the parse→stringify
+// landing rewrote the whole document — the template's inline
+// `units = [ … ]` became [[stage.units]] tables, intake.sh's
+// `^units = [` anchor matched nothing, and every model-pinned review
+// derived ZERO lens order files on the normal path). The parser is
+// the VERIFIER, not the writer: this function performs surgical line
+// edits (the [workflow] table's span, or the dotted-key form), and
+// the caller re-parses the result to prove workflow.model landed.
+// Comments, key order, and inline-table layouts survive verbatim.
 function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
-  try {
-    const parsed = parseToml(templateToml) as { workflow?: { model?: string } }
-    if (!parsed.workflow || typeof parsed.workflow !== "object") return undefined
-    parsed.workflow.model = model
-    return stringifyToml(parsed)
-  } catch (err) {
-    return undefined // unparseable: the caller's own parse-guard refuses
+  const pin = `model = ${JSON.stringify(model)}`
+  const lines = templateToml.split("\n")
+  // 1) the [workflow] table header (tolerant: trailing comment/space)
+  const headerIdx = lines.findIndex((l) => /^\[workflow\]\s*(#.*)?$/.test(l.trim()))
+  if (headerIdx !== -1) {
+    let end = lines.length
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      if (/^\[/.test(lines[i].trim())) {
+        end = i
+        break
+      }
+    }
+    for (let i = headerIdx + 1; i < end; i++) {
+      if (/^[ \t]*model\s*=/.test(lines[i])) {
+        lines[i] = pin
+        return lines.join("\n")
+      }
+    }
+    lines.splice(headerIdx + 1, 0, pin)
+    return lines.join("\n")
   }
+  // 2) dotted-key form (workflow.model = "…" at top level — no header
+  // line, the consumer's parser reads it fine; gate-r1 kept this arm)
+  const dotted = /^workflow\.model\s*=/
+  for (let i = 0; i < lines.length; i++) {
+    if (dotted.test(lines[i])) {
+      lines[i] = pin.replace(/^model = /, "workflow.model = ")
+      return lines.join("\n")
+    }
+  }
+  const firstDotted = lines.findIndex((l) => /^workflow\./.test(l))
+  if (firstDotted !== -1) {
+    lines.splice(firstDotted, 0, pin.replace(/^model = /, "workflow.model = "))
+    return lines.join("\n")
+  }
+  return undefined // no [workflow] table in any form — the caller's parse-verify refuses
 }
 
 // The roster's surgical filter (review-gate.ts subset materialization):

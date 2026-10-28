@@ -1421,10 +1421,20 @@ export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []
     // MERGE, never clobber (issue #249): a unit dir may already carry
     // the model pin and provider settings from an earlier generation —
     // the isolation keys (permission, mcp) FORCE-win, everything else
-    // the sandbox earned survives the re-seed
-    const prior = existsSync(cfgPath)
-      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
-      : {}
+    // the sandbox earned survives the re-seed. A TORN/UNREADABLE prior
+    // must not kill the isolation write (gate-r1 tests-36: the parse
+    // sat inside the one outer catch that swallows everything — one
+    // corrupt file silently re-granted the unit the operator's
+    // interactive global config, #249's own failure reintroduced by
+    // this feature): isolation wins over merge-preservation.
+    let prior: Record<string, unknown> = {}
+    if (existsSync(cfgPath)) {
+      try {
+        prior = JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>
+      } catch {
+        prior = {} // the corrupt prior is replaced, not obeyed
+      }
+    }
     const config: Record<string, unknown> = {
       ...prior,
       $schema: "https://opencode.ai/config.json",
