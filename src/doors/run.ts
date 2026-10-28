@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -7,6 +8,8 @@ import { expandHome, scopeCovers, scopeFromDir } from "../core/permission.ts"
 import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
+import { checkpoint, readState } from "../core/state.ts"
+import { findJobByDir } from "../adapters/store.ts"
 import {
   contentHashOf,
   duplicateStageIds,
@@ -27,7 +30,11 @@ import {
   findSessionByHost,
   findSessionBySpur,
   listJobs,
+  loadJob,
   openSession,
+  bookingStale,
+  orphanJob,
+  sessionsRoot,
   stampSpurKey,
   type JobRecord,
   type Provenance,
@@ -136,6 +143,146 @@ function copyBeside(source: string, store: string): void {
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })
+  // ── the re-levy fold (momentum-3, r11; reshaped by r12) ────────────
+  // The manual's hard rule — "re-levy the SAME program dir: the
+  // settled fold spares done units" — serves exactly ONE intent: a
+  // prior booking of THIS program dir died mid-chain. r12's three
+  // findings pinned the fold's true preconditions:
+  //   momentum-5/principles-4 — a COMPLETED prior run must not fold
+  //     (an identical-args re-review and the drill's second run want
+  //     fresh minds; replaying verdicts is the four-late death again)
+  //   momentum-4 — folded verdicts must be the new run's OWN hooks'
+  //     verdicts: hooks/ joins the identity, so changed hooks never
+  //     match and the unit re-runs
+  //   path, not content: kinship is the same program DIR re-levied,
+  //     never byte-identical strangers
+  // The precondition is conservative by design: a prior with no failed
+  // rows (a unit killed before its first card) does not fold — the
+  // full rail re-runs. Wrong-fresh beats wrong-replay.
+  const hooksHash = existsSync(join(source, "hooks"))
+    ? contentHashOf(join(source, "hooks"))
+    : ""
+  // EVERY program input copyBeside stages must join the identity
+  // (r13 principles-5/questions-1: questions.toml, task.txt, actor.md,
+  // roots.txt, project.json, contract.toml staged beside the program
+  // but hashed nowhere — a done unit folded forward across edited
+  // inputs, run 2's ledger claiming a settle its own inputs never
+  // made). A missing input hashes as its name only.
+  const beside = ["questions.toml", "task.txt", "actor.md", "roots.txt", "project.json", "contract.toml"]
+    .map((n) => {
+      const f = join(source, n)
+      if (!existsSync(f)) return `${n}:`
+      return `${n}:${createHash("sha1").update(readFileSync(f)).digest("hex")}`
+    })
+    .join("|")
+  const identity = {
+    source: resolve(source),
+    workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
+    hooks: hooksHash,
+    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data")) : "",
+    members: existsSync(members) ? contentHashOf(members) : "",
+    beside,
+  }
+  writeFileSync(join(store, ".whl-program"), JSON.stringify(identity))
+  const prior = newestPriorRun(store, identity)
+  // the fold's OWN precondition, decided (r23 momentum-12): the prior
+  // booking must be DEAD (orphaned/aborted/retired) — a merely PAUSED
+  // (parked) run's prescribed recovery is its own 'whl continue', and
+  // folding its done units beside that rebirth drives two live chains
+  // on one program. No job record (legacy/manual staging) → fold.
+  if (prior) {
+    // a LIVE prior booking blocks the fold — running/paused WITH a
+    // runner pid (its own recovery owns the program). A pid-less
+    // "running" record is a checkpoint-minted trace shell (the cycle
+    // mints one per staged dir — it never spawned anything) and must
+    // not block (r23 momentum-12's own repro shapes this).
+    const priorJob = findJobByDir(prior)
+    const liveBlocker =
+      priorJob &&
+      (priorJob.state === "running" || priorJob.state === "paused") &&
+      !!priorJob.pid
+    if (liveBlocker) {
+      logRunNote(store, `fold: prior booking ${priorJob.id} is ${priorJob.state} with live pid ${priorJob.pid} — not dead; nothing folds (its own recovery owns the program)`)
+      return
+    }
+  }
+  if (prior) {
+    const settled = readState(prior)
+    // "completed" is per-shape and needs the prior's OWN unit count
+    // (r13 momentum-6: the fallback total = done+failed declared a
+    // fold-carrying prior with no units snapshot 'completed' and the
+    // chain's second re-levy folded nothing):
+    //   a REVIEW run completed when its cold gate wrote a verdict;
+    //   a GENERIC run completed when its units.jsonl exists and every
+    //   unit settled. No units snapshot → not completed → the fold
+    //   fires (unfinished by default — wrong-fresh beats wrong-replay).
+    const priorVerdict = join(prior, "data", "review", "verdict.json")
+    const unitsJsonl = join(prior, "units.jsonl")
+    const unitsJsonlPresent = existsSync(unitsJsonl)
+    const total = unitsJsonlPresent
+      ? readFileSync(unitsJsonl, "utf8").trim().split("\n").filter(Boolean).length
+      : 0
+    const settledCount = settled.done.length + settled.failed.length
+    const isReview = existsSync(join(prior, "data", "review"))
+    const completed = isReview
+      ? existsSync(priorVerdict)
+      : unitsJsonlPresent && settledCount >= total
+    if (completed) {
+      logRunNote(store, "fold: prior run completed — fresh minds, nothing folded")
+    } else {
+      const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
+      for (const u of done) {
+        // the fold is an OPTIMIZATION (r26 tests-1): an unreadable unit
+        // dir must never abort the booking. cpSync-recursive is
+        // NATIVELY fatal on an unreadable dir (libc++ filesystem_error
+        // terminates the process — a JS try/catch cannot see it), so
+        // the dir is PROBED with readdirSync first (a JS-catchable
+        // EACCES); a unit that fails the probe or the copy simply
+        // re-runs — no phantom booking, no native abort.
+        try {
+          readdirSync(join(prior, "units", u))
+          cpSync(join(prior, "units", u), join(store, "units", u), { recursive: true })
+          checkpoint(store, `unit:${u}`, "ok", `folded from prior run ${prior}`, u)
+        } catch (err) {
+          logRunNote(store, `fold: unit ${u} unreadable (${err instanceof Error ? (err as NodeJS.ErrnoException).code ?? err.message.split("\n")[0] : String(err)}) — re-running it`)
+        }
+      }
+      if (done.length > 0) logRunNote(store, `fold: ${done.length} done unit(s) spared from ${prior}`)
+    }
+  }
+}
+
+// the fold's receipt, beside the program — a note, never a verdict
+function logRunNote(store: string, note: string): void {
+  appendFileSync(join(store, "fold.log"), `${new Date().toISOString()} ${note}\n`)
+}
+
+// the newest earlier staged run of the SAME program (identity marker
+// match), excluding the store being staged — the re-levy fold's source
+function newestPriorRun(store: string, identity: { source: string; workflow: string; hooks: string; data: string; members: string; beside: string }): string | null {
+  const root = sessionsRoot()
+  if (!existsSync(root)) return null
+  const want = JSON.stringify(identity)
+  let best: { dir: string; m: number } | null = null
+  for (const sid of readdirSync(root)) {
+    const jdir = join(root, sid, "jobs")
+    if (!existsSync(jdir)) continue
+    for (const jid of readdirSync(jdir)) {
+      const run = join(jdir, jid, "run")
+      const marker = join(run, ".whl-program")
+      if (!existsSync(marker)) continue
+      if (readFileSync(marker, "utf8") !== want) continue
+      if (resolve(run) === resolve(store)) continue
+      let m = 0
+      try {
+        m = statSync(marker).mtimeMs
+      } catch {
+        continue
+      }
+      if (!best || m > best.m) best = { dir: run, m }
+    }
+  }
+  return best?.dir ?? null
 }
 
 // The lineage resolution, ONE spelling (deep seam: book() and the
@@ -266,6 +413,27 @@ function book(
   const lineage = resolveLineageSession(dir, spurId.spurId)
   if ("refuse" in lineage) return { ok: false, why: lineage.refuse, code: 1 }
   const session = lineage.session
+  // momentum-8 (r15) + the r16 probe findings: a SIGKILLed
+  // orchestrator leaves its Job reading state:"running" forever, and
+  // THE BOOKING PROBE is orphanJob's production caller — with the
+  // store's canonical oracle (pidAlive: EPERM and unparseable pids
+  // count ALIVE) and a booking grace for the window between
+  // createJob and the runner's pid event (r16 tests-10: that window
+  // is the NORMAL shape of every booking — a young pid-less record
+  // is a live intent, never an orphan).
+  for (const job of listJobs(session.id)) {
+    // THE single-act law (the sweep's own twin ceremony): re-read the
+    // record from disk before orphaning — a concurrent `whl continue`
+    // may have revived it between this snapshot and the write (r18
+    // momentum-1: the probe clobbered a revived record to orphaned
+    // from its stale snapshot). The fresh record answers twice:
+    // still running, still stale → orphan.
+    const fresh = loadJob(session.id, job.id) ?? job
+    if (fresh.state !== "running") continue
+    if (bookingStale(fresh, Date.now())) {
+      orphanJob(fresh, `booking probe: running Job is stale (pid ${fresh.pid ?? "none"} — dead or past the booking grace)`, fresh.panes?.length ?? 0)
+    }
+  }
   const running = listJobs(session.id).filter((job) => job.state === "running").length
   const another = admitAnotherJob(running)
   if (!another.admit) {

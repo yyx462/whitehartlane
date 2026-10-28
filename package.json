@@ -33,7 +33,7 @@
   "scripts": {
     "build": "node build.mjs",
     "prepack": "npm run build",
-    "test": "SHEP_SCOPE=whl-test node --experimental-strip-types --test test/**/*.test.ts"
+    "test": "SHEP_SCOPE=whl-test node --experimental-strip-types --test \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

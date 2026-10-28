@@ -90,6 +90,9 @@ Every PR-generating stage gets the same tail:
 
 ## Knobs and limits (honest)
 
+- **Economics are measured, not guessed**: ECONOMICS.md traces the
+  rail's own 8-round recursion (tokens, duplicates, wall time) and
+  lists the levers; `scripts/review-trace.mjs` re-traces any machine.
 - **Gate cap 300s**: intake's dep install is budget-capped (150s per
   side, `npm ci --prefer-offline`); a repo that cannot fit degrades —
   repros needing node_modules classify bogus, never block wrong.
