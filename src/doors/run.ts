@@ -9,6 +9,7 @@ import { HookError, gradeSmoke, loadManifest, probeHooks } from "./hooks.ts"
 import { workflowKind, type WorkflowKind } from "../core/workflow-kind.ts"
 import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
 import { checkpoint, readState } from "../core/state.ts"
+import { findJobByDir } from "../adapters/store.ts"
 import {
   contentHashOf,
   duplicateStageIds,
@@ -184,6 +185,27 @@ function copyBeside(source: string, store: string): void {
   }
   writeFileSync(join(store, ".whl-program"), JSON.stringify(identity))
   const prior = newestPriorRun(store, identity)
+  // the fold's OWN precondition, decided (r23 momentum-12): the prior
+  // booking must be DEAD (orphaned/aborted/retired) — a merely PAUSED
+  // (parked) run's prescribed recovery is its own 'whl continue', and
+  // folding its done units beside that rebirth drives two live chains
+  // on one program. No job record (legacy/manual staging) → fold.
+  if (prior) {
+    // a LIVE prior booking blocks the fold — running/paused WITH a
+    // runner pid (its own recovery owns the program). A pid-less
+    // "running" record is a checkpoint-minted trace shell (the cycle
+    // mints one per staged dir — it never spawned anything) and must
+    // not block (r23 momentum-12's own repro shapes this).
+    const priorJob = findJobByDir(prior)
+    const liveBlocker =
+      priorJob &&
+      (priorJob.state === "running" || priorJob.state === "paused") &&
+      !!priorJob.pid
+    if (liveBlocker) {
+      logRunNote(store, `fold: prior booking ${priorJob.id} is ${priorJob.state} with live pid ${priorJob.pid} — not dead; nothing folds (its own recovery owns the program)`)
+      return
+    }
+  }
   if (prior) {
     const settled = readState(prior)
     // "completed" is per-shape and needs the prior's OWN unit count

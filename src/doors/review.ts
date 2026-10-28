@@ -179,7 +179,21 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         code: 2,
       }
     }
-    const hasTempPin = /\btemperature\s*=/.test(templateToml)
+    // the temp-pin question, answered by the consumer's own read too
+    // (r23 tests-40: the table-blind regex matched "temperature" in
+    // comments and string values, refusing legal model-less
+    // materializations) — a deep walk over the PARSED document: a
+    // temperature KEY anywhere (workflow table, stage tables, unit
+    // entries) pins; the word in a comment or a value does not.
+    const hasTempPin = (function walk(node: unknown): boolean {
+      if (Array.isArray(node)) return node.some(walk)
+      if (node && typeof node === "object") {
+        return Object.entries(node as Record<string, unknown>).some(
+          ([k, v]) => k === "temperature" || walk(v),
+        )
+      }
+      return false
+    })(parsedTemplate)
     // "a model to ride" = declared in the template OR supplied via
     // --model — the consumer's read for the former, the argv for the
     // latter (r20 principles-12 kept the parser; this disjunct is the

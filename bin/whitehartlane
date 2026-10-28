@@ -786,6 +786,21 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
+    // r23 questions-5 — the continue verb routes through the ONE-WRITER
+    // owner: a mate answering this Job's own "continue or abort it"
+    // wake must not revive it beside a successor booking the booking
+    // probe just admitted (two live writers on one lineage session).
+    // A live (running, non-stale) Job on the same program dir vetoes.
+    const successor = jobs.find(
+      (j) => j.id !== job.id && j.dir === job.dir && j.state === "running" && !bookingStale(j, Date.now()),
+    )
+    if (successor) {
+      console.error(
+        `continue: a successor booking (${successor.id}) is live on this program dir — the stale-orphan wake is stale too; abort the successor or discard this Job`,
+      )
+      process.exitCode = 2
+      return
+    }
     // #201 row 8: an edited declaration must not continue in silence —
     // the booking carries the program's content hash; a source that
     // hashes differently now means the rebirth runs DIFFERENT program

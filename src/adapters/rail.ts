@@ -282,16 +282,16 @@ export class Rail implements ShepPort {
         if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
-      // The stand-down law, seated AFTER the lease round-trip (an
-      // orphaned record carries no resurrectable state; the lease
-      // noted on it is harmless): if the write-site re-read saw the
-      // booking probe's orphan, THIS BOOT STANDS DOWN — the orphan
-      // receipt stands; `whl continue` revives the commission
-      // properly. A boot-time snapshot could never see this flip; the
-      // write-site re-read can.
-      if (fresh.state === "orphaned") {
+      // The stand-down law, seated AFTER the lease round-trip — and
+      // answering for EVERY parked state (r23 principles-14: orphaned
+      // alone missed pause/abort flips in the snapshot→write gap — an
+      // abort booked in the window was stamped and driven to
+      // completion). THIS boot stands down unless the record still
+      // reads running on disk: any parked/dead receipt (pause, abort,
+      // orphan) stands, and `whl continue` owns the revival.
+      if (fresh.state !== "running") {
         throw new Error(
-          `booking probe orphaned ${job.id} during this boot (no orchestrator pid within the grace) — the orphan receipt stands; run: whitehartlane continue ${job.id}`,
+          `the Job flipped to ${fresh.state} during this boot (a pause/abort/orphan receipt stands) — run: whitehartlane continue ${job.id}`,
         )
       }
       // The stamp writes the FRESH record (the same re-read the lease
