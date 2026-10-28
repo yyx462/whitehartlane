@@ -186,6 +186,21 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   return lines.join("\n")
 }
 
+// "does this document pin temperature anywhere?" — a deep walk over
+// the PARSED document (r23 tests-40: the word in a comment or a
+// string value is not a pin; the KEY is). Named for reuse: the
+// audit-strip's pre-verify walks the STRIPPED bytes with the same
+// question (gate-r3) — one walker, both sites.
+function hasTemperatureKey(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(hasTemperatureKey)
+  if (node && typeof node === "object") {
+    return Object.entries(node as Record<string, unknown>).some(
+      ([k, v]) => k === "temperature" || hasTemperatureKey(v),
+    )
+  }
+  return false
+}
+
 // A model-less dropout audit's untuned materialization (gate-r2
 // momentum-15): remove `temperature = <num>` keys from unit lines —
 // the pins are tuning that needs a model to ride; without one the
@@ -292,6 +307,12 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // verify — never by a table-blind regex; malformed TOML is a code-2
   // door refusal, never an escaped stack).
   let pinnedWorkflowToml: string | undefined
+  // a model-less dropout audit's UNTUNED content (gate-r3: the strip
+  // was dead-written — a local no write arm persisted; the audit
+  // materialized the raw pins, every lens spawn refused at the host,
+  // and the receipt claimed "pins dropped"). Same pattern as the pin:
+  // computed and VERIFIED pre-materialization, written exactly here.
+  let auditUntunedToml: string | undefined
   {
     // the roster strip composes HERE, before the pin-plan's parse
     // (the #252 merge: the pin write used to clobber the staged strip —
@@ -321,15 +342,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // materializations) — a deep walk over the PARSED document: a
     // temperature KEY anywhere (workflow table, stage tables, unit
     // entries) pins; the word in a comment or a value does not.
-    const hasTempPin = (function walk(node: unknown): boolean {
-      if (Array.isArray(node)) return node.some(walk)
-      if (node && typeof node === "object") {
-        return Object.entries(node as Record<string, unknown>).some(
-          ([k, v]) => k === "temperature" || walk(v),
-        )
-      }
-      return false
-    })(parsedTemplate)
+    const hasTempPin = hasTemperatureKey(parsedTemplate)
     // "a model to ride" = declared in the template OR supplied via
     // --model — the consumer's read for the former, the argv for the
     // latter (r20 principles-12 kept the parser; this disjunct is the
@@ -349,8 +362,26 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         // nothing, the skip region stays unmeasured, and the rate pins
         // at 1.0 forever. The pins are TUNING, not law: strip them and
         // the lenses spawn on the host default, untuned. The bin's
-        // receipt says so.
-        templateToml = stripTemperaturePins(templateToml)
+        // receipt says so. AND the strip must LAND (gate-r3: the four
+        // lenses caught the strip dead-written into a local): the
+        // stripped bytes are VERIFIED here (a parse of the result —
+        // any surviving temperature key means the regex missed a form
+        // and the receipt would lie) and WRITTEN at materialization.
+        const stripped = stripTemperaturePins(templateToml)
+        let clean = false
+        try {
+          clean = !hasTemperatureKey(parseToml(stripped))
+        } catch {
+          clean = false
+        }
+        if (!clean) {
+          return {
+            ok: false,
+            why: `the dropout audit's temperature strip could not strip every pin (the strip regex missed a form) — refusing rather than shipping pins the receipt claims were dropped (this is a door bug; report it)`,
+            code: 2,
+          }
+        }
+        auditUntunedToml = stripped
       } else {
         return {
           ok: false,
@@ -440,12 +471,19 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the pin-plan was computed and verified PRE-materialization from the
   // ROSTER-STRIPPED template (r17 principles-10/tests-1: one
   // computation, one anchor; the #252 merge: roster + pin compose in
-  // ONE content, and the materialization makes exactly ONE write).
+  // ONE content). The audit's UNTUNED content (model-less dropout
+  // audit) writes here too (gate-r3: the strip was dead-written —
+  // four lenses caught the local that no write arm persisted). The
+  // arms are mutually exclusive by construction: the pin exists only
+  // with a model; the untuned strip only without one.
   if (pinnedWorkflowToml !== undefined) {
     writeFileSync(join(dir, "workflow.toml"), pinnedWorkflowToml)
-  } else if (args.roster && args.roster.length < 4) {
-    // the no-model path: strip the staged copy (same surgical filter,
-    // verified shape — the template's own bytes)
+  } else if (auditUntunedToml !== undefined) {
+    writeFileSync(join(dir, "workflow.toml"), auditUntunedToml)
+  }
+  if (args.roster && args.roster.length < 4 && pinnedWorkflowToml === undefined) {
+    // the no-model paths: strip the staged copy (same surgical filter,
+    // verified shape — whatever content was just written)
     const staged = readFileSync(join(dir, "workflow.toml"), "utf8")
     const stripped = stripUnitsToRoster(staged, new Set(args.roster))
     if (stripped !== null) writeFileSync(join(dir, "workflow.toml"), stripped)
