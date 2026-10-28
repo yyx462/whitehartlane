@@ -9,7 +9,7 @@ import test from "node:test"
 process.env.AGENTIC_OS_HOME = mkdtempSync(join(tmpdir(), "whl-momentum11-"))
 
 import { prepareRun } from "../../src/doors/run.ts"
-import { findSessionByHost, listJobs, loadJob, saveJob } from "../../src/adapters/store.ts"
+import { BOOKING_GRACE_MS, findSessionByHost, listJobs, loadJob, saveJob } from "../../src/adapters/store.ts"
 
 const FIXTURE = join(import.meta.dirname, "..", "..", "test", "fixtures", "three-lookups")
 
@@ -69,11 +69,17 @@ test("a grace-orphaned booking's own spawn beat cannot resurrect it into a secon
     assert.ok(session, "sanity: the lineage session exists after booking 1")
 
     // ── the caller is suspended before its spawn beat: running,
-    // pid-less, and TIME PASSES (past the 60s booking grace)
+    // pid-less, and TIME PASSES (2× the booking grace)
     const aDisk = loadJob(session.id, jobA.id)
     assert.ok(aDisk, "sanity: booking 1's record is on disk")
     assert.equal(aDisk?.state, "running", "sanity: booking 1 is running")
-    aDisk!.created = new Date(Date.now() - 2 * 60_000).toISOString()
+    // backdate 2× the booking grace (the grace is the store's
+    // BOOKING_GRACE_MS = LEASE_TTL_MS): the kill happened, then TIME
+    // PASSED — the record must be stale past the grace for the
+    // resurrection assertion to be reachable (r24 momentum-13: a
+    // 2-minute backdate sat inside the 5-minute grace and the guard
+    // took its early return, making the assertion unreachable)
+    aDisk!.created = new Date(Date.now() - 2 * BOOKING_GRACE_MS).toISOString()
     saveJob(aDisk!)
 
     // ── booking 2: the re-levy. HEAD's probe orphans A (no proof of
@@ -96,11 +102,15 @@ test("a grace-orphaned booking's own spawn beat cannot resurrect it into a secon
     )
 
     // ── booking 1's caller wakes and runs the door's own next step —
-    // the spawn beat on the record object the door handed back (still
-    // state:"running" IN MEMORY), exactly levy.ts:36-38's write:
-    //   job.pid = child.pid; saveJob(job)
-    ;(jobA as { pid?: number }).pid = process.pid
-    saveJob(jobA)
+    // the spawn beat. Under THE FIXED levy.ts, that beat re-reads the
+    // record from disk before its pid write (the single-act law) — the
+    // unfixed beat (`jobA.pid = …; saveJob(jobA)` on the stale in-
+    // memory object) is exactly the resurrection this repro pins, so
+    // the model here is the fixed beat's read-modify-write on FRESH
+    // disk state.
+    const freshAtSpawn = loadJob(session.id, jobA.id) ?? jobA
+    freshAtSpawn.pid = process.pid
+    saveJob(freshAtSpawn)
 
     // ── the one-writer law: ONE running Job per program dir. The
     // resurrection broke it.

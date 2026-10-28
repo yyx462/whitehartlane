@@ -789,10 +789,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // r23 questions-5 — the continue verb routes through the ONE-WRITER
     // owner: a mate answering this Job's own "continue or abort it"
     // wake must not revive it beside a successor booking the booking
-    // probe just admitted (two live writers on one lineage session).
-    // A live (running, non-stale) Job on the same program dir vetoes.
+    // probe just admitted. Kinship is the LINEAGE SESSION (r24: every
+    // booking mints its own run dir — j.dir is never equal across
+    // bookings; the session, keyed by the program dir, is). A live
+    // (running, non-stale) Job on this lineage session vetoes.
     const successor = jobs.find(
-      (j) => j.id !== job.id && j.dir === job.dir && j.state === "running" && !bookingStale(j, Date.now()),
+      (j) => j.id !== job.id && j.sid === job.sid && j.state === "running" && !bookingStale(j, Date.now()),
     )
     if (successor) {
       console.error(
