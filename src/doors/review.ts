@@ -404,7 +404,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // the roster verify — UNCONDITIONAL now (gate-r5 tests-2: the
     // no-model strip no-op'd with no verify behind it, materializing
     // all four units while the gate decided two): the consumer's own
-    // read must agree the subset landed
+    // read must agree the subset landed. AND non-empty (gate-r7
+    // principles-28): a roster naming ZERO of the template's units
+    // dropped every lens and the strays-only check passed on zero
+    // survivors — a zero-lens review with ok:true, the exact shape
+    // the empty-roster guard refuses.
     if (args.roster && args.roster.length < 4) {
       const keep = new Set(args.roster)
       const ids = (parsedTemplate.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id))
@@ -413,6 +417,14 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         return {
           ok: false,
           why: `roster subsetting failed post-verify — units outside the roster survived the strip: ${stray.join(", ")} (this is a door bug; report it)`,
+          code: 2,
+        }
+      }
+      const survivors = ids.filter((id) => id !== undefined)
+      if (survivors.length === 0) {
+        return {
+          ok: false,
+          why: `the roster names no unit in this template (roster [${args.roster.join(", ")}] ∩ template units = ∅) — a zero-lens review is the empty-roster shape the door refuses; this is gate/template drift (the gate read a different template than the door)`,
           code: 2,
         }
       }

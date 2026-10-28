@@ -1804,6 +1804,17 @@ export async function runOrchestrator(input: {
         // reprompt still fires when the pane goes idle.
         waits.push(graceWait > 0 ? graceWait : GRACE_RECHECK_MS)
       }
+      // the birth judge's deadline (gate-r7 momentum-21/principles-27):
+      // an unboarded pane's FIRST judge look must land AT bornMs — the
+      // judge was written to END the stall-ceiling ride, but this loop
+      // never woke for it, so the first dead-at-birth kill rode the very
+      // ceiling bornMs exists to cut. Unconditional while positive (a
+      // log line is NOT boarding — the worker protocol's first breath
+      // writes one; only a session boards): a boarded pane's judge look
+      // returns none at the no-op wake, and the wait self-consumes once
+      // bornMs passes. A rebirth mints a fresh flight with its own clock.
+      const birthWait = flight.spawnedAt + bornMs - now()
+      if (birthWait > 0) waits.push(birthWait)
       waits.push(flight.lastChange + stallMs - now())
     }
     if (stepPending.checks > 0 || stepPending.stations > 0) waits.push(gateCheckMs)

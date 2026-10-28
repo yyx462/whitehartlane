@@ -24,7 +24,7 @@
 // verdict.json for its headSha, read from its own home (append-only
 // decisions; labels are facts where they live).
 import { execFileSync } from "node:child_process"
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { homeRoot, sessionsRoot } from "../adapters/store.ts"
@@ -147,10 +147,14 @@ export function appendLedgerRow(row: Omit<LedgerRow, "ts">, path = ledgerPath())
 }
 
 function verdictRedsByHeadSha(): Map<string, { red: boolean }> {
-  // one verdict per headSha: LAST one wins (re-runs of the same head)
-  const m = new Map<string, { red: boolean }>()
+  // one verdict per headSha: the NEWEST verdict.json wins (gate-r7
+  // tests-1: "last one wins" was readdirSync enumeration order —
+  // name-sorted job dirs — so a re-run head's stale RED beat the newer
+  // GREEN and the dropout rate pinned at 1.0 on the manual's own
+  // re-levy loop). Recency = the verdict file's mtime.
+  const m = new Map<string, { red: boolean; at: number }>()
   const root = sessionsRoot()
-  if (!existsSync(root)) return m
+  if (!existsSync(root)) return new Map<string, { red: boolean }>()
   for (const sid of readdirSync(root)) {
     const jdir = join(root, sid, "jobs")
     if (!existsSync(jdir)) continue
@@ -159,13 +163,21 @@ function verdictRedsByHeadSha(): Map<string, { red: boolean }> {
       if (!existsSync(v)) continue
       try {
         const verdict = JSON.parse(readFileSync(v, "utf8"))
-        m.set(String(verdict.head ?? ""), { red: (verdict.blocked ?? []).length > 0 })
+        const head = String(verdict.head ?? "")
+        let at = 0
+        try {
+          at = statSync(v).mtimeMs
+        } catch {
+          /* unstatable falls back to losing collisions */
+        }
+        const prev = m.get(head)
+        if (!prev || at >= prev.at) m.set(head, { red: (verdict.blocked ?? []).length > 0, at })
       } catch {
         /* skip unreadable */
       }
     }
   }
-  return m
+  return new Map([...m].map(([k, v]) => [k, { red: v.red }]))
 }
 
 export type ClassStats = { greens: number; reds: number; audits: number; rate: number }
