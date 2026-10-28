@@ -1095,7 +1095,8 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
       pid,
       why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands; the pid is recorded`,
     })
-    return fresh
+    Object.assign(job, fresh) // the caller's reference stays coherent with the disk
+    return job
   }
   fresh.state = "running"
   fresh.continues = (fresh.continues ?? 0) + 1
@@ -1105,6 +1106,7 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
   fresh.finished = undefined
   fresh.pid = pid
   saveJob(fresh)
+  Object.assign(job, fresh) // same: the flip lands on the fresh record, the caller's reference mirrors it
   appendEvent(job.sid, {
     actor: "levy",
     kind: "job.continued",
@@ -1112,7 +1114,7 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
     pid,
     continues: fresh.continues,
   })
-  return fresh
+  return job
 }
 
 // The session id is booked the moment the host tool reports it —
