@@ -81,6 +81,24 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
   }
 }
 
+// The roster's surgical filter (review-gate.ts subset materialization):
+// removes unit entries whose id is not in `keep`, from every
+// `units = [ … ]` block. Returns null when no units block exists (the
+// caller refuses — subsetting a template with no units is a bug).
+function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
+  const lines = toml.split("\n")
+  const start = lines.findIndex((l) => l.startsWith("units = ["))
+  if (start === -1) return null
+  let end = start
+  while (end < lines.length && lines[end].trim() !== "]") end++
+  const kept = lines.slice(start + 1, end).filter((l) => {
+    const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
+    return !m || keep.has(m[1])
+  })
+  lines.splice(start + 1, end - start - 1, ...kept)
+  return lines.join("\n")
+}
+
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
   const repo = resolve(args.repo)
   if (!existsSync(join(repo, ".git"))) {
@@ -170,7 +188,18 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // door refusal, never an escaped stack).
   let pinnedWorkflowToml: string | undefined
   {
-    const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    // the roster strip composes HERE, before the pin-plan's parse
+    // (the #252 merge: the pin write used to clobber the staged strip —
+    // two transformations, one file, last-writer-wins restored all four
+    // units. ONE content, both transformations, ONE write).
+    let templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    if (args.roster && args.roster.length < 4) {
+      const stripped = stripUnitsToRoster(templateToml, new Set(args.roster))
+      if (stripped === null) {
+        return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
+      }
+      templateToml = stripped
+    }
     let parsedTemplate: { workflow?: { model?: string } }
     try {
       parsedTemplate = parseToml(templateToml) as { workflow?: { model?: string } }
@@ -245,6 +274,23 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
           code: 2,
         }
       }
+      // the roster half of the SAME single write (the #252 merge): the
+      // pinned content was built from the ROSTER-STRIPPED template —
+      // verify the consumer's own read agrees: every unit id in every
+      // stage's units block must be in the roster.
+      if (args.roster && args.roster.length < 4) {
+        const keep = new Set(args.roster)
+        const stages = (parsed as { stage?: Array<{ units?: Array<{ id?: string }> }> }).stage ?? []
+        const ids = stages.flatMap((s) => (s.units ?? []).map((u) => u.id))
+        const stray = ids.filter((id) => id !== undefined && !keep.has(id))
+        if (stray.length > 0) {
+          return {
+            ok: false,
+            why: `roster subsetting failed post-verify — units outside the roster survived the pin write: ${stray.join(", ")} (this is a door bug; the roster was pre-flight)`,
+            code: 2,
+          }
+        }
+      }
     }
   }
 
@@ -269,35 +315,25 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // a chain cannot shed units mid-run, so the roster is pre-flight).
   // The filter is line-surgical on the units block; an EMPTY roster
   // refuses (that is a skip, not a review with no lenses).
-  if (args.roster && args.roster.length < 4) {
-    if (args.roster.length === 0) {
-      return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
-    }
-    const keep = new Set(args.roster)
-    const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
-    const lines = toml.split("\n")
-    const start = lines.findIndex((l) => l.startsWith("units = ["))
-    if (start === -1) {
-      return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
-    }
-    let end = start
-    while (end < lines.length && lines[end].trim() !== "]") end++
-    const kept = lines.slice(start + 1, end).filter((l) => {
-      const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
-      return !m || keep.has(m[1])
-    })
-    lines.splice(start + 1, end - start - 1, ...kept)
-    writeFileSync(join(dir, "workflow.toml"), lines.join("\n"))
+  if (args.roster && args.roster.length === 0) {
+    return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
   }
   // the lens temperature pins need a model to ride (the host writes
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin. The MISSING-model refusal lives at the door now
   // (pre-materialization, above) — this branch only writes the pin.
-  // the pin-plan was computed and verified PRE-materialization — the
-  // materialization writes exactly those bytes (r17 principles-10/
-  // tests-1: one computation, one anchor)
+  // the pin-plan was computed and verified PRE-materialization from the
+  // ROSTER-STRIPPED template (r17 principles-10/tests-1: one
+  // computation, one anchor; the #252 merge: roster + pin compose in
+  // ONE content, and the materialization makes exactly ONE write).
   if (pinnedWorkflowToml !== undefined) {
     writeFileSync(join(dir, "workflow.toml"), pinnedWorkflowToml)
+  } else if (args.roster && args.roster.length < 4) {
+    // the no-model path: strip the staged copy (same surgical filter,
+    // verified shape — the template's own bytes)
+    const staged = readFileSync(join(dir, "workflow.toml"), "utf8")
+    const stripped = stripUnitsToRoster(staged, new Set(args.roster))
+    if (stripped !== null) writeFileSync(join(dir, "workflow.toml"), stripped)
   }
 
   const title = args.title ?? `${head} → ${base}`
