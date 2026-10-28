@@ -183,7 +183,9 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // door's parse and intake's reader both bless this form — the strip
   // refused it with 'no units block'): drop whole blocks whose id is
   // not in the roster
-  const unitsLine = /^[ \t]*units = \[/
+  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [` are
+  // legal TOML the door's text-preserving materialization stages verbatim
+  const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
   if (!lines.some((l) => unitsLine.test(l))) {
     let changed = false
     let saw = false

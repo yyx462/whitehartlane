@@ -1073,22 +1073,46 @@ export function pauseJob(job: JobRecord, reason: string, panesRemaining: number)
 // the counter is a soft warning in `jobs`, not a gate (the relaunch
 // cap guarded crash-loops; a typed continue is deliberate).
 export function continueJob(job: JobRecord, pid: number): JobRecord {
-  job.state = "running"
-  job.continues = (job.continues ?? 0) + 1
-  job.pause = undefined
-  job.abort = undefined
-  job.orphan = undefined
-  job.finished = undefined
-  job.pid = pid
-  saveJob(job)
+  // the FIFTH writer joins the single-act law (gate-r11 principles-33):
+  // the caller holds a boot-time snapshot across a LONG ceremony (the
+  // drain rebirth spans minutes; continue's straggler retire 30s/pane)
+  // — an abort/pause/orphan flip landing inside that window must
+  // survive this write, not be clobbered back to running with its
+  // receipt deleted and a live pid stamped. The FRESH record decides:
+  // a receipt that differs from the caller's snapshot STANDS (the
+  // operator superseded the revival); the live pid is recorded so
+  // `whl continue` can re-claim, and the flip operates on the fresh
+  // record so ceremony-time writes (lease, spawned panes) survive.
+  const fresh = loadJob(job.sid, job.id) ?? job
+  const superseded = fresh.state !== job.state && fresh.state !== "running" && fresh.state !== "retired"
+  if (superseded) {
+    fresh.pid = pid
+    saveJob(fresh)
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.superseded",
+      jid: job.id,
+      pid,
+      why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands; the pid is recorded`,
+    })
+    return fresh
+  }
+  fresh.state = "running"
+  fresh.continues = (fresh.continues ?? 0) + 1
+  fresh.pause = undefined
+  fresh.abort = undefined
+  fresh.orphan = undefined
+  fresh.finished = undefined
+  fresh.pid = pid
+  saveJob(fresh)
   appendEvent(job.sid, {
     actor: "levy",
     kind: "job.continued",
     jid: job.id,
     pid,
-    continues: job.continues,
+    continues: fresh.continues,
   })
-  return job
+  return fresh
 }
 
 // The session id is booked the moment the host tool reports it —

@@ -943,7 +943,14 @@ export function cycle(deps: CycleDeps): boolean {
   const birthJudge: Judge = (b) => {
     if (!deps.faults || deps.draining) return { kind: "none" }
     if (b.marker !== null) return { kind: "none" }
-    if (b.paneStatus === "working") return { kind: "none" } // boarding right now
+    // 'working' exempts a pane only INSIDE the birth window (gate-r11
+    // tests-1): a transport that reports working forever — the #249
+    // auth-chrome class, where agent_status lies — must not give a
+    // never-boarding pane a lifetime exemption from BOTH this judge
+    // and the stall ladder's defer. After born_ms, session existence
+    // is the only key (the judge's own r6 doctrine): boarded-quiet
+    // panes spare via sessionOf above/below; unboarded ones rebirth.
+    if (b.paneStatus === "working" && b.age <= bornMs) return { kind: "none" } // boarding right now
     if (deps.faults.sessionOf(b.id)) return { kind: "none" } // boarded — however quiet (r6)
     if (b.age <= bornMs) return { kind: "none" }
     const sid = deps.faults.rebook?.(b.id) // one last look, then judge

@@ -98,7 +98,7 @@ lenses=$({ # spelling- and indent-tolerant (gate-r10 principles-31/questions-9):
   # single quotes — and the door's parse materializes all of it; the
   # reader must read what the door writes. TWIN WARNING: the id class
   # is hooks.ts SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
-  sed -n '/^[ \t]*units = \[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[ \t]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
+  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[ \t]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
   # the [[stage.units]] array-of-tables form — the door's parsed reader
   # accepts and materializes it (gate-r5 principles-26); the textual
   # reader must derive the same lenses or every lens silently loses
