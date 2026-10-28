@@ -170,20 +170,61 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
 
 // The roster's surgical filter (review-gate.ts subset materialization):
 // removes unit entries whose id is not in `keep`, from every
-// `units = [ … ]` block. Returns null when no units block exists (the
-// caller refuses — subsetting a template with no units is a bug).
+// `units = [ … ]` block. TWO array forms (gate-r5 tests-1/2): the
+// multi-line block (entries on their own lines — line surgery) and the
+// SINGLE-LINE inline array (all entries on the `units = [` line —
+// rebuilt from the parse, scalars only; the briefs carry literal
+// braces, so text-side brace matching is doomed). Returns null when no
+// units block exists or a value cannot be re-serialized.
 function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   const lines = toml.split("\n")
-  const start = lines.findIndex((l) => l.startsWith("units = ["))
-  if (start === -1) return null
-  let end = start
-  while (end < lines.length && lines[end].trim() !== "]") end++
-  const kept = lines.slice(start + 1, end).filter((l) => {
-    const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
-    return !m || keep.has(m[1])
-  })
-  lines.splice(start + 1, end - start - 1, ...kept)
-  return lines.join("\n")
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith("units = [")) continue
+    // single-line inline array: the closing ] rides the same line —
+    // rebuild it from the parse
+    if (/\]\s*(#.*)?$/.test(lines[i].trim()) && !lines[i].trim().endsWith("[")) {
+      try {
+        const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
+        let stageIdx = 0
+        for (let j = 0; j < i; j++) if (/^\[\[?stage\]?\]/.test(lines[j].trim())) stageIdx++
+        stageIdx -= 1
+        const units = (parsed.stage ?? [])[stageIdx]?.units
+        if (!Array.isArray(units)) return null
+        const scalar = (v: unknown): string | undefined => {
+          if (typeof v === "string") return JSON.stringify(v)
+          if (typeof v === "number" || typeof v === "boolean") return String(v)
+          return undefined
+        }
+        const kept: string[] = []
+        for (const u of units) {
+          if (!u || typeof u !== "object" || typeof u.id !== "string") continue
+          if (!keep.has(u.id)) continue
+          const entries = Object.entries(u).map(([k, v]) => {
+            const s = scalar(v)
+            return s === undefined ? null : `${k} = ${s}`
+          })
+          if (entries.some((e) => e === null)) return null
+          kept.push(`{ ${entries.join(", ")} }`)
+        }
+        lines[i] = `units = [ ${kept.join(", ")} ]`
+        return lines.join("\n")
+      } catch {
+        return null
+      }
+    }
+    // multi-line block: line surgery (the template's own shape)
+    const start = i
+    let end = start
+    while (end < lines.length && lines[end].trim() !== "]") end++
+    if (end >= lines.length) return null
+    const kept = lines.slice(start + 1, end).filter((l) => {
+      const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
+      return !m || keep.has(m[1])
+    })
+    lines.splice(start + 1, end - start - 1, ...kept)
+    return lines.join("\n")
+  }
+  return null
 }
 
 // "does this document pin temperature anywhere?" — a deep walk over
@@ -300,35 +341,32 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the recovery the message itself prescribed was dead-ended). A
   // docs-only diff never needs a model: nothing spawns, nothing pins.
   //
-  // THE pin-plan (r17 principles-10/tests-1: one computation, one
-  // anchor; r19 tests-1: verified by the parser; r20 principles-12/
-  // tests-30/tests-31: EVERY model question is answered by the
-  // consumer's own smol-toml read — hasModel, the landing, and the
-  // verify — never by a table-blind regex; malformed TOML is a code-2
-  // door refusal, never an escaped stack).
-  let pinnedWorkflowToml: string | undefined
-  // a model-less dropout audit's UNTUNED content (gate-r3: the strip
-  // was dead-written — a local no write arm persisted; the audit
-  // materialized the raw pins, every lens spawn refused at the host,
-  // and the receipt claimed "pins dropped"). Same pattern as the pin:
-  // computed and VERIFIED pre-materialization, written exactly here.
-  let auditUntunedToml: string | undefined
+  // THE CONTENT PIPELINE (gate-r5: the pin-plan grew three captured
+  // arms — pin, untuned, legacy staged strip — and the no-model strip
+  // had no verify behind it, so a silent no-op inverted the gate's
+  // roster decision with no refusal and no receipt). ONE string, an
+  // ordered chain of TEXT transforms, each VERIFIED by the parser as
+  // it lands, ONE write at materialization:
+  //   roster strip (units ⊆ roster, verified — both model paths)
+  //   → temperature strip (audit + no model; no temperature keys, verified)
+  //   → model pin (workflow.model === --model, verified)
+  // Every model question is answered by the consumer's own smol-toml
+  // read (r20 principles-12); malformed TOML is a code-2 door refusal,
+  // never an escaped stack (r20 tests-30).
+  let workflowTomlOut: string | undefined
   {
-    // the roster strip composes HERE, before the pin-plan's parse
-    // (the #252 merge: the pin write used to clobber the staged strip —
-    // two transformations, one file, last-writer-wins restored all four
-    // units. ONE content, both transformations, ONE write).
-    let templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
+    let toml = templateToml
     if (args.roster && args.roster.length < 4) {
-      const stripped = stripUnitsToRoster(templateToml, new Set(args.roster))
+      const stripped = stripUnitsToRoster(toml, new Set(args.roster))
       if (stripped === null) {
         return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
       }
-      templateToml = stripped
+      toml = stripped
     }
-    let parsedTemplate: { workflow?: { model?: string } }
+    let parsedTemplate: { workflow?: { model?: string }; stage?: Array<{ units?: Array<{ id?: string }> }> }
     try {
-      parsedTemplate = parseToml(templateToml) as { workflow?: { model?: string } }
+      parsedTemplate = parseToml(toml) as typeof parsedTemplate
     } catch (err) {
       return {
         ok: false,
@@ -336,38 +374,34 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         code: 2,
       }
     }
-    // the temp-pin question, answered by the consumer's own read too
-    // (r23 tests-40: the table-blind regex matched "temperature" in
-    // comments and string values, refusing legal model-less
-    // materializations) — a deep walk over the PARSED document: a
-    // temperature KEY anywhere (workflow table, stage tables, unit
-    // entries) pins; the word in a comment or a value does not.
+    // the roster verify — UNCONDITIONAL now (gate-r5 tests-2: the
+    // no-model strip no-op'd with no verify behind it, materializing
+    // all four units while the gate decided two): the consumer's own
+    // read must agree the subset landed
+    if (args.roster && args.roster.length < 4) {
+      const keep = new Set(args.roster)
+      const ids = (parsedTemplate.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id))
+      const stray = ids.filter((id) => id !== undefined && !keep.has(id))
+      if (stray.length > 0) {
+        return {
+          ok: false,
+          why: `roster subsetting failed post-verify — units outside the roster survived the strip: ${stray.join(", ")} (this is a door bug; report it)`,
+          code: 2,
+        }
+      }
+    }
     const hasTempPin = hasTemperatureKey(parsedTemplate)
-    // "a model to ride" = declared in the template OR supplied via
-    // --model — the consumer's read for the former, the argv for the
-    // latter (r20 principles-12 kept the parser; this disjunct is the
-    // supplied half — dropping it refused every --model call)
-    // "a model to ride" = a grammar-legal model DECLARED in the template
-    // (the run path's own grammar — an illegal template model like ""
-    // or a bare id is NOT a declared model: the temp-pin refusal fires
-    // and the operator's --model wins — r21 tests-1) OR supplied via
-    // --model (the argv half; r20 principles-12 kept the parser read
-    // for the template half)
     const templateModel = parsedTemplate?.workflow?.model
     const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
       if (args.auditLevy === true && args.model === undefined) {
         // a MODEL-LESS dropout audit (gate-r2 momentum-15): refusing
-        // here dead-ends the audit — an audit nobody levies measures
-        // nothing, the skip region stays unmeasured, and the rate pins
-        // at 1.0 forever. The pins are TUNING, not law: strip them and
-        // the lenses spawn on the host default, untuned. The bin's
-        // receipt says so. AND the strip must LAND (gate-r3: the four
-        // lenses caught the strip dead-written into a local): the
-        // stripped bytes are VERIFIED here (a parse of the result —
-        // any surviving temperature key means the regex missed a form
-        // and the receipt would lie) and WRITTEN at materialization.
-        const stripped = stripTemperaturePins(templateToml)
+        // here dead-ends the audit. The pins are TUNING, not law:
+        // strip them and the lenses spawn on the host default,
+        // untuned — stated in the bin's receipt. VERIFIED here
+        // (gate-r3): any surviving temperature key refuses rather
+        // than ships a receipt that lies.
+        const stripped = stripTemperaturePins(toml)
         let clean = false
         try {
           clean = !hasTemperatureKey(parseToml(stripped))
@@ -381,7 +415,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
             code: 2,
           }
         }
-        auditUntunedToml = stripped
+        toml = stripped
       } else {
         return {
           ok: false,
@@ -392,21 +426,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     }
     if (typeof args.model === "string") {
       // r19 tests-1: the landing must be inside the [workflow] table
-      // THE RUN-TIME READS — a `model =` line in any other table sailed
-      // the old regex verify while loadManifest read workflow.model =
-      // undefined. Text-preserving landing + a parse of the result:
-      // the verification is the consumer's own read.
-      pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, args.model)
+      // THE RUN-TIME READS. Text-preserving landing + a parse of the
+      // result: the verification is the consumer's own read.
+      const pinned = pinIntoWorkflowTable(toml, args.model)
       let parsed: { workflow?: { model?: string } } | undefined
       try {
-        parsed = pinnedWorkflowToml !== undefined
-          ? parseToml(pinnedWorkflowToml) as { workflow?: { model?: string } }
-          : undefined
+        parsed = pinned !== undefined ? (parseToml(pinned) as { workflow?: { model?: string } }) : undefined
       } catch (err) {
-        // r20 tests-30: the pin's landing can produce bytes the run-
-        // time cannot parse (e.g. a duplicated model key the template's
-        // own indentation hid) — a door refusal naming the template,
-        // never an escaped TomlError
         return {
           ok: false,
           why: `the model pin's landing does not parse as TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template's [workflow] table or pass --template pointing at a valid one`,
@@ -420,24 +446,9 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
           code: 2,
         }
       }
-      // the roster half of the SAME single write (the #252 merge): the
-      // pinned content was built from the ROSTER-STRIPPED template —
-      // verify the consumer's own read agrees: every unit id in every
-      // stage's units block must be in the roster.
-      if (args.roster && args.roster.length < 4) {
-        const keep = new Set(args.roster)
-        const stages = (parsed as { stage?: Array<{ units?: Array<{ id?: string }> }> }).stage ?? []
-        const ids = stages.flatMap((s) => (s.units ?? []).map((u) => u.id))
-        const stray = ids.filter((id) => id !== undefined && !keep.has(id))
-        if (stray.length > 0) {
-          return {
-            ok: false,
-            why: `roster subsetting failed post-verify — units outside the roster survived the pin write: ${stray.join(", ")} (this is a door bug; the roster was pre-flight)`,
-            code: 2,
-          }
-        }
-      }
+      toml = pinned
     }
+    workflowTomlOut = toml !== templateToml ? toml : undefined
   }
 
   const headShort = headSha.slice(0, 8)
@@ -468,25 +479,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin. The MISSING-model refusal lives at the door now
   // (pre-materialization, above) — this branch only writes the pin.
-  // the pin-plan was computed and verified PRE-materialization from the
-  // ROSTER-STRIPPED template (r17 principles-10/tests-1: one
-  // computation, one anchor; the #252 merge: roster + pin compose in
-  // ONE content). The audit's UNTUNED content (model-less dropout
-  // audit) writes here too (gate-r3: the strip was dead-written —
-  // four lenses caught the local that no write arm persisted). The
-  // arms are mutually exclusive by construction: the pin exists only
-  // with a model; the untuned strip only without one.
-  if (pinnedWorkflowToml !== undefined) {
-    writeFileSync(join(dir, "workflow.toml"), pinnedWorkflowToml)
-  } else if (auditUntunedToml !== undefined) {
-    writeFileSync(join(dir, "workflow.toml"), auditUntunedToml)
-  }
-  if (args.roster && args.roster.length < 4 && pinnedWorkflowToml === undefined) {
-    // the no-model paths: strip the staged copy (same surgical filter,
-    // verified shape — whatever content was just written)
-    const staged = readFileSync(join(dir, "workflow.toml"), "utf8")
-    const stripped = stripUnitsToRoster(staged, new Set(args.roster))
-    if (stripped !== null) writeFileSync(join(dir, "workflow.toml"), stripped)
+  // THE CONTENT PIPELINE's single write (gate-r5: three arms — pin,
+  // untuned, legacy staged strip — became one verified chain; the
+  // materialization writes whatever the chain changed, nothing else)
+  if (workflowTomlOut !== undefined) {
+    writeFileSync(join(dir, "workflow.toml"), workflowTomlOut)
   }
 
   const title = args.title ?? `${head} → ${base}`

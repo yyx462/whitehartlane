@@ -593,6 +593,12 @@ export class Rail implements ShepPort {
     const name = this.scopedName(rawName)
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
+    // gate-r5 momentum-17: the pane's KIND books at the BIRTH site —
+    // the fleet-tab path both spawnWorker and resumeWorker delegate
+    // here; a pane whose agent boards slower than the one-shot +5s
+    // probe needs tryBookSession, and its guard (!cwd || !kind)
+    // refused every pane born without this row
+    this.kindOf.set(name, kind)
     const rec = this.shep("record", pane, name)
     if (rec.status !== 0) {
       // an unrecorded split pane would leak as a bare shell — close it

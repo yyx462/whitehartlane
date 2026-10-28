@@ -89,7 +89,20 @@ i=0
 # the roster is the materialized units, never the hardcoded four (the
 # gate materializes subsets); dead order files for absent lenses were
 # harmless dead weight — this reads the truth instead
-for lens in $(sed -n '/^units = \[/,/^\]/p' "$prog/workflow.toml" | grep -o '{ id = "[a-z]*"' | sed 's/.*id = "//;s/"//'); do
+# the lens derivation — ONE reader, extracted verbatim by
+# test/review/principles-26.test.ts (marker-delimited: edit the
+# pipeline here, never in the test — the test runs these exact bytes)
+# :lens-derivation-start
+lenses=$({ sed -n '/^units = \[/,/^\]/p' "$prog/workflow.toml" | grep -o '{ id = "[a-z]*"' | sed 's/.*id = "//;s/"//'
+  # the [[stage.units]] array-of-tables form — the door's parsed reader
+  # accepts and materializes it (gate-r5 principles-26); the textual
+  # reader must derive the same lenses or every lens silently loses
+  # its shuffled hunk order. Stateful awk (a sed range consumes each
+  # next header as its own end and drops the second unit's id).
+  awk '/^\[\[stage\.units\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^id = "[a-z]*"/ { sub(/^id = "/, ""); sub(/"$/, ""); print }' "$prog/workflow.toml"
+} | awk '!seen[$0]++')
+# :lens-derivation-end
+for lens in $lenses; do
   i=$((i+1))
   shuffle_order "$((7 * i + 13))" > "$prog/data/review/order-$lens.txt"
 done
