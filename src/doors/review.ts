@@ -183,7 +183,8 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // door's parse and intake's reader both bless this form — the strip
   // refused it with 'no units block'): drop whole blocks whose id is
   // not in the roster
-  if (!lines.some((l) => l.startsWith("units = ["))) {
+  const unitsLine = /^[ \t]*units = \[/
+  if (!lines.some((l) => unitsLine.test(l))) {
     let changed = false
     let saw = false
     for (let i = 0; i < lines.length; i++) {
@@ -207,7 +208,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     return changed ? lines.join("\n") : toml
   }
   for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].startsWith("units = [")) continue
+    if (!unitsLine.test(lines[i])) continue
     // single-line inline array: the closing ] rides the same line —
     // rebuild it from the parse
     if (/\]\s*(#.*)?$/.test(lines[i].trim()) && !lines[i].trim().endsWith("[")) {
@@ -271,12 +272,33 @@ function hasTemperatureKey(node: unknown): boolean {
 }
 
 // A model-less dropout audit's untuned materialization (gate-r2
-// momentum-15): remove `temperature = <num>` keys from unit lines —
-// the pins are tuning that needs a model to ride; without one the
-// lenses spawn on the host default, untuned (stated in the receipt).
+// momentum-15): remove `temperature = <num>` keys — the pins are tuning
+// that needs a model to ride; without one the lenses spawn on the host
+// default, untuned (stated in the receipt). BOTH unit forms (gate-r10
+// tests-1): the inline-array arm rewrites `{ id =` entry lines, and the
+// [[stage.units]] arm drops temperature-key LINES inside unit blocks
+// (the form gate-r6 blessed — the strip missing it dead-ended every
+// audited escalation on table-form templates).
 function stripTemperaturePins(toml: string): string {
-  return toml
-    .split("\n")
+  const lines = toml.split("\n")
+  // arm 2: [[stage.units]] blocks — drop temperature-key lines
+  let inUnitBlock = false
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (/^\[\[stage\.units\]\]$/.test(t)) {
+      inUnitBlock = true
+      continue
+    }
+    if (/^\[/.test(t)) {
+      inUnitBlock = false
+      continue
+    }
+    if (inUnitBlock && /^[ \t]*temperature[ \t]*=[ \t]*[0-9]+(\.[0-9]+)?[ \t]*(#.*)?$/.test(lines[i])) {
+      lines[i] = ""
+    }
+  }
+  // arm 1: inline-array entry lines
+  return lines
     .map((l) =>
       /\{\s*id\s*=/.test(l)
         ? l.replace(/,\s*temperature\s*=\s*[0-9]+(\.[0-9]+)?/g, "").replace(/temperature\s*=\s*[0-9]+(\.[0-9]+)?\s*,\s*/g, "")

@@ -93,15 +93,18 @@ i=0
 # test/review/principles-26.test.ts (marker-delimited: edit the
 # pipeline here, never in the test — the test runs these exact bytes)
 # :lens-derivation-start
-lenses=$({ sed -n '/^units = \[/,/^\]/p' "$prog/workflow.toml" | grep -o '{ id = "[a-z][a-z0-9_-]*"' | sed 's/.*id = "//;s/"//'
+lenses=$({ # spelling- and indent-tolerant (gate-r10 principles-31/questions-9):
+  # TOML legalizes indented blocks, {id = "x"} unpadded braces, and
+  # single quotes — and the door's parse materializes all of it; the
+  # reader must read what the door writes. TWIN WARNING: the id class
+  # is hooks.ts SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
+  sed -n '/^[ \t]*units = \[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[ \t]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
   # the [[stage.units]] array-of-tables form — the door's parsed reader
   # accepts and materializes it (gate-r5 principles-26); the textual
   # reader must derive the same lenses or every lens silently loses
   # its shuffled hunk order. Stateful awk (a sed range consumes each
   # next header as its own end and drops the second unit's id).
-  # TWIN WARNING: the id class is hooks.ts SHEP_SAFE_ID ([a-z][a-z0-9_-]*,
-  # gate-r8: [a-z]* silently dropped digit/dash ids) — change both.
-  awk '/^\[\[stage\.units\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^id = "[a-z][a-z0-9_-]*"/ { sub(/^id = "/, ""); sub(/"$/, ""); print }' "$prog/workflow.toml"
+  awk '/^[ \t]*\[\[stage\.units\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^[ \t]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')/ { sub(/^[ \t]*id[ \t]*=[ \t]*["'"'"']/, ""); sub(/["'"'"']$/, ""); print }' "$prog/workflow.toml"
 } | awk '!seen[$0]++')
 # :lens-derivation-end
 for lens in $lenses; do

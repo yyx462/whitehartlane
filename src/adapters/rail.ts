@@ -653,13 +653,20 @@ export class Rail implements ShepPort {
     )
     // The session mints on the first message and may land in the tool's
     // store a beat later — probe again shortly so the booked pointer
-    // carries the id a Continue resumes. Marker first (a marker miss at
-    // birth means the brief was not committed yet, not that the newest
-    // sibling is ours); plain newest-wins only as the last resort, the
-    // old behavior, so a session always books eventually.
+    // carries the id a Continue resumes. THE MARKER DOCTRINE (gate-r10
+    // momentum-23/principles-32): this third booker joins the law the
+    // other two already state — a marker in hand means the marker is
+    // the discriminator; a marker miss means not-committed-yet, NEVER
+    // the newest sibling's session. The old "plain newest-wins as the
+    // last resort, so a session always books eventually" booked A
+    // SIBLING's session on this pane's row (cross-booking ADR-5
+    // continues and fault-lane switches); the booking this timer
+    // exists for can wait for the message to commit.
     if (!sessionId) {
       setTimeout(() => {
-        const late = this.resolveLiveSession(kind, cwd, since, marker) ?? this.resolveLiveSession(kind, cwd, since)
+        const late = marker
+          ? this.resolveMarkedSession(kind, cwd, since, marker)
+          : this.resolveLiveSession(kind, cwd, since)
         if (late) this.ledger?.setSession(name, late)
       }, 5_000).unref()
     }
