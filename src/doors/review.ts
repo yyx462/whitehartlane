@@ -21,6 +21,7 @@ import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
+import { SHEP_ID_CLASS } from "./hooks.ts"
 
 export type ReviewArgs = {
   repo: string
@@ -192,7 +193,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
       while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
       const id = lines
         .slice(i, end)
-        .map((l) => l.trim().match(/^id = "([a-z]+)"/)?.[1])
+        .map((l) => l.trim().match(new RegExp('^id = "(' + SHEP_ID_CLASS + ')"'))?.[1])
         .find(Boolean)
       if (id !== undefined && !keep.has(id)) {
         lines.splice(i, end - i)
@@ -245,7 +246,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     while (end < lines.length && lines[end].trim() !== "]") end++
     if (end >= lines.length) return null
     const kept = lines.slice(start + 1, end).filter((l) => {
-      const m = l.match(/\{\s*id\s*=\s*"([a-z]+)"/)
+      const m = l.match(new RegExp('\\{\\s*id\\s*=\\s*"(' + SHEP_ID_CLASS + ')"'))
       return !m || keep.has(m[1])
     })
     lines.splice(start + 1, end - start - 1, ...kept)
@@ -336,7 +337,15 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   files = git(repo, "diff", "--name-only", baseSha, headSha).split("\n").filter(Boolean)
   if (files.length === 0) {
-    return { ok: true, dir: null, skipped: true, why: "empty diff", files: 0 }
+    // the empty-diff skip carries the same audit bypass as its
+    // docs-only twin below (gate-r8 tests-1: the gate's audited
+    // docs_only escalation for a zero-file diff dead-ended with
+    // nothing levied while the receipt claimed "full rail")
+    if (args.auditLevy) {
+      // fall through: the audit measures the class, even an empty one
+    } else {
+      return { ok: true, dir: null, skipped: true, why: "empty diff", files: 0 }
+    }
   }
   // The docs-only skip is a PRE-FLIGHT, not a chain stage: a declared
   // chain cannot shed its units mid-run (ADR 0014), so the skip has to

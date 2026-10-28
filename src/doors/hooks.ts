@@ -518,7 +518,14 @@ function hookTimeoutMs(): number {
   if (Number.isFinite(raw) && raw >= 1_000) return Math.min(raw, 3_600_000)
   return DEFAULT_HOOK_TIMEOUT_MS
 }
-const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
+// THE unit/stage/member id grammar (gate-r8: four readers answered it
+// four ways — the strip's [a-z]+ and intake's [a-z]* silently dropped
+// digit/dash ids SHEP_SAFE_ID legalizes). The CLASS is exported for
+// composition into larger patterns (SHEP_SAFE_ID.source carries its ^
+// and $ anchors — composing those mid-pattern matched nothing, the
+// gate-r8 debug); the anchored form is the validator.
+export const SHEP_ID_CLASS = "[a-z][a-z0-9_-]{0,31}"
+export const SHEP_SAFE_ID = new RegExp(`^${SHEP_ID_CLASS}$`)
 
 export function loadManifest(taskDir: string, warn?: (message: string) => void): Manifest {
   const path = join(taskDir, "workflow.toml")
