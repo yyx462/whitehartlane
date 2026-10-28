@@ -270,27 +270,32 @@ export class Rail implements ShepPort {
       // The mutex half (j-93d652 gap #2): a LIVE holder refuses us —
       // one writer per job, so a double `whl continue` dies at the
       // door instead of split-braining the exchange.
+      // The WRITE-SITE single-act law (r21 principles-13/r18
+      // momentum-1): the boot-time load is a snapshot; the disk is
+      // re-read HERE, at the write, before the lease or the pid/door
+      // stamp touch it.
+      let fresh = job
       try {
-        // The WRITE-SITE single-act law (r21 principles-13/r18
-        // momentum-1): the boot-time load is a snapshot; the disk is
-        // re-read HERE, at the write, before the lease or the pid/door
-        // stamp touch it. An ORPHANED record means the booking probe
-        // declared THIS boot abandoned while it was booting — the
-        // orphan receipt stands; the runner stands down and `whl
-        // continue` revives the commission properly.
-        const fresh = loadJob(sid0, jid0) ?? job
-        if (fresh.state === "orphaned") {
-          throw new Error(
-            `booking probe orphaned ${job.id} during this boot (no orchestrator pid within the grace) — the orphan receipt stands; run: whitehartlane continue ${job.id}`,
-          )
-        }
+        fresh = loadJob(sid0, jid0) ?? job
         acquireLease(fresh, `orchestrator pid=${process.pid}`)
       } catch (err) {
         if (err instanceof Error && err.message.startsWith(LEASE_HELD_BY_LIVE_ORCHESTRATOR)) throw err
         this.log("lease: acquire failed — the run continues unleased")
       }
-      // The stamp writes the FRESH record (the same single-act re-read
-      // the lease acquire used) — never the boot-time snapshot.
+      // The stand-down law, seated AFTER the lease round-trip (an
+      // orphaned record carries no resurrectable state; the lease
+      // noted on it is harmless): if the write-site re-read saw the
+      // booking probe's orphan, THIS BOOT STANDS DOWN — the orphan
+      // receipt stands; `whl continue` revives the commission
+      // properly. A boot-time snapshot could never see this flip; the
+      // write-site re-read can.
+      if (fresh.state === "orphaned") {
+        throw new Error(
+          `booking probe orphaned ${job.id} during this boot (no orchestrator pid within the grace) — the orphan receipt stands; run: whitehartlane continue ${job.id}`,
+        )
+      }
+      // The stamp writes the FRESH record (the same re-read the lease
+      // acquire used) — never the boot-time snapshot.
       const booked = fresh
       booked.pid = process.pid
       booked.door = { rev: doorRev(), started: new Date().toISOString() }
