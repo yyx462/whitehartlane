@@ -37,8 +37,19 @@ git -C "$REPO" worktree add --detach "$prog/data/review/head" "$HEAD_SHA" >/dev/
 git -C "$REPO" worktree add --detach "$prog/data/review/base" "$BASE_SHA" >/dev/null
 
 # the diff + file list
-git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/diff.patch"
-git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files.txt"
+# THE REPRO CORPUS RIDES, THE READING DOES NOT (2026-10-30, the user's
+# convergence verdict): every lens re-read a 25k-line diff of which
+# 21k was test/review/ — the adopted repros. In 33 rounds that corpus
+# generated exactly ONE finding (r2, a suite test asserting the wrong
+# thing) while costing the round its context budget — the lenses
+# stall near limits reading proof they already trust: the suite RUNS
+# every repro on every round (the prove gate + npm test), which is
+# the regression guarantee. The lens diff excludes the corpus; the
+# checkouts above keep every file (prove re-runs the repros from the
+# checkout, and a lens MAY still open a specific repro by path when
+# a finding cites one).
+git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
+git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
 
 # pr.md — the claims, not the story. The body (when the CLI was given
 # one) is claims the author WROTE ABOUT THE CODE; the author's session
