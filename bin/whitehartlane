@@ -363,7 +363,6 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // a skip STANDS only when unaudited (gate-r1 momentum-2: the
         // ledger records the judgment; the ESCALATION still levies)
         if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
-        if (gateOnly) return // decided + ledger row; the caller levies
         gateAudit = g.decision.audit === true
         // THE SUBSET QUESTION lives in the DOOR's parse (gate-r21
         // principles-41, the bin seat of r20 tests-5001's class): the
@@ -388,6 +387,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         }
       }
     }
+    // --gate-only's contract is the CALLER's, not the gate's (gate-r28b
+    // momentum-102): "decided + ledger row; the caller levies — never
+    // materialize." Both old guards lived inside the gate block they
+    // guard, so WHL_GATE=off (the documented kill-switch skips the
+    // block wholesale) fell through to prepareReview and materialized
+    // — and with --unattended/--from, LEVIED — a full rail for a
+    // decision-only caller. One guard, at the caller's seat. (The
+    // catch's broken-gate guard stays: it carries exit code 1, a
+    // different contract — a broken gate decides nothing.)
+    if (gateOnly) return
     const ready = prepareReview(
       {
         repo: positional,

@@ -585,39 +585,34 @@ function stripTemperaturePins(toml: string, unresolved: Set<string>): string {
   // to ride (gate-r27 principles-1: a pin carrying its own nearest
   // model is declared tuning that works without --model; stripping it
   // shipped an untuned receipt for lenses the run-time would have run
-  // TUNED). The block's identity (id/name line) names it in the set.
-  let blockKey: "units" | "members" | null = null
-  let blockIdentity: string | null = null
+  // TUNED). TOML KEY ORDER IS FREE (gate-r28b questions-1/tests-602):
+  // the identity line may FOLLOW the temperature line — the block is
+  // decided from any of its lines, never from line order; the old
+  // order-bound capture left a temperature-first pin in place and the
+  // audit dead-ended at its own verify. Block extent runs to the next
+  // header line (the parse-verify backstops the string-interior
+  // residual, as ever).
+  const identityRe = new RegExp(`^["']?(id|name)["']?[ \\t]*=[ \\t]*["']([^"'\\n]+)["']`)
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
-    // the shared header predicates (gate-r24 principles-51): ONE seat
-    // for "is this line a [[stage.<array>]] header" — quoted keys and
-    // trailing comments included, exactly the grammar the roster
-    // strip's anchor reads.
-    if (isStageUnitsHeader(t) || isStageMembersHeader(t)) {
-      blockKey = isStageUnitsHeader(t) ? "units" : "members"
-      blockIdentity = null // captured from the block's id/name line
-      continue
-    }
-    if (/^\[/.test(t)) {
-      blockKey = null
-      blockIdentity = null
-      continue
-    }
-    if (blockKey !== null) {
-      const m = t.match(new RegExp(`^["']?(id|name)["']?[ \\t]*=[ \\t]*["']([^"'\\n]+)["']`))
-      if (m && blockIdentity === null) {
-        blockIdentity = m[2]
-        continue
-      }
-      if (
-        blockIdentity !== null &&
-        unresolved.has(`${blockKey}:${blockIdentity}`) &&
-        isTemperaturePinLine(lines[i])
-      ) {
-        lines[i] = ""
+    if (!isStageUnitsHeader(t) && !isStageMembersHeader(t)) continue
+    const key: "units" | "members" = isStageUnitsHeader(t) ? "units" : "members"
+    let end = i + 1
+    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
+    let identity: string | null = null
+    for (let j = i + 1; j < end; j++) {
+      const m = lines[j].trim().match(identityRe)
+      if (m) {
+        identity = m[2]
+        break
       }
     }
+    if (identity !== null && unresolved.has(`${key}:${identity}`)) {
+      for (let j = i + 1; j < end; j++) {
+        if (isTemperaturePinLine(lines[j])) lines[j] = ""
+      }
+    }
+    i = end - 1
   }
   // arm 1: the inline forms — THE PARSE DECIDES (gate-r17 tests-2005):
   // pins are KEYS; only the parse knows a key from a word in a string.

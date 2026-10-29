@@ -1135,11 +1135,19 @@ export function cycle(deps: CycleDeps): boolean {
       const gate = deps.chain.gateOf(unit.id, finishedIds, failedIds)
       if (gate.open) spawnable.push(unit)
       else if (gate.blockedBy) {
+        // faultsCanary FALSE, fault TRUE (gate-r28b principles-100 /
+        // momentum-101): a wave blocked by a FAILED BLOCKER is the
+        // FIFTH transport-class close — the blocker's death (a grade
+        // FAULT, pure infra) is what closed this unit; this unit never
+        // answered anything. Its four sibling closes (birth judge,
+        // fault lane, spawn-fail, pane-dead) pass false:true for the
+        // same reason (#144: infra says nothing about the plan;
+        // "canary-stopped" is reserved for "a REAL answer failed").
         finish(unit.id, false, {
           unit: unit.id,
           result: `wave blocked by failed ${gate.blockedBy}`,
           pass: false,
-        }, "wave")
+        }, "wave", false, true)
       }
     }
     unfinished = spawnable
