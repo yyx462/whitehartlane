@@ -16,9 +16,12 @@ const doorSrc = readFileSync(join(ROOT, "src", "doors", "review.ts"), "utf8")
 const binSrc = readFileSync(join(ROOT, "bin", "whitehartlane"), "utf8")
 const doorOwnsTheAudit = doorSrc.includes("auditLevy") && binSrc.includes("dropout audit without --model")
 
-function fixtureDocsRepo(where: string): string {
+function fixtureCodeRepo(where: string): string {
   const g = (...args: string[]) => execFileSync("git", ["-C", where, ...args], { encoding: "utf8" })
-  mkdirSync(join(where, "docs"), { recursive: true })
+  // gate-r12 momentum-25: docs-only never audits anymore (a file-list
+  // fact is not a judgment), so the audit's strip law is pinned on the
+  // LIVE shape — the judgment-class audit, a code diff
+  mkdirSync(join(where, "src"), { recursive: true })
   g("init", "-q", "-b", "master")
   g("config", "user.email", "review@test")
   g("config", "user.name", "review")
@@ -26,9 +29,9 @@ function fixtureDocsRepo(where: string): string {
   g("add", "-A")
   g("commit", "-q", "-m", "base")
   g("checkout", "-q", "-b", "feat")
-  writeFileSync(join(where, "docs", "notes.md"), "docs-only change\n")
+  writeFileSync(join(where, "src", "app.ts"), "export const one = 1\n")
   g("add", "-A")
-  g("commit", "-q", "-m", "docs")
+  g("commit", "-q", "-m", "feat")
   return where
 }
 
@@ -53,7 +56,7 @@ test("a model-less dropout audit's materialized lenses really run untuned — th
   if (!doorOwnsTheAudit) return // BASE shape: no audit levy, nothing to judge
   const tmp = mkdtempSync(join(tmpdir(), "whl-q6-"))
   try {
-    const repo = fixtureDocsRepo(join(tmp, "repo"))
+    const repo = fixtureCodeRepo(join(tmp, "repo"))
     const out = join(tmp, "program") // must NOT exist beforehand
     // the exact shape the bin's gate produces for a fresh docs_only
     // class: audit escalation, no --model (bin:364-366)
@@ -63,7 +66,7 @@ test("a model-less dropout audit's materialized lenses really run untuned — th
     )
     assert.ok(
       r.ok && !("skipped" in r && r.skipped),
-      `sanity: the audit levy must materialize past the docs-only pre-flight (auditLevy bypasses it): got ${JSON.stringify(r)}`,
+      `sanity: the audit levy must materialize (a code diff never hits the docs-only pre-flight): got ${JSON.stringify(r)}`,
     )
     const dir = (r as { dir: string }).dir
     const toml = readFileSync(join(dir, "workflow.toml"), "utf8")

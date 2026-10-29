@@ -53,7 +53,10 @@ test("a model-less dropout audit materializes UNPINNED units — the strip must 
   const out = join(tmp, "program") // must NOT exist beforehand
   try {
     const repo = join(tmp, "repo")
-    mkdirSync(join(repo, "docs"), { recursive: true })
+    // gate-r12 momentum-25: docs-only never audits anymore (a file-list
+    // fact is not a judgment), so the audit's strip law is pinned on the
+    // LIVE shape — the judgment-class audit, a code diff
+    mkdirSync(join(repo, "src"), { recursive: true })
     const g = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" })
     g("init", "-q", "-b", "master")
     g("config", "user.email", "review@test")
@@ -62,9 +65,9 @@ test("a model-less dropout audit materializes UNPINNED units — the strip must 
     g("add", "-A")
     g("commit", "-q", "-m", "base")
     g("checkout", "-q", "-b", "feat")
-    writeFileSync(join(repo, "docs", "notes.md"), "docs-only change\n")
+    writeFileSync(join(repo, "src", "app.ts"), "export const one = 1\n")
     g("add", "-A")
-    g("commit", "-q", "-m", "docs")
+    g("commit", "-q", "-m", "feat")
 
     // the door must NOT refuse (the momentum-15 law: an audited docs-only
     // skip levies — refusing here dead-ends the dropout). It materializes.

@@ -275,19 +275,22 @@ export function decideGate(
 ): GateDecision {
   if (f.klass === "docs_only") {
     // the one mechanical rule, kept by construction: the blocking
-    // class (code twins) cannot live in a docs-only diff — but the
-    // dropout still audits it (a lying doc is a real, if P2, finding).
-    // action records the JUDGMENT ("skip"), audit the ESCALATION —
-    // gate-r1 momentum-2: audited skips recorded action:"review", so
-    // classStats (action!=="skip" → ignore) never counted them, greens
-    // never accrued, and the rate could never decay below 1.0 — the
-    // gate could NEVER loosen, dead code where the manual promises
-    // "loosens as greens accumulate". The ledger now tells the truth;
-    // the levy (bin) reads action + audit.
-    const audit = roll < stats.rate
-    return audit
-      ? { action: "skip", roster: [...LENSES], ps: null, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit of docs_only — full rail" }
-      : { action: "skip", roster: [], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong" }
+    // class (code twins) cannot live in a docs-only diff. And it is
+    // MECHANICAL — a file-list fact, not a judgment — so the dropout
+    // audit never samples it (gate-r12 momentum-25): the audit
+    // exists to sample the JUDGE's skips ("jev said skip; the sample
+    // says run"), and on a fresh class rate 1.0 made every docs-only
+    // skip levy a full 4-lens rail — falsifying the manual's own
+    // hard rule ("docs-only diffs skip at the door, receipt printed,
+    // exit 0") deterministically on every first contact. action
+    // records the JUDGMENT ("skip"); audit the ESCALATION — gate-r1
+    // momentum-2: audited skips recorded action:"review", so
+    // classStats never counted them, greens never accrued, and the
+    // rate could never decay below 1.0 — the gate could NEVER loosen,
+    // dead code where the manual promises "loosens as greens
+    // accumulate". The ledger now tells the truth; the levy (bin)
+    // reads action + audit.
+    return { action: "skip", roster: [], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong, no judgment to audit" }
   }
   if (ps === null) {
     return { action: "review", roster: [...LENSES], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev unavailable — fail-safe full rail" }

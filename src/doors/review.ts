@@ -196,7 +196,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
       while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
       const id = lines
         .slice(i, end)
-        .map((l) => l.trim().match(new RegExp('^id = "(' + SHEP_ID_CLASS + ')"'))?.[1])
+        .map((l) => l.trim().match(new RegExp(`^id[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
         .find(Boolean)
       if (id !== undefined && !keep.has(id)) {
         lines.splice(i, end - i)
@@ -249,7 +249,10 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     while (end < lines.length && lines[end].trim() !== "]") end++
     if (end >= lines.length) return null
     const kept = lines.slice(start + 1, end).filter((l) => {
-      const m = l.match(new RegExp('\\{\\s*id\\s*=\\s*"(' + SHEP_ID_CLASS + ')"'))
+      // both quote spellings (gate-r12 principles-34): TOML legalizes
+      // single-quoted ids and unpadded keys, and the door's parse
+      // materializes them — this reader reads what the door writes
+      const m = l.match(new RegExp(`\\{\\s*id\\s*=\\s*["'](${SHEP_ID_CLASS})["']`))
       return !m || keep.has(m[1])
     })
     lines.splice(start + 1, end - start - 1, ...kept)
@@ -299,10 +302,17 @@ function stripTemperaturePins(toml: string): string {
       lines[i] = ""
     }
   }
-  // arm 1: inline-array entry lines
+  // arm 1: inline-array entry lines. ANY key order (gate-r12
+  // principles-35): TOML legalizes temperature-first entries
+  // ({ temperature = 0.2, id = "…" }) and the door's parse reads and
+  // materializes them — the arm selects every line carrying a pin
+  // INSIDE its braces, not only the ones that happen to start with id
+  // (the id-first selector let the survivor trip the parse-verify and
+  // dead-end the audited escalation one key order later).
+  const inlinePin = /\{[^}]*\btemperature\s*=\s*[0-9]+(\.[0-9]+)?/
   return lines
     .map((l) =>
-      /\{\s*id\s*=/.test(l)
+      inlinePin.test(l)
         ? l.replace(/,\s*temperature\s*=\s*[0-9]+(\.[0-9]+)?/g, "").replace(/temperature\s*=\s*[0-9]+(\.[0-9]+)?\s*,\s*/g, "")
         : l,
     )
@@ -361,23 +371,32 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   files = git(repo, "diff", "--name-only", baseSha, headSha).split("\n").filter(Boolean)
   if (files.length === 0) {
-    // the empty-diff skip carries the same audit bypass as its
-    // docs-only twin below (gate-r8 tests-1: the gate's audited
-    // docs_only escalation for a zero-file diff dead-ended with
-    // nothing levied while the receipt claimed "full rail")
+    // an audit levy arriving at an EMPTY diff means the class flipped
+    // under it (a force-push between the gate's read and the levy's) —
+    // the levy still runs (the audit measures the judgment the gate
+    // made on the diff it saw; an all-green verdict on nothing accrues
+    // honestly) rather than dead-ending with a ledger row claiming
+    // audit:true and nothing levied (gate-r8 tests-1's shape). The
+    // plain spell skips with a receipt.
     if (args.auditLevy) {
-      // fall through: the audit measures the class, even an empty one
+      // fall through: the audit measures the class, even an emptied one
     } else {
       return { ok: true, dir: null, skipped: true, why: "empty diff", files: 0 }
     }
   }
   // The docs-only skip is a PRE-FLIGHT, not a chain stage: a declared
   // chain cannot shed its units mid-run (ADR 0014), so the skip has to
-  // happen before anything is booked. Receipt, not silence. EXCEPT a
-  // dropout-audit levy (gate-r2 momentum-15): the gate escalated this
-  // docs-only diff precisely to measure the skip — skipping the audit
-  // dead-ends the dropout (no verdict, no label, greens never accrue).
-  if (!args.auditLevy && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
+  // happen before anything is booked. Receipt, not silence. And
+  // UNCONDITIONAL (gate-r12 momentum-25): the auditLevy bypass that
+  // once rode here existed to let a dropout audit measure a docs-only
+  // skip — but the gate never audits docs_only anymore (a file-list
+  // fact is mechanical, not a judgment to sample), and the bypass was
+  // the hole that falsified the manual's "docs-only diffs skip at the
+  // door" on every fresh-class first contact. files.length > 0: an
+  // EMPTY list satisfies every() vacuously — the empty-diff branch
+  // above owns that case, and an audit levied on an emptied diff must
+  // not be swallowed here (gate-r8 tests-1's dead-end).
+  if (files.length > 0 && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
   // ONE truthiness rule for a declared model (r10: four lenses caught

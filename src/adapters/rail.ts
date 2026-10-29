@@ -580,8 +580,14 @@ export class Rail implements ShepPort {
   private resolveMarkedSession(kind: string, cwd: string, since: string, marker: string): string | null {
     const abs = this.resolveLiveSession(kind, cwd, since, marker)
     if (abs !== null) return abs
+    // rel "" is DEGENERATE (gate-r12 tests-601): the fan-out norm puts
+    // the brief IN the pane's cwd (marker === cwd), and
+    // resolveOpencode treats an empty expect as FALSY (`if (expect)`)
+    // — the probe would answer marker-less newest-wins, the forbidden
+    // fallback the doctrine above forbids. "" cannot appear in any
+    // first message as a path; the abs arm already answered.
     const rel = relative(cwd, marker)
-    return rel !== marker ? this.resolveLiveSession(kind, cwd, since, rel) : null
+    return rel !== "" && rel !== marker ? this.resolveLiveSession(kind, cwd, since, rel) : null
   }
 
   // Start an agent in an existing pane, record it, submit the brief.
@@ -1229,7 +1235,10 @@ export class Rail implements ShepPort {
       ? this.resolveMarkedSession(kind, cwd, since, marker)
       : this.resolveLiveSession(kind, cwd, since)
     if (sid) this.ledger?.setSession(label, sid)
-    return sid
+    // the resolvers speak null for "nothing"; the seam's contract is
+    // undefined (tests-601: a null leak made a miss look like a value
+    // to strict-equal callers)
+    return sid ?? undefined
   }
 
   bookSessionLate(name: string, kind: string, cwd: string, since: string): void {    setTimeout(() => {

@@ -386,8 +386,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         model: val("model"),
         roster: gateRoster,
         // a dropout-audit levy reaches the RAIL (gate-r2 momentum-15):
-        // the docs-only pre-flight skip must not eat the audit — the
-        // audit exists to measure the skipped class
+        // an audited skip self-levies its full-rail sample — the door's
+        // skips must not eat the audit mid-flight (the empty-diff
+        // fall-through is the one remaining bypass; docs-only skips
+        // unconditionally, because the gate never audits them)
         auditLevy: gateAudit,
       },
       join(import.meta.dirname, "..", "templates"),

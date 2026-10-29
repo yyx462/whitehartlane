@@ -184,7 +184,7 @@ test("runGate: jev BROKEN → fail-safe full rail, row still written", () => {
   }
 })
 
-test("runGate: docs-only skips (ledger'd), and audits while the class is fresh", () => {
+test("runGate: docs-only skips (ledger'd) and never audits — a file-list fact is not a judgment", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-gate-docs-"))
   const repo = fixtureRepo(join(tmp, "repo"))
   const g = (a: string) => execSync(`git ${a}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
@@ -196,15 +196,17 @@ test("runGate: docs-only skips (ledger'd), and audits while the class is fresh",
   writeFileSync(join(repo, "MORE.md"), "# more\n")
   g("add -A")
   g("commit -qm docs2")
-  // fresh docs_only class → rate 1.0 → every skip is audited → with
-  // roll forced high the audit still fires (rate 1.0 always wins).
-  // The JUDGMENT is skip; the audit flag is the escalation (the fixed
-  // contract — the ledger row must record the judgment, momentum-2)
+  // docs_only is MECHANICAL (gate-r12 momentum-25): the dropout audit
+  // samples the JUDGE's skips, and a file-list fact carries no judgment
+  // to sample — on a fresh class rate 1.0 audited every docs-only skip
+  // and the levy falsified the manual's "docs-only diffs skip at the
+  // door" on every first contact. The JUDGMENT is skip, unescalated;
+  // the ledger row still records it.
   const { features, decision } = runGate(repo, "main", "docs-branch")
   assert.equal(features.klass, "docs_only")
   assert.equal(decision.action, "skip")
-  assert.equal(decision.audit, true)
-  assert.match(decision.why, /dropout audit of docs_only/)
+  assert.equal(decision.audit, false)
+  assert.match(decision.why, /no judgment to audit/)
 })
 
 test("appendLedgerRow: one JSON line per decision", () => {
