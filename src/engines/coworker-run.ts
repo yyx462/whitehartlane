@@ -10,6 +10,7 @@ import { execSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
+import { opencodeSessionActiveSince } from "../adapters/transcripts.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { chooseModel } from "../jev/model-chooser.ts"
 import { runFaultLane } from "./fault-lane.ts"
@@ -102,14 +103,28 @@ export async function runCoworker(
   // that never boarded was born resumed into its sibling's session —
   // held idle, its brief never delivered, the exchange deadlocked.
   // The same law rail.bookedSessionOf's w- form states: exact match,
-  // no variants.
+  // no variants. AND THE POINTER IS EVIDENCE ONLY WHEN IT IS ACTIVE
+  // THIS GENERATION (gate-r27, momentum-90's law at the coworker
+  // seat): existence alone reads a surviving predecessor's untouched
+  // session as boarding — verify opencode pointers against the store
+  // before answering.
   const bookedSessionOf = (name: string): string | undefined => {
     if (!ledger) return undefined
     const latest = ledger.job.panes
       .filter((p) => p.unit === name && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
-    return latest?.transcript?.session_id
+    const sid = latest?.transcript?.session_id
+    if (sid === undefined) return undefined
+    // ACTIVITY IS THE ORACLE (gate-r27, momentum-90's law at the
+    // coworker seat): a readable store with no row disproves the
+    // pointer; an unreadable store spares (momentum-34) — never a
+    // store-less world answering 'dead'.
+    if (latest?.transcript?.tool === "opencode") {
+      const bornMs = Date.parse(latest.born)
+      if (!Number.isNaN(bornMs) && !opencodeSessionActiveSince(sid, bornMs)) return undefined
+    }
+    return sid
   }
   const resumeOf = new Map<string, string>()
   if (ledger) {

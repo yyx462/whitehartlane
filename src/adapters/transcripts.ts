@@ -362,6 +362,57 @@ export function opencodeSessionExists(id: string): boolean {
 // predecessor's booking, riding the full stall ceiling born_ms
 // exists to cut.
 
+// Is the session ACTIVE this generation? The boarding oracle's second
+// half (rail.bookedSessionOf, gate-r27 momentum-90): EXISTENCE alone
+// reads a surviving predecessor's untouched session as boarding on the
+// same-machine ADR-5 continue — the resumed pane that never started
+// is spared past born_ms forever. Boarding is THIS generation's
+// evidence: the session was created after the pane's born stamp (the
+// fresh-boarding shape), or carries a message newer than it (the
+// resumed-and-driving shape). Honest fail direction throughout: an
+// unreadable store, a missing time stamp, or an un-timed message row
+// cannot DISPROVE activity — true (spare; infra must not kill live
+// panes, the momentum-34 law). Stated residual: with an un-timed
+// session_message schema, ANY message row spares — the
+// predecessor-worked-then-died variant of the resume arc is the
+// residual shape.
+export function opencodeSessionActiveSince(id: string, sinceMs: number): boolean {
+  const db = opencodeReadDb()
+  if (!db) return true // unverifiable — spare
+  let created: number | undefined
+  try {
+    for (const table of OPENCODE_SESSION_TABLES) {
+      try {
+        const row = db.prepare(`SELECT time_created FROM ${table} WHERE id = ? LIMIT 1`).get(id) as
+          | { time_created?: unknown }
+          | undefined
+        if (row !== undefined) {
+          if (typeof row.time_created === "number") created = row.time_created
+          break
+        }
+      } catch {
+        /* table absent — try the next */
+      }
+    }
+  } catch {
+    return true // unreadable — spare
+  }
+  if (created !== undefined && created >= sinceMs) return true // created this generation
+  try {
+    const hit = db.prepare("SELECT 1 FROM message WHERE session_id = ? AND time_created >= ? LIMIT 1").get(id, sinceMs)
+    if (hit) return true // a timed message newer than the pane's birth
+  } catch {
+    /* table absent on this opencode version */
+  }
+  try {
+    const hit = db.prepare("SELECT 1 FROM session_message WHERE session_id = ? LIMIT 1").get(id)
+    if (hit) return true // un-timed rows: cannot disprove new activity — spare (stated residual)
+  } catch {
+    /* table absent */
+  }
+  return false // old creation, no timed message, no rows at all: untouched by this generation
+}
+
 // The spawner session's current title — the identity half of the wake
 // ladder's parent-pane guard (the host tool syncs the session title
 // into the pane's terminal title, "OC | <title>"). Self-contained on

@@ -47,7 +47,7 @@ import {
   type TranscriptPointer,
 } from "./store.ts"
 import { readState } from "../core/state.ts"
-import { opencodeSessionExists, resolveOpencode, resolvePi } from "./transcripts.ts"
+import { opencodeSessionActiveSince, resolveOpencode, resolvePi } from "./transcripts.ts"
 import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
 import { HerdrTransport } from "./herdr-transport.ts"
 import { OpenCodeHost, parseAgentStatus } from "./opencode-host.ts"
@@ -1211,18 +1211,22 @@ export class Rail implements ShepPort {
       .pop()
     const sid = latest?.transcript?.session_id
     if (sid === undefined) return undefined
-    // THE POINTER IS EVIDENCE ONLY WHEN IT RESOLVES (gate-r26
-    // momentum-80): the ADR-5 resume arc books the PRIOR run's
-    // session id verbatim (inhabitPane, resumeSession ?? resolve… — no
-    // resolution, no liveness), so a resumed pane whose agent never
-    // boards carried a DEAD predecessor's booking as boarding
-    // evidence, and the birth judge spared it past born_ms forever —
-    // riding the full stall ceiling born_ms exists to cut. Verified
-    // against the host store when the pointer is opencode's; other
-    // tools' pointers ride stated (no store check here) — the resume
-    // arc that books ids verbatim is opencode's ADR-5 shape.
-    if (latest?.transcript?.tool === "opencode" && !opencodeSessionExists(sid)) {
-      return undefined // a dead pointer is not boarding evidence
+    // ACTIVITY IS THE ORACLE (gate-r26 momentum-80, gate-r27
+    // momentum-90): the ADR-5 resume arc books the PRIOR run's
+    // session id verbatim, so the pointer is evidence only when the
+    // session is real AND active THIS generation (created after the
+    // pane's born stamp, or carrying a message newer than it).
+    // opencodeSessionActiveSince carries both halves with the honest
+    // fail directions: a readable store with no row DISPROVES
+    // (momentum-80), an unreadable store SPARES (momentum-34 — a
+    // store-less test world is unverifiable, never dead; the old
+    // separate existence call answered 'dead' there and broke the
+    // resume machinery).
+    if (latest?.transcript?.tool === "opencode") {
+      const bornMs = Date.parse(latest.born)
+      if (!Number.isNaN(bornMs) && !opencodeSessionActiveSince(sid, bornMs)) {
+        return undefined // dead, or the predecessor's untouched session: not boarding
+      }
     }
     return sid
   }

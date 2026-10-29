@@ -537,6 +537,25 @@ test("a mid-ladder respawn restarts the nudge ladder fresh — the flight state 
 // left it. The switch recovers the member, not just the model.
 test("a model switch mid-ladder restarts the nudge ladder fresh — the post-switch nudge teaches the channel", async () => {
   const dir = await coworkerDir("coworker-court-switch-")
+  // hermetic against the machine's real opencode store (gate-r27): the
+  // boarding oracle (bookedSessionOf) verifies booked pointers against
+  // OPENCODE_DB — seed this test's late booking ("s-alpha", created
+  // NOW) into a temp store so the pointer verifies as this
+  // generation's boarding, exactly what the episode scripts
+  const storeDb = join(dir, "store.db")
+  const { DatabaseSync } = await import("node:sqlite")
+  const db = new DatabaseSync(storeDb)
+  db.exec("CREATE TABLE IF NOT EXISTS session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created REAL)")
+  db.exec("CREATE TABLE IF NOT EXISTS session_message (seq INTEGER PRIMARY KEY, session_id TEXT, type TEXT, data TEXT)")
+  db.prepare("INSERT OR REPLACE INTO session_v2 (id, directory, time_created) VALUES (?, ?, ?)").run("s-alpha", dir, Date.now())
+  // the resumed-and-driving shape: this episode books "s-alpha" LATE
+  // (born after the seed), so creation-time cannot carry the activity
+  // — a message row does (the un-timed-schema arm of the oracle)
+  db.prepare("INSERT OR REPLACE INTO session_message (seq, session_id, type, data) VALUES (1, ?, 'user', ?)").run("s-alpha", JSON.stringify({ parts: [{ text: "Find the capital of France" }] }))
+  db.close()
+  const prevDb = process.env.OPENCODE_DB
+  process.env.OPENCODE_DB = storeDb
+  try {
   // alpha runs on a/one; the run-local ladder names its replacement
   const toml = join(dir, "workflow.toml")
   writeFileSync(toml, readFileSync(toml, "utf8").replace("initiates = true", 'initiates = true\nmodel = "a/one"'))
@@ -615,4 +634,8 @@ test("a model switch mid-ladder restarts the nudge ladder fresh — the post-swi
   assert.equal(switchEvent!.payload.to, "a/two")
   const relayLedger = JSON.parse(readFileSync(join(dir, "relay.json"), "utf8")) as { delivered: string[] }
   assert.ok(relayLedger.delivered.includes("1-alpha.json"), "the member's mail actually relayed")
+  } finally {
+    if (prevDb === undefined) delete process.env.OPENCODE_DB
+    else process.env.OPENCODE_DB = prevDb
+  }
 })

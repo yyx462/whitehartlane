@@ -503,6 +503,49 @@ function pinsSpawnTemperature(parsed: unknown): boolean {
   })
 }
 
+// THE PIN-PLAN ASKS THE CONSUMER'S QUESTION (gate-r27 principles-1):
+// every entry that pins temperature AND has NO model to ride by
+// NEAREST declaration — the same resolution the seat that acts uses
+// (hooks modelPlanFromStages: unit.model ?? stage.model; the host
+// birth: … ?? modelIn — the workflow pin; --model above all). Keyed
+// `<array>:<identity>` for the strip's per-entry discrimination. A
+// pin is model-less only when the entry's own model, its stage's
+// model, the workflow model, AND --model are ALL absent.
+function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined): Set<string> {
+  const workflowModel = (parsed as { workflow?: { model?: unknown } })?.workflow?.model
+  const workflowModelValid =
+    (typeof workflowModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(workflowModel)) || false
+  const stage = (parsed as { stage?: unknown })?.stage
+  const stages = Array.isArray(stage) ? stage : []
+  const unresolved = new Set<string>()
+  for (const s of stages) {
+    if (s == null || typeof s !== "object") continue
+    const stageObj = s as Record<string, unknown>
+    const stageModel = stageObj.model
+    for (const [key, identity] of [
+      ["units", "id"],
+      ["members", "name"],
+    ] as const) {
+      const entries = stageObj[key]
+      if (!Array.isArray(entries)) continue
+      for (const e of entries) {
+        if (e == null || typeof e !== "object" || !("temperature" in e)) continue
+        const entry = e as Record<string, unknown>
+        const rides =
+          (typeof entry.model === "string" && entry.model.length > 0) ||
+          (typeof stageModel === "string" && stageModel.length > 0) ||
+          workflowModelValid ||
+          typeof cliModel === "string"
+        if (!rides) {
+          const who = entry[identity]
+          if (typeof who === "string") unresolved.add(`${key}:${who}`)
+        }
+      }
+    }
+  }
+  return unresolved
+}
+
 // A model-less dropout audit's untuned materialization (gate-r2
 // momentum-15): remove `temperature = <num>` keys — the pins are tuning
 // that needs a model to ride; without one the lenses spawn on the host
@@ -532,54 +575,70 @@ function isTemperaturePinLine(line: string): boolean {
   }
 }
 
-function stripTemperaturePins(toml: string): string {
+function stripTemperaturePins(toml: string, unresolved: Set<string>): string {
   const lines = toml.split("\n")
   // arm 2: [[stage.units]] AND [[stage.members]] blocks (gate-r25
   // principles-60: member temperature rides the same host birth and
   // is refused there with no model — the audit's receipt "temperature
   // pins dropped" must cover every enforced seat) — drop
-  // temperature-key LINES (whole bare-key lines only; a multi-line
-  // string whose line is EXACTLY a bare temperature key is the
-  // documented residual — the parse-verify backstops surviving pins)
-  let inEntryBlock = false
+  // temperature-key LINES, but ONLY in blocks whose pin has NO model
+  // to ride (gate-r27 principles-1: a pin carrying its own nearest
+  // model is declared tuning that works without --model; stripping it
+  // shipped an untuned receipt for lenses the run-time would have run
+  // TUNED). The block's identity (id/name line) names it in the set.
+  let blockKey: "units" | "members" | null = null
+  let blockIdentity: string | null = null
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
     // the shared header predicates (gate-r24 principles-51): ONE seat
     // for "is this line a [[stage.<array>]] header" — quoted keys and
     // trailing comments included, exactly the grammar the roster
-    // strip's anchor reads. Two grammars here dead-ended a dropout
-    // audit of a legal template at its own verify.
+    // strip's anchor reads.
     if (isStageUnitsHeader(t) || isStageMembersHeader(t)) {
-      inEntryBlock = true
+      blockKey = isStageUnitsHeader(t) ? "units" : "members"
+      blockIdentity = null // captured from the block's id/name line
       continue
     }
     if (/^\[/.test(t)) {
-      inEntryBlock = false
+      blockKey = null
+      blockIdentity = null
       continue
     }
-    if (inEntryBlock && isTemperaturePinLine(lines[i])) {
-      lines[i] = ""
+    if (blockKey !== null) {
+      const m = t.match(new RegExp(`^["']?(id|name)["']?[ \\t]*=[ \\t]*["']([^"'\\n]+)["']`))
+      if (m && blockIdentity === null) {
+        blockIdentity = m[2]
+        continue
+      }
+      if (
+        blockIdentity !== null &&
+        unresolved.has(`${blockKey}:${blockIdentity}`) &&
+        isTemperaturePinLine(lines[i])
+      ) {
+        lines[i] = ""
+      }
     }
   }
   // arm 1: the inline forms — THE PARSE DECIDES (gate-r17 tests-2005):
-  // the old /\{[^}]*\btemperature/ matcher matched the WORD inside
-  // brief string values and the comma-form replace ate "temperature =
-  // 5, " from INSIDE the value — the lens was briefed with a different
-  // question than the program declared, ok:true. Pins are KEYS; only
-  // the parse knows a key from a word in a string. Each block is
-  // rebuilt from the parse with the temperature keys deleted (string
-  // values re-serialize verbatim). BOTH stage arrays — units and
-  // members (gate-r25 principles-60), one rewriter.
-  const dropTemperature = (u: Record<string, unknown>): Record<string, unknown> => {
-    if (!("temperature" in u)) return u
-    const next = { ...u }
-    delete next.temperature
-    return next
-  }
-  const unitsPass = rebuildInlineArray(lines.join("\n"), "units", "id", dropTemperature)
+  // pins are KEYS; only the parse knows a key from a word in a string.
+  // Each block is rebuilt from the parse with the UNRESOLVED entries'
+  // temperature keys deleted (string values re-serialize verbatim);
+  // entries whose pin rides a nearest model keep it. BOTH stage
+  // arrays — units and members (gate-r25 principles-60), one rewriter.
+  const dropUnresolvedTemperature =
+    (key: "units" | "members", identity: "id" | "name") =>
+    (u: Record<string, unknown>): Record<string, unknown> => {
+      if (!("temperature" in u)) return u
+      const who = u[identity]
+      if (typeof who === "string" && !unresolved.has(`${key}:${who}`)) return u // its pin rides — keep it
+      const next = { ...u }
+      delete next.temperature
+      return next
+    }
+  const unitsPass = rebuildInlineArray(lines.join("\n"), "units", "id", dropUnresolvedTemperature("units", "id"))
   const membersPass =
     unitsPass !== null
-      ? rebuildInlineArray(unitsPass.text, "members", "name", dropTemperature)
+      ? rebuildInlineArray(unitsPass.text, "members", "name", dropUnresolvedTemperature("members", "name"))
       : null
   return membersPass?.text ?? unitsPass?.text ?? lines.join("\n")
 }
@@ -807,20 +866,27 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       }
     }
     const hasTempPin = pinsSpawnTemperature(parsedTemplate)
-    const templateModel = parsedTemplate?.workflow?.model
-    const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
+    // gate-r27 principles-1: the nearest-declaration walk — see
+    // unresolvedTemperaturePins above. hasModel = every pin rides.
+    const unresolvedPins = unresolvedTemperaturePins(parsedTemplate, args.model)
+    const hasModel = unresolvedPins.size === 0
     if (hasTempPin && !hasModel) {
       if (args.auditLevy === true && args.model === undefined) {
         // a MODEL-LESS dropout audit (gate-r2 momentum-15): refusing
-        // here dead-ends the audit. The pins are TUNING, not law:
-        // strip them and the lenses spawn on the host default,
-        // untuned — stated in the bin's receipt. VERIFIED here
-        // (gate-r3): any surviving temperature key refuses rather
-        // than ships a receipt that lies.
-        const stripped = stripTemperaturePins(toml)
+        // here dead-ends the audit. The pins are TUNING, not law — but
+        // ONLY the pins with NO model to ride (gate-r27 principles-1):
+        // a pin carrying its own nearest model is declared tuning that
+        // works without --model, and stripping it shipped an untuned
+        // receipt for lenses the run-time would have run TUNED. The
+        // strip drops the UNRESOLVED pins only; the verify asks the
+        // same nearest-declaration question of the stripped bytes.
+        const stripped = stripTemperaturePins(toml, unresolvedPins)
         let clean = false
         try {
-          clean = !pinsSpawnTemperature(parseToml(stripped))
+          // the verify asks the SAME nearest-declaration question of
+          // the stripped bytes (gate-r27 principles-1): every pin
+          // either rides a model or is gone
+          clean = unresolvedTemperaturePins(parseToml(stripped), args.model).size === 0
         } catch {
           clean = false
         }
