@@ -194,31 +194,40 @@ export function detectTrunk(repo: string): string | undefined {
 // rebuilt from the parse, scalars only; the briefs carry literal
 // braces, so text-side brace matching is doomed). Returns null when no
 // units block exists or a value cannot be re-serialized.
-function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
+// The shared parse-driven units-block rewriter (gate-r17): THE PARSE
+// IS THE DECISION — which entries exist and what they carry comes
+// from smol-toml ONCE, and each `units = [` block in the text is
+// REPLACED by its parse-kept rebuild. The former text arms (entry-id
+// regexes, header counters, block-end scans, quote and padding
+// tolerances) each stayed one legal spelling behind the TOML grammar
+// forever — the parse cannot. Stages-with-units in the parse, in
+// order, answer to units blocks in the text, in order (the zip the
+// misindex class tests-901 pinned). `edit` answers per unit: the
+// (possibly modified) object to keep, or null to drop the entry.
+// Returns null when the document does not parse (the caller's verify
+// refuses honestly). The inline serializer is TOTAL over the parse's
+// own value shapes (gate-r15 tests-1: nested tables and arrays).
+function rebuildInlineUnits(
+  toml: string,
+  edit: (u: Record<string, unknown>) => Record<string, unknown> | null,
+): { text: string; saw: boolean; changed: boolean } | null {
   const lines = toml.split("\n")
-  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [` are
-  // legal TOML the door's text-preserving materialization stages verbatim
+  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [`
+  // are legal TOML the door's text-preserving materialization stages
   const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
-  // THE PARSE IS THE DECISION (gate-r17 — the same replacement the
-  // grammar grind forced on intake): which entries exist and what they
-  // carry comes from smol-toml ONCE; the text surgery only REPLACES
-  // each units block with its parse-kept rebuild. The former text
-  // arms (entry-id regexes, header counters, block-end scans, quote
-  // and padding tolerances) each stayed one legal spelling behind the
-  // grammar forever — the parse cannot. Stage-with-units blocks in
-  // the parse, in order, answer to units blocks in the text, in
-  // order (the zip the misindex class tests-901 pinned).
   let stagesWithUnits: Array<Array<Record<string, unknown>>> = []
   try {
-    const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
-    stagesWithUnits = (parsed.stage ?? [])
-      .map((s) => (s.units ?? []).filter((u): u is Record<string, unknown> => !!u && typeof u === "object"))
+    const parsed = parseToml(toml) as { stage?: unknown }
+    // a singular [stage] table is legal TOML the parse hands back as a
+    // plain object — never crash on the shape (gate-r17 tests-2); a
+    // template the door cannot subset refuses at the verify instead
+    const stages = Array.isArray(parsed.stage) ? (parsed.stage as Array<{ units?: unknown }>) : []
+    stagesWithUnits = stages
+      .map((s) => (Array.isArray(s.units) ? s.units.filter((u): u is Record<string, unknown> => !!u && typeof u === "object") : []))
       .filter((units) => units.length > 0)
   } catch {
     return null // the door's own parse verify refuses these bytes honestly
   }
-  // the inline serializer is TOTAL over the parse's own value shapes
-  // (gate-r15 tests-1): nested inline tables and arrays included
   const inline = (v: unknown): string | undefined => {
     if (typeof v === "string") return JSON.stringify(v)
     if (typeof v === "number" || typeof v === "boolean") return String(v)
@@ -238,29 +247,6 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   }
   let saw = false
   let changed = false
-  // the [[stage.units]] array-of-tables form (gate-r6 tests-102): drop
-  // whole blocks whose id is not in the roster — the id read through
-  // the SAME parse (quoted keys included, gate-r15 momentum-30), the
-  // block located by its header (spacing-tolerant, gate-r15 tests-1)
-  for (let i = 0; i < lines.length; i++) {
-    if (!/^\[\[\s*stage\.units\s*\]\]/.test(lines[i].trim())) continue
-    saw = true
-    let end = i + 1
-    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
-    const id = lines
-      .slice(i, end)
-      .map((l) => l.trim().match(new RegExp(`^["']?id["']?[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
-      .find(Boolean)
-    if (id !== undefined && !keep.has(id)) {
-      lines.splice(i, end - i)
-      changed = true
-      i--
-    } else {
-      i = end - 1
-    }
-  }
-  // every `units = [` block — single-line and multi-line, ONE arm —
-  // replaced by its parse-kept rebuild
   let zip = 0
   for (let i = 0; i < lines.length; i++) {
     if (!unitsLine.test(lines[i])) continue
@@ -268,11 +254,11 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     const stageUnits = stagesWithUnits[zip]
     zip += 1
     if (stageUnits === undefined) return null // text/parse disagreement — the verify refuses honestly
-    // the kept entries from the parse, in order
     const kept: string[] = []
     for (const u of stageUnits) {
-      if (typeof u.id !== "string" || !keep.has(u.id)) continue
-      const entries = Object.entries(u).map(([k, v]) => {
+      const next = edit(u)
+      if (next === null) continue
+      const entries = Object.entries(next).map(([k, v]) => {
         const s = inline(v)
         return s === undefined ? null : `${k} = ${s}`
       })
@@ -298,8 +284,42 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     lines.splice(i, end + 1 - i, rebuilt)
     if (blockWas !== rebuilt) changed = true
   }
-  if (!saw) return null
-  return changed ? lines.join("\n") : toml
+  return { text: changed ? lines.join("\n") : toml, saw, changed }
+}
+
+function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
+  const lines = toml.split("\n")
+  let sawTable = false
+  let tableChanged = false
+  // the [[stage.units]] array-of-tables form (gate-r6 tests-102): drop
+  // whole blocks whose id is not in the roster — the id read through
+  // the SAME parse (quoted keys included, gate-r15 momentum-30), the
+  // block located by its header (spacing-tolerant, gate-r15 tests-1)
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\[\[\s*stage\.units\s*\]\]/.test(lines[i].trim())) continue
+    sawTable = true
+    let end = i + 1
+    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
+    const id = lines
+      .slice(i, end)
+      .map((l) => l.trim().match(new RegExp(`^["']?id["']?[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
+      .find(Boolean)
+    if (id !== undefined && !keep.has(id)) {
+      lines.splice(i, end - i)
+      tableChanged = true
+      i--
+    } else {
+      i = end - 1
+    }
+  }
+  // every `units = [` block — single-line and multi-line, ONE arm —
+  // replaced by its parse-kept rebuild
+  const res = rebuildInlineUnits(lines.join("\n"), (u) =>
+    typeof u.id === "string" && keep.has(u.id) ? u : null,
+  )
+  if (res === null) return null
+  if (!res.saw && !sawTable) return null
+  return res.changed || tableChanged ? res.text : toml
 }
 
 // "does this document pin temperature anywhere?" — a deep walk over
@@ -327,15 +347,16 @@ function hasTemperatureKey(node: unknown): boolean {
 // audited escalation on table-form templates).
 function stripTemperaturePins(toml: string): string {
   const lines = toml.split("\n")
-  // arm 2: [[stage.units]] blocks — drop temperature-key lines.
-  // Space-tolerant header (gate-r16 tests-1): `[[ stage.units ]]` is
-  // legal TOML the door's parse, the roster strip's anchor, and
-  // intake's awk arm all bless — an exact-match header here refused
-  // the strip's own verify and dead-ended every audited escalation
-  // on a spaced-header template with a false "door bug" premise.
+  // arm 2: [[stage.units]] blocks — drop temperature-key LINES (whole
+  // bare-key lines only; a multi-line string whose line is EXACTLY a
+  // bare temperature key is the documented residual — the parse-verify
+  // backstops surviving pins)
   let inUnitBlock = false
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
+    // Space-tolerant header (gate-r16 tests-1): `[[ stage.units ]]` is
+    // legal TOML the door's parse, the roster strip's anchor, and
+    // intake's handoff all bless.
     if (/^\[\[\s*stage\.units\s*\]\]$/.test(t)) {
       inUnitBlock = true
       continue
@@ -348,21 +369,21 @@ function stripTemperaturePins(toml: string): string {
       lines[i] = ""
     }
   }
-  // arm 1: inline-array entry lines. ANY key order (gate-r12
-  // principles-35): TOML legalizes temperature-first entries
-  // ({ temperature = 0.2, id = "…" }) and the door's parse reads and
-  // materializes them — the arm selects every line carrying a pin
-  // INSIDE its braces, not only the ones that happen to start with id
-  // (the id-first selector let the survivor trip the parse-verify and
-  // dead-end the audited escalation one key order later).
-  const inlinePin = /\{[^}]*\btemperature\s*=\s*[0-9]+(\.[0-9]+)?/
-  return lines
-    .map((l) =>
-      inlinePin.test(l)
-        ? l.replace(/,\s*temperature\s*=\s*[0-9]+(\.[0-9]+)?/g, "").replace(/temperature\s*=\s*[0-9]+(\.[0-9]+)?\s*,\s*/g, "")
-        : l,
-    )
-    .join("\n")
+  // arm 1: the inline form — THE PARSE DECIDES (gate-r17 tests-2005):
+  // the old /\{[^}]*\btemperature/ matcher matched the WORD inside
+  // brief string values and the comma-form replace ate "temperature =
+  // 5, " from INSIDE the value — the lens was briefed with a different
+  // question than the program declared, ok:true. Pins are KEYS; only
+  // the parse knows a key from a word in a string. Each block is
+  // rebuilt from the parse with the temperature keys deleted (string
+  // values re-serialize verbatim).
+  const res = rebuildInlineUnits(lines.join("\n"), (u) => {
+    if (!("temperature" in u)) return u
+    const next = { ...u }
+    delete next.temperature
+    return next
+  })
+  return res?.text ?? lines.join("\n")
 }
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
