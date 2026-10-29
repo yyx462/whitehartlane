@@ -169,6 +169,23 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
   return undefined // no arm landed — the caller's refusal names the true premise
 }
 
+// The trunk's name is ONE decision (gate-r14 tests-1): the door
+// auto-detects master/main/trunk, and the gate's bin default must
+// answer the same — a hardcoded "master" left main-only repos (the
+// git/GitHub default layout) gate-broken on every review, no ledger
+// row ever written.
+export function detectTrunk(repo: string): string | undefined {
+  for (const d of ["master", "main", "trunk"]) {
+    try {
+      git(repo, "rev-parse", "--verify", d)
+      return d
+    } catch {
+      /* try the next */
+    }
+  }
+  return undefined
+}
+
 // The roster's surgical filter (review-gate.ts subset materialization):
 // removes unit entries whose id is not in `keep`, from every
 // `units = [ … ]` block. TWO array forms (gate-r5 tests-1/2): the
@@ -179,40 +196,44 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
 // units block exists or a value cannot be re-serialized.
 function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   const lines = toml.split("\n")
+  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [` are
+  // legal TOML the door's text-preserving materialization stages verbatim
+  const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
+  // EVERY block the door's parse reads (gate-r14 momentum-27): stage[]
+  // is an array and each fan-out stage carries its own units — the
+  // arms used to return after the FIRST block, so a two-wave chain's
+  // second stage kept its unlisted units and the post-verify refused
+  // the gate's own decision as a "door bug". Both arms run to the end;
+  // one return.
+  let saw = false
+  let changed = false
   // the [[stage.units]] array-of-tables form (gate-r6 tests-102: the
   // door's parse and intake's reader both bless this form — the strip
   // refused it with 'no units block'): drop whole blocks whose id is
   // not in the roster
-  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [` are
-  // legal TOML the door's text-preserving materialization stages verbatim
-  const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
-  if (!lines.some((l) => unitsLine.test(l))) {
-    let changed = false
-    let saw = false
-    for (let i = 0; i < lines.length; i++) {
-      if (!/^\[\[stage\.units\]\]/.test(lines[i].trim())) continue
-      saw = true
-      let end = i + 1
-      while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
-      const id = lines
-        .slice(i, end)
-        .map((l) => l.trim().match(new RegExp(`^id[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
-        .find(Boolean)
-      if (id !== undefined && !keep.has(id)) {
-        lines.splice(i, end - i)
-        changed = true
-        i--
-      } else {
-        i = end - 1
-      }
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\[\[stage\.units\]\]/.test(lines[i].trim())) continue
+    saw = true
+    let end = i + 1
+    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
+    const id = lines
+      .slice(i, end)
+      .map((l) => l.trim().match(new RegExp(`^id[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
+      .find(Boolean)
+    if (id !== undefined && !keep.has(id)) {
+      lines.splice(i, end - i)
+      changed = true
+      i--
+    } else {
+      i = end - 1
     }
-    if (!saw) return null
-    return changed ? lines.join("\n") : toml
   }
   for (let i = 0; i < lines.length; i++) {
     if (!unitsLine.test(lines[i])) continue
+    saw = true
     // single-line inline array: the closing ] rides the same line —
-    // rebuild it from the parse
+    // rebuild it from the parse (the briefs carry literal braces, so
+    // text-side brace matching is doomed)
     if (/\]\s*(#.*)?$/.test(lines[i].trim()) && !lines[i].trim().endsWith("[")) {
       try {
         const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
@@ -238,7 +259,8 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
           kept.push(`{ ${entries.join(", ")} }`)
         }
         lines[i] = `units = [ ${kept.join(", ")} ]`
-        return lines.join("\n")
+        changed = true
+        continue
       } catch {
         return null
       }
@@ -248,17 +270,20 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     let end = start
     while (end < lines.length && lines[end].trim() !== "]") end++
     if (end >= lines.length) return null
-    const kept = lines.slice(start + 1, end).filter((l) => {
+    const block = lines.slice(start + 1, end)
+    const kept = block.filter((l) => {
       // both quote spellings (gate-r12 principles-34): TOML legalizes
       // single-quoted ids and unpadded keys, and the door's parse
       // materializes them — this reader reads what the door writes
       const m = l.match(new RegExp(`\\{\\s*id\\s*=\\s*["'](${SHEP_ID_CLASS})["']`))
       return !m || keep.has(m[1])
     })
+    if (kept.length !== block.length) changed = true
     lines.splice(start + 1, end - start - 1, ...kept)
-    return lines.join("\n")
+    i = start + kept.length + 1 // past this block's closing ]
   }
-  return null
+  if (!saw) return null
+  return changed ? lines.join("\n") : toml
 }
 
 // "does this document pin temperature anywhere?" — a deep walk over
@@ -341,13 +366,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   const head = args.head ?? headBranch
   let base = args.base
   if (!base) {
-    for (const d of ["master", "main", "trunk"]) {
-      try {
-        git(repo, "rev-parse", "--verify", d)
-        base = d
-        break
-      } catch { /* try the next */ }
-    }
+    base = detectTrunk(repo)
     if (!base) return { ok: false, why: "no --base given and no master/main/trunk branch found", code: 2 }
   }
   let headSha: string, baseSha: string, files: string[]

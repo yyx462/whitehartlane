@@ -21,7 +21,7 @@ import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
-import { prepareReview, reviewReceipt } from "../src/doors/review.ts"
+import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, runGate } from "../src/doors/review-gate.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
@@ -351,7 +351,11 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     let gateRoster = undefined
     let gateAudit = false
     if (process.env.WHL_GATE !== "off") {
-      const baseRef = val("base") ?? "master"
+      // ONE trunk decision (gate-r14 tests-1): the door auto-detects
+      // master/main/trunk — the gate's default answers the same, or a
+      // main-only repo (the git/GitHub default layout) is gate-broken
+      // on every review with no ledger row ever written
+      const baseRef = val("base") ?? detectTrunk(resolve(positional)) ?? "master"
       const headRef = val("head") ?? "HEAD"
       try {
         const g = runGate(resolve(positional), baseRef, headRef)
@@ -367,8 +371,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         if (g.decision.action === "review" && g.decision.roster.length < 4) gateRoster = g.decision.roster
       } catch (err) {
         // the gate must never BLOCK a review (that would be a new
-        // failure mode in front of the rail) — a broken gate reviews
+        // failure mode in front of the rail) — a broken gate reviews.
+        // EXCEPT --gate-only (gate-r14 tests-1): the caller asked for a
+        // DECISION, not a rail — a broken gate decides nothing, and
+        // falling through here materialized the caller's program
         console.error(`gate: broken (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fail-safe: full rail`)
+        if (gateOnly) {
+          process.exitCode = 1
+          return
+        }
       }
     }
     const ready = prepareReview(

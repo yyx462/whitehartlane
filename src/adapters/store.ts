@@ -1083,8 +1083,14 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
   // operator superseded the revival); the live pid is recorded so
   // `whl continue` can re-claim, and the flip operates on the fresh
   // record so ceremony-time writes (lease, spawned panes) survive.
+  // RETIRED is a differing receipt too (gate-r14 questions-10): the
+  // fail button writes state:"retired" + a failed receipt on a PARKED
+  // job (it refuses only running), and retired is not continuable by
+  // design — the only way this window ever sees it is the exact race
+  // the law was written for. Every state except "running" carries (or
+  // implies) a receipt; resurrecting any of them splits the brain.
   const fresh = loadJob(job.sid, job.id) ?? job
-  const superseded = fresh.state !== job.state && fresh.state !== "running" && fresh.state !== "retired"
+  const superseded = fresh.state !== job.state && fresh.state !== "running"
   if (superseded) {
     fresh.pid = pid
     saveJob(fresh)
