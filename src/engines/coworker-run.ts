@@ -455,19 +455,30 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   // twin). Respawn while retries remain (the liveness judge's
   // transport ceremony), close honestly at the cap.
   const bornPatience = Math.min(manifest.workflow.born_ms ?? 180_000, stallMs)
-  // "did this member EVER board?" — the RAW ROW question (any pane row
-  // carrying a session pointer), NOT bookedSessionOf's verified answer
-  // (which consults the host store; a synthetic test pointer must not
-  // read as never-boarded and eat a respawn — the r27 hermeticity
-  // lesson). The verified oracle keeps its seats (resume, the fan-out
-  // spare); the birth question only asks whether a booking exists.
-  const everBookedRow = (name: string): boolean => {
+  // "did this member EVER board — ACTIVELY, THIS GENERATION?" — the
+  // momentum-90 law at the birth seat (gate-r31 momentum-104): a raw
+  // row's pointer can be the RESUME arc's verbatim booking of a dead
+  // predecessor's session (the same file's bookedSessionOf disproves
+  // exactly such pointers via opencodeSessionActiveSince), and the raw
+  // read spared a never-boarding respawned member forever — the ride
+  // this seat exists to cut. Per row: opencode pointers verify against
+  // the store (an unreadable store or an unstamped row spares — the
+  // momentum-34 fail direction); other tools' pointers ride stated.
+  const everBoardedActive = (name: string): boolean => {
     if (!ledger) return false
-    return ledger.job.panes.some((p) => p.unit === name && p.transcript?.session_id !== undefined)
+    return ledger.job.panes.some((p) => {
+      if (p.unit !== name) return false
+      const t = p.transcript
+      if (!t?.session_id) return false
+      if (t.tool !== "opencode") return true
+      const rowBornMs = Date.parse(p.born ?? "")
+      if (Number.isNaN(rowBornMs)) return true
+      return opencodeSessionActiveSince(t.session_id, rowBornMs)
+    })
   }
   const memberBirthJudge: Judge<MemberBeat> = (b) => {
     if (!b.holdsBall) return { kind: "none" }
-    if (everBookedRow(b.id)) return { kind: "none" } // boarded — however quiet, this court is not its seat
+    if (everBoardedActive(b.id)) return { kind: "none" } // boarded — however quiet, this court is not its seat
     // JURISDICTION (the court's own law): only the shape the stall
     // ladder CANNOT judge — a member 'working'-deferred forever (the
     // #249 agent_status-lies class; an idle unboarded member is the

@@ -1561,9 +1561,15 @@ export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []
       // the isolation write must survive that (the whole point)
     }
     const mcp = globalMcpNames()
-    if (mcp.length > 0) {
-      config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
-    }
+    // THE ISOLATION KEYS FORCE-WIN UNCONDITIONALLY (gate-r31 tests-1):
+    // the empty-probe path (no opencode on PATH, the 20s timeout under
+    // load, the process-wide cache poisoned at []) used to inherit the
+    // prior file's ENABLED mcp servers — the force-win was keyed on
+    // mcp.length > 0, so a failed probe silently re-granted every
+    // server the prior generation (or anyone who could write the unit
+    // dir) declared enabled. An empty probe STRIPS the block; a live
+    // probe re-seeds it disabled-only.
+    config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
     writeFileSync(cfgPath, `${JSON.stringify(config, null, 2)}\n`)
   } catch {
     // permissions scoping is best-effort; the run works without it
