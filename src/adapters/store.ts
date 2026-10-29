@@ -1082,6 +1082,56 @@ export function pauseJob(job: JobRecord, reason: string, panesRemaining: number)
 // Continue is user-decided, never automatic, and never hard-capped —
 // the counter is a soft warning in `jobs`, not a gate (the relaunch
 // cap guarded crash-loops; a typed continue is deliberate).
+// CLAIM THE REVIVAL BEFORE THE SPAWN (gate-r22 momentum-50): flip a
+// parked record to running — with the same write-site guards
+// continueJob carries (the twin revival stands; a superseding receipt
+// stands) — BEFORE the runner child exists to read it. The child's
+// boot enforces the stand-down law on "not running", so spawning
+// against a still-paused record lets a fast child kill its own
+// revival while the parent then writes a running receipt naming the
+// dead child. A record already reading "running" (a fresh booking)
+// claims nothing and bumps nothing — `continues` counts revivals.
+export function claimRevivalFlip(job: JobRecord): { ok: true } | { ok: false; why: string } {
+  const fresh = loadJob(job.sid, job.id) ?? job
+  // THE TWIN REVIVAL (gate-r21 momentum-40): a fresh record already
+  // running over a non-running snapshot is another writer's revival —
+  // its runner holds the lease and keeps the record. Stand down.
+  if (fresh.state === "running" && job.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.twin-revival",
+      jid: job.id,
+      why: `another revival (crowned by the live lease) landed — the leader's record stands`,
+    })
+    Object.assign(job, fresh)
+    return { ok: false, why: `another revival holds ${job.id} — the leader's record stands` }
+  }
+  // a differing receipt stands (abort/pause/orphan/retired flips
+  // landed inside the ceremony window)
+  if (fresh.state !== job.state && fresh.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.superseded",
+      jid: job.id,
+      why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands`,
+    })
+    Object.assign(job, fresh)
+    return { ok: false, why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands` }
+  }
+  if (fresh.state !== "running") {
+    fresh.state = "running"
+    fresh.continues = (fresh.continues ?? 0) + 1
+    fresh.pause = undefined
+    fresh.abort = undefined
+    fresh.orphan = undefined
+    fresh.finished = undefined
+    saveJob(fresh)
+    appendEvent(job.sid, { actor: "levy", kind: "job.claimed", jid: job.id })
+  }
+  Object.assign(job, fresh)
+  return { ok: true }
+}
+
 export function continueJob(job: JobRecord, pid: number): JobRecord {
   // the FIFTH writer joins the single-act law (gate-r11 principles-33):
   // the caller holds a boot-time snapshot across a LONG ceremony (the

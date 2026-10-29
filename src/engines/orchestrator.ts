@@ -796,6 +796,14 @@ export function cycle(deps: CycleDeps): boolean {
       stage: "unit",
       pass: false,
       row: { unit: b.id, result: "pane dead", pass: false },
+      // faultsCanary FALSE, fault TRUE (gate-r22 principles-42): a
+      // pane dying without answering is the FOURTH transport-class
+      // close (its twins: birth judge r16, fault lane r16, spawn-fail
+      // r19) — infra says nothing about the plan, and
+      // "canary-stopped" is the label reserved for "a REAL answer
+      // failed" (#144's honest-label law)
+      faultsCanary: false,
+      fault: true,
       detail: "pane not live in herdr",
       wake: "pane not live in herdr",
     }

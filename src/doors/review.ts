@@ -397,11 +397,9 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   return res.changed || tableChanged ? res.text : toml
 }
 
-// "does this document pin temperature anywhere?" — a deep walk over
-// the PARSED document (r23 tests-40: the word in a comment or a
-// string value is not a pin; the KEY is). Named for reuse: the
-// audit-strip's pre-verify walks the STRIPPED bytes with the same
-// question (gate-r3) — one walker, both sites.
+// "does this document pin temperature anywhere?" — a deep walk over a
+// PARSED subtree (r23 tests-40: the word in a comment or a string
+// value is not a pin; the KEY is).
 function hasTemperatureKey(node: unknown): boolean {
   if (Array.isArray(node)) return node.some(hasTemperatureKey)
   if (node && typeof node === "object") {
@@ -410,6 +408,24 @@ function hasTemperatureKey(node: unknown): boolean {
     )
   }
   return false
+}
+
+// THE SCREEN ANSWERS ITS CONSUMERS' QUESTION (gate-r22 tests-6101):
+// "does this program pin PER-UNIT temperature?" — stage[].units[].
+// temperature, the scope stripTemperaturePins itself speaks (the run
+// reads the pin per unit at spawn; the host writes
+// provider.<p>.models.<id>.temperature). The old whole-document walk
+// demanded a model for — and the dropout audit's post-strip verify
+// dead-ended on — keys in tables no consumer reads (loadManifest
+// tolerates and ignores them): a false premise refusing a template
+// the control materializes fine, and an audited levy measuring
+// nothing. One question, one scope, both sites.
+function pinsUnitTemperature(parsed: unknown): boolean {
+  const stage = (parsed as { stage?: unknown })?.stage
+  const stages = Array.isArray(stage) ? stage : []
+  return stages.some(
+    (s) => s != null && typeof s === "object" && hasTemperatureKey((s as { units?: unknown }).units),
+  )
 }
 
 // A model-less dropout audit's untuned materialization (gate-r2
@@ -688,7 +704,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         }
       }
     }
-    const hasTempPin = hasTemperatureKey(parsedTemplate)
+    const hasTempPin = pinsUnitTemperature(parsedTemplate)
     const templateModel = parsedTemplate?.workflow?.model
     const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
@@ -702,7 +718,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         const stripped = stripTemperaturePins(toml)
         let clean = false
         try {
-          clean = !hasTemperatureKey(parseToml(stripped))
+          clean = !pinsUnitTemperature(parseToml(stripped))
         } catch {
           clean = false
         }

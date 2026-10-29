@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { abortJob, bookingStale, continueJob, killPane, listJobs, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
+import { abortJob, bookingStale, claimRevivalFlip, killPane, listJobs, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
 
 export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
@@ -22,6 +22,16 @@ export function spawnRunner(
 ): SpawnOutcome {
   const door = runnerDoor(orchestratorRoot)
   if (!existsSync(door)) return { ok: false, why: `no orchestrator at ${door}` }
+  // THE CLAIM PRECEDES THE SPAWN (gate-r22 momentum-50): the child's
+  // boot enforces the stand-down law on "not running" (rail.ts), so a
+  // child spawned against a record still reading PAUSED kills its own
+  // revival whenever its boot read lands before the parent's flip —
+  // and the parent then stamped a running receipt naming the dead
+  // child. Claim first (write-site guards included): the child always
+  // boots into a record that says running. A fresh booking (record
+  // born running, pid-less) claims nothing — the no-op branch.
+  const claim = claimRevivalFlip(job)
+  if (!claim.ok) return { ok: false, why: claim.why }
   const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
   const child = spawn(process.execPath, ["--experimental-strip-types", door, job.dir], {
     detached: true,
@@ -92,7 +102,11 @@ export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOu
     killPane(job, pane.label)
   }
   const out = spawnRunner(job, orchestratorRoot)
-  if (out.ok) continueJob(job, out.pid)
+  // no continueJob tail (gate-r22 momentum-50): the CLAIM now precedes
+  // the spawn inside spawnRunner (the child must boot into a running
+  // record), and the child stamps its own pid at boot (rail.ts) — a
+  // flip+stamp tail over this ceremony's stale snapshot would only
+  // trip the twin guard against the claim this ceremony itself wrote
   return out
 }
 
