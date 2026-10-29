@@ -183,30 +183,54 @@ function verdictRedsByHeadSha(): Map<string, { red: boolean }> {
 export type ClassStats = { greens: number; reds: number; audits: number; rate: number }
 
 // the dropout rate: fresh class → audit every skip; greens decay it;
-// any red resets it to every-skip (drift alarm). Pure.
+// any red resets it to every-skip (drift alarm). A RESET is
+// re-decayable (gate-r13 tests-701): the decay counts greens SINCE the
+// last red — `reds > 0` pinned every class that ever caught a real
+// bug at 1.0 forever, dead-coding the documented "can only loosen as
+// greens accumulate". Pure.
 export function classStats(rows: LedgerRow[], labels: Map<string, { red: boolean }>, klass: GateClass): ClassStats {
   let greens = 0
   let reds = 0
   let audits = 0
+  let sinceRed = 0 // greens accumulated since the last red
   for (const r of rows) {
     if (r.klass !== klass || r.action !== "skip") continue
     audits += 1
     const label = labels.get(r.headSha)
     if (!label) continue
-    if (label.red) reds += 1
-    else greens += 1
+    if (label.red) {
+      reds += 1
+      sinceRed = 0 // the drift alarm re-tightens — and the class can re-earn trust after it
+    } else {
+      greens += 1
+      sinceRed += 1
+    }
   }
-  const rate = reds > 0 || greens < 3 ? 1.0 : greens < 8 ? 0.25 : 0.1
+  const rate = sinceRed < 3 ? 1.0 : sinceRed < 8 ? 0.25 : 0.1
   return { greens, reds, audits, rate }
 }
 
 function readLedger(path = ledgerPath()): LedgerRow[] {
   if (!existsSync(path)) return []
+  // one torn line must not take the whole gate down (gate-r13
+  // tests-700): the ledger is appendFileSync'd mid-crash surface — a
+  // SIGKILL between open and flush leaves a partial line, and the
+  // reader is the gate's front door (runGate throws → the bin's catch
+  // demotes the gate PERMANENTLY). The module's other machine-state
+  // readers (verdictRedsByHeadSha, hotFileCounts) guard per item; this
+  // reader joins them: skip the unreadable line, decide anyway.
   return readFileSync(path, "utf8")
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((l) => JSON.parse(l) as LedgerRow)
+    .map((l) => {
+      try {
+        return JSON.parse(l) as LedgerRow
+      } catch {
+        return null
+      }
+    })
+    .filter((r): r is LedgerRow => r !== null)
 }
 
 // ---- jev: the judgment (four noul, one request)
@@ -252,7 +276,14 @@ export function jevLenses(
     const ps: Partial<Record<Lens, number>> = {}
     for (const lens of LENSES) {
       const n = answers?.[`l_${lens}`]?.noul
-      if (typeof n !== "number" || !Number.isFinite(n)) return null // unparsable → fail-safe
+      // unparsable → fail-safe. The DOMAIN is enforced here too
+      // (gate-r13 tests-702): a finite noul outside [0,1] is the same
+      // broken-judge garbage one shape later — trusted raw it can
+      // silently turn the rail OFF (noul:-1 ×4 → empty roster → plain
+      // skip), the exact vanish-not-review direction the fail-safe
+      // law forbids. The script ENFORCES; validating the judgment's
+      // domain is enforcement, not judgment.
+      if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1) return null
       ps[lens] = n
     }
     return ps

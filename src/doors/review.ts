@@ -386,17 +386,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   // The docs-only skip is a PRE-FLIGHT, not a chain stage: a declared
   // chain cannot shed its units mid-run (ADR 0014), so the skip has to
-  // happen before anything is booked. Receipt, not silence. And
-  // UNCONDITIONAL (gate-r12 momentum-25): the auditLevy bypass that
-  // once rode here existed to let a dropout audit measure a docs-only
-  // skip — but the gate never audits docs_only anymore (a file-list
-  // fact is mechanical, not a judgment to sample), and the bypass was
-  // the hole that falsified the manual's "docs-only diffs skip at the
-  // door" on every fresh-class first contact. files.length > 0: an
-  // EMPTY list satisfies every() vacuously — the empty-diff branch
-  // above owns that case, and an audit levied on an emptied diff must
-  // not be swallowed here (gate-r8 tests-1's dead-end).
-  if (files.length > 0 && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
+  // happen before anything is booked. Receipt, not silence. The
+  // auditLevy fall-through is the RACE GUARD (gate-r13
+  // momentum-26/principles-36), the same law the empty-diff arm above
+  // states: the gate NEVER audits docs_only on its own judgment (a
+  // file-list fact is mechanical — gate-r12 momentum-25), so an audited
+  // levy arriving at a docs-only diff means the class FLIPPED under it
+  // between the gate's read and this one (--gate-only makes the window
+  // caller-controlled) — the ledger row is already written, and an
+  // audit nobody runs measures nothing. One decision, one answer at
+  // both arms of "the class flipped under it".
+  if (!args.auditLevy && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
   // ONE truthiness rule for a declared model (r10: four lenses caught
