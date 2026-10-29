@@ -447,14 +447,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
   // (hooks validates workflow.born_ms) with NO consumer: the stall
   // judge deferred the never-boarding ball-holder on "working"
   // unconditionally and the exchange rode a member nobody will ever
-  // hear. THE PATIENCE IS THE EARLIER CLOCK — min(born_ms, stall_ms):
-  // an unboarded member silent past EITHER ceiling is the
-  // never-boarding shape (the stall ladder would judge a BOOKED pane
-  // at the same silence; working does not exempt past the window —
-  // the #249 agent_status-lies class, gate-r11 tests-1's fan-out
-  // twin). Respawn while retries remain (the liveness judge's
-  // transport ceremony), close honestly at the cap.
-  const bornPatience = Math.min(manifest.workflow.born_ms ?? 180_000, stallMs)
+  // hear. Working does not exempt past the window — the #249
+  // agent_status-lies class, gate-r11 tests-1's fan-out twin. Respawn
+  // while retries remain (the liveness judge's transport ceremony),
+  // close honestly at the cap.
+  // THE BIRTH PATIENCE IS THE DECLARED FIELD ALONE (gate-r32
+  // momentum-105): the fan-out twin honors born_ms alone —
+  // `if (b.age <= bornMs) return none` — and one decision answers one
+  // way: the r30 min(born_ms, stall_ms) silently overrode the
+  // operator's declared patience whenever the stall ceiling sat lower,
+  // birth-retrying members tens of seconds early while the fan-out
+  // bench spared the same manifest.
+  const bornPatience = manifest.workflow.born_ms ?? 180_000
   // "did this member EVER board — ACTIVELY, THIS GENERATION?" — the
   // momentum-90 law at the birth seat (gate-r31 momentum-104): a raw
   // row's pointer can be the RESUME arc's verbatim booking of a dead

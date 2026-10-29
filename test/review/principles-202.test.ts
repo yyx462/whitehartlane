@@ -90,22 +90,24 @@ test("a coworker program's never-boarding member is judged, not deferred on 'wor
     herdr.onPrompt = () => {} // never boards, never mails
     const rail = fakeRail(dir, herdr, ledger as never)
 
-    // bound the exchange: the stop lands from beta at 2.5s — the judgment
-    // window under test is everything before it (≈40 beats at 60ms,
-    // ~8× the stallMs ladder, and ~12× if born_ms's own 30s floor were
-    // honored at seconds-scale — the shape is judged-or-not, not when)
+    // bound the exchange: the stop lands from beta at 34s — the judgment
+    // window under test is everything before it. ADAPTED (gate-r32,
+    // momentum-105): the birth patience is the DECLARED born_ms alone
+    // (30s floor) — the r30 min(born_ms, stall_ms) formula was the
+    // disease momentum-105 closed, so the ruling lands at ~30s and the
+    // window must span it.
     setTimeout(() => {
       mkdirSync(join(dir, "messages"), { recursive: true })
       writeFileSync(
         join(dir, "messages", "1-beta.json"),
         JSON.stringify({ from: "beta", to: "alpha", type: "stop", body: "bound the run" }),
       )
-    }, 2_500).unref()
+    }, 34_000).unref()
 
     const run = Promise.race([
       runCoworker(rail, { stallMs: 300, beatMs: 60, graceMs: 0 }),
       new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error("the exchange never ended — the repro bound failed")), 15_000).unref(),
+        setTimeout(() => rej(new Error("the exchange never ended — the repro bound failed")), 60_000).unref(),
       ),
     ])
     await run

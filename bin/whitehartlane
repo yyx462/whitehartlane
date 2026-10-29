@@ -44,6 +44,7 @@ import {
   leaseExpired,
   listJobs,
   bookingStale,
+  leaseHolderPid,
   liveLeaseHolder,
   loadJob,
   normalizeSpur,
@@ -757,17 +758,22 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
-    if (job.state !== "running" || !pidAlive(job.pid)) {
+    // THE CANONICAL ORACLE ANSWERS (gate-r32 principles-300, pause's
+    // twin): bookingStale's lease arm, never the raw pid half — the
+    // residue shape (dead loser pid on the record, live winner on the
+    // lease) refreshes like any live run, signalling the holder.
+    if (job.state !== "running" || bookingStale(job, Date.now())) {
       console.error(`refresh: ${job.id} is ${job.state}${job.pid ? " (orchestrator not live)" : ""} — only a running Job refreshes. A parked one is continue.`)
       process.exitCode = 2
       return
     }
     const ceiling = 10 * 60_000
     writeFileSync(join(job.dir, "drain.deadline"), new Date(Date.now() + ceiling).toISOString())
+    const refreshTarget = pidAlive(job.pid) ? job.pid : job.lease ? (leaseHolderPid(job.lease) ?? job.pid) : job.pid
     try {
-      process.kill(job.pid, "SIGTERM")
+      process.kill(refreshTarget, "SIGTERM")
     } catch (err) {
-      console.error(`refresh: could not signal pid ${job.pid} (${err.message})`)
+      console.error(`refresh: could not signal pid ${refreshTarget} (${err.message})`)
       process.exitCode = 1
       return
     }
@@ -817,7 +823,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
-    if (job.state !== "running" || !pidAlive(job.pid)) {
+    // THE CANONICAL ORACLE ANSWERS (gate-r32 principles-300): the raw
+    // record.pid is the raced half — the double-continue residue leaves
+    // the lease's LOSER on the pid field while the winner still beats
+    // the job, and the raw test reported a live-held Job "(orchestrator
+    // not live)" — a fact the store's own oracle contradicts, and the
+    // dead end of abort's own prescription ("pause it first"). Pause is
+    // the sanctioned stop of a live writer: proceed, and signal the
+    // holder the oracle names when the record's pid is the dead half.
+    if (job.state !== "running" || bookingStale(job, Date.now())) {
       console.error(`pause: ${job.id} is ${job.state}${job.pid ? " (orchestrator not live)" : ""} — only a running Job can pause`)
       process.exitCode = 2
       return
@@ -832,11 +846,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       }
       writeFileSync(join(job.dir, "drain.deadline"), new Date(Date.now() + ms).toISOString())
     }
+    const pauseTarget = pidAlive(job.pid) ? job.pid : job.lease ? (leaseHolderPid(job.lease) ?? job.pid) : job.pid
     try {
-      process.kill(job.pid, "SIGTERM")
-      console.log(`pause: signalled orchestrator pid ${job.pid} — ${job.id} drains to a boundary, then books paused`)
+      process.kill(pauseTarget, "SIGTERM")
+      console.log(`pause: signalled orchestrator pid ${pauseTarget} — ${job.id} drains to a boundary, then books paused`)
     } catch (err) {
-      console.error(`pause: could not signal pid ${job.pid} (${err.message})`)
+      console.error(`pause: could not signal pid ${pauseTarget} (${err.message})`)
       process.exitCode = 1
     }
     return
