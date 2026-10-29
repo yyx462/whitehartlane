@@ -47,7 +47,7 @@ import {
   type TranscriptPointer,
 } from "./store.ts"
 import { readState } from "../core/state.ts"
-import { resolveOpencode, resolvePi } from "./transcripts.ts"
+import { opencodeSessionExists, resolveOpencode, resolvePi } from "./transcripts.ts"
 import { defaultRunner, jsonAt, type RunnerResult } from "../doors/runners.ts"
 import { HerdrTransport } from "./herdr-transport.ts"
 import { OpenCodeHost, parseAgentStatus } from "./opencode-host.ts"
@@ -1209,7 +1209,22 @@ export class Rail implements ShepPort {
       .filter((p) => p.unit === `w-${name}` && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
-    return latest?.transcript?.session_id
+    const sid = latest?.transcript?.session_id
+    if (sid === undefined) return undefined
+    // THE POINTER IS EVIDENCE ONLY WHEN IT RESOLVES (gate-r26
+    // momentum-80): the ADR-5 resume arc books the PRIOR run's
+    // session id verbatim (inhabitPane, resumeSession ?? resolve… — no
+    // resolution, no liveness), so a resumed pane whose agent never
+    // boards carried a DEAD predecessor's booking as boarding
+    // evidence, and the birth judge spared it past born_ms forever —
+    // riding the full stall ceiling born_ms exists to cut. Verified
+    // against the host store when the pointer is opencode's; other
+    // tools' pointers ride stated (no store check here) — the resume
+    // arc that books ids verbatim is opencode's ADR-5 shape.
+    if (latest?.transcript?.tool === "opencode" && !opencodeSessionExists(sid)) {
+      return undefined // a dead pointer is not boarding evidence
+    }
+    return sid
   }
 
   // The birth judge's second look (j-4a0009): bookSessionLate ran at

@@ -353,6 +353,15 @@ export function opencodeSessionExists(id: string): boolean {
   return listOpencodeSessions(1000).some((s) => s.id === id)
 }
 
+// Does the session exist in the opencode store? The birth judge's
+// boarding oracle (rail.bookedSessionOf, gate-r26 momentum-80) reuses
+// THE one existence oracle (above): a booked POINTER is evidence only
+// when the session it names is real — the ADR-5 resume arc books the
+// PRIOR run's session id verbatim, and a resumed pane whose agent
+// never boards would otherwise be spared forever on a dead
+// predecessor's booking, riding the full stall ceiling born_ms
+// exists to cut.
+
 // The spawner session's current title — the identity half of the wake
 // ladder's parent-pane guard (the host tool syncs the session title
 // into the pane's terminal title, "OC | <title>"). Self-contained on

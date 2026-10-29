@@ -365,9 +365,6 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
         if (gateOnly) return // decided + ledger row; the caller levies
         gateAudit = g.decision.audit === true
-        if (gateAudit && !val("model")) {
-          console.log("review: dropout audit without --model — temperature pins dropped; the lenses run on the host default, untuned")
-        }
         // THE SUBSET QUESTION lives in the DOOR's parse (gate-r21
         // principles-41, the bin seat of r20 tests-5001's class): the
         // old `roster.length < 4` here meant a four-lens roster —
@@ -421,6 +418,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     if (ready.skipped) {
       console.log(reviewReceipt(ready))
       return
+    }
+    // THE RECEIPT REPORTS, NEVER PREDICTS (gate-r26 principles-62):
+    // "temperature pins dropped" is the DOOR's fact — the strip runs
+    // only when the template also declares no model, so a
+    // model-carrying template keeps its pins (tuned at its own model)
+    // and this line stays silent for it. The old pre-door print
+    // claimed the drop for every audit without --model.
+    if (ready.untuned === true) {
+      console.log("review: dropout audit without --model — temperature pins dropped; the lenses run on the host default, untuned")
     }
     // the door's own admission screens judge the materialized program
     // (grammar, deliverables, brief paths) — a broken template dies

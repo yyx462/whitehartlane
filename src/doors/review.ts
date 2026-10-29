@@ -47,7 +47,7 @@ export type ReviewArgs = {
 }
 
 export type ReviewReady =
-  | { ok: true; dir: string; skipped: false; headShort: string }
+  | { ok: true; dir: string; skipped: false; headShort: string; untuned?: true }
   | { ok: true; dir: null; skipped: true; why: string; files: number }
   | { ok: false; why: string; code: 1 | 2 }
 
@@ -478,38 +478,28 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   return res.changed || tableChanged ? res.text : toml
 }
 
-// "does this document pin temperature anywhere?" — a deep walk over a
-// PARSED subtree (r23 tests-40: the word in a comment or a string
-// value is not a pin; the KEY is).
-function hasTemperatureKey(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(hasTemperatureKey)
-  if (node && typeof node === "object") {
-    return Object.entries(node as Record<string, unknown>).some(
-      ([k, v]) => k === "temperature" || hasTemperatureKey(v),
-    )
-  }
-  return false
-}
-
 // THE SCREEN ANSWERS ITS CONSUMERS' QUESTION (gate-r22 tests-6101,
-// widened gate-r25 principles-60): "does this program pin a
-// temperature the RUN-TIME will enforce?" — every spawn seat: stage
-// units AND coworker members (member temperature rides
-// rail.inhabitPane into the shared host birth, which refuses any
-// temperature spawn with no model). The r22 narrowing to units
-// dropped the members seat BASE's textual screen covered, and a
-// member-pinned model-less template died at member birth on infra
-// the door was moved to catch. Tables no consumer reads
-// (loadManifest ignores them) stay out of scope — the tests-6101
-// false-refusal law. One question, every enforced seat, both sites
-// (the screen and the strip's post-strip verify).
+// widened gate-r25 principles-60, flattened gate-r26 principles-61):
+// "does this program pin a temperature the RUN-TIME will enforce?" —
+// an ENTRY-LEVEL temperature key on a stage unit or a coworker member
+// (the only shape any consumer reads: the manifest hands
+// entry.temperature to the host birth, which refuses any temperature
+// spawn with no model). Tables no consumer reads stay out of scope
+// (the tests-6101 law), and so do NESTED keys inside an entry
+// (tuning = { temperature = 0.3 } is data, not a pin — loadManifest
+// ignores it; the deep walk refused templates the run-time runs
+// untuned, the false-refusal class one nesting level down). One
+// question, one level, every enforced seat — the screen and the
+// strip's post-strip verify.
 function pinsSpawnTemperature(parsed: unknown): boolean {
   const stage = (parsed as { stage?: unknown })?.stage
   const stages = Array.isArray(stage) ? stage : []
   return stages.some((s) => {
     if (s == null || typeof s !== "object") return false
     const stageObj = s as { units?: unknown; members?: unknown }
-    return hasTemperatureKey(stageObj.units ?? null) || hasTemperatureKey(stageObj.members ?? null)
+    return [stageObj.units, stageObj.members].some(
+      (arr) => Array.isArray(arr) && arr.some((e) => e != null && typeof e === "object" && "temperature" in e),
+    )
   })
 }
 
@@ -711,6 +701,9 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // model-less audit levy's own shape) evaluated it and threw
   // ReferenceError before any ReviewReady)
   let materializedToml: string | undefined
+  // set by the audit strip branch — the bin's receipt reports it
+  // (gate-r26 principles-62)
+  let untunedAudit = false
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
     let toml = templateToml
@@ -839,6 +832,15 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
           }
         }
         toml = stripped
+        // THE RECEIPT'S FACT, ANSWERED AT THE ONE SEAT THAT KNOWS
+        // (gate-r26 principles-62): "were the pins dropped?" is this
+        // branch's own decision — the bin used to print "temperature
+        // pins dropped" gated only on (audit && no --model), but this
+        // strip runs only when the TEMPLATE also declares no model; a
+        // model-carrying template kept its pins under a receipt that
+        // claimed they were dropped. The bin reports this flag; it no
+        // longer predicts.
+        untunedAudit = true
       } else {
         return {
           ok: false,
@@ -1006,7 +1008,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     if (!existsSync(args.traceDir)) return { ok: false, why: `--trace-dir ${args.traceDir} does not exist`, code: 2 }
     cpSync(args.traceDir, join(dir, "data", "trace"), { recursive: true })
   }
-  return { ok: true, dir, skipped: false, headShort }
+  return { ok: true, dir, skipped: false, headShort, ...(untunedAudit ? { untuned: true as const } : {}) }
 }
 
 // The receipt the door prints after materializing (before any levy) —
