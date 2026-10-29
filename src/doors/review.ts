@@ -98,9 +98,11 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
   const pin = `model = ${JSON.stringify(model)}`
   const lines = templateToml.split("\n")
-  // 1) the [workflow] table header — tolerant: interior spaces and a
-  // trailing comment (gate-r2 tests-41: "[ workflow ]" parses fine)
-  const headerIdx = lines.findIndex((l) => /^\[\s*workflow\s*\]\s*(#.*)?$/.test(l.trim()))
+  // 1) the [workflow] table header — tolerant: interior spaces, a
+  // trailing comment (gate-r2 tests-41: "[ workflow ]" parses fine),
+  // and a QUOTED table key (gate-r18 tests-3001: ["workflow"] is
+  // legal TOML smol-toml parses into the same workflow table)
+  const headerIdx = lines.findIndex((l) => /^\[\s*["']?workflow["']?\s*\]\s*(#.*)?$/.test(l.trim()))
   if (headerIdx !== -1) {
     let end = lines.length
     for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -212,22 +214,11 @@ function rebuildInlineUnits(
   edit: (u: Record<string, unknown>) => Record<string, unknown> | null,
 ): { text: string; saw: boolean; changed: boolean } | null {
   const lines = toml.split("\n")
-  // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [`
-  // are legal TOML the door's text-preserving materialization stages
-  const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
-  let stagesWithUnits: Array<Array<Record<string, unknown>>> = []
-  try {
-    const parsed = parseToml(toml) as { stage?: unknown }
-    // a singular [stage] table is legal TOML the parse hands back as a
-    // plain object — never crash on the shape (gate-r17 tests-2); a
-    // template the door cannot subset refuses at the verify instead
-    const stages = Array.isArray(parsed.stage) ? (parsed.stage as Array<{ units?: unknown }>) : []
-    stagesWithUnits = stages
-      .map((s) => (Array.isArray(s.units) ? s.units.filter((u): u is Record<string, unknown> => !!u && typeof u === "object") : []))
-      .filter((units) => units.length > 0)
-  } catch {
-    return null // the door's own parse verify refuses these bytes honestly
-  }
+  // block DETECTOR: spacing-tolerant (gate-r11 momentum-24) and
+  // quoted-key-tolerant — `["units"] = [` is legal TOML
+  const unitsLine = /^[ \t]*["']?units["']?[ \t]*=[ \t]*\[/
+  // the inline serializer is TOTAL over the parse's own value shapes
+  // (gate-r15 tests-1: nested tables and arrays)
   const inline = (v: unknown): string | undefined => {
     if (typeof v === "string") return JSON.stringify(v)
     if (typeof v === "number" || typeof v === "boolean") return String(v)
@@ -247,15 +238,38 @@ function rebuildInlineUnits(
   }
   let saw = false
   let changed = false
-  let zip = 0
   for (let i = 0; i < lines.length; i++) {
     if (!unitsLine.test(lines[i])) continue
     saw = true
-    const stageUnits = stagesWithUnits[zip]
-    zip += 1
-    if (stageUnits === undefined) return null // text/parse disagreement — the verify refuses honestly
+    // THE PARSE IS THE EXTENT ORACLE (gate-r18 tests-3002/3003,
+    // momentum-33): the block ends at the SMALLEST line-prefix from
+    // here that parses as TOML. No closer scan (a ']'-initial line
+    // inside a multi-line basic string cut the splice mid-string and
+    // manufactured invalid TOML); no cross-stage zip (an
+    // array-of-tables stage ahead of an inline stage misaligned the
+    // document's stage order and rebuilt the WRONG stage's units,
+    // silently inverting the roster). Each block carries ITS OWN
+    // parse; the document's stage order never enters. A unitsLine
+    // match with NO parseable extent (e.g. the bytes sit inside a
+    // multi-line string elsewhere) refuses honestly here.
+    let end = -1
+    let blockUnits: Array<Record<string, unknown>> | null = null
+    for (let e = i; e < lines.length && e < i + 500; e++) {
+      try {
+        const p = parseToml(lines.slice(i, e + 1).join("\n")) as { units?: unknown }
+        if (Array.isArray(p.units)) {
+          blockUnits = p.units as Array<Record<string, unknown>>
+          end = e
+          break
+        }
+      } catch {
+        /* extend the span until the parse closes the array */
+      }
+    }
+    if (end === -1) return null // no parseable extent — the verify refuses honestly
+    const units = blockUnits.filter((u): u is Record<string, unknown> => !!u && typeof u === "object")
     const kept: string[] = []
-    for (const u of stageUnits) {
+    for (const u of units) {
       const next = edit(u)
       if (next === null) continue
       const entries = Object.entries(next).map(([k, v]) => {
@@ -266,20 +280,6 @@ function rebuildInlineUnits(
       kept.push(`{ ${entries.join(", ")} }`)
     }
     const rebuilt = `units = [ ${kept.join(", ")} ]`
-    const t = lines[i].trim()
-    if (/\]\s*(#.*)?$/.test(t) && !t.endsWith("[")) {
-      // single-line block: the closer rides the same line
-      if (lines[i] !== rebuilt) {
-        lines[i] = rebuilt
-        changed = true
-      }
-      continue
-    }
-    // multi-line block: replace through its closer (which may carry a
-    // trailing comment — gate-r15 tests-1)
-    let end = i + 1
-    while (end < lines.length && !/^\]/.test(lines[end].trim())) end++
-    if (end >= lines.length) return null
     const blockWas = lines.slice(i, end + 1).join("\n")
     lines.splice(i, end + 1 - i, rebuilt)
     if (blockWas !== rebuilt) changed = true
@@ -494,6 +494,15 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // read (r20 principles-12); malformed TOML is a code-2 door refusal,
   // never an escaped stack (r20 tests-30).
   let workflowTomlOut: string | undefined
+  // the FINAL materialized bytes, captured INSIDE the pipeline's scope
+  // (gate-r18 principles-39: the lens handoff used to read
+  // `workflowTomlOut ?? templateToml` OUTSIDE the block that declares
+  // templateToml — ?? short-circuits, so every pipeline-changed path
+  // skipped the right operand and the suite stayed green, while a
+  // changed-NOTHING path (no --model, nothing to strip — the
+  // model-less audit levy's own shape) evaluated it and threw
+  // ReferenceError before any ReviewReady)
+  let materializedToml: string | undefined
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
     let toml = templateToml
@@ -524,6 +533,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // the empty-roster guard refuses.
     if (args.roster && args.roster.length < 4) {
       const keep = new Set(args.roster)
+      // a singular [stage] table is legal TOML the parse hands back as
+      // a plain object — the run refuses it ("stages must be an
+      // array"), and so does the door, typed (gate-r18 tests-2006:
+      // .flatMap on the object escaped as a raw TypeError stack)
+      if (parsedTemplate.stage !== undefined && !Array.isArray(parsedTemplate.stage)) {
+        return {
+          ok: false,
+          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
+          code: 2,
+        }
+      }
       const ids = (parsedTemplate.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id))
       const stray = ids.filter((id) => id !== undefined && !keep.has(id))
       if (stray.length > 0) {
@@ -601,6 +621,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       toml = pinned
     }
     workflowTomlOut = toml !== templateToml ? toml : undefined
+    materializedToml = toml
   }
 
   const headShort = headSha.slice(0, 8)
@@ -666,11 +687,21 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // one P1 per spelling per round. The parse is the reader; this file
   // is the handoff; intake no longer re-derives.
   {
-    const finalToml = workflowTomlOut ?? templateToml
+    const finalToml = materializedToml ?? readFileSync(join(template, "workflow.toml"), "utf8")
     let ids: string[] = []
     try {
-      const parsedFinal = parseToml(finalToml) as { stage?: Array<{ units?: Array<{ id?: string }> }> }
-      ids = (parsedFinal.stage ?? [])
+      const parsedFinal = parseToml(finalToml) as { stage?: unknown }
+      // singular [stage]: same typed refusal as the roster verify —
+      // the run requires an array; never .flatMap an object
+      // (gate-r18 tests-2006's twin crash site)
+      if (parsedFinal.stage !== undefined && !Array.isArray(parsedFinal.stage)) {
+        return {
+          ok: false,
+          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
+          code: 2,
+        }
+      }
+      ids = ((parsedFinal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
         .flatMap((s) => (s.units ?? []).map((u) => u?.id))
         .filter((x): x is string => typeof x === "string")
     } catch {
