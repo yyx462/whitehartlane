@@ -98,6 +98,11 @@ test("intake's lens derivation reads every unit the door's parse reads — quote
         "",
       ].join("\n") + "\n",
     )
+    // gate-r17: intake reads the door's parse-derived handoff
+    // (data/review/lenses.txt); the harness stages the same handoff
+    // the door writes for these bytes
+    mkdirSync(join(ctl, "data", "review"), { recursive: true })
+    writeFileSync(join(ctl, "data", "review", "lenses.txt"), parsedUnitIds(ctl).join("\n") + "\n")
     assert.deepEqual(
       deriveLenses(ctl).sort(),
       parsedUnitIds(ctl).sort(),

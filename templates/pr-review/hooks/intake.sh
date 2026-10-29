@@ -93,26 +93,22 @@ i=0
 # test/review/principles-26.test.ts (marker-delimited: edit the
 # pipeline here, never in the test — the test runs these exact bytes)
 # :lens-derivation-start
-lenses=$({ # spelling- and indent-tolerant (gate-r10 principles-31/questions-9),
-  # quoted-key-tolerant (gate-r15 momentum-30), brace-tolerant
-  # (gate-r16 questions-12): a '{' inside a pre-id VALUE (a code
-  # snippet in a brief — legal TOML, any key order) broke the old
-  # \{[^}{]*id prefix, silently dropping that lens's order file. The
-  # id is matched anywhere inside the units range — entries are
-  # single lines, the range holds only entry lines. Residual, stated:
-  # an id-shaped string inside a brief value derives an inert spurious
-  # order file (no lens consumes it); the door's parse stays the truth
-  # at the verifies. TWIN WARNING: the id class is hooks.ts
-  # SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
-  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE 'id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id['"'"'"]?[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
-  # the [[stage.units]] array-of-tables form — the door's parsed reader
-  # accepts and materializes it (gate-r5 principles-26); the textual
-  # reader must derive the same lenses or every lens silently loses
-  # its shuffled hunk order. Stateful awk (a sed range consumes each
-  # next header as its own end and drops the second unit's id).
-  # Interior spaces in the header are legal TOML (gate-r15 tests-1).
-  awk '/^[ \t]*\[\[[ \t]*stage\.units[ \t]*\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^[ \t]*['"'"'"]?id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')/ { sub(/^[ \t]*['"'"'"]?id['"'"'"]?[ \t]*=[ \t]*["'"'"']/, ""); sub(/["'"'"']$/, ""); print }' "$prog/workflow.toml"
-} | awk '!seen[$0]++')
+# THE ONE READER (gate-r17 — the design replacement the grammar grind
+# forced): the door's own smol-toml parse derived the lens roster ONCE
+# at materialization into data/review/lenses.txt; this hook READS the
+# handoff — it does not re-derive from TOML text. Every textual
+# re-derivation (sed/grep/awk) stayed one legal spelling behind the
+# grammar forever: quotes, padding, key order, quoted keys, trailing
+# comments, spaced headers, braces in briefs — one silent miss each.
+# A missing or empty handoff is a door bug: REFUSE, never silently
+# derive nothing (a lens without its order file reads diff.patch in
+# the shared native order — the correlated first-attention the
+# shuffle exists to kill).
+if [ ! -s "$prog/data/review/lenses.txt" ]; then
+  echo "intake: $prog/data/review/lenses.txt is missing or empty — the door did not hand off the lens roster (this is a door bug; report it)" >&2
+  exit 1
+fi
+lenses=$(cat "$prog/data/review/lenses.txt")
 # :lens-derivation-end
 for lens in $lenses; do
   i=$((i+1))

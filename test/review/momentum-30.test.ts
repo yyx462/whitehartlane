@@ -71,6 +71,11 @@ test("intake's lens derivation reads every unit the door's parse reads — singl
         "",
       ].join("\n") + "\n",
     )
+    // gate-r17: the door's parse derives the handoff (lenses.txt) at
+    // materialization; intake reads it. The harness stages the same
+    // handoff the door writes for these bytes.
+    mkdirSync(join(ctl, "data", "review"), { recursive: true })
+    writeFileSync(join(ctl, "data", "review", "lenses.txt"), parsedUnitIds(ctl).join("\n") + "\n")
     assert.deepEqual(
       deriveLenses(ctl).sort(),
       parsedUnitIds(ctl).sort(),
@@ -103,20 +108,37 @@ test("intake's lens derivation reads every unit the door's parse reads — singl
       ["principles", "tests"],
       "premise: smol-toml — the door's own parser — reads BOTH unit ids from the quoted-key spelling",
     )
+    // the handoff the door writes for these bytes (quoted key included —
+    // the parse reads it, so the handoff carries it)
+    mkdirSync(join(tpl, "data", "review"), { recursive: true })
+    writeFileSync(join(tpl, "data", "review", "lenses.txt"), parsedTpl.join("\n") + "\n")
 
-    // THE LAW: the derivation must equal the parse on the same bytes.
+    // THE LAW (gate-r17's shape): intake derives FROM THE HANDOFF —
+    // derived == the parse, whatever spelling carried the ids.
     const derived = deriveLenses(tpl)
     assert.deepEqual(
       [...derived].sort(),
       [...parsedTpl].sort(),
-      `INV-3/INV-4: "which lens units did this program materialize?" is decided by TWO sites that ` +
-        `DISAGREE on these very bytes. The parse reads ${JSON.stringify(parsedTpl)}; intake.sh's ` +
-        `marker-block derivation — whose own comment promises "single quotes" tolerance — derived ` +
-        `${JSON.stringify(derived)}: its grep/awk arms match the literal bytes id[ \\t]*= and a ` +
-        `single-quoted KEY ({'id' = 'tests'}) matches nothing. That lens silently gets NO ` +
-        `order-<lens>.txt (native correlated read order) while intake still prints "intake ok" — ` +
-        `no refusal, no receipt. Derive from the parse or match quoted keys, or refuse the shape — ` +
-        `never a silent partial-shuffle review.`,
+      `INV-3/INV-4: "which lens units did this program materialize?" is answered by the door's parse, ` +
+        `handed off as data/review/lenses.txt, and read by intake — derived ${JSON.stringify(derived)} vs ` +
+        `parsed ${JSON.stringify(parsedTpl)}. The quoted-key spelling {'id' = 'tests'} rides the parse ` +
+        `into the handoff; no textual re-derivation exists to miss it.`,
+    )
+
+    // the refusal arm (the new design's own law): a program without the
+    // handoff REFUSES — never silently derives nothing (a lens without
+    // its order file reads diff.patch in the shared native order).
+    rmSync(join(tpl, "data", "review", "lenses.txt"))
+    let refused = ""
+    try {
+      deriveLenses(tpl)
+    } catch (err) {
+      refused = String((err as { stderr?: string }).stderr ?? err)
+    }
+    assert.match(
+      refused,
+      /lenses\.txt is missing or empty/,
+      `INV-4 (refusal beats silence): with the handoff absent the block must refuse loudly — got ${JSON.stringify(refused.slice(0, 160))}`,
     )
   } finally {
     rmSync(tmp, { recursive: true, force: true })

@@ -199,22 +199,50 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // spacing-tolerant (gate-r11 momentum-24): `units =[` and `units= [` are
   // legal TOML the door's text-preserving materialization stages verbatim
   const unitsLine = /^[ \t]*units[ \t]*=[ \t]*\[/
-  // EVERY block the door's parse reads (gate-r14 momentum-27): stage[]
-  // is an array and each fan-out stage carries its own units — the
-  // arms used to return after the FIRST block, so a two-wave chain's
-  // second stage kept its unlisted units and the post-verify refused
-  // the gate's own decision as a "door bug". Both arms run to the end;
-  // one return.
+  // THE PARSE IS THE DECISION (gate-r17 — the same replacement the
+  // grammar grind forced on intake): which entries exist and what they
+  // carry comes from smol-toml ONCE; the text surgery only REPLACES
+  // each units block with its parse-kept rebuild. The former text
+  // arms (entry-id regexes, header counters, block-end scans, quote
+  // and padding tolerances) each stayed one legal spelling behind the
+  // grammar forever — the parse cannot. Stage-with-units blocks in
+  // the parse, in order, answer to units blocks in the text, in
+  // order (the zip the misindex class tests-901 pinned).
+  let stagesWithUnits: Array<Array<Record<string, unknown>>> = []
+  try {
+    const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
+    stagesWithUnits = (parsed.stage ?? [])
+      .map((s) => (s.units ?? []).filter((u): u is Record<string, unknown> => !!u && typeof u === "object"))
+      .filter((units) => units.length > 0)
+  } catch {
+    return null // the door's own parse verify refuses these bytes honestly
+  }
+  // the inline serializer is TOTAL over the parse's own value shapes
+  // (gate-r15 tests-1): nested inline tables and arrays included
+  const inline = (v: unknown): string | undefined => {
+    if (typeof v === "string") return JSON.stringify(v)
+    if (typeof v === "number" || typeof v === "boolean") return String(v)
+    if (Array.isArray(v)) {
+      const items = v.map(inline)
+      return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
+    }
+    if (v && typeof v === "object") {
+      const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
+        const s = inline(x)
+        return s === undefined ? null : `${k} = ${s}`
+      })
+      if (entries.some((e) => e === null)) return undefined
+      return `{ ${entries.join(", ")} }`
+    }
+    return undefined
+  }
   let saw = false
   let changed = false
-  // the [[stage.units]] array-of-tables form (gate-r6 tests-102: the
-  // door's parse and intake's reader both bless this form — the strip
-  // refused it with 'no units block'): drop whole blocks whose id is
-  // not in the roster
+  // the [[stage.units]] array-of-tables form (gate-r6 tests-102): drop
+  // whole blocks whose id is not in the roster — the id read through
+  // the SAME parse (quoted keys included, gate-r15 momentum-30), the
+  // block located by its header (spacing-tolerant, gate-r15 tests-1)
   for (let i = 0; i < lines.length; i++) {
-    // interior spaces are legal in the header (gate-r15 tests-1):
-    // `[[ stage.units ]]` parses at the door — the anchor must not be
-    // column-0-exact
     if (!/^\[\[\s*stage\.units\s*\]\]/.test(lines[i].trim())) continue
     saw = true
     let end = i + 1
@@ -231,85 +259,44 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
       i = end - 1
     }
   }
+  // every `units = [` block — single-line and multi-line, ONE arm —
+  // replaced by its parse-kept rebuild
+  let zip = 0
   for (let i = 0; i < lines.length; i++) {
     if (!unitsLine.test(lines[i])) continue
     saw = true
-    // single-line inline array: the closing ] rides the same line —
-    // rebuild it from the parse (the briefs carry literal braces, so
-    // text-side brace matching is doomed)
-    if (/\]\s*(#.*)?$/.test(lines[i].trim()) && !lines[i].trim().endsWith("[")) {
-      try {
-        const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
-        let stageIdx = 0
-        // interior spaces are legal in the stage header (gate-r15
-        // tests-2): `[[ stage ]]` parses at the door, and a counter that
-        // misses it indexes an EARLIER stage's units — the later stage's
-        // rostered entries silently vanish, ok:true, no refusal
-        for (let j = 0; j < i; j++) if (/^\[\[?\s*stage\s*\]?\]/.test(lines[j].trim())) stageIdx++
-        stageIdx -= 1
-        const units = (parsed.stage ?? [])[stageIdx]?.units
-        if (!Array.isArray(units)) return null
-        // the inline serializer is TOTAL over the parse's own value
-        // shapes (gate-r15 tests-1): a nested inline value (env = { … },
-        // tags = [ … ]) is legal TOML the door reads — scalar() refused
-        // it and the whole strip returned null with the false premise
-        // "no units block"
-        const inline = (v: unknown): string | undefined => {
-          if (typeof v === "string") return JSON.stringify(v)
-          if (typeof v === "number" || typeof v === "boolean") return String(v)
-          if (Array.isArray(v)) {
-            const items = v.map(inline)
-            return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
-          }
-          if (v && typeof v === "object") {
-            const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
-              const s = inline(x)
-              return s === undefined ? null : `${k} = ${s}`
-            })
-            if (entries.some((e) => e === null)) return undefined
-            return `{ ${entries.join(", ")} }`
-          }
-          return undefined
-        }
-        const kept: string[] = []
-        for (const u of units) {
-          if (!u || typeof u !== "object" || typeof u.id !== "string") continue
-          if (!keep.has(u.id)) continue
-          const entries = Object.entries(u).map(([k, v]) => {
-            const s = inline(v)
-            return s === undefined ? null : `${k} = ${s}`
-          })
-          if (entries.some((e) => e === null)) return null
-          kept.push(`{ ${entries.join(", ")} }`)
-        }
-        lines[i] = `units = [ ${kept.join(", ")} ]`
-        changed = true
-        continue
-      } catch {
-        return null
-      }
+    const stageUnits = stagesWithUnits[zip]
+    zip += 1
+    if (stageUnits === undefined) return null // text/parse disagreement — the verify refuses honestly
+    // the kept entries from the parse, in order
+    const kept: string[] = []
+    for (const u of stageUnits) {
+      if (typeof u.id !== "string" || !keep.has(u.id)) continue
+      const entries = Object.entries(u).map(([k, v]) => {
+        const s = inline(v)
+        return s === undefined ? null : `${k} = ${s}`
+      })
+      if (entries.some((e) => e === null)) return null
+      kept.push(`{ ${entries.join(", ")} }`)
     }
-    // multi-line block: line surgery (the template's own shape)
-    const start = i
-    let end = start
-    // the closer may carry a trailing comment (gate-r15 tests-1):
-    // `] # lenses` is legal TOML — a bare-`]`-only scan runs to EOF and
-    // refuses with the false premise "no units block"
+    const rebuilt = `units = [ ${kept.join(", ")} ]`
+    const t = lines[i].trim()
+    if (/\]\s*(#.*)?$/.test(t) && !t.endsWith("[")) {
+      // single-line block: the closer rides the same line
+      if (lines[i] !== rebuilt) {
+        lines[i] = rebuilt
+        changed = true
+      }
+      continue
+    }
+    // multi-line block: replace through its closer (which may carry a
+    // trailing comment — gate-r15 tests-1)
+    let end = i + 1
     while (end < lines.length && !/^\]/.test(lines[end].trim())) end++
     if (end >= lines.length) return null
-    const block = lines.slice(start + 1, end)
-    const kept = block.filter((l) => {
-      // both quote spellings for the id AND its key (gate-r12
-      // principles-34, gate-r15 momentum-30): TOML legalizes
-      // single-quoted ids, unpadded keys, and quoted keys — {'id' =
-      // 'x'} — and the door's parse materializes all of it; this
-      // reader reads what the door writes
-      const m = l.match(new RegExp(`\\{\\s*["']?id["']?\\s*=\\s*["'](${SHEP_ID_CLASS})["']`))
-      return !m || keep.has(m[1])
-    })
-    if (kept.length !== block.length) changed = true
-    lines.splice(start + 1, end - start - 1, ...kept)
-    i = start + kept.length + 1 // past this block's closing ]
+    const blockWas = lines.slice(i, end + 1).join("\n")
+    lines.splice(i, end + 1 - i, rebuilt)
+    if (blockWas !== rebuilt) changed = true
   }
   if (!saw) return null
   return changed ? lines.join("\n") : toml
@@ -648,6 +635,28 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the door's own law, not by a new one.
   mkdirSync(join(dir, "data", "review"), { recursive: true })
   writeFileSync(join(dir, "data", "review", "config.sh"), lines.join("\n") + "\n")
+  // THE ONE READER (gate-r17 — the design replacement the grammar grind
+  // forced): "which lens units did this program materialize?" is
+  // answered ONCE, by the door's own smol-toml parse of the FINAL
+  // materialized bytes, and intake.sh reads THIS file. Four textual
+  // shadow-readers (sed/grep/awk arms) each stayed one legal TOML
+  // spelling behind the grammar forever — quotes, padding, key order,
+  // quoted keys, trailing comments, spaced headers, braces in briefs —
+  // one P1 per spelling per round. The parse is the reader; this file
+  // is the handoff; intake no longer re-derives.
+  {
+    const finalToml = workflowTomlOut ?? templateToml
+    let ids: string[] = []
+    try {
+      const parsedFinal = parseToml(finalToml) as { stage?: Array<{ units?: Array<{ id?: string }> }> }
+      ids = (parsedFinal.stage ?? [])
+        .flatMap((s) => (s.units ?? []).map((u) => u?.id))
+        .filter((x): x is string => typeof x === "string")
+    } catch {
+      return { ok: false, why: `the final materialized workflow.toml does not parse — cannot hand off the lens roster (this is a door bug; report it)`, code: 2 }
+    }
+    writeFileSync(join(dir, "data", "review", "lenses.txt"), ids.length > 0 ? ids.join("\n") + "\n" : "")
+  }
   // refuse, never vanish (the self-review's tests-4): a --body-file
   // that does not exist is a typo'd path, and silently ignoring it
   // reviews a PR missing the claims the caller thought it carried
