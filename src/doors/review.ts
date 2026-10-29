@@ -238,9 +238,31 @@ function rebuildInlineUnits(
   }
   let saw = false
   let changed = false
+  // STRING-EMBEDDED FALSE POSITIVES (gate-r19 tests-9101): a
+  // `units = [` line inside a multi-line brief string matches the
+  // textual detector, and its slice can even PARSE standalone when the
+  // quoted example carries its own closing bracket — the oracle would
+  // rewrite a lens's quoted law. The discriminator: string content
+  // never becomes parse data. A REAL block's unit ids all exist in the
+  // WHOLE-document parse's stage units; a quoted example's ids do not.
+  // (Residual, stated: a brief quoting the program's OWN unit ids
+  // verbatim passes containment and its example is rewritten — the
+  // pathological self-documenting template.)
+  let documentUnitIds: Set<string> | null = null
+  try {
+    const whole = parseToml(toml) as { stage?: unknown }
+    const stages = Array.isArray(whole.stage) ? whole.stage : whole.stage !== undefined ? [whole.stage] : []
+    documentUnitIds = new Set(
+      (stages as Array<{ units?: unknown }>)
+        .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
+        .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
+        .filter((x): x is string => x !== null),
+    )
+  } catch {
+    return null // the whole document does not parse — the verify refuses honestly
+  }
   for (let i = 0; i < lines.length; i++) {
     if (!unitsLine.test(lines[i])) continue
-    saw = true
     // THE PARSE IS THE EXTENT ORACLE (gate-r18 tests-3002/3003,
     // momentum-33): the block ends at the SMALLEST line-prefix from
     // here that parses as TOML. No closer scan (a ']'-initial line
@@ -266,8 +288,27 @@ function rebuildInlineUnits(
         /* extend the span until the parse closes the array */
       }
     }
-    if (end === -1) return null // no parseable extent — the verify refuses honestly
+    if (end === -1) {
+      // In a document the WHOLE-parse already accepted (top of this
+      // function), a real inline block's prefix closes somewhere
+      // parseable — inline arrays are self-contained. No parseable
+      // extent therefore means a quoted example whose own bracket
+      // never closes inside the string (gate-r19 tests-9101-2): skip
+      // the false positive, never dead-end the strip on it.
+      continue
+    }
     const units = blockUnits.filter((u): u is Record<string, unknown> => !!u && typeof u === "object")
+    // the containment discriminator above: a "block" whose parsed ids
+    // do not exist in the document's stage units is a quoted example
+    // inside a string value — not the strip's to edit. Skip it WITHOUT
+    // counting it as a seen block (a template whose only inline-looking
+    // line is a quoted example is served by its real units, wherever
+    // they are declared — never refused as "no units block")
+    const blockIds = units.map((u) => (typeof u.id === "string" ? u.id : null)).filter((x): x is string => x !== null)
+    if (blockIds.length > 0 && !blockIds.every((id) => documentUnitIds.has(id))) {
+      continue
+    }
+    saw = true
     const kept: string[] = []
     for (const u of units) {
       const next = edit(u)
@@ -707,7 +748,22 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     } catch {
       return { ok: false, why: `the final materialized workflow.toml does not parse — cannot hand off the lens roster (this is a door bug; report it)`, code: 2 }
     }
-    writeFileSync(join(dir, "data", "review", "lenses.txt"), ids.length > 0 ? ids.join("\n") + "\n" : "")
+    // ONE doctrine, both paths (gate-r19 questions-14): the roster
+    // path already refuses a template whose parse reads zero stage
+    // units ("a zero-lens review is the empty-roster shape the door
+    // refuses") — the plain path used to materialize it ok:true with
+    // an EMPTY handoff, and the run's own intake gate exited 1 on
+    // exactly that ("missing or empty handoff … this is a door bug"):
+    // a booked job dead at its first gate, holding a receipt that
+    // blames the door for the shape the door just shipped.
+    if (ids.length === 0) {
+      return {
+        ok: false,
+        why: `the template declares no stage units — a zero-lens review is the empty-roster shape the door refuses (the run's intake gate would exit on the empty handoff)`,
+        code: 2,
+      }
+    }
+    writeFileSync(join(dir, "data", "review", "lenses.txt"), ids.join("\n") + "\n")
   }
   // refuse, never vanish (the self-review's tests-4): a --body-file
   // that does not exist is a typo'd path, and silently ignoring it

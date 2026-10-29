@@ -1172,11 +1172,17 @@ export function cycle(deps: CycleDeps): boolean {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
       deps.attempts.set(unit.id, attempts)
       if (attempts >= RETRY_CAP) {
+        // faultsCanary FALSE, fault TRUE (gate-r19 principles-40): a
+        // spawn that keeps failing is pure transport — the third close
+        // of the same infra class as the fault-lane and birth-judge
+        // closes, which pass false for exactly this reason (#144:
+        // infra says nothing about the plan; "canary-stopped" is the
+        // label reserved for "a REAL answer failed")
         finish(unit.id, false, {
           unit: unit.id,
           result: "spawn failed",
           pass: false,
-        }, "spawn", true, false, `spawn failed ${attempts} times`)
+        }, "spawn", false, true, `spawn failed ${attempts} times`)
         deps.shep.wake(unit.id, "blocked", `spawn failed ${attempts} times`)
       } else {
         // #165: arm a near-term retry — never ride the stall ladder for a

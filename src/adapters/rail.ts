@@ -180,6 +180,16 @@ export class Rail implements ShepPort {
   private readonly scopedFn: (name: string) => string
   // per-pane memory the permission sweep derives roots and context from
   private readonly cwdOf = new Map<string, string>()
+  // spawn-time stamps per pane label (gate-r19 momentum-34): the
+  // rebook's since window falls back to these when the ledger is
+  // unavailable (openLedger's degraded mode) — the ledger only carries
+  // the pane's born stamp, and a spawn-time since does the same job;
+  // the old NOW fallback started the window after any existing
+  // session, so the degraded-mode rebook answered undefined for a
+  // session sitting resolvable in the host store and the birth judge
+  // killed a boarded pane ("dead at birth" — a false verdict written
+  // by an infra failure)
+  private readonly spawnedAtOf = new Map<string, string>()
   // spawn-time worker kind per label — tryBookSession needs it to
   // re-resolve a session (the birth judge's second look)
   private readonly kindOf = new Map<string, string>()
@@ -613,6 +623,7 @@ export class Rail implements ShepPort {
     const name = this.scopedName(rawName)
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
+    this.spawnedAtOf.set(name, since)
     // gate-r5 momentum-17: the pane's KIND books at the BIRTH site —
     // the fleet-tab path both spawnWorker and resumeWorker delegate
     // here; a pane whose agent boards slower than the one-shot +5s
@@ -690,6 +701,7 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    this.spawnedAtOf.set(label, new Date().toISOString())
     this.kindOf.set(label, kind)
     // DRY-RUN (worker_kind = "mock"): no pane, no agent — the unit's
     // done line lands next to its brief and the cycle settles it
@@ -765,6 +777,7 @@ export class Rail implements ShepPort {
     const label = this.scopedName(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
+    this.spawnedAtOf.set(label, new Date().toISOString())
     // gate-r4 principles-25: the resumed pane's KIND books too —
     // tryBookSession's guard (`!cwd || !kind`) structurally refused
     // the birth judge's one-last-look for every resumed pane, and a
@@ -1224,7 +1237,9 @@ export class Rail implements ShepPort {
         .filter((p) => p.label === label)
         .sort((a, b) => a.born.localeCompare(b.born))
         .map((p) => p.born)
-        .pop() ?? new Date().toISOString()
+        .pop() ??
+      this.spawnedAtOf.get(label) ?? // degraded mode (no ledger): the spawn stamp (gate-r19 momentum-34)
+      new Date().toISOString()
     // gate-r9 tests-300: when a MARKER exists, it is the discriminator —
     // resolveOpencode's own doctrine (transcripts.ts: no candidate carries
     // the marker → NO id; the caller retries) forbids the marker-less
