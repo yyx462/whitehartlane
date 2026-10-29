@@ -261,30 +261,38 @@ function inlineTomlValue(v: unknown): string | undefined {
 // Returns null when the document does not parse (the caller's verify
 // refuses honestly). The inline serializer is TOTAL over the parse's
 // own value shapes (gate-r15 tests-1: nested tables and arrays).
-// the whole-document stage-unit ids — the CONTAINMENT ORACLE both
-// strip arms share (gate-r19 tests-9101's law: string content never
-// becomes parse data; a "block" whose ids do not exist in the
-// document's parse is a quoted example inside a string value).
-// Throws on unparseable bytes — the callers refuse honestly.
-function documentStageUnitIds(toml: string): Set<string> {
+// the whole-document stage-entry ids for an array key — the
+// CONTAINMENT ORACLE both strip arms share (gate-r19 tests-9101's
+// law: string content never becomes parse data; a "block" whose
+// entries do not exist in the document's parse is a quoted example
+// inside a string value). Throws on unparseable bytes — the callers
+// refuse honestly.
+function documentStageIds(toml: string, key: string, identity: "id" | "name"): Set<string> {
   const whole = parseToml(toml) as { stage?: unknown }
   const stages = Array.isArray(whole.stage) ? whole.stage : whole.stage !== undefined ? [whole.stage] : []
   return new Set(
-    (stages as Array<{ units?: unknown }>)
-      .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
-      .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
+    (stages as Array<Record<string, unknown>>)
+      .flatMap((s) => {
+        const entries = s?.[key]
+        return Array.isArray(entries) ? entries : []
+      })
+      .map((u) => (u && typeof u === "object" && typeof (u as Record<string, unknown>)[identity] === "string" ? ((u as Record<string, string>)[identity]) : null))
       .filter((x): x is string => x !== null),
   )
 }
 
-function rebuildInlineUnits(
+function rebuildInlineArray(
   toml: string,
+  key: string,
+  identity: "id" | "name",
   edit: (u: Record<string, unknown>) => Record<string, unknown> | null,
 ): { text: string; saw: boolean; changed: boolean } | null {
   const lines = toml.split("\n")
   // block DETECTOR: spacing-tolerant (gate-r11 momentum-24) and
-  // quoted-key-tolerant — `["units"] = [` is legal TOML
-  const unitsLine = /^[ \t]*["']?units["']?[ \t]*=[ \t]*\[/
+  // quoted-key-tolerant — `["units"] = [` is legal TOML. One rewriter
+  // for both stage arrays (units — gate-r17; members — gate-r25
+  // principles-60): same grammar, same oracles.
+  const arrayLine = new RegExp(`^[ \t]*["']?${key}["']?[ \t]*=[ \t]*\\[`)
   let saw = false
   let changed = false
   // STRING-EMBEDDED FALSE POSITIVES (gate-r19 tests-9101): a
@@ -292,19 +300,19 @@ function rebuildInlineUnits(
   // textual detector, and its slice can even PARSE standalone when the
   // quoted example carries its own closing bracket — the oracle would
   // rewrite a lens's quoted law. The discriminator: string content
-  // never becomes parse data. A REAL block's unit ids all exist in the
-  // WHOLE-document parse's stage units; a quoted example's ids do not.
+  // never becomes parse data. A REAL block's entry ids all exist in the
+  // WHOLE-document parse's stage arrays; a quoted example's ids do not.
   // (Residual, stated: a brief quoting the program's OWN unit ids
   // verbatim passes containment and its example is rewritten — the
-  // pathological self-documenting template.)
-  let documentUnitIds: Set<string>
+  // pathological self-documentating template.)
+  let documentIds: Set<string>
   try {
-    documentUnitIds = documentStageUnitIds(toml)
+    documentIds = documentStageIds(toml, key, identity)
   } catch {
     return null // the whole document does not parse — the verify refuses honestly
   }
   for (let i = 0; i < lines.length; i++) {
-    if (!unitsLine.test(lines[i])) continue
+    if (!arrayLine.test(lines[i])) continue
     // THE PARSE IS THE EXTENT ORACLE (gate-r18 tests-3002/3003,
     // momentum-33): the block ends at the SMALLEST line-prefix from
     // here that parses as TOML. No closer scan (a ']'-initial line
@@ -313,16 +321,16 @@ function rebuildInlineUnits(
     // array-of-tables stage ahead of an inline stage misaligned the
     // document's stage order and rebuilt the WRONG stage's units,
     // silently inverting the roster). Each block carries ITS OWN
-    // parse; the document's stage order never enters. A unitsLine
+    // parse; the document's stage order never enters. An arrayLine
     // match with NO parseable extent (e.g. the bytes sit inside a
     // multi-line string elsewhere) refuses honestly here.
     let end = -1
-    let blockUnits: Array<Record<string, unknown>> | null = null
+    let blockEntries: Array<Record<string, unknown>> | null = null
     for (let e = i; e < lines.length && e < i + 500; e++) {
       try {
-        const p = parseToml(lines.slice(i, e + 1).join("\n")) as { units?: unknown }
-        if (Array.isArray(p.units)) {
-          blockUnits = p.units as Array<Record<string, unknown>>
+        const p = parseToml(lines.slice(i, e + 1).join("\n")) as Record<string, unknown>
+        if (Array.isArray(p[key])) {
+          blockEntries = p[key] as Array<Record<string, unknown>>
           end = e
           break
         }
@@ -339,30 +347,30 @@ function rebuildInlineUnits(
       // the false positive, never dead-end the strip on it.
       continue
     }
-    const units = blockUnits.filter((u): u is Record<string, unknown> => !!u && typeof u === "object")
+    const entries = blockEntries.filter((u): u is Record<string, unknown> => !!u && typeof u === "object")
     // the containment discriminator above: a "block" whose parsed ids
-    // do not exist in the document's stage units is a quoted example
+    // do not exist in the document's stage arrays is a quoted example
     // inside a string value — not the strip's to edit. Skip it WITHOUT
     // counting it as a seen block (a template whose only inline-looking
-    // line is a quoted example is served by its real units, wherever
+    // line is a quoted example is served by its real entries, wherever
     // they are declared — never refused as "no units block")
-    const blockIds = units.map((u) => (typeof u.id === "string" ? u.id : null)).filter((x): x is string => x !== null)
-    if (blockIds.length > 0 && !blockIds.every((id) => documentUnitIds.has(id))) {
+    const blockIds = entries.map((u) => (typeof u[identity] === "string" ? (u[identity] as string) : null)).filter((x): x is string => x !== null)
+    if (blockIds.length > 0 && !blockIds.every((id) => documentIds.has(id))) {
       continue
     }
     saw = true
     const kept: string[] = []
-    for (const u of units) {
+    for (const u of entries) {
       const next = edit(u)
       if (next === null) continue
-      const entries = Object.entries(next).map(([k, v]) => {
+      const serialized = Object.entries(next).map(([k, v]) => {
         const s = inlineTomlValue(v)
         return s === undefined ? null : `${k} = ${s}`
       })
-      if (entries.some((e) => e === null)) return null
-      kept.push(`{ ${entries.join(", ")} }`)
+      if (serialized.some((e) => e === null)) return null
+      kept.push(`{ ${serialized.join(", ")} }`)
     }
-    const rebuilt = `units = [ ${kept.join(", ")} ]`
+    const rebuilt = `${key} = [ ${kept.join(", ")} ]`
     const blockWas = lines.slice(i, end + 1).join("\n")
     lines.splice(i, end + 1 - i, rebuilt)
     if (blockWas !== rebuilt) changed = true
@@ -379,9 +387,16 @@ function rebuildInlineUnits(
 // dead-ended at its own verify ("the strip regex missed a form … this
 // is a door bug") while the roster strip read the same line fine.
 // Spacing-tolerant (gate-r16 tests-1), quoted-key-tolerant,
-// comment-tolerant — the parser's grammar, one spelling.
+// comment-tolerant — the parser's grammar, one spelling. The same
+// grammar answers the members twin ([[stage.members]]) — one builder.
+function stageArrayHeaderRe(key: string): RegExp {
+  return new RegExp(`^\\[\\[\\s*stage\\s*\\.\\s*["']?${key}["']?\\s*\\]\\]\\s*(#.*)?$`)
+}
 function isStageUnitsHeader(line: string): boolean {
-  return /^\[\[\s*stage\s*\.\s*["']?units["']?\s*\]\]\s*(#.*)?$/.test(line.trim())
+  return stageArrayHeaderRe("units").test(line.trim())
+}
+function isStageMembersHeader(line: string): boolean {
+  return stageArrayHeaderRe("members").test(line.trim())
 }
 
 function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
@@ -406,7 +421,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // — tests-9101's law, both arms.
   let documentUnitIds: Set<string>
   try {
-    documentUnitIds = documentStageUnitIds(toml)
+    documentUnitIds = documentStageIds(toml, "units", "id")
   } catch {
     return null // the whole document does not parse — the verify refuses honestly
   }
@@ -455,7 +470,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   }
   // every `units = [` block — single-line and multi-line, ONE arm —
   // replaced by its parse-kept rebuild
-  const res = rebuildInlineUnits(lines.join("\n"), (u) =>
+  const res = rebuildInlineArray(lines.join("\n"), "units", "id", (u) =>
     typeof u.id === "string" && keep.has(u.id) ? u : null,
   )
   if (res === null) return null
@@ -476,22 +491,26 @@ function hasTemperatureKey(node: unknown): boolean {
   return false
 }
 
-// THE SCREEN ANSWERS ITS CONSUMERS' QUESTION (gate-r22 tests-6101):
-// "does this program pin PER-UNIT temperature?" — stage[].units[].
-// temperature, the scope stripTemperaturePins itself speaks (the run
-// reads the pin per unit at spawn; the host writes
-// provider.<p>.models.<id>.temperature). The old whole-document walk
-// demanded a model for — and the dropout audit's post-strip verify
-// dead-ended on — keys in tables no consumer reads (loadManifest
-// tolerates and ignores them): a false premise refusing a template
-// the control materializes fine, and an audited levy measuring
-// nothing. One question, one scope, both sites.
-function pinsUnitTemperature(parsed: unknown): boolean {
+// THE SCREEN ANSWERS ITS CONSUMERS' QUESTION (gate-r22 tests-6101,
+// widened gate-r25 principles-60): "does this program pin a
+// temperature the RUN-TIME will enforce?" — every spawn seat: stage
+// units AND coworker members (member temperature rides
+// rail.inhabitPane into the shared host birth, which refuses any
+// temperature spawn with no model). The r22 narrowing to units
+// dropped the members seat BASE's textual screen covered, and a
+// member-pinned model-less template died at member birth on infra
+// the door was moved to catch. Tables no consumer reads
+// (loadManifest ignores them) stay out of scope — the tests-6101
+// false-refusal law. One question, every enforced seat, both sites
+// (the screen and the strip's post-strip verify).
+function pinsSpawnTemperature(parsed: unknown): boolean {
   const stage = (parsed as { stage?: unknown })?.stage
   const stages = Array.isArray(stage) ? stage : []
-  return stages.some(
-    (s) => s != null && typeof s === "object" && hasTemperatureKey((s as { units?: unknown }).units),
-  )
+  return stages.some((s) => {
+    if (s == null || typeof s !== "object") return false
+    const stageObj = s as { units?: unknown; members?: unknown }
+    return hasTemperatureKey(stageObj.units ?? null) || hasTemperatureKey(stageObj.members ?? null)
+  })
 }
 
 // A model-less dropout audit's untuned materialization (gate-r2
@@ -525,45 +544,54 @@ function isTemperaturePinLine(line: string): boolean {
 
 function stripTemperaturePins(toml: string): string {
   const lines = toml.split("\n")
-  // arm 2: [[stage.units]] blocks — drop temperature-key LINES (whole
-  // bare-key lines only; a multi-line string whose line is EXACTLY a
-  // bare temperature key is the documented residual — the parse-verify
-  // backstops surviving pins)
-  let inUnitBlock = false
+  // arm 2: [[stage.units]] AND [[stage.members]] blocks (gate-r25
+  // principles-60: member temperature rides the same host birth and
+  // is refused there with no model — the audit's receipt "temperature
+  // pins dropped" must cover every enforced seat) — drop
+  // temperature-key LINES (whole bare-key lines only; a multi-line
+  // string whose line is EXACTLY a bare temperature key is the
+  // documented residual — the parse-verify backstops surviving pins)
+  let inEntryBlock = false
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
-    // the shared header predicate (gate-r24 principles-51): ONE seat
-    // for "is this line a [[stage.units]] header" — quoted keys and
+    // the shared header predicates (gate-r24 principles-51): ONE seat
+    // for "is this line a [[stage.<array>]] header" — quoted keys and
     // trailing comments included, exactly the grammar the roster
     // strip's anchor reads. Two grammars here dead-ended a dropout
     // audit of a legal template at its own verify.
-    if (isStageUnitsHeader(t)) {
-      inUnitBlock = true
+    if (isStageUnitsHeader(t) || isStageMembersHeader(t)) {
+      inEntryBlock = true
       continue
     }
     if (/^\[/.test(t)) {
-      inUnitBlock = false
+      inEntryBlock = false
       continue
     }
-    if (inUnitBlock && isTemperaturePinLine(lines[i])) {
+    if (inEntryBlock && isTemperaturePinLine(lines[i])) {
       lines[i] = ""
     }
   }
-  // arm 1: the inline form — THE PARSE DECIDES (gate-r17 tests-2005):
+  // arm 1: the inline forms — THE PARSE DECIDES (gate-r17 tests-2005):
   // the old /\{[^}]*\btemperature/ matcher matched the WORD inside
   // brief string values and the comma-form replace ate "temperature =
   // 5, " from INSIDE the value — the lens was briefed with a different
   // question than the program declared, ok:true. Pins are KEYS; only
   // the parse knows a key from a word in a string. Each block is
   // rebuilt from the parse with the temperature keys deleted (string
-  // values re-serialize verbatim).
-  const res = rebuildInlineUnits(lines.join("\n"), (u) => {
+  // values re-serialize verbatim). BOTH stage arrays — units and
+  // members (gate-r25 principles-60), one rewriter.
+  const dropTemperature = (u: Record<string, unknown>): Record<string, unknown> => {
     if (!("temperature" in u)) return u
     const next = { ...u }
     delete next.temperature
     return next
-  })
-  return res?.text ?? lines.join("\n")
+  }
+  const unitsPass = rebuildInlineArray(lines.join("\n"), "units", "id", dropTemperature)
+  const membersPass =
+    unitsPass !== null
+      ? rebuildInlineArray(unitsPass.text, "members", "name", dropTemperature)
+      : null
+  return membersPass?.text ?? unitsPass?.text ?? lines.join("\n")
 }
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
@@ -706,20 +734,33 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       }
     }
     let rosterSubsets = false
-    if (args.roster) {
-      // a singular [stage] table is legal TOML the parse hands back as
-      // a plain object — the run refuses it ("stages must be an
-      // array"), and so does the door, typed (gate-r18 tests-2006:
-      // .flatMap on the object escaped as a raw TypeError stack).
-      // Subset path only: a full-rail materialization leaves the shape
-      // to the run's own refusal.
-      if (parsedOriginal.stage !== undefined && !Array.isArray(parsedOriginal.stage)) {
+    // THE STAGE/UNITS SHAPE LAW, ONE SEAT, BOTH PATHS (gate-r25
+    // questions-15): a singular [stage] table or a singular units
+    // table ([stage.units] / units = {… }) is legal TOML the parse
+    // hands back as a plain object, and every units reader downstream
+    // assumed the array — the singular-STAGE twin is typed-refused
+    // while the units twin crashed with an escaped TypeError. The
+    // run's own law: stages AND units must be arrays. Guarded once,
+    // here, at the unconditional pre-build parse — before any side
+    // effect, both paths; the strip writes only array forms, so the
+    // materialized bytes cannot regress into the guarded shape.
+    if (parsedOriginal.stage !== undefined && !Array.isArray(parsedOriginal.stage)) {
+      return {
+        ok: false,
+        why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
+        code: 2,
+      }
+    }
+    for (const s of (parsedOriginal.stage as Array<{ units?: unknown }> | undefined) ?? []) {
+      if (s != null && typeof s === "object" && s.units !== undefined && !Array.isArray(s.units)) {
         return {
           ok: false,
-          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
+          why: `the template's units is a singular table — the run requires units array entries ([[stage.units]] or units = [ … ]); rewrite the units declaration`,
           code: 2,
         }
       }
+    }
+    if (args.roster) {
       const templateIds = ((parsedOriginal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
         .flatMap((s) => (s.units ?? []).map((u) => u?.id))
         .filter((x): x is string => typeof x === "string")
@@ -772,7 +813,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         }
       }
     }
-    const hasTempPin = pinsUnitTemperature(parsedTemplate)
+    const hasTempPin = pinsSpawnTemperature(parsedTemplate)
     const templateModel = parsedTemplate?.workflow?.model
     const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
     if (hasTempPin && !hasModel) {
@@ -786,7 +827,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         const stripped = stripTemperaturePins(toml)
         let clean = false
         try {
-          clean = !pinsUnitTemperature(parseToml(stripped))
+          clean = !pinsSpawnTemperature(parseToml(stripped))
         } catch {
           clean = false
         }
@@ -909,13 +950,10 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       // singular [stage]: same typed refusal as the roster verify —
       // the run requires an array; never .flatMap an object
       // (gate-r18 tests-2006's twin crash site)
-      if (parsedFinal.stage !== undefined && !Array.isArray(parsedFinal.stage)) {
-        return {
-          ok: false,
-          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
-          code: 2,
-        }
-      }
+      // the stage/units shape law lives at ONE seat now (gate-r25
+      // questions-15): the unconditional pre-build guard on
+      // parsedOriginal — the strip writes only array forms, so the
+      // materialized bytes cannot regress into a singular shape
       ids = ((parsedFinal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
         .flatMap((s) => (s.units ?? []).map((u) => u?.id))
         .filter((x): x is string => typeof x === "string")

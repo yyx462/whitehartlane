@@ -30,8 +30,6 @@ export function spawnRunner(
   // child. Claim first (write-site guards included): the child always
   // boots into a record that says running. A fresh booking (record
   // born running, pid-less) claims nothing — the no-op branch.
-  const claim = claimRevivalFlip(job)
-  if (!claim.ok) return { ok: false, why: claim.why }
   // the one-writer session read AT THE WRITE (gate-r23 momentum-60):
   // the ceremony door checked at entry, then spent the retire window
   // (30s per un-died pane, errors swallowed) — a booking admitted
@@ -39,8 +37,16 @@ export function spawnRunner(
   // writers on one program dir. The commit point re-reads the
   // session; a fresh booking (the only running Job on its session)
   // sails through.
+  // THE VETO PRECEDES THE CLAIM (gate-r25 momentum-70/questions-16):
+  // claim-first left a veto REFUSAL holding a lying record — flipped
+  // to running, the pause receipt deleted, continues bumped — and the
+  // refusal's own prescribed recovery (`whl continue`) dead-ends at
+  // the continue verb's parked-state gate. The veto reads; only a
+  // passing veto claims. A refusal mutates nothing.
   const veto = successorVetoWhy(job)
   if (veto) return { ok: false, why: veto }
+  const claim = claimRevivalFlip(job)
+  if (!claim.ok) return { ok: false, why: claim.why }
   const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
   const child = spawn(process.execPath, ["--experimental-strip-types", door, job.dir], {
     detached: true,

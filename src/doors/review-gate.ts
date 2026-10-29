@@ -195,7 +195,15 @@ export function classStats(rows: LedgerRow[], labels: Map<string, { red: boolean
   let sinceRed = 0 // greens accumulated since the last red
   for (const r of rows) {
     if (r.klass !== klass || r.action !== "skip") continue
-    audits += 1
+    // only ESCALATED skips are audits (gate-r25 tests-9601): the row's
+    // own `audit` flag is the one fact that says a measured full-rail
+    // verdict exists (or will) for this skip — a plain skip (jev said
+    // skip, the roll said stand down) has no rail and no verdict; it
+    // is not a measurement, and counting it inflated
+    // class_audit_history.audits on every decayed class (rate 0.25
+    // leaves 3 of 4 skips unescalated — the inflation was unbounded),
+    // corrupting the fact fed to the gate's one judgment.
+    if (r.audit) audits += 1
     const label = labels.get(r.headSha)
     if (!label) continue
     if (label.red) {
