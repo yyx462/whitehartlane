@@ -975,11 +975,21 @@ export function pidAlive(pid: number | null): boolean {
 // suspect" is the honest bound
 export const BOOKING_GRACE_MS = LEASE_TTL_MS
 export function bookingStale(
-  job: { state: string; pid?: number; created: string },
+  job: { state: string; pid?: number; created: string; lease?: { holder: string; epoch: number; renewed: string; expires: string } },
   nowMs: number,
   live = pidAlive,
 ): boolean {
   if (job.state !== "running") return false
+  // THE LEASE RIDES THE SAME RECORD (gate-r21 momentum-41): the
+  // double-continue residue leaves record.pid holding the lease's
+  // LOSER while the lease crowns a live winner still beating the job —
+  // reading the pid half alone orphans a live run, fires the mate wake
+  // for a commission still running, and admits a successor booking
+  // beside the leader. A lease whose holder is alive and not expired
+  // is the repo's own answer that this Job is NOT abandoned.
+  if (job.lease?.expires && live(leaseHolderPid(job.lease) ?? -1) && nowMs <= Date.parse(job.lease.expires) + LEASE_TTL_MS) {
+    return false
+  }
   if (job.pid !== undefined && job.pid !== null) return !live(job.pid)
   return nowMs - Date.parse(job.created) > BOOKING_GRACE_MS
 }
@@ -1090,6 +1100,27 @@ export function continueJob(job: JobRecord, pid: number): JobRecord {
   // the law was written for. Every state except "running" carries (or
   // implies) a receipt; resurrecting any of them splits the brain.
   const fresh = loadJob(job.sid, job.id) ?? job
+  // THE TWIN REVIVAL (gate-r21 momentum-40): the caller's snapshot is
+  // PARKED (this ceremony IS a revival; the running-flip is its own
+  // tail, not yet executed), so a fresh record already reading
+  // "running" is ANOTHER writer's revival that landed mid-ceremony —
+  // its runner holds the lease and keeps the record. Stamp our pid
+  // over the leader's and the record names a dead child while a live
+  // lease beats beside it — the exact double-continue residue the
+  // booking probe then orphans a live run on (momentum-41). Stand down
+  // ENTIRELY, the superseded-receipt's spirit one divergence wider:
+  // no flip, no bump, no pid — the leader's record stands.
+  if (fresh.state === "running" && job.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.twin-revival",
+      jid: job.id,
+      pid,
+      why: `another revival (crowned by the live lease) landed mid-ceremony — the leader's record stands; the caller's child dies at the lease it never won`,
+    })
+    Object.assign(job, fresh) // the caller's reference mirrors the leader's record
+    return job
+  }
   const superseded = fresh.state !== job.state && fresh.state !== "running"
   if (superseded) {
     fresh.pid = pid

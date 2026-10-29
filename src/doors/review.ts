@@ -171,15 +171,15 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
       const parsed = parseToml(templateToml) as { workflow?: Record<string, unknown> }
       const wf = parsed.workflow
       if (!wf || typeof wf !== "object") return undefined
-      const scalar = (v: unknown): string | undefined => {
-        if (typeof v === "string") return JSON.stringify(v)
-        if (typeof v === "number" || typeof v === "boolean") return String(v)
-        return undefined // nested structures: not this arm's form
-      }
+      // the SHARED TOTAL serializer (gate-r21 tests-9502): this arm's
+      // own scalar-only twin refused — false premise — a single-line
+      // inline workflow table carrying a nested value the run-time's
+      // own parse reads fine; the roster strip's serializer was TOTAL
+      // over the same shapes one function over. One serializer.
       const entries: string[] = []
       let modelLanded = false
       for (const [k, v] of Object.entries(wf)) {
-        const s = scalar(v)
+        const s = inlineTomlValue(v)
         if (s === undefined) return undefined
         if (k === "model") {
           entries.push(`model = ${JSON.stringify(model)}`)
@@ -225,8 +225,32 @@ export function detectTrunk(repo: string): string | undefined {
 // rebuilt from the parse, scalars only; the briefs carry literal
 // braces, so text-side brace matching is doomed). Returns null when no
 // units block exists or a value cannot be re-serialized.
-// The shared parse-driven units-block rewriter (gate-r17): THE PARSE
-// IS THE DECISION — which entries exist and what they carry comes
+// THE TOTAL inline serializer (gate-r15 tests-1: nested tables and
+// arrays), SHARED by every arm that rewrites inline TOML (gate-r21
+// tests-9502: the model pin's inline-table arm carried its own
+// scalar-only twin that bailed on any nested value — refusing, with a
+// false premise, a single-line inline workflow table the run-time's
+// own parse reads fine — while this serializer one function over was
+// explicitly TOTAL over the same shapes. One serializer, every seat.)
+function inlineTomlValue(v: unknown): string | undefined {
+  if (typeof v === "string") return JSON.stringify(v)
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  if (Array.isArray(v)) {
+    const items = v.map(inlineTomlValue)
+    return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
+  }
+  if (v && typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
+      const s = inlineTomlValue(x)
+      return s === undefined ? null : `${k} = ${s}`
+    })
+    if (entries.some((e) => e === null)) return undefined
+    return `{ ${entries.join(", ")} }`
+  }
+  return undefined
+}
+
+// The shared parse-driven units-block rewriter (gate-r17): THE PARSE// IS THE DECISION — which entries exist and what they carry comes
 // from smol-toml ONCE, and each `units = [` block in the text is
 // REPLACED by its parse-kept rebuild. The former text arms (entry-id
 // regexes, header counters, block-end scans, quote and padding
@@ -246,25 +270,6 @@ function rebuildInlineUnits(
   // block DETECTOR: spacing-tolerant (gate-r11 momentum-24) and
   // quoted-key-tolerant — `["units"] = [` is legal TOML
   const unitsLine = /^[ \t]*["']?units["']?[ \t]*=[ \t]*\[/
-  // the inline serializer is TOTAL over the parse's own value shapes
-  // (gate-r15 tests-1: nested tables and arrays)
-  const inline = (v: unknown): string | undefined => {
-    if (typeof v === "string") return JSON.stringify(v)
-    if (typeof v === "number" || typeof v === "boolean") return String(v)
-    if (Array.isArray(v)) {
-      const items = v.map(inline)
-      return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
-    }
-    if (v && typeof v === "object") {
-      const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
-        const s = inline(x)
-        return s === undefined ? null : `${k} = ${s}`
-      })
-      if (entries.some((e) => e === null)) return undefined
-      return `{ ${entries.join(", ")} }`
-    }
-    return undefined
-  }
   let saw = false
   let changed = false
   // STRING-EMBEDDED FALSE POSITIVES (gate-r19 tests-9101): a
@@ -343,7 +348,7 @@ function rebuildInlineUnits(
       const next = edit(u)
       if (next === null) continue
       const entries = Object.entries(next).map(([k, v]) => {
-        const s = inline(v)
+        const s = inlineTomlValue(v)
         return s === undefined ? null : `${k} = ${s}`
       })
       if (entries.some((e) => e === null)) return null
@@ -748,6 +753,19 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   const headShort = headSha.slice(0, 8)
   const slug = `${basename(repo)}-${head === headBranch && headBranch !== "HEAD" ? headBranch.replace(/[^a-zA-Z0-9-]/g, "-") : headShort}`
   const dir = args.out ? resolve(args.out) : join(repo, ".whl-review", slug)
+  // the gate's roster (review-gate.ts): a subset materializes ONLY
+  // those lens units — one decision, made once at the door (ADR 0014:
+  // a chain cannot shed units mid-run, so the roster is pre-flight).
+  // An EMPTY roster refuses BEFORE ANY SIDE EFFECT (gate-r21
+  // tests-9501): this check used to fire after mkdir+cpSync but
+  // before data/review existed, leaving a half-built dir the door's
+  // own replace-guard ("workflow.toml && data/review") classifies as
+  // not-ours — the prescribed re-run at the same --out dead-ended on
+  // the debris, and the default --out sits inside the repo under
+  // review. Refusals precede the build; nothing is left to clean up.
+  if (args.roster && args.roster.length === 0) {
+    return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
+  }
   // an unguarded rmSync on a caller-supplied path is a footgun (the
   // self-review r4's momentum-1): a typo'd --out must refuse, never
   // recursively delete whatever was there. Replacing OUR OWN
@@ -761,14 +779,6 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   mkdirSync(dir, { recursive: true })
   cpSync(template, dir, { recursive: true })
-  // the gate's roster (review-gate.ts): a subset materializes ONLY
-  // those lens units — one decision, made once at the door (ADR 0014:
-  // a chain cannot shed units mid-run, so the roster is pre-flight).
-  // The filter is line-surgical on the units block; an EMPTY roster
-  // refuses (that is a skip, not a review with no lenses).
-  if (args.roster && args.roster.length === 0) {
-    return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
-  }
   // the lens temperature pins need a model to ride (the host writes
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin. The MISSING-model refusal lives at the door now

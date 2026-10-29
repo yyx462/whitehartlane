@@ -368,7 +368,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         if (gateAudit && !val("model")) {
           console.log("review: dropout audit without --model — temperature pins dropped; the lenses run on the host default, untuned")
         }
-        if (g.decision.action === "review" && g.decision.roster.length < 4) gateRoster = g.decision.roster
+        // THE SUBSET QUESTION lives in the DOOR's parse (gate-r21
+        // principles-41, the bin seat of r20 tests-5001's class): the
+        // old `roster.length < 4` here meant a four-lens roster —
+        // INCLUDING the fail-safe full-rail roster — was never handed
+        // to a template declaring a fifth unit, and the door
+        // materialized units no gate decision named. The bin HANDS
+        // OVER whatever roster the gate decided (non-empty); the door's
+        // own set-difference law decides whether it is a subset that
+        // strips. One law, one seat — and the seat is the door's.
+        if (g.decision.action === "review" && g.decision.roster.length > 0) gateRoster = g.decision.roster
       } catch (err) {
         // the gate must never BLOCK a review (that would be a new
         // failure mode in front of the rail) — a broken gate reviews.
