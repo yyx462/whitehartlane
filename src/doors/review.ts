@@ -98,40 +98,67 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
   const pin = `model = ${JSON.stringify(model)}`
   const lines = templateToml.split("\n")
+  // THE PARSE VERIFIES THE LANDING (gate-r20 tests-5003): every seat
+  // is located by TEXT, and text matches inside string values too — a
+  // `[workflow]` line quoted in a documentation string matched first,
+  // the pin landed INSIDE the string, the verify parse read no
+  // workflow.model, and the door refused a template the consumer reads
+  // perfectly. String content never becomes parse data (tests-9101's
+  // law, applied to the pin arm): a landing COUNTS only when the
+  // whole-document parse says workflow.model === the pin. Each arm
+  // tries every candidate; the first the parse blesses wins; a form
+  // whose candidates all fail falls through to the next arm.
+  const landsPinned = (text: string): boolean => {
+    try {
+      const p = parseToml(text) as { workflow?: { model?: unknown } }
+      return p.workflow?.model === model
+    } catch {
+      return false // a landing that does not parse is not a landing
+    }
+  }
   // 1) the [workflow] table header — tolerant: interior spaces, a
   // trailing comment (gate-r2 tests-41: "[ workflow ]" parses fine),
   // and a QUOTED table key (gate-r18 tests-3001: ["workflow"] is
   // legal TOML smol-toml parses into the same workflow table)
-  const headerIdx = lines.findIndex((l) => /^\[\s*["']?workflow["']?\s*\]\s*(#.*)?$/.test(l.trim()))
-  if (headerIdx !== -1) {
-    let end = lines.length
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-      if (/^\[/.test(lines[i].trim())) {
+  const headerRe = /^\[\s*["']?workflow["']?\s*\]\s*(#.*)?$/
+  for (let headerIdx = 0; headerIdx < lines.length; headerIdx++) {
+    if (!headerRe.test(lines[headerIdx].trim())) continue
+    const cand = lines.slice()
+    let end = cand.length
+    for (let i = headerIdx + 1; i < cand.length; i++) {
+      if (/^\[/.test(cand[i].trim())) {
         end = i
         break
       }
     }
+    let landed: string | undefined
     for (let i = headerIdx + 1; i < end; i++) {
-      if (/^[ \t]*model\s*=/.test(lines[i])) {
-        lines[i] = pin
-        return lines.join("\n")
+      if (/^[ \t]*model\s*=/.test(cand[i])) {
+        cand[i] = pin
+        landed = cand.join("\n")
+        break
       }
     }
-    lines.splice(headerIdx + 1, 0, pin)
-    return lines.join("\n")
+    if (landed === undefined) {
+      cand.splice(headerIdx + 1, 0, pin)
+      landed = cand.join("\n")
+    }
+    if (landsPinned(landed)) return landed
   }
   // 2) dotted-key form (workflow.model = "…" at top level)
-  const dotted = /^workflow\.model\s*=/
   for (let i = 0; i < lines.length; i++) {
-    if (dotted.test(lines[i])) {
-      lines[i] = pin.replace(/^model = /, "workflow.model = ")
-      return lines.join("\n")
-    }
+    if (!/^workflow\.model\s*=/.test(lines[i])) continue
+    const cand = lines.slice()
+    cand[i] = pin.replace(/^model = /, "workflow.model = ")
+    const landed = cand.join("\n")
+    if (landsPinned(landed)) return landed
   }
-  const firstDotted = lines.findIndex((l) => /^workflow\./.test(l))
-  if (firstDotted !== -1) {
-    lines.splice(firstDotted, 0, pin.replace(/^model = /, "workflow.model = "))
-    return lines.join("\n")
+  for (let firstDotted = 0; firstDotted < lines.length; firstDotted++) {
+    if (!/^workflow\./.test(lines[firstDotted])) continue
+    const cand = lines.slice()
+    cand.splice(firstDotted, 0, pin.replace(/^model = /, "workflow.model = "))
+    const landed = cand.join("\n")
+    if (landsPinned(landed)) return landed
   }
   // 3) single-line inline table (workflow = { k = v, … }) — gate-r2
   // principles-15: smol-toml parses a complete workflow table from
@@ -162,13 +189,15 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
         }
       }
       if (!modelLanded) entries.push(`model = ${JSON.stringify(model)}`)
-      lines[inlineIdx] = `workflow = { ${entries.join(", ")} }`
-      return lines.join("\n")
+      const cand = lines.slice()
+      cand[inlineIdx] = `workflow = { ${entries.join(", ")} }`
+      const landed = cand.join("\n")
+      return landsPinned(landed) ? landed : undefined
     } catch {
       return undefined
     }
   }
-  return undefined // no arm landed — the caller's refusal names the true premise
+  return undefined // no arm landed a candidate the parse verifies — the caller's refusal names the true premise
 }
 
 // The trunk's name is ONE decision (gate-r14 tests-1): the door
@@ -386,6 +415,27 @@ function hasTemperatureKey(node: unknown): boolean {
 // [[stage.units]] arm drops temperature-key LINES inside unit blocks
 // (the form gate-r6 blessed — the strip missing it dead-ended every
 // audited escalation on table-form templates).
+// a temperature-pin LINE (the [[stage.units]] arm's unit of work): the
+// KEY matched textually (bare or quoted — the roster strip's
+// tolerance), the VALUE judged by the PARSE (gate-r20 tests-5002: the
+// old decimal-only regex `[0-9]+(\.[0-9]+)?` missed the exponential
+// spelling `temperature = 0.2e0` — legal TOML, the same 0.2 to
+// smol-toml — so the pin survived the line strip and the gate-audited
+// dropout levy dead-ended at its own verify: no program, no verdict,
+// the audit measuring nothing. The strip speaks the parser's grammar:
+// a value the parse reads as a number is a pin; anything else is not
+// this arm's to touch, and the parse-verify backstops the residual.)
+function isTemperaturePinLine(line: string): boolean {
+  const m = line.match(/^[ \t]*["']?temperature["']?[ \t]*=[ \t]*(.+)$/)
+  if (!m) return false
+  try {
+    const v = parseToml(`__probe = ${m[1]}`) as { __probe?: unknown }
+    return typeof v.__probe === "number"
+  } catch {
+    return false
+  }
+}
+
 function stripTemperaturePins(toml: string): string {
   const lines = toml.split("\n")
   // arm 2: [[stage.units]] blocks — drop temperature-key LINES (whole
@@ -406,7 +456,7 @@ function stripTemperaturePins(toml: string): string {
       inUnitBlock = false
       continue
     }
-    if (inUnitBlock && /^[ \t]*temperature[ \t]*=[ \t]*[0-9]+(\.[0-9]+)?[ \t]*(#.*)?$/.test(lines[i])) {
+    if (inUnitBlock && isTemperaturePinLine(lines[i])) {
       lines[i] = ""
     }
   }
@@ -547,12 +597,52 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
     let toml = templateToml
-    if (args.roster && args.roster.length < 4) {
-      const stripped = stripUnitsToRoster(toml, new Set(args.roster))
-      if (stripped === null) {
-        return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
+    // THE SUBSET QUESTION (gate-r20 tests-5001): "does this roster
+    // name fewer units than the template DECLARES?" — answered by set
+    // difference against the template's own parse, never by the
+    // canonical gate size. The old `roster.length < 4` keyed the strip
+    // and the verify on a magic constant, so a four-element roster over
+    // a FIVE-unit template skipped every roster check and materialized
+    // all five units — at exactly the length where "full rail" and
+    // "subset" stop coinciding, silently running a lens the gate's
+    // decision excluded.
+    let parsedOriginal: { workflow?: { model?: string }; stage?: unknown }
+    try {
+      parsedOriginal = parseToml(templateToml) as typeof parsedOriginal
+    } catch (err) {
+      return {
+        ok: false,
+        why: `the template's workflow.toml is not valid TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template or pass --template pointing at a valid one`,
+        code: 2,
       }
-      toml = stripped
+    }
+    let rosterSubsets = false
+    if (args.roster) {
+      // a singular [stage] table is legal TOML the parse hands back as
+      // a plain object — the run refuses it ("stages must be an
+      // array"), and so does the door, typed (gate-r18 tests-2006:
+      // .flatMap on the object escaped as a raw TypeError stack).
+      // Subset path only: a full-rail materialization leaves the shape
+      // to the run's own refusal.
+      if (parsedOriginal.stage !== undefined && !Array.isArray(parsedOriginal.stage)) {
+        return {
+          ok: false,
+          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
+          code: 2,
+        }
+      }
+      const templateIds = ((parsedOriginal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
+        .flatMap((s) => (s.units ?? []).map((u) => u?.id))
+        .filter((x): x is string => typeof x === "string")
+      const keep = new Set(args.roster)
+      rosterSubsets = templateIds.some((id) => !keep.has(id))
+      if (rosterSubsets) {
+        const stripped = stripUnitsToRoster(toml, keep)
+        if (stripped === null) {
+          return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
+        }
+        toml = stripped
+      }
     }
     let parsedTemplate: { workflow?: { model?: string }; stage?: Array<{ units?: Array<{ id?: string }> }> }
     try {
@@ -564,27 +654,17 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         code: 2,
       }
     }
-    // the roster verify — UNCONDITIONAL now (gate-r5 tests-2: the
-    // no-model strip no-op'd with no verify behind it, materializing
-    // all four units while the gate decided two): the consumer's own
-    // read must agree the subset landed. AND non-empty (gate-r7
-    // principles-28): a roster naming ZERO of the template's units
-    // dropped every lens and the strays-only check passed on zero
-    // survivors — a zero-lens review with ok:true, the exact shape
-    // the empty-roster guard refuses.
-    if (args.roster && args.roster.length < 4) {
+    // the roster verify — UNCONDITIONAL behind the strip (gate-r5
+    // tests-2: the no-model strip no-op'd with no verify behind it,
+    // materializing all four units while the gate decided two): the
+    // consumer's own read must agree the subset landed. AND non-empty
+    // (gate-r7 principles-28): a roster naming ZERO of the template's
+    // units dropped every lens and the strays-only check passed on zero
+    // survivors — a zero-lens review with ok:true, the exact shape the
+    // empty-roster guard refuses. Keyed on the SAME parse-derived flag
+    // as the strip (gate-r20 tests-5001 — one law, one seat).
+    if (rosterSubsets && args.roster) {
       const keep = new Set(args.roster)
-      // a singular [stage] table is legal TOML the parse hands back as
-      // a plain object — the run refuses it ("stages must be an
-      // array"), and so does the door, typed (gate-r18 tests-2006:
-      // .flatMap on the object escaped as a raw TypeError stack)
-      if (parsedTemplate.stage !== undefined && !Array.isArray(parsedTemplate.stage)) {
-        return {
-          ok: false,
-          why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
-          code: 2,
-        }
-      }
       const ids = (parsedTemplate.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id))
       const stray = ids.filter((id) => id !== undefined && !keep.has(id))
       if (stray.length > 0) {
