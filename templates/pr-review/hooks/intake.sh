@@ -94,19 +94,21 @@ i=0
 # pipeline here, never in the test — the test runs these exact bytes)
 # :lens-derivation-start
 lenses=$({ # spelling- and indent-tolerant (gate-r10 principles-31/questions-9),
-  # key-order-tolerant (gate-r14 principles-37): TOML legalizes indented
-  # blocks, {id = "x"} unpadded braces, single quotes, and ANY key order
-  # — { temperature = 0.2, id = "x" } is the form the door's parse reads
-  # and materializes; the reader must read what the door writes, or the
-  # temperature-first lens silently loses its order file. TWIN WARNING:
-  # the id class is hooks.ts SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
-  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[^}{]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
+  # key-order-tolerant (gate-r14 principles-37), quoted-key-tolerant
+  # (gate-r15 momentum-30): TOML legalizes indented blocks, {id = "x"}
+  # unpadded braces, single quotes, ANY key order, and QUOTED KEYS —
+  # {'id' = 'x'} is the form the door's parse reads and materializes;
+  # the reader must read what the door writes, or that lens silently
+  # loses its order file. TWIN WARNING: the id class is hooks.ts
+  # SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
+  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[^}{]*id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id['"'"'"]?[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
   # the [[stage.units]] array-of-tables form — the door's parsed reader
   # accepts and materializes it (gate-r5 principles-26); the textual
   # reader must derive the same lenses or every lens silently loses
   # its shuffled hunk order. Stateful awk (a sed range consumes each
   # next header as its own end and drops the second unit's id).
-  awk '/^[ \t]*\[\[stage\.units\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^[ \t]*id[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')/ { sub(/^[ \t]*id[ \t]*=[ \t]*["'"'"']/, ""); sub(/["'"'"']$/, ""); print }' "$prog/workflow.toml"
+  # Interior spaces in the header are legal TOML (gate-r15 tests-1).
+  awk '/^[ \t]*\[\[[ \t]*stage\.units[ \t]*\]\]/ { inb = 1; next } /^\[/ { inb = 0 } inb && /^[ \t]*['"'"'"]?id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')/ { sub(/^[ \t]*['"'"'"]?id['"'"'"]?[ \t]*=[ \t]*["'"'"']/, ""); sub(/["'"'"']$/, ""); print }' "$prog/workflow.toml"
 } | awk '!seen[$0]++')
 # :lens-derivation-end
 for lens in $lenses; do

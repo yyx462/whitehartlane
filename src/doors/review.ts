@@ -212,13 +212,16 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // refused it with 'no units block'): drop whole blocks whose id is
   // not in the roster
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\[\[stage\.units\]\]/.test(lines[i].trim())) continue
+    // interior spaces are legal in the header (gate-r15 tests-1):
+    // `[[ stage.units ]]` parses at the door — the anchor must not be
+    // column-0-exact
+    if (!/^\[\[\s*stage\.units\s*\]\]/.test(lines[i].trim())) continue
     saw = true
     let end = i + 1
     while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
     const id = lines
       .slice(i, end)
-      .map((l) => l.trim().match(new RegExp(`^id[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
+      .map((l) => l.trim().match(new RegExp(`^["']?id["']?[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
       .find(Boolean)
     if (id !== undefined && !keep.has(id)) {
       lines.splice(i, end - i)
@@ -238,13 +241,34 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
       try {
         const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<Record<string, unknown>> }> }
         let stageIdx = 0
-        for (let j = 0; j < i; j++) if (/^\[\[?stage\]?\]/.test(lines[j].trim())) stageIdx++
+        // interior spaces are legal in the stage header (gate-r15
+        // tests-2): `[[ stage ]]` parses at the door, and a counter that
+        // misses it indexes an EARLIER stage's units — the later stage's
+        // rostered entries silently vanish, ok:true, no refusal
+        for (let j = 0; j < i; j++) if (/^\[\[?\s*stage\s*\]?\]/.test(lines[j].trim())) stageIdx++
         stageIdx -= 1
         const units = (parsed.stage ?? [])[stageIdx]?.units
         if (!Array.isArray(units)) return null
-        const scalar = (v: unknown): string | undefined => {
+        // the inline serializer is TOTAL over the parse's own value
+        // shapes (gate-r15 tests-1): a nested inline value (env = { … },
+        // tags = [ … ]) is legal TOML the door reads — scalar() refused
+        // it and the whole strip returned null with the false premise
+        // "no units block"
+        const inline = (v: unknown): string | undefined => {
           if (typeof v === "string") return JSON.stringify(v)
           if (typeof v === "number" || typeof v === "boolean") return String(v)
+          if (Array.isArray(v)) {
+            const items = v.map(inline)
+            return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
+          }
+          if (v && typeof v === "object") {
+            const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
+              const s = inline(x)
+              return s === undefined ? null : `${k} = ${s}`
+            })
+            if (entries.some((e) => e === null)) return undefined
+            return `{ ${entries.join(", ")} }`
+          }
           return undefined
         }
         const kept: string[] = []
@@ -252,7 +276,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
           if (!u || typeof u !== "object" || typeof u.id !== "string") continue
           if (!keep.has(u.id)) continue
           const entries = Object.entries(u).map(([k, v]) => {
-            const s = scalar(v)
+            const s = inline(v)
             return s === undefined ? null : `${k} = ${s}`
           })
           if (entries.some((e) => e === null)) return null
@@ -268,14 +292,19 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     // multi-line block: line surgery (the template's own shape)
     const start = i
     let end = start
-    while (end < lines.length && lines[end].trim() !== "]") end++
+    // the closer may carry a trailing comment (gate-r15 tests-1):
+    // `] # lenses` is legal TOML — a bare-`]`-only scan runs to EOF and
+    // refuses with the false premise "no units block"
+    while (end < lines.length && !/^\]/.test(lines[end].trim())) end++
     if (end >= lines.length) return null
     const block = lines.slice(start + 1, end)
     const kept = block.filter((l) => {
-      // both quote spellings (gate-r12 principles-34): TOML legalizes
-      // single-quoted ids and unpadded keys, and the door's parse
-      // materializes them — this reader reads what the door writes
-      const m = l.match(new RegExp(`\\{\\s*id\\s*=\\s*["'](${SHEP_ID_CLASS})["']`))
+      // both quote spellings for the id AND its key (gate-r12
+      // principles-34, gate-r15 momentum-30): TOML legalizes
+      // single-quoted ids, unpadded keys, and quoted keys — {'id' =
+      // 'x'} — and the door's parse materializes all of it; this
+      // reader reads what the door writes
+      const m = l.match(new RegExp(`\\{\\s*["']?id["']?\\s*=\\s*["'](${SHEP_ID_CLASS})["']`))
       return !m || keep.has(m[1])
     })
     if (kept.length !== block.length) changed = true
