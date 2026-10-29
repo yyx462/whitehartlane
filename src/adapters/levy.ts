@@ -32,6 +32,15 @@ export function spawnRunner(
   // born running, pid-less) claims nothing — the no-op branch.
   const claim = claimRevivalFlip(job)
   if (!claim.ok) return { ok: false, why: claim.why }
+  // the one-writer session read AT THE WRITE (gate-r23 momentum-60):
+  // the ceremony door checked at entry, then spent the retire window
+  // (30s per un-died pane, errors swallowed) — a booking admitted
+  // inside it rode past the door's one-shot veto into two live
+  // writers on one program dir. The commit point re-reads the
+  // session; a fresh booking (the only running Job on its session)
+  // sails through.
+  const veto = successorVetoWhy(job)
+  if (veto) return { ok: false, why: veto }
   const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
   const child = spawn(process.execPath, ["--experimental-strip-types", door, job.dir], {
     detached: true,
@@ -70,6 +79,23 @@ export function rebirthExitCode(why: string): number {
   return /successor booking/.test(why) ? 2 : 1
 }
 
+// the successor veto (r25 principles-22): a live successor booking on
+// this lineage session forbids another live writer on the program
+// dir. ONE seat for the question, asked at the ceremony door (fail
+// fast, before a pane dies) and again AT THE WRITE (gate-r23
+// momentum-60: the retire window — 30s per un-died pane, errors
+// swallowed — outlived the door's one-shot check; a booking admitted
+// mid-ceremony rode into the two-live-writers split brain the veto's
+// own message names).
+export function successorVetoWhy(job: JobRecord): string | null {
+  const successor = listJobs(job.sid).find(
+    (j) => j.id !== job.id && j.state === "running" && !bookingStale(j, Date.now()),
+  )
+  return successor
+    ? `a successor booking (${successor.id}) is live on this program dir — reviving ${job.id} beside it is two live writers; abort the successor first`
+    : null
+}
+
 export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOutcome {
   // The door refuses first (j-93d652 gap #2): retiring panes under a
   // LIVE holder's feet is the damage a double continue does — fail
@@ -85,15 +111,12 @@ export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOu
   // continue's rebirth): a live successor booking on this lineage
   // session vetoes the rebirth — two live writers on one program dir
   // is the split brain the booking probe's veto exists to prevent.
-  // One seat, not one per caller.
-  const successor = listJobs().find(
-    (j) => j.id !== job.id && j.sid === job.sid && j.state === "running" && !bookingStale(j, Date.now()),
-  )
-  if (successor) {
-    return {
-      ok: false,
-      why: `a successor booking (${successor.id}) is live on this program dir — reviving ${job.id} beside it is two live writers; abort the successor first`,
-    }
+  // One seat, not one per caller — and asked AGAIN at the write
+  // (spawnRunner, beside the claim): this entry check only fails
+  // fast; it cannot promise the window behind it.
+  const veto = successorVetoWhy(job)
+  if (veto) {
+    return { ok: false, why: veto }
   }
   for (const pane of job.panes.filter((p) => p.died === undefined)) {
     try {

@@ -21,7 +21,6 @@ import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
-import { SHEP_ID_CLASS } from "./hooks.ts"
 
 export type ReviewArgs = {
   repo: string
@@ -262,6 +261,22 @@ function inlineTomlValue(v: unknown): string | undefined {
 // Returns null when the document does not parse (the caller's verify
 // refuses honestly). The inline serializer is TOTAL over the parse's
 // own value shapes (gate-r15 tests-1: nested tables and arrays).
+// the whole-document stage-unit ids — the CONTAINMENT ORACLE both
+// strip arms share (gate-r19 tests-9101's law: string content never
+// becomes parse data; a "block" whose ids do not exist in the
+// document's parse is a quoted example inside a string value).
+// Throws on unparseable bytes — the callers refuse honestly.
+function documentStageUnitIds(toml: string): Set<string> {
+  const whole = parseToml(toml) as { stage?: unknown }
+  const stages = Array.isArray(whole.stage) ? whole.stage : whole.stage !== undefined ? [whole.stage] : []
+  return new Set(
+    (stages as Array<{ units?: unknown }>)
+      .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
+      .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
+      .filter((x): x is string => x !== null),
+  )
+}
+
 function rebuildInlineUnits(
   toml: string,
   edit: (u: Record<string, unknown>) => Record<string, unknown> | null,
@@ -282,16 +297,9 @@ function rebuildInlineUnits(
   // (Residual, stated: a brief quoting the program's OWN unit ids
   // verbatim passes containment and its example is rewritten — the
   // pathological self-documenting template.)
-  let documentUnitIds: Set<string> | null = null
+  let documentUnitIds: Set<string>
   try {
-    const whole = parseToml(toml) as { stage?: unknown }
-    const stages = Array.isArray(whole.stage) ? whole.stage : whole.stage !== undefined ? [whole.stage] : []
-    documentUnitIds = new Set(
-      (stages as Array<{ units?: unknown }>)
-        .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
-        .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
-        .filter((x): x is string => x !== null),
-    )
+    documentUnitIds = documentStageUnitIds(toml)
   } catch {
     return null // the whole document does not parse — the verify refuses honestly
   }
@@ -367,19 +375,63 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   let sawTable = false
   let tableChanged = false
   // the [[stage.units]] array-of-tables form (gate-r6 tests-102): drop
-  // whole blocks whose id is not in the roster — the id read through
-  // the SAME parse (quoted keys included, gate-r15 momentum-30), the
-  // block located by its header (spacing-tolerant, gate-r15 tests-1)
+  // whole blocks whose id is not in the roster. THE PARSE IS THE
+  // EXTENT ORACLE FOR THE TABLE FORM TOO (gate-r23 principles-43):
+  // the old text scan — a quote-blind header anchor plus "first
+  // trimmed line starting with [" as the end — never matched the
+  // legal [[stage."units"]] header, and cut a multi-line brief
+  // carrying a bracketed example line mid-string, then refused "no
+  // units block" for a template the door's own parse reads: a false
+  // premise that killed the gate's subset review entirely. The header
+  // is located by TEXT (quote-tolerant, trailing-comment tolerant);
+  // the EXTENT is the FIRST candidate boundary whose slice parses
+  // standalone to exactly one unit entry (a candidate that cuts a
+  // multi-line string fails the parse and falls through); and
+  // containment against the whole-document parse decides which
+  // "headers" are quoted examples — tests-9101's law, both arms.
+  const headerRe = /^\[\[\s*stage\s*\.\s*["']?units["']?\s*\]\]\s*(#.*)?$/
+  let documentUnitIds: Set<string>
+  try {
+    documentUnitIds = documentStageUnitIds(toml)
+  } catch {
+    return null // the whole document does not parse — the verify refuses honestly
+  }
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\[\[\s*stage\.units\s*\]\]/.test(lines[i].trim())) continue
+    if (!headerRe.test(lines[i].trim())) continue
+    // candidate boundaries: every later trimmed line opening a table
+    // header, or EOF. The first whose slice [i..e) parses standalone
+    // with exactly ONE unit entry is the block's extent.
+    let end = -1
+    let id: string | null = null
+    for (let e = i + 1; e <= lines.length; e++) {
+      if (e < lines.length && !/^\[/.test(lines[e].trim())) continue
+      const slice = lines.slice(i, e).join("\n")
+      try {
+        const p = parseToml(slice) as { stage?: unknown }
+        const stages = Array.isArray(p.stage) ? p.stage : p.stage !== undefined ? [p.stage] : []
+        const ids = (stages as Array<{ units?: unknown }>)
+          .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
+          .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
+          .filter((x): x is string => x !== null)
+        if (ids.length === 1) {
+          end = e
+          id = ids[0]
+          break
+        }
+      } catch {
+        /* the candidate cuts the block mid-string — try the next */
+      }
+    }
+    if (end === -1) continue // no parseable single-unit extent — not this arm's to touch
+    // containment (tests-9101's law): a "header" whose block's id does
+    // not exist in the document's parse is a quoted example inside a
+    // string value — skip it, un-counted
+    if (id === null || !documentUnitIds.has(id)) {
+      i = end - 1
+      continue
+    }
     sawTable = true
-    let end = i + 1
-    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
-    const id = lines
-      .slice(i, end)
-      .map((l) => l.trim().match(new RegExp(`^["']?id["']?[ \t]*=[ \t]*["'](${SHEP_ID_CLASS})["']`))?.[1])
-      .find(Boolean)
-    if (id !== undefined && !keep.has(id)) {
+    if (!keep.has(id)) {
       lines.splice(i, end - i)
       tableChanged = true
       i--
