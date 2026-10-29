@@ -122,27 +122,36 @@ function pinIntoWorkflowTable(templateToml: string, model: string): string | und
   const headerRe = /^\[\s*["']?workflow["']?\s*\]\s*(#.*)?$/
   for (let headerIdx = 0; headerIdx < lines.length; headerIdx++) {
     if (!headerRe.test(lines[headerIdx].trim())) continue
-    const cand = lines.slice()
-    let end = cand.length
-    for (let i = headerIdx + 1; i < cand.length; i++) {
-      if (/^\[/.test(cand[i].trim())) {
+    let end = lines.length
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      if (/^\[/.test(lines[i].trim())) {
         end = i
         break
       }
     }
-    let landed: string | undefined
+    // EVERY LANDING FOR THIS HEADER, UNTIL ONE VERIFIES (gate-r29
+    // tests-42): the old arm tried ONE candidate per header — the
+    // first model-looking line — and on its parse-verify failure
+    // walked to the next HEADER, never to the other landings of THIS
+    // header. A [workflow] table whose multi-line string quotes a
+    // line-initial `model = "…"` example had its in-string line
+    // replaced (the pin landed inside the string), the verify
+    // refused, and the door answered 'no [workflow] table' — a false
+    // premise for a template the consumer reads and one of the
+    // refusal's own named forms. Candidates: insert under the header
+    // AND replacing each model-looking line in turn; the parse picks.
+    const insertLanding = lines.slice()
+    insertLanding.splice(headerIdx + 1, 0, pin)
+    const candidates: string[] = [insertLanding.join("\n")]
     for (let i = headerIdx + 1; i < end; i++) {
-      if (/^[ \t]*model\s*=/.test(cand[i])) {
-        cand[i] = pin
-        landed = cand.join("\n")
-        break
-      }
+      if (!/^[ \t]*model\s*=/.test(lines[i])) continue
+      const replaceLanding = lines.slice()
+      replaceLanding[i] = pin
+      candidates.push(replaceLanding.join("\n"))
     }
-    if (landed === undefined) {
-      cand.splice(headerIdx + 1, 0, pin)
-      landed = cand.join("\n")
+    for (const landed of candidates) {
+      if (landsPinned(landed)) return landed
     }
-    if (landsPinned(landed)) return landed
   }
   // 2) dotted-key form (workflow.model = "…" at top level)
   for (let i = 0; i < lines.length; i++) {
@@ -567,9 +576,17 @@ function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined
 function isTemperaturePinLine(line: string): boolean {
   const m = line.match(/^[ \t]*["']?temperature["']?[ \t]*=[ \t]*(.+)$/)
   if (!m) return false
+  // KEY PRESENCE IS THE QUESTION (gate-r29 tests-44): the screen
+  // (pinsSpawnTemperature), the pin-plan (unresolvedTemperaturePins)
+  // and the host birth all decide 'is this a pin?' by the KEY
+  // whatever the value type — a string-valued `temperature = "0.4"`
+  // is a pin to every one of them, so the line probe accepts ANY
+  // value the parser reads (one decision, every arm, one answer);
+  // the number-only probe left the identical pin in place and
+  // dead-ended the audit at its own verify.
   try {
-    const v = parseToml(`__probe = ${m[1]}`) as { __probe?: unknown }
-    return typeof v.__probe === "number"
+    parseToml(`__probe = ${m[1]}`)
+    return true
   } catch {
     return false
   }
@@ -587,27 +604,55 @@ function stripTemperaturePins(toml: string, unresolved: Set<string>): string {
   // shipped an untuned receipt for lenses the run-time would have run
   // TUNED). TOML KEY ORDER IS FREE (gate-r28b questions-1/tests-602):
   // the identity line may FOLLOW the temperature line — the block is
-  // decided from any of its lines, never from line order; the old
-  // order-bound capture left a temperature-first pin in place and the
-  // audit dead-ended at its own verify. Block extent runs to the next
-  // header line (the parse-verify backstops the string-interior
-  // residual, as ever).
-  const identityRe = new RegExp(`^["']?(id|name)["']?[ \\t]*=[ \\t]*["']([^"'\\n]+)["']`)
+  // decided from any of its lines, never from line order. THE PARSE
+  // IS THE EXTENT ORACLE HERE TOO (gate-r29 tests-43): the raw
+  // next-header scan cut a block whose brief quotes a bracket-initial
+  // example line (`  [workflow]`) mid-string — the real pin after the
+  // string survived and the audit dead-ended at its own verify. The
+  // extent is the FIRST candidate boundary whose slice parses
+  // standalone to exactly one entry; identity comes from that parse;
+  // containment against the document's ids kills quoted-example
+  // headers — full parity with the roster arm (tests-9101's law).
+  const stageIds: { units: Set<string>; members: Set<string> } = { units: new Set(), members: new Set() }
+  try {
+    stageIds.units = documentStageIds(toml, "units", "id")
+    stageIds.members = documentStageIds(toml, "members", "name")
+  } catch {
+    return toml // the document does not parse — the verify refuses honestly
+  }
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
     if (!isStageUnitsHeader(t) && !isStageMembersHeader(t)) continue
     const key: "units" | "members" = isStageUnitsHeader(t) ? "units" : "members"
-    let end = i + 1
-    while (end < lines.length && !/^\[/.test(lines[end].trim())) end++
-    let identity: string | null = null
-    for (let j = i + 1; j < end; j++) {
-      const m = lines[j].trim().match(identityRe)
-      if (m) {
-        identity = m[2]
-        break
+    const identity = key === "units" ? "id" : "name"
+    let end = -1
+    let entry: Record<string, unknown> | null = null
+    for (let e = i + 1; e <= lines.length; e++) {
+      if (e < lines.length && !/^\[/.test(lines[e].trim())) continue
+      const slice = lines.slice(i, e).join("\n")
+      try {
+        const p = parseToml(slice) as Record<string, unknown>
+        const stageArr = Array.isArray(p.stage) ? p.stage : p.stage !== undefined ? [p.stage] : []
+        const entries = (stageArr as Array<Record<string, unknown>>).flatMap((s) => {
+          const arr = s?.[key]
+          return Array.isArray(arr) ? (arr as unknown[]) : []
+        })
+        if (entries.length === 1 && entries[0] != null && typeof entries[0] === "object") {
+          end = e
+          entry = entries[0] as Record<string, unknown>
+          break
+        }
+      } catch {
+        /* the candidate cuts the block mid-string — try the next */
       }
     }
-    if (identity !== null && unresolved.has(`${key}:${identity}`)) {
+    if (end === -1 || entry === null) continue // no parseable single-entry extent — not this arm's to touch
+    const who = entry[identity]
+    if (typeof who !== "string" || !stageIds[key].has(who)) {
+      i = end - 1
+      continue // a quoted example inside a string — containment kills it
+    }
+    if (unresolved.has(`${key}:${who}`)) {
       for (let j = i + 1; j < end; j++) {
         if (isTemperaturePinLine(lines[j])) lines[j] = ""
       }
