@@ -538,9 +538,15 @@ function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined
     if (s == null || typeof s !== "object") continue
     const stageObj = s as Record<string, unknown>
     const stageModel = stageObj.model
-    for (const [key, identity] of [
-      ["units", "id"],
-      ["members", "name"],
+    // UNITS resolve unit.model ?? stage.model (modelPlanFromStages);
+    // MEMBERS resolve member.model ONLY — no acting seat reads
+    // stage.model for a member (gate-r34 principles-301: the plan
+    // walks solo stages and fan-out units, never member arrays; a
+    // member pin "riding" the stage model died at every member birth
+    // while the door said ok:true)
+    for (const [key, identity, ridesStageModel] of [
+      ["units", "id", true],
+      ["members", "name", false],
     ] as const) {
       const entries = stageObj[key]
       if (!Array.isArray(entries)) continue
@@ -549,7 +555,7 @@ function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined
         const entry = e as Record<string, unknown>
         const rides =
           (typeof entry.model === "string" && entry.model.length > 0) ||
-          (typeof stageModel === "string" && stageModel.length > 0) ||
+          (ridesStageModel && typeof stageModel === "string" && stageModel.length > 0) ||
           workflowModelValid ||
           typeof cliModel === "string"
         if (!rides) {

@@ -48,8 +48,14 @@ git -C "$REPO" worktree add --detach "$prog/data/review/base" "$BASE_SHA" >/dev/
 # checkouts above keep every file (prove re-runs the repros from the
 # checkout, and a lens MAY still open a specific repro by path when
 # a finding cites one).
+# files-all.txt is the UNFILTERED list (gate-r34 tests-10002): prove's
+# incomplete-fix classification keys on the diff-file set — filtering
+# it demoted every corpus-test finding to 'pre-existing' advisory
+# forever, structurally killing the one class this corpus DID
+# generate (r2). Machine truth stays whole; only the reading shrank.
 git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
 git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
+git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files-all.txt"
 
 # pr.md — the claims, not the story. The body (when the CLI was given
 # one) is claims the author WROTE ABOUT THE CODE; the author's session
