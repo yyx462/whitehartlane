@@ -439,6 +439,67 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     }
   }
 
+  // BIRTH (gate-r30 principles-202, the fan-out bench's twin law):
+  // "how long may an unboarded pane ride?" is ONE decision — the
+  // fan-out bench answers at born_ms (orchestrator.ts birthJudge:
+  // session existence is the only key, the working exemption dies at
+  // bornMs, transport never an answer). This bench accepted the field
+  // (hooks validates workflow.born_ms) with NO consumer: the stall
+  // judge deferred the never-boarding ball-holder on "working"
+  // unconditionally and the exchange rode a member nobody will ever
+  // hear. THE PATIENCE IS THE EARLIER CLOCK — min(born_ms, stall_ms):
+  // an unboarded member silent past EITHER ceiling is the
+  // never-boarding shape (the stall ladder would judge a BOOKED pane
+  // at the same silence; working does not exempt past the window —
+  // the #249 agent_status-lies class, gate-r11 tests-1's fan-out
+  // twin). Respawn while retries remain (the liveness judge's
+  // transport ceremony), close honestly at the cap.
+  const bornPatience = Math.min(manifest.workflow.born_ms ?? 180_000, stallMs)
+  // "did this member EVER board?" — the RAW ROW question (any pane row
+  // carrying a session pointer), NOT bookedSessionOf's verified answer
+  // (which consults the host store; a synthetic test pointer must not
+  // read as never-boarded and eat a respawn — the r27 hermeticity
+  // lesson). The verified oracle keeps its seats (resume, the fan-out
+  // spare); the birth question only asks whether a booking exists.
+  const everBookedRow = (name: string): boolean => {
+    if (!ledger) return false
+    return ledger.job.panes.some((p) => p.unit === name && p.transcript?.session_id !== undefined)
+  }
+  const memberBirthJudge: Judge<MemberBeat> = (b) => {
+    if (!b.holdsBall) return { kind: "none" }
+    if (everBookedRow(b.id)) return { kind: "none" } // boarded — however quiet, this court is not its seat
+    // JURISDICTION (the court's own law): only the shape the stall
+    // ladder CANNOT judge — a member 'working'-deferred forever (the
+    // #249 agent_status-lies class; an idle unboarded member is the
+    // nudge ladder's: prompt, refuse, kill — the standing law). This
+    // seat exists because the stall judge defers on "working"
+    // UNCONDITIONALLY, and a never-boarding member rode the whole
+    // exchange behind that defer.
+    if (b.status !== "working") return { kind: "none" }
+    if (Date.now() - (bornAt.get(b.id) ?? 0) <= bornPatience) return { kind: "none" }
+    const spent = retriesUsed.get(b.id) ?? 0
+    if (spent < retryCap && respawnMember(memberOf(b.id))) {
+      retriesUsed.set(b.id, spent + 1)
+      ledger?.emit("retry", { member: b.id, attempt: spent + 1, why: "never boarded by the birth patience" })
+      log(`member ${b.id} never boarded within ${bornPatience}ms — respawned (transport retry ${spent + 1}/${retryCap})`)
+      return { kind: "defer", why: "birth retry — never boarded within the patience" }
+    }
+    return {
+      kind: "close",
+      stage: "member",
+      pass: false,
+      row: {
+        unit: b.id,
+        result: `dead at birth (${bornPatience}ms, ${spent + 1} attempts)`,
+        pass: false,
+      },
+      faultsCanary: false,
+      fault: true,
+      detail: `no agent session ${bornPatience}ms after spawn, ${spent + 1} attempts`,
+      wake: `member ${b.id} never boarded — dead at birth (issue #249 class)`,
+    }
+  }
+
   // stall — the nudge ladder. Only the ball holder is judged: working
   // defers, a booked wait stands the clock down (ADR 0006), two
   // nudges (refusals quoted at their sender), one guidance-deferred
@@ -490,7 +551,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   // the seating — the precedence IS the design (pinned in
   // test/coworker-run.test.ts, the way benchOrder's is).
-  const memberBench: Judge<MemberBeat>[] = [privilegeJudge, livenessJudge, stallJudge]
+  const memberBench: Judge<MemberBeat>[] = [privilegeJudge, livenessJudge, memberBirthJudge, stallJudge]
 
   // the bailiff: close = the one dead record; defer/reprompt = the
   // ball's clock resets (only the holder's silence is the exchange's)

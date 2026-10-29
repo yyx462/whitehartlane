@@ -914,6 +914,20 @@ export function cycle(deps: CycleDeps): boolean {
   // working: the only honest verdict left is stalled.
   const stallJudge: Judge = (b) => {
     if (deps.draining || deps.fallbackLadder === false) return { kind: "none" }
+    // A NEVER-BOARDING pane's death is the BIRTH judge's question
+    // (gate-r30 momentum-103): inside the birth window the birth seat
+    // returns none (it rules only at born_ms), and with stall_ms <
+    // born_ms — legal config; the born DEFAULT alone is 180s, so every
+    // stall_ms in [60s, 180s) hits it — this seat answered first and
+    // settled the transport death as a plain FAILED answer card
+    // (faultsCanary defaults true): 'canary-stopped' with no answer
+    // anywhere on the path, a card regrade cannot re-enter. Log
+    // quietness is NOT evidence for an unboarded pane (the birth
+    // judge's own doctrine); carry — the birth seat rules at born_ms,
+    // transport-class, on every ordering. ONLY where the birth judge
+    // is ARMED (deps.faults exists — session visibility): unarmed, it
+    // can never rule, and this ladder is the pane's only guard.
+    if (deps.faults && !b.booked && b.age <= bornMs) return { kind: "none" }
     if (b.logGrew || b.silentFor <= stallMs) return { kind: "none" }
     if (b.booked) {
       // booked wait: a live child spur holds this pane (ADR 0006) —

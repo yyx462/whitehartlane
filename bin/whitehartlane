@@ -44,6 +44,7 @@ import {
   leaseExpired,
   listJobs,
   bookingStale,
+  liveLeaseHolder,
   loadJob,
   normalizeSpur,
 
@@ -1161,11 +1162,26 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
+    // THE CANONICAL ORACLE DECIDES (gate-r30 principles-201): the raw
+    // record.pid is the raced half — the double-continue residue leaves
+    // the lease's LOSER on the pid field while the winner still beats
+    // the job. The old `pidAlive(job.pid)` test read the dead half,
+    // fell to the declined branch, and booked an abort receipt BESIDE a
+    // live lease holder the oracle counts live — a blind write the
+    // holder's next save clobbers (the split brain the lease mutex
+    // exists to prevent). A live holder means the writer lives: refuse
+    // naming it (the rebirth door's own message), never book beside it.
+    const liveHolder = job.state === "running" && !bookingStale(job, Date.now()) ? liveLeaseHolder(job) : null
+    if (liveHolder && !pidAlive(job.pid)) {
+      console.error(`abort: ${job.id} is held by a live orchestrator (${liveHolder}) — kill or pause it first; one writer per job`)
+      process.exitCode = 2
+      return
+    }
     if (job.state === "running" && pidAlive(job.pid)) {
       // kill semantics (ADR 5): SIGKILL — the orchestrator cannot book,
       // so the CLI books the abort and retires the panes itself.
-      // Unfinished units stay open; their booked sessions survive for
-      // a later continue. (SIGTERM is pause, not abort.)
+      // Unfinished units stay open; their booked sessions survive for a
+      // later continue. (SIGTERM is pause, not abort.)
       try {
         process.kill(job.pid, "SIGKILL")
       } catch (err) {
