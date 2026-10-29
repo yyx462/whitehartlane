@@ -94,14 +94,17 @@ i=0
 # pipeline here, never in the test — the test runs these exact bytes)
 # :lens-derivation-start
 lenses=$({ # spelling- and indent-tolerant (gate-r10 principles-31/questions-9),
-  # key-order-tolerant (gate-r14 principles-37), quoted-key-tolerant
-  # (gate-r15 momentum-30): TOML legalizes indented blocks, {id = "x"}
-  # unpadded braces, single quotes, ANY key order, and QUOTED KEYS —
-  # {'id' = 'x'} is the form the door's parse reads and materializes;
-  # the reader must read what the door writes, or that lens silently
-  # loses its order file. TWIN WARNING: the id class is hooks.ts
+  # quoted-key-tolerant (gate-r15 momentum-30), brace-tolerant
+  # (gate-r16 questions-12): a '{' inside a pre-id VALUE (a code
+  # snippet in a brief — legal TOML, any key order) broke the old
+  # \{[^}{]*id prefix, silently dropping that lens's order file. The
+  # id is matched anywhere inside the units range — entries are
+  # single lines, the range holds only entry lines. Residual, stated:
+  # an id-shaped string inside a brief value derives an inert spurious
+  # order file (no lens consumes it); the door's parse stays the truth
+  # at the verifies. TWIN WARNING: the id class is hooks.ts
   # SHEP_ID_CLASS ([a-z][a-z0-9_-]*); change both.
-  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE '\{[^}{]*id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id['"'"'"]?[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
+  sed -n '/^[ \t]*units[ \t]*=[ \t]*\[/,/^[ \t]*\]/p' "$prog/workflow.toml" | grep -oE 'id['"'"'"]?[ \t]*=[ \t]*("[a-z][a-z0-9_-]*"|'"'"'[a-z][a-z0-9_-]*'"'"')' | sed -E 's/.*id['"'"'"]?[ \t]*=[ \t]*["'"'"']//; s/["'"'"']$//'
   # the [[stage.units]] array-of-tables form — the door's parsed reader
   # accepts and materializes it (gate-r5 principles-26); the textual
   # reader must derive the same lenses or every lens silently loses

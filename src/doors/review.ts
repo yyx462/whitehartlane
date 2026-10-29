@@ -340,11 +340,16 @@ function hasTemperatureKey(node: unknown): boolean {
 // audited escalation on table-form templates).
 function stripTemperaturePins(toml: string): string {
   const lines = toml.split("\n")
-  // arm 2: [[stage.units]] blocks — drop temperature-key lines
+  // arm 2: [[stage.units]] blocks — drop temperature-key lines.
+  // Space-tolerant header (gate-r16 tests-1): `[[ stage.units ]]` is
+  // legal TOML the door's parse, the roster strip's anchor, and
+  // intake's awk arm all bless — an exact-match header here refused
+  // the strip's own verify and dead-ended every audited escalation
+  // on a spaced-header template with a false "door bug" premise.
   let inUnitBlock = false
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
-    if (/^\[\[stage\.units\]\]$/.test(t)) {
+    if (/^\[\[\s*stage\.units\s*\]\]$/.test(t)) {
       inUnitBlock = true
       continue
     }

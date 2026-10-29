@@ -965,6 +965,13 @@ export function cycle(deps: CycleDeps): boolean {
         stage: "unit",
         pass: false,
         row: { unit: b.id, result: "dead at birth", pass: false },
+        // transport, never an answer (gate-r16 tests-2): the judge's
+        // own doctrine calls the never-boarded pane transport class —
+        // the close settles as a FAULT (grade-fault card, regrade can
+        // re-enter) and never trips the canary (#144: infra says
+        // nothing about the plan)
+        faultsCanary: false,
+        fault: true,
         detail: `no agent session ${bornMs}ms after spawn, ${rebirths + 1} attempts`,
         wake: "dead at birth — the pane never boarded (issue #249 class)",
       }
@@ -1079,7 +1086,12 @@ export function cycle(deps: CycleDeps): boolean {
       policy: readModelsFile(deps.taskDir, toml, join(import.meta.dirname, "..", "..")),
       rail: deps.faults,
       close: (id, why) => {
-        finish(id, false, { unit: id, result: why, pass: false }, "unit", true, true)
+        // faultsCanary FALSE (gate-r16 principles-38): an exhausted
+        // model ladder is pure transport — the provider died, the plan
+        // said nothing — and the stop-the-line label ("a REAL answer
+        // failed") is reserved for answers. The grade-fault twin one
+        // seat away passes false for exactly this reason (#144).
+        finish(id, false, { unit: id, result: why, pass: false }, "unit", false, true)
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
