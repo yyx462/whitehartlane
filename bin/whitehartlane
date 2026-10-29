@@ -398,7 +398,19 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // decision-only caller. One guard, at the caller's seat. (The
     // catch's broken-gate guard stays: it carries exit code 1, a
     // different contract — a broken gate decides nothing.)
-    if (gateOnly) return
+    // AND NEVER SILENT (gate-r33b principles-102): under the
+    // kill-switch there IS no decision and no ledger row — a silent
+    // exit 0 betrayed the contract the flag's own comment states.
+    // Refuse loudly, naming the kill-switch (the broken-gate twin's
+    // own loudness).
+    if (gateOnly) {
+      if (process.env.WHL_GATE === "off") {
+        console.error("review: --gate-only asked for a decision, but the gate is off (WHL_GATE=off) — no decision, no ledger row. Unset the kill-switch, or levy without --gate-only for the legacy full rail")
+        process.exitCode = 1
+        return
+      }
+      return
+    }
     const ready = prepareReview(
       {
         repo: positional,

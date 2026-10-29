@@ -45,9 +45,21 @@ export function spawnRunner(
   // passing veto claims. A refusal mutates nothing.
   const veto = successorVetoWhy(job)
   if (veto) return { ok: false, why: veto }
+  // THE LOG SEAT PRECEDES EVERY MUTATION (gate-r33b tests-9001): the
+  // open was unguarded AND after the claim — a job whose run dir is
+  // gone made openSync throw ENOENT with the record already flipped
+  // to running and its pause receipt deleted: 'a refusal mutates
+  // nothing' one step later than the arm above. Open (guarded) after
+  // the read-only veto, before the mutating claim; only a spawnable
+  // job claims.
+  let logFd: number
+  try {
+    logFd = openSync(join(job.dir, "orchestrator.log"), "a")
+  } catch (err) {
+    return { ok: false, why: `cannot open ${join(job.dir, "orchestrator.log")} (${err instanceof Error ? err.message : String(err)}) — the run dir is gone; refusing without mutating the record` }
+  }
   const claim = claimRevivalFlip(job)
   if (!claim.ok) return { ok: false, why: claim.why }
-  const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
   const child = spawn(process.execPath, ["--experimental-strip-types", door, job.dir], {
     detached: true,
     stdio: ["ignore", logFd, logFd],

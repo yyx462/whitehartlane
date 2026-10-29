@@ -243,6 +243,13 @@ export function detectTrunk(repo: string): string | undefined {
 function inlineTomlValue(v: unknown): string | undefined {
   if (typeof v === "string") return JSON.stringify(v)
   if (typeof v === "number" || typeof v === "boolean") return String(v)
+  // A TOML DATE is a value class of its own (gate-r33b tests-9002):
+  // smol-toml hands dates back as TomlDate (extends Date), and the
+  // plain-object branch below re-serialized it into an EMPTY inline
+  // table (Object.entries(Date) = []) — silently replacing a declared
+  // field with garbage under ok:true. ISO offset date-time is valid
+  // TOML and round-trips through the consumer's own parse.
+  if (v instanceof Date) return v.toISOString()
   if (Array.isArray(v)) {
     const items = v.map(inlineTomlValue)
     return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
