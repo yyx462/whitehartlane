@@ -94,10 +94,19 @@ export async function runCoworker(
   const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused, refusedDetail: [...refusedDetail.values()] })
   // A parked member continues its own booked session (write-ahead at
   // birth); a member without one is born fresh, held idle until mail.
+  // THE ONE SPELLING, coworker edition (gate-r24 principles-50): a
+  // member's pane row is matched by its EXACT unit — members inhabit
+  // under their name verbatim (inhabitPane(m.name, …)), so the
+  // bare-name disjunct and the dash-prefix startsWith arm were pure
+  // collision surface (member api answering api-v2's row): a member
+  // that never boarded was born resumed into its sibling's session —
+  // held idle, its brief never delivered, the exchange deadlocked.
+  // The same law rail.bookedSessionOf's w- form states: exact match,
+  // no variants.
   const bookedSessionOf = (name: string): string | undefined => {
     if (!ledger) return undefined
     const latest = ledger.job.panes
-      .filter((p) => (p.unit === name || p.unit?.startsWith(`${name}-`)) && p.transcript)
+      .filter((p) => p.unit === name && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
     return latest?.transcript?.session_id

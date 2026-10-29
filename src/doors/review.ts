@@ -370,6 +370,20 @@ function rebuildInlineUnits(
   return { text: changed ? lines.join("\n") : toml, saw, changed }
 }
 
+// "is this line a [[stage.units]] unit-block header?" — ONE seat
+// (gate-r24 principles-51): the roster strip's anchor and the
+// temperature strip's block detector used to be two grammars that
+// disagreed on legal TOML (quoted key segments — [[stage."units"]] —
+// and trailing comments — [[stage.units]] # lenses — matched one and
+// not the other), so a model-less dropout audit of such a template
+// dead-ended at its own verify ("the strip regex missed a form … this
+// is a door bug") while the roster strip read the same line fine.
+// Spacing-tolerant (gate-r16 tests-1), quoted-key-tolerant,
+// comment-tolerant — the parser's grammar, one spelling.
+function isStageUnitsHeader(line: string): boolean {
+  return /^\[\[\s*stage\s*\.\s*["']?units["']?\s*\]\]\s*(#.*)?$/.test(line.trim())
+}
+
 function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   const lines = toml.split("\n")
   let sawTable = false
@@ -383,13 +397,13 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
   // carrying a bracketed example line mid-string, then refused "no
   // units block" for a template the door's own parse reads: a false
   // premise that killed the gate's subset review entirely. The header
-  // is located by TEXT (quote-tolerant, trailing-comment tolerant);
-  // the EXTENT is the FIRST candidate boundary whose slice parses
-  // standalone to exactly one unit entry (a candidate that cuts a
-  // multi-line string fails the parse and falls through); and
-  // containment against the whole-document parse decides which
-  // "headers" are quoted examples — tests-9101's law, both arms.
-  const headerRe = /^\[\[\s*stage\s*\.\s*["']?units["']?\s*\]\]\s*(#.*)?$/
+  // is located by isStageUnitsHeader (ONE seat, shared with the
+  // temperature strip — gate-r24 principles-51); the EXTENT is the
+  // FIRST candidate boundary whose slice parses standalone to exactly
+  // one unit entry (a candidate that cuts a multi-line string fails
+  // the parse and falls through); and containment against the
+  // whole-document parse decides which "headers" are quoted examples
+  // — tests-9101's law, both arms.
   let documentUnitIds: Set<string>
   try {
     documentUnitIds = documentStageUnitIds(toml)
@@ -397,7 +411,7 @@ function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
     return null // the whole document does not parse — the verify refuses honestly
   }
   for (let i = 0; i < lines.length; i++) {
-    if (!headerRe.test(lines[i].trim())) continue
+    if (!isStageUnitsHeader(lines[i])) continue
     // candidate boundaries: every later trimmed line opening a table
     // header, or EOF. The first whose slice [i..e) parses standalone
     // with exactly ONE unit entry is the block's extent.
@@ -518,10 +532,12 @@ function stripTemperaturePins(toml: string): string {
   let inUnitBlock = false
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim()
-    // Space-tolerant header (gate-r16 tests-1): `[[ stage.units ]]` is
-    // legal TOML the door's parse, the roster strip's anchor, and
-    // intake's handoff all bless.
-    if (/^\[\[\s*stage\.units\s*\]\]$/.test(t)) {
+    // the shared header predicate (gate-r24 principles-51): ONE seat
+    // for "is this line a [[stage.units]] header" — quoted keys and
+    // trailing comments included, exactly the grammar the roster
+    // strip's anchor reads. Two grammars here dead-ended a dropout
+    // audit of a legal template at its own verify.
+    if (isStageUnitsHeader(t)) {
       inUnitBlock = true
       continue
     }
