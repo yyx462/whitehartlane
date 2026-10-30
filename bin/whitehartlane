@@ -576,8 +576,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const ready = prepareReview(
       {
         repo: positional,
-        base: val("base"),
-        head: val("head"),
+        // the gate's OWN resolution rides down on EVERY arm (momentum-300):
+        // the mint pins it in the levy, the fall-through pins it here —
+        // a raw ref re-resolved inside prepareReview is a second
+        // "which bytes" site that can disagree with the ledgered sha
+        // across the gate's own jev window
+        base: gateBaseSha ?? val("base"),
+        head: gateHeadSha ?? val("head"),
         title: val("title"),
         author: val("author"),
         mergeCmd: val("merge-cmd"),

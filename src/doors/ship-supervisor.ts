@@ -125,7 +125,12 @@ export function resolveCaller(cwd: string, opts: { env?: Record<string, string>;
       if (Array.isArray(list) && list.length > 0) {
         const under = (dir: string) => cwd === dir || cwd.startsWith(`${dir}/`)
         const matching = list.filter((s) => under(s.directory))
-        const hit = matching[0] // newest-first
+        // newest BY THE FIELD, never by array position (principles-2000):
+        // trusting the CLI's return order is a second decision site for
+        // "which session is newest" — the wake target must not flip with
+        // a sort-order change in some future CLI
+        matching.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0))
+        const hit = matching[0]
         const now = opts.now ?? Date.now()
         const busySibling = matching.slice(1).find((s) => now - (s.updated ?? 0) < COWORKER_QUIET_MS)
         if (hit && !busySibling) {
