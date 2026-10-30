@@ -11,9 +11,8 @@
 // absent by construction; here the supervisor IS the hearer. One wake,
 // kept by design.
 import { execFileSync, spawn } from "node:child_process"
-import { openSync } from "node:fs"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import { existsSync, mkdirSync, openSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 // single-quote shell escaping — the levy command is COPIED into the
 // supervisor's brief and run verbatim; a title with an apostrophe must
@@ -27,11 +26,13 @@ export function supervisorBrief(opts: { levyCmd: string; runDir: string; pr: str
     ``,
     `1. Run this levy in your tracked background shell (NEVER nohup or '&' detached — you must hear it finish):`,
     `   ${levyCmd}`,
-    `2. When it finishes, read the verdict at ${runDir}/data/review/verdict.json.`,
-    `3. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md`,
-    `   The comment carries: the verdict (accept/reject), each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from ${runDir}/feedback/MAP.md when it exists.`,
-    `4. accept: the rail's merge command already merged the PR — do NOT merge again. reject: do NOT merge, do NOT fix anything, do NOT re-run the review — the authors own the fixes.`,
-    `5. Write one line to ${runDir}/supervisor-result.md (verdict + PR number). Then STOP — your commission is complete.`,
+    `2. STAY ALIVE until the commission resolves — your process IS the watch. Keep a FOREGROUND blocking wait for the verdict (a sh loop like: until [ -f "$V" ]; do sleep 15; done; cat "$V") and let it run to completion. Do NOT end your turn with nothing pending; a supervisor that exits early abandons the commission (the receipt: the first live supervisor died exactly this way and PR #259 went silent).`,
+    `3. The verdict file: the levy's own stdout names the job it booked (a line like 'job: j-XXXX') — the verdict lands at the JOB's run dir, pattern ${runDir.startsWith("/") ? "$AGENTIC_OS_HOME" : ""}/sessions/*/jobs/<jid>/run/data/review/verdict.json under the agentic-os home; the staged ${runDir}/data/review/verdict.json may also carry it. Watch BOTH paths; resolve <jid> from the levy output.`,
+    `4. When the wait ends, read the outcome. If verdict.json exists: go to step 5. If verdict.json is ABSENT (no verdict — the inner door refused, or infra failed): the levy carried --pr so its skip receipt may already be on PR #${pr}; post ONE comment yourself naming the outcome and the levy's printed reason — the PR is NEVER left silent.`,
+    `5. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md — the verdict (accept/reject), each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from the job run dir's feedback/MAP.md when it exists.`,
+    `6. accept: the rail's merge command already merged the PR — do NOT merge again. reject: do NOT merge, do NOT fix anything, do NOT re-run the review — the authors own the fixes.`,
+    `7. If the wait exceeds 2 hours: post a timeout comment on PR #${pr} and (best effort) run: notify "ship-gate" "PR #${pr} review timed out — supervisor log beside ${runDir}" — so a human hears the silence.`,
+    `8. Write one line to ${runDir}/supervisor-result.md (verdict or outcome + PR number). Then STOP — your commission is complete.`,
   ].join("\n")
 }
 
@@ -48,10 +49,18 @@ export function ghPrComment(pr: string, repo: string, body: string): { ok: boole
 }
 
 // mint the owner: detached one-shot agent, stdout/stderr to a log the
-// caller can tail. The caller prints the log path — the supervisor is
-// never silent, even when it fails to start.
-export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: string; bin?: string }): { pid: number; logPath: string } {
+// caller can tail. A bin that cannot spawn is INFRA, reported as infra
+// (questions-18): preflight resolves it BEFORE spawning — a failed
+// spawn returns ok:false (never "pid -1 owns the review"), and the
+// async 'error' listener is armed anyway so a post-preflight failure
+// cannot crash the caller as an unhandled event.
+export type SpawnedSupervisor = { ok: true; pid: number; logPath: string } | { ok: false; why: string }
+
+export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: string; bin?: string }): SpawnedSupervisor {
   const bin = opts.bin ?? process.env.WHL_SUPERVISOR_BIN ?? "opencode"
+  const onPath = (process.env.PATH ?? "").split(":").some((d) => existsSync(join(d, bin)))
+  const present = bin.includes("/") ? existsSync(bin) : onPath
+  if (!present) return { ok: false, why: `supervisor bin '${bin}' not found (WHL_SUPERVISOR_BIN or PATH)` }
   mkdirSync(dirname(opts.logPath), { recursive: true })
   const fd = openSync(opts.logPath, "a")
   const child = spawn(bin, ["run", "--standalone", opts.brief], {
@@ -59,8 +68,10 @@ export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: str
     detached: true, // submit-pr returns now; the supervisor outlives it BY DESIGN
     stdio: ["ignore", fd, fd],
   })
+  child.on("error", () => {}) // preflight raced: the fd-holding caller reports via log silence instead of a crash
   child.unref()
-  return { pid: child.pid ?? -1, logPath: opts.logPath }
+  if (typeof child.pid !== "number" || child.pid <= 0) return { ok: false, why: `spawn returned pid ${child.pid}` }
+  return { ok: true, pid: child.pid, logPath: opts.logPath }
 }
 
 // ---- parent resolution: the commissioner is an agent most of the time

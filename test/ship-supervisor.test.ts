@@ -48,6 +48,8 @@ test("spawnSupervisor: detached spawn with run --standalone and a tailed log", a
   chmodSync(bin, 0o755)
   const out = join(tmp, "run")
   const s = spawnSupervisor({ brief: "BRIEF-CONTENT", cwd: tmp, logPath: join(out, "supervisor.log"), bin })
+  assert.ok(s.ok, `the spawn must succeed against a real stub bin (why: ${s.ok ? "" : s.why})`)
+  if (!s.ok) return
   assert.ok(s.pid > 0, "a real pid came back")
   let argv = ""
   for (let i = 0; i < 40 && !argv; i++) {
@@ -64,6 +66,14 @@ test("spawnSupervisor: detached spawn with run --standalone and a tailed log", a
     if (existsSync(join(out, "supervisor.log"))) log = readFileSync(join(out, "supervisor.log"), "utf8")
   }
   assert.match(log, /supervisor up/)
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+test("spawnSupervisor: an unspawnable bin is infra-as-infra (questions-18's unit twin)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-supervisor-dead-"))
+  const s = spawnSupervisor({ brief: "x", cwd: tmp, logPath: join(tmp, "l.log"), bin: join(tmp, "definitely-absent") })
+  assert.ok(!s.ok, "a missing bin never reports an owned commission")
+  assert.match((s as { why: string }).why, /not found/)
   rmSync(tmp, { recursive: true, force: true })
 })
 

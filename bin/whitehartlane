@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
-import { gateReceipt, runGate, shipConfigOf } from "../src/doors/review-gate.ts"
+import { gateReceipt, LENSES, runGate, shipConfigOf } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
@@ -342,17 +342,34 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr"])
+    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
-    const spawner = spawnerFromArgs(args)
+    let spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
     const gateOnly = args.includes("--gate-only")
     if (!positional) {
       console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
       console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>] [--gate-only]")
-      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto]")
+      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto] [--roster <lenses>]")
       process.exitCode = 2
       return
+    }
+    // --roster <csv>: the commissioner ALREADY decided (the --auto mint
+    // runs the gate once and hands its decision down — one commission,
+    // one gate row; the minted levy must not re-ask a stochastic judge
+    // the same question, principles-1001/tests-2). A pinned roster
+    // skips the gate wholesale: no second draw, no second ledger row.
+    const rosterRaw = val("roster")
+    let rosterPin = undefined
+    if (rosterRaw) {
+      const ids = rosterRaw.split(",").map((s) => s.trim()).filter(Boolean)
+      const bad = ids.filter((i) => !LENSES.includes(i))
+      if (ids.length === 0 || bad.length > 0) {
+        console.error(`review: --roster wants a comma list of lenses (${LENSES.join(",")}) — got '${rosterRaw}'`)
+        process.exitCode = 2
+        return
+      }
+      rosterPin = ids
     }
     // the gate runs FIRST (review-gate.ts): facts → one `jev run`
     // (four noul, one per lens) → roster + dropout audit + ledger row.
@@ -360,7 +377,10 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // the kill-switch (legacy full-rail behavior).
     let gateRoster = undefined
     let gateAudit = false
-    if (process.env.WHL_GATE !== "off") {
+    if (rosterPin) {
+      console.log(`roster: pinned (${rosterPin.join(",")}) — the gate decision was made by the commissioner; no second draw, no second row`)
+      gateRoster = rosterPin
+    } else if (process.env.WHL_GATE !== "off") {
       // ONE trunk decision (gate-r14 tests-1): the door auto-detects
       // master/main/trunk — the gate's default answers the same, or a
       // main-only repo (the git/GitHub default layout) is gate-broken
@@ -469,25 +489,56 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
           process.exitCode = 2
           return
         }
+        // ONE grammar, the door's (principles-1002): the mint must not
+        // accept a model pin its own door refuses on the next line
+        if (!/^[^/\s]+\/[^/\s]+$/.test(model)) {
+          console.error(`review: --auto model must be provider/model — bare ids are refused here, at the door — got '${model}'`)
+          process.exitCode = 2
+          return
+        }
+        // the --out dir is NEVER pre-created (principles-1000, the P0):
+        // the door's replace-guard refuses an existing non-program dir,
+        // and the supervisor's log must live BESIDE the run dir — an
+        // in-dir log made every parentless auto review dead on arrival
         const out = val("out") ?? join(homeRoot(), "auto-reviews", `pr${pr}-${new Date().toISOString().replaceAll(":", "-")}`)
-        mkdirSync(out, { recursive: true })
         const baseRef = val("base") ?? detectTrunk(repoAbs) ?? "master"
         const headRef = val("head") ?? "HEAD"
         const title = val("title") ?? `PR #${pr}`
         const mergeCmd = val("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: accept (#${pr})"`
-        const levy = ["whl", "review", repoAbs, "--base", baseRef, "--head", headRef, "--model", model, "--title", q(title), "--out", out, "--merge-cmd", q(mergeCmd), "--unattended"].join(" ")
+        // the decision rides down (principles-1001/tests-2): the gate
+        // above already decided and ledgered — the minted levy pins the
+        // roster and carries --pr so an inner skip still reaches the PR
+        const rosterCsv = (gateRoster ?? [...LENSES]).join(",")
+        const levy = [
+          "whl", "review", q(repoAbs),
+          "--base", q(baseRef), "--head", q(headRef),
+          "--model", q(model), "--title", q(title),
+          "--out", q(out), "--merge-cmd", q(mergeCmd),
+          "--roster", q(rosterCsv), "--pr", pr,
+          "--unattended",
+        ].join(" ")
         const s = spawnSupervisor({
           brief: supervisorBrief({ levyCmd: levy, runDir: out, pr, repo: repoAbs }),
-          cwd: out,
-          logPath: join(out, "supervisor.log"),
+          cwd: dirname(out),
+          logPath: `${out}.supervisor.log`,
         })
+        if (!s.ok) {
+          // infra as infra (questions-18): a failed spawn is never an
+          // owned commission — report the fault, own nothing
+          console.error(`review: cannot mint the ship supervisor (${s.why}) — the PR is NOT under review; fix the supervisor bin or levy by hand`)
+          process.exitCode = 1
+          return
+        }
         console.log(`parent: none traceable (no --from/WHL_FROM, no OPENCODE_SESSION_ID, no herdr opencode pane) — the rare path`)
         console.log(`supervisor: pid ${s.pid} owns the review of PR #${pr} (log: ${s.logPath})`)
         console.log(`verdict: will land at ${join(out, "data", "review", "verdict.json")} and as a comment on the PR`)
         return
       }
       // a traceable parent: fall through — the levy below carries
-      // --from and the wake goes to that session
+      // --from and the wake goes to that session. RECOMPUTE the spawner
+      // (tests-1): --from may have been pushed AFTER the first read at
+      // the top of this verb — a stale spawner meant "levies nothing"
+      spawner = spawnerFromArgs(args)
     }
     const ready = prepareReview(
       {
