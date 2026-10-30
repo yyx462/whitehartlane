@@ -20,7 +20,7 @@ import { homedir, tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
+import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
@@ -643,6 +643,14 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = runReady.code
       return
     }
+    // THE VERDICT SEAT (principles-3000 / momentum-903): the door
+    // PROMISES the verdict at <out>/data/review/verdict.json and the
+    // supervisor's bounded wait polls exactly that path — link the
+    // staged seat to the job's run dir, where prove.sh writes it. The
+    // door re-materializes the program on every re-levy (which wipes
+    // the dir), so the seat is (re)established HERE — after the
+    // booking that names the run dir.
+    linkVerdictSeat(ready.dir, runReady.job.dir)
     if (spawner) {
       runReady.job.spawner = spawner
       saveJob(runReady.job)

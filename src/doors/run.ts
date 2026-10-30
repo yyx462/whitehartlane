@@ -139,7 +139,7 @@ export function stageRun(source: string, store: string): void {
 // copy (a dangling link until the verdict lands — then it resolves).
 // The seat holds OUTPUT, never input: whatever sits there is stale
 // (the truth lives in the run dir), so it is replaced by the link.
-function linkVerdictSeat(source: string, store: string): void {
+export function linkVerdictSeat(source: string, store: string): void {
   const seat = join(source, "data", "review", "verdict.json")
   try {
     if (existsSync(seat) || lstatSync(seat, { throwIfNoEntry: false })) rmSync(seat, { force: true })
@@ -213,7 +213,11 @@ function copyBeside(source: string, store: string): void {
     source: resolve(source),
     workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
     hooks: hooksHash,
-    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data")) : "",
+    // the verdict SEAT is output, never input: its presence (a link
+    // into the run dir) or absence must not change the program's
+    // identity — the fold's "same program?" judgment cannot flip on a
+    // seat (2026-10-30, the "program changed since booking" strand)
+    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data"), ["review/verdict.json"]) : "",
     members: existsSync(members) ? contentHashOf(members) : "",
     beside,
   }

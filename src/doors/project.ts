@@ -98,14 +98,17 @@ export function spurIdOf(input: { spurId?: string; name?: string; toml: string }
 
 // the version of a program: sha1 over the staged files, sorted —
 // cheap, deterministic, and every content change is a new version.
-export function contentHashOf(dir: string): string {
+export function contentHashOf(dir: string, exclude: string[] = []): string {
   const h = createHash("sha1")
-  const walk = (d: string) => {
+  const skip = new Set(exclude)
+  const walk = (d: string, rel: string) => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
     for (const e of entries) {
       const p = join(d, e.name)
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (skip.has(r)) continue
       h.update(e.name)
-      if (e.isDirectory()) walk(p)
+      if (e.isDirectory()) walk(p, r)
       else if (e.isSymbolicLink()) {
         // a LINK is a seat, not content (2026-10-30, principles-3000):
         // the staged program's verdict seat points into the job's run
@@ -123,7 +126,7 @@ export function contentHashOf(dir: string): string {
       }
     }
   }
-  walk(dir)
+  walk(dir, "")
   return h.digest("hex").slice(0, 12)
 }
 
