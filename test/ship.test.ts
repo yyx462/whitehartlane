@@ -95,9 +95,21 @@ test("whl ship: the end-to-end override — merge, receipt, ledger", () => {
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, "verdict.json"), JSON.stringify({ verdict: "reject", head: headSha, blocked: [{ id: "m-1", severity: "P1", claim: "asserts the wrong requirement" }] }))
   }
-  // a gh stub: records the comment body, exit 0
+  // a gh stub: records every call, answers the boundary probe with the
+  // judged head, exit 0
   const gh = join(tmp, "gh")
-  writeFileSync(gh, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(join(tmp, "gh-calls.txt"))}\n`)
+  const headShaQ = JSON.stringify(headSha)
+  writeFileSync(
+    gh,
+    [
+      "#!/bin/sh",
+      `case "$1 $2" in "pr view") echo ${headShaQ} ;;`,
+      `  *) printf '%s\\n' "$*" >> ${JSON.stringify(join(tmp, "gh-calls.txt"))} ;;`,
+      "esac",
+      "exit 0",
+      "",
+    ].join("\n"),
+  )
   chmodSync(gh, 0o755)
   const overrule = join(tmp, "o.json")
   writeFileSync(overrule, JSON.stringify({ "m-1": "the repro asserts the wrong requirement — the reviewer sees the diff, the owner knows the intent" }))

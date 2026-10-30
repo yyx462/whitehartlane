@@ -682,6 +682,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
+    // ONE --pr grammar, both seats (tests-10010): the --auto flow enforces
+    // digits at its door; ship interpolates the value into a merge command
+    // run through sh -c — anything but digits is shell statements
+    if (!/^\d+$/.test(sVal("pr"))) {
+      console.error(`ship: --pr wants a number — got '${sVal("pr")}' (the same digit grammar the --auto flow enforces)`)
+      usage()
+      process.exitCode = 2
+      return
+    }
     const repoAbs = resolve(sRepo)
     const baseRef = sVal("base") ?? detectTrunk(repoAbs) ?? "master"
     const headRef = sVal("head") ?? "HEAD"
@@ -718,6 +727,23 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     })
     const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")
     const pr = sVal("pr")
+    // NEVER STALE BYTES AT THE MERGE BOUNDARY (momentum-500, principles-16,
+    // tests-10011): the verdict judged one sha; `gh pr merge <n>` merges
+    // the PR's CURRENT remote head. Verify the two are the same bytes at
+    // the last possible seat — and a query failure refuses (unverified is
+    // unmerged; the fail-safe direction)
+    let prHead = ""
+    try {
+      prHead = execFileSync("gh", ["pr", "view", pr, "--json", "headRefOid", "--jq", ".headRefOid"], { cwd: repoAbs, encoding: "utf8", timeout: 30_000 }).trim()
+    } catch {
+      prHead = ""
+    }
+    const judgedSha = check.verdict.head ?? headSha
+    if (prHead !== judgedSha) {
+      console.error(`ship: the PR is at ${prHead.slice(0, 12) || "(unverifiable)"} but the verdict judged ${judgedSha.slice(0, 12)} — bytes no verdict judged would ride the override. Re-review the moved head, then ship.`)
+      process.exitCode = 1
+      return
+    }
     const mergeCmd = sVal("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: override-merge (#${pr})"`
     try {
       execFileSync("sh", ["-c", mergeCmd], { cwd: repoAbs, encoding: "utf8", timeout: 120_000 })
@@ -729,6 +755,20 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by }))
     if (!c.ok) console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands`)
     console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt on the PR, ledger row written`)
+    return
+  }
+
+  if (cmd === "ship-config") {
+    // ship-config — the per-project contract, parsed by the ONE parser
+    // (questions-1, round 6): gwt's auto-levy tail consumed file
+    // PRESENCE, so `auto = false` still levied. This probe is the value's
+    // one reader outside the door — gwt asks, never re-derives from TOML
+    // text (every textual derivation stays one grammar behind forever).
+    const cfgRepo = resolve(process.argv[3] ?? process.cwd())
+    const cfg = shipConfigOf(cfgRepo)
+    console.log(cfg.auto ? "auto: true" : "auto: false")
+    if (cfg.model) console.log(`model: ${cfg.model}`)
+    console.log(`strictness: ${cfg.strictness}`)
     return
   }
 
