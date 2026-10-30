@@ -32,6 +32,11 @@ case "$verdict" in
   reject)
     n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/data/review/verdict.json")
     echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at data/review/verdict.json" >&2
+    # the fixer's exit (the 2026-10-30 ruling): the reviewer reminds, the
+    # owner decides. Fix what you accept; after round 1 you may REJECT
+    # THE REJECTION — every blocked finding answered with a one-line why,
+    # merged under a recorded override, never stealth
+    echo "merge: the fixer's exit — fix + adopt the repros, or (after round 1) overrule: whl ship <repo> --pr <n> --overrule <file.json> (every blocked finding answered, receipt on the PR)" >&2
     exit 1
     ;;
   *)

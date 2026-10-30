@@ -22,8 +22,9 @@ import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
-import { gateReceipt, LENSES, runGate, shipConfigOf } from "../src/doors/review-gate.ts"
+import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
+import { overruleComment, shipCheck, verdictsForHead } from "../src/doors/ship.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -655,6 +656,79 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     console.log(`verdict: will land at ${join(ready.dir, "data", "review", "verdict.json")} (the staged run dir carries it)`)
     console.log(`log: ${runReady.log}`)
     console.log(`trace: ${runReady.trace}`)
+    return
+  }
+
+  if (cmd === "ship") {
+    // ship — the fixer's right to reject a rejection (2026-10-30 ruling):
+    // after round 1, the branch owner may overrule a reject, answering
+    // EVERY blocked finding with a one-line why, and merge the EXACT
+    // bytes the verdict judged. Recorded: ledger row action=override +
+    // a PR comment naming each overruled fact and its why. The reviewer
+    // reminds; the owner decides; the override is never stealth.
+    const sArgs = process.argv.slice(3)
+    const sVal = (name) => {
+      const i = sArgs.indexOf(`--${name}`)
+      return i !== -1 ? sArgs[i + 1] : undefined
+    }
+    const sFlags = new Set(["--pr", "--head", "--base", "--overrule", "--merge-cmd", "--by"])
+    const sRepo = sArgs.find((a, i) => i === 0 || (a && !a.startsWith("-") && !sFlags.has(sArgs[i - 1])))
+    const usage = () => {
+      console.error("usage: whitehartlane ship <repo> --pr <n> --overrule <file.json> [--base <trunk>] [--head <ref>] [--merge-cmd <cmd>] [--by <who>]")
+      console.error("       the overrule file: { \"<finding-id>\": \"one line why\", … } — every blocked finding answered")
+    }
+    if (!sRepo || !sVal("pr") || !sVal("overrule")) {
+      usage()
+      process.exitCode = 2
+      return
+    }
+    const repoAbs = resolve(sRepo)
+    const baseRef = sVal("base") ?? detectTrunk(repoAbs) ?? "master"
+    const headRef = sVal("head") ?? "HEAD"
+    let headSha = ""
+    try {
+      headSha = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
+    } catch {
+      console.error(`ship: cannot resolve ${headRef} in ${repoAbs}`)
+      process.exitCode = 2
+      return
+    }
+    const rounds = verdictsForHead(headSha)
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds })
+    if (!check.ok) {
+      console.error(`ship: ${check.why}`)
+      process.exitCode = check.code
+      return
+    }
+    // the merged bytes ARE the judged bytes (the momentum-200 class,
+    // overrule arm): a verdict about old shas must not bless a moved head
+    const ledgerRow = gateFeatures(repoAbs, baseRef, headSha)
+    appendLedgerRow({
+      repo: repoAbs,
+      head: headRef,
+      headSha,
+      klass: ledgerRow.klass,
+      files: ledgerRow.files.length,
+      churn: ledgerRow.churn,
+      hot: ledgerRow.hotFiles,
+      ps: null,
+      roster: [],
+      action: "override",
+      audit: false,
+    })
+    const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")
+    const pr = sVal("pr")
+    const mergeCmd = sVal("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: override-merge (#${pr})"`
+    try {
+      execFileSync("sh", ["-c", mergeCmd], { cwd: repoAbs, encoding: "utf8", timeout: 120_000 })
+    } catch (err) {
+      console.error(`ship: the merge command failed (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — the overrule is ledgered, the PR is NOT merged`)
+      process.exitCode = 1
+      return
+    }
+    const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by }))
+    if (!c.ok) console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands`)
+    console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt on the PR, ledger row written`)
     return
   }
 

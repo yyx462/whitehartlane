@@ -92,52 +92,59 @@ test("resolveCaller: the harness's own env id is final", () => {
   assert.deepEqual(c, { from: "opencode:ses_direct", via: "env OPENCODE_SESSION_ID" })
 })
 
-test("resolveCaller: herdr's opencode pane + the project's newest session", () => {
+test("resolveCaller: herdr's opencode pane binds the project's ONLY session — two is a guess, refused", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-caller-"))
   const repo = join(tmp, "repo")
   mkdirSync(repo)
   const herdr = stubBin(tmp, "herdr", JSON.stringify({ result: { agent: { agent: "opencode" } } }))
-  const sessions = JSON.stringify([
-    { id: "ses_new", directory: repo, updated: 1793339266367 },
-    { id: "ses_old", directory: repo, updated: 1 },
-  ])
-  const oc = stubBin(tmp, "oc", sessions)
   // the caller's cwd is a real worktree under the session's project —
   // execFileSync spawns WITH it, so it must exist
   mkdirSync(join(repo, "wt-x"))
-  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: oc }
-  // newest-first list, ancestor directory → the newest binds
+  // ONE session in the project: identity by uniqueness — bind it
+  const solo = stubBin(tmp, "oc-solo", JSON.stringify([{ id: "ses_only", directory: repo, updated: 1793339266367 }]))
+  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: solo }
   const c = resolveCaller(join(repo, "wt-x"), { env, now: 1793339266367 + 45_000 })
-  assert.equal(c?.from, "opencode:ses_new")
-  assert.match(c?.via ?? "", /herdr pane wK:pSV/)
-  // a session rooted OUTSIDE this cwd never binds (the wake stays in
-  // the commissioning project)
+  assert.equal(c?.from, "opencode:ses_only")
+  assert.match(c?.via ?? "", /the project's ONLY session/)
+  // TWO sessions — any ages (the sibling may be older OR newer; the
+  // commissioner's own long turn looks quiet either way): a guess,
+  // refused — the supervisor is minted instead
+  const duo = stubBin(tmp, "oc-duo", JSON.stringify([
+    { id: "ses_new", directory: repo, updated: 1793339266367 },
+    { id: "ses_old", directory: repo, updated: 1 },
+  ]))
+  assert.equal(resolveCaller(join(repo, "wt-x"), { env: { ...env, WHL_OPENCODE_BIN: duo }, now: 1793339266367 + 45_000 }), null)
+  // a session rooted OUTSIDE this cwd never counts toward uniqueness
   const foreign = stubBin(tmp, "oc2", JSON.stringify([{ id: "ses_other", directory: "/elsewhere", updated: 9e15 }]))
+  const soloWithForeign = stubBin(tmp, "oc3", JSON.stringify([
+    { id: "ses_only", directory: repo, updated: 1793339266367 },
+    { id: "ses_other", directory: "/elsewhere", updated: 9e15 },
+  ]))
   assert.equal(resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: foreign } }), null)
+  assert.equal(resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: soloWithForeign }, now: 1793339266367 + 45_000 })?.from, "opencode:ses_only", "a foreign-rooted session is not a candidate")
   rmSync(tmp, { recursive: true, force: true })
 })
 
-test("resolveCaller: the coworker law — an equally fresh sibling REFUSES the bind", () => {
+test("resolveCaller: the coworker law — any sibling in the project REFUSES the bind", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-caller-cw-"))
   const repo = join(tmp, "repo")
   mkdirSync(repo)
   const herdr = stubBin(tmp, "herdr", JSON.stringify({ result: { agent: { agent: "opencode" } } }))
   const now = 1793339266367
-  // a whl fan-out: two members, same project, both mid-turn
+  // a whl fan-out: two members, same project, both mid-turn — and the
+  // STALE shape too: the commissioner mid-turn is quiet-looking while
+  // a sibling ticks; recency would bind the sibling (momentum-1)
   const busy = stubBin(tmp, "oc-busy", JSON.stringify([
     { id: "ses_a", directory: repo, updated: now },
     { id: "ses_b", directory: repo, updated: now - 60_000 },
   ]))
   const env = { HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: busy }
-  assert.equal(resolveCaller(repo, { env, now: now + 30_000 }), null, "newest is not identity while a sibling is fresh — guessing the commissioner is the wrong-owner wake")
-  // the sibling long quiet: the newest binds again
-  const quiet = stubBin(tmp, "oc-quiet", JSON.stringify([
+  assert.equal(resolveCaller(repo, { env, now: now + 30_000 }), null, "two candidates is a guess — refuse, mint the supervisor")
+  const stale = stubBin(tmp, "oc-quiet", JSON.stringify([
     { id: "ses_a", directory: repo, updated: now },
     { id: "ses_b", directory: repo, updated: now - 45 * 60 * 1000 },
   ]))
-  const c = resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: quiet }, now: now + 30_000 })
-  assert.equal(c?.from, "opencode:ses_a")
-  assert.match(c?.via ?? "", /siblings quiet/)
+  assert.equal(resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: stale }, now: now + 30_000 }), null, "even a long-quiet sibling keeps the count at two — uniqueness, not recency")
   rmSync(tmp, { recursive: true, force: true })
 })
 

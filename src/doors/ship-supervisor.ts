@@ -13,6 +13,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { sessionsRoot } from "../adapters/store.ts"
 
 // single-quote shell escaping — the levy command is COPIED into the
 // supervisor's brief and run verbatim; a title with an apostrophe must
@@ -27,7 +28,7 @@ export function supervisorBrief(opts: { levyCmd: string; runDir: string; pr: str
     `1. Run this levy in your tracked background shell (NEVER nohup or '&' detached — you must hear it finish):`,
     `   ${levyCmd}`,
     `2. STAY ALIVE until the commission resolves — your process IS the watch. Keep a FOREGROUND blocking wait for the verdict (a sh loop like: until [ -f "$V" ]; do sleep 15; done; cat "$V") and let it run to completion. Do NOT end your turn with nothing pending; a supervisor that exits early abandons the commission (the receipt: the first live supervisor died exactly this way and PR #259 went silent).`,
-    `3. The verdict file: the levy's own stdout names the job it booked (a line like 'job: j-XXXX') — the verdict lands at the JOB's run dir, pattern ${runDir.startsWith("/") ? "$AGENTIC_OS_HOME" : ""}/sessions/*/jobs/<jid>/run/data/review/verdict.json under the agentic-os home; the staged ${runDir}/data/review/verdict.json may also carry it. Watch BOTH paths; resolve <jid> from the levy output.`,
+    `3. The verdict file: the levy's own stdout names the job it booked (a line like 'job: j-XXXX') — the verdict lands at the JOB's run dir, pattern ${sessionsRoot()}/*/jobs/<jid>/run/data/review/verdict.json (that root is concrete — do not expand \$AGENTIC_OS_HOME yourself); the staged ${runDir}/data/review/verdict.json may also carry it. Watch BOTH paths; resolve <jid> from the levy output.`,
     `4. When the wait ends, read the outcome. If verdict.json exists: go to step 5. If verdict.json is ABSENT (no verdict — the inner door refused, or infra failed): the levy carried --pr so its skip receipt may already be on PR #${pr}; post ONE comment yourself naming the outcome and the levy's printed reason — the PR is NEVER left silent.`,
     `5. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md — the verdict (accept/reject), each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from the job run dir's feedback/MAP.md when it exists.`,
     `6. accept: the rail's merge command already merged the PR — do NOT merge again. reject: do NOT merge, do NOT fix anything, do NOT re-run the review — the authors own the fixes.`,
@@ -86,17 +87,16 @@ export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: str
 //      trusted — herdr's liveness word replaces a freshness window
 //      (a window on `updated` breaks long turns; `updated` ticks per
 //      turn, not per tool call), and the directory-ancestor check
-//      keeps the wake inside the commissioning project. COWORKER LAW:
-//      a whl fan-out puts SEVERAL live sessions in one project —
-//      "newest" stops being identity when the runner-up is equally
-//      fresh, and binding then GUESSES the commissioner (a
-//      wrong-owner wake violates the one-wake law worse than minting
-//      a supervisor). The newest binds only when it is decisively
-//      newest: every other session in the project must be quiet.
+//      keeps the wake inside the commissioning project. COWORKER LAW
+//      (momentum-1, sharpened round 5): "newest" is NEVER identity —
+//      the commissioner's own long turn looks quiet while a sibling
+//      ticks, so recency guesses the wrong owner exactly when it
+//      matters. Tier 2 binds ONLY by uniqueness: exactly ONE session
+//      in the project — no siblings to confuse, no ordering to trust.
+//      Two or more candidates, fresh or stale → null → the supervisor
+//      (a minted owner beats a guessed one, always).
 //   anything else → null → the supervisor (rare by construction)
 export type Caller = { from: string; via: string }
-
-const COWORKER_QUIET_MS = 10 * 60 * 1000
 
 const runJson = (bin: string, args: string[], cwd: string, timeout = 15_000): unknown => {
   try {
@@ -125,17 +125,15 @@ export function resolveCaller(cwd: string, opts: { env?: Record<string, string>;
       if (Array.isArray(list) && list.length > 0) {
         const under = (dir: string) => cwd === dir || cwd.startsWith(`${dir}/`)
         const matching = list.filter((s) => under(s.directory))
-        // newest BY THE FIELD, never by array position (principles-2000):
-        // trusting the CLI's return order is a second decision site for
-        // "which session is newest" — the wake target must not flip with
-        // a sort-order change in some future CLI
-        matching.sort((a, b) => (b.updated ?? 0) - (a.updated ?? 0))
-        const hit = matching[0]
-        const now = opts.now ?? Date.now()
-        const busySibling = matching.slice(1).find((s) => now - (s.updated ?? 0) < COWORKER_QUIET_MS)
-        if (hit && !busySibling) {
+        // identity by UNIQUENESS, never by order or recency (momentum-1):
+        // one candidate is provably the commissioner's project session;
+        // two or more is a guess, and a guessed wake owner is the exact
+        // wrong-owner wake this tier exists to prevent
+        if (matching.length === 1) {
+          const hit = matching[0]
+          const now = opts.now ?? Date.now()
           const ageS = Math.max(0, Math.round((now - (hit.updated ?? 0)) / 1000))
-          return { from: `opencode:${hit.id}`, via: `herdr pane ${env.HERDR_PANE_ID} runs opencode; newest session in project, siblings quiet (updated ${ageS}s ago)` }
+          return { from: `opencode:${hit.id}`, via: `herdr pane ${env.HERDR_PANE_ID} runs opencode; the project's ONLY session (updated ${ageS}s ago)` }
         }
       }
     }

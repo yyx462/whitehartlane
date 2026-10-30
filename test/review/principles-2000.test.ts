@@ -57,13 +57,13 @@ test("resolveCaller tier-2: the wake target is a function of the session SET, ne
     const env = (oc: string) => ({ HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: oc })
     const a = mod.resolveCaller(repo, { env: env(forward), now })
     const b = mod.resolveCaller(repo, { env: env(reversed), now })
-    assert.ok(a, "sanity: the forward order binds (the code's own tested shape)")
-    assert.ok(b, "sanity: the reversed order binds too — nothing refused the guess")
-    assert.equal(
-      a!.from,
-      b!.from,
-      "INV-3 (twin of resolveOpencode): the same machine state — same session set, both siblings quiet — must yield ONE wake target. HEAD binds list[0] as 'newest' (ship-supervisor.ts:128), so the CLI's return order picks who gets the wake: order-dependence means the bind GUESSES the commissioner (a wrong-owner wake, which the module's own comment calls worse than minting a supervisor). The repo's one owner of this decision never trusts list order (transcripts.ts:206-212 computes max(created) instead).",
-    )
+    // ADOPTED WITH THE FIX (momentum-1, round 5 — identity by
+    // uniqueness, never recency or order): two candidates in the
+    // project is a GUESS, and a guessed wake owner is the wrong-owner
+    // wake. Both orders must REFUSE — order-independence by refusing
+    // to guess at all, the stronger shape.
+    assert.equal(a, null, "sanity under the uniqueness law: two sessions in the project → the forward order refuses")
+    assert.equal(b, null, "the reversed order refuses identically — never a guess")
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

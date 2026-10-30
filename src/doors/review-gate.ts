@@ -136,7 +136,7 @@ type LedgerRow = {
   hot: { file: string; findings: number }[]
   ps: Partial<Record<Lens, number>> | null
   roster: Lens[]
-  action: "skip" | "review"
+  action: "skip" | "review" | "override"
   audit: boolean
   // the band that made the decision (absent on rows older than the
   // band table — they were all medium by definition)
