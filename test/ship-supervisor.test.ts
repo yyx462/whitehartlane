@@ -5,11 +5,11 @@
 // the supervisor stops), and the spawn is testable through a stub bin.
 import assert from "node:assert/strict"
 import { execSync } from "node:child_process"
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { q, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
+import { q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -66,3 +66,63 @@ test("spawnSupervisor: detached spawn with run --standalone and a tailed log", a
   assert.match(log, /supervisor up/)
   rmSync(tmp, { recursive: true, force: true })
 })
+
+// ---- parent resolution: the commissioner is an agent most of the
+// time; the supervisor is the RARE fallback (2026-10-30). Pinned here:
+// the evidence order and what each tier requires.
+const stubBin = (dir: string, name: string, out: string): string => {
+  const p = join(dir, name)
+  writeFileSync(p, `#!/bin/sh\ncat <<'EOF'\n${out}\nEOF\n`)
+  chmodSync(p, 0o755)
+  return p
+}
+
+test("resolveCaller: the harness's own env id is final", () => {
+  const c = resolveCaller("/anywhere", { env: { OPENCODE_SESSION_ID: "ses_direct" } })
+  assert.deepEqual(c, { from: "opencode:ses_direct", via: "env OPENCODE_SESSION_ID" })
+})
+
+test("resolveCaller: herdr's opencode pane + the project's newest session", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-caller-"))
+  const repo = join(tmp, "repo")
+  mkdirSync(repo)
+  const herdr = stubBin(tmp, "herdr", JSON.stringify({ result: { agent: { agent: "opencode" } } }))
+  const sessions = JSON.stringify([
+    { id: "ses_new", directory: repo, updated: 1793339266367 },
+    { id: "ses_old", directory: repo, updated: 1 },
+  ])
+  const oc = stubBin(tmp, "oc", sessions)
+  // the caller's cwd is a real worktree under the session's project —
+  // execFileSync spawns WITH it, so it must exist
+  mkdirSync(join(repo, "wt-x"))
+  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: oc }
+  // newest-first list, ancestor directory → the newest binds
+  const c = resolveCaller(join(repo, "wt-x"), { env, now: 1793339266367 + 45_000 })
+  assert.equal(c?.from, "opencode:ses_new")
+  assert.match(c?.via ?? "", /herdr pane wK:pSV/)
+  // a session rooted OUTSIDE this cwd never binds (the wake stays in
+  // the commissioning project)
+  const foreign = stubBin(tmp, "oc2", JSON.stringify([{ id: "ses_other", directory: "/elsewhere", updated: 9e15 }]))
+  assert.equal(resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: foreign } }), null)
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+test("resolveCaller: a NON-opencode pane, a dead herdr, no herdr — all null (the supervisor's cases)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-caller2-"))
+  const repo = join(tmp, "repo")
+  mkdirSync(repo)
+  const sessions = JSON.stringify([{ id: "ses_x", directory: repo, updated: 9e15 }])
+  const oc = stubBin(tmp, "oc", sessions)
+  // herdr says the pane runs something else — the session list is NOT
+  // trusted (the wake must reach the commissioner, not a neighbor)
+  const claude = stubBin(tmp, "herdr", JSON.stringify({ result: { agent: { agent: "claude-code" } } }))
+  assert.equal(resolveCaller(repo, { env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", WHL_HERDR_BIN: claude, WHL_OPENCODE_BIN: oc } }), null)
+  // no herdr env at all: a bare terminal NEVER auto-binds, however
+  // fresh the sessions look — that path mints the supervisor
+  assert.equal(resolveCaller(repo, { env: { WHL_OPENCODE_BIN: oc } }), null)
+  // herdr present but broken (unparsable): guarded, still null
+  const dead = stubBin(tmp, "herdr-dead", "not json")
+  assert.equal(resolveCaller(repo, { env: { HERDR_ENV: "1", HERDR_PANE_ID: "p", WHL_HERDR_BIN: dead, WHL_OPENCODE_BIN: oc } }), null)
+  rmSync(tmp, { recursive: true, force: true })
+})
+

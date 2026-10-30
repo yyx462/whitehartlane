@@ -62,3 +62,57 @@ export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: str
   child.unref()
   return { pid: child.pid ?? -1, logPath: opts.logPath }
 }
+
+// ---- parent resolution: the commissioner is an agent most of the time
+// (2026-10-30, the user's rule: the supervisor is the RARE fallback).
+// submit-pr runs inside an agent's shell; the wake should reach THAT
+// agent, and only a genuinely parentless terminal mints a supervisor.
+// Order of evidence, strongest first:
+//   1. the harness itself names the session (OPENCODE_SESSION_ID — the
+//      cleanest field, exported the day opencode does)
+//   2. herdr names the pane's agent (API field, never pane scraping):
+//      only when THIS pane runs an opencode agent is the session list
+//      trusted — herdr's liveness word replaces a freshness window
+//      (a window on `updated` breaks long turns; `updated` ticks per
+//      turn, not per tool call), and the directory-ancestor check
+//      keeps the wake inside the commissioning project
+//   anything else → null → the supervisor (rare by construction)
+export type Caller = { from: string; via: string }
+
+const runJson = (bin: string, args: string[], cwd: string, timeout = 15_000): unknown => {
+  try {
+    return JSON.parse(execFileSync(bin, args, { cwd, encoding: "utf8", timeout }))
+  } catch {
+    return null
+  }
+}
+
+export function resolveCaller(cwd: string, opts: { env?: Record<string, string>; now?: number } = {}): Caller | null {
+  const env = opts.env ?? process.env
+  // 1. the harness said who we are — final, no guessing
+  const self = env.OPENCODE_SESSION_ID
+  if (self) return { from: `opencode:${self}`, via: "env OPENCODE_SESSION_ID" }
+  // 2. herdr's word for THIS pane + the project's newest session
+  if (env.HERDR_ENV === "1" && env.HERDR_PANE_ID) {
+    const herdrBin = env.WHL_HERDR_BIN ?? "herdr"
+    const ocBin = env.WHL_OPENCODE_BIN ?? "opencode"
+    const info = runJson(herdrBin, ["agent", "get", env.HERDR_PANE_ID], cwd) as
+      | { result?: { agent?: { agent?: string } } }
+      | null
+    if (info?.result?.agent?.agent === "opencode") {
+      const list = runJson(ocBin, ["session", "list", "--format", "json", "-n", "5"], cwd) as
+        | Array<{ id: string; directory: string; updated: number }>
+        | null
+      if (Array.isArray(list) && list.length > 0) {
+        const under = (dir: string) => cwd === dir || cwd.startsWith(`${dir}/`)
+        const hit = list.find((s) => under(s.directory))
+        if (hit) {
+          const ageS = Math.max(0, Math.round(((opts.now ?? Date.now()) - (hit.updated ?? 0)) / 1000))
+          return { from: `opencode:${hit.id}`, via: `herdr pane ${env.HERDR_PANE_ID} runs opencode; newest session in project (updated ${ageS}s ago)` }
+        }
+      }
+    }
+  }
+  return null
+}
+

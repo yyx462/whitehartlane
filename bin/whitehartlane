@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url"
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, runGate, shipConfigOf } from "../src/doors/review-gate.ts"
-import { ghPrComment, q, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
+import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -439,6 +439,17 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // kill-switch is a contradiction: auto IS the gate's flow.
     if (args.includes("--auto")) {
       if (!val("from") && process.env.WHL_FROM) args.push("--from", process.env.WHL_FROM)
+      // the commissioner is an agent most of the time (2026-10-30, the
+      // user's rule: the supervisor is the RARE fallback): resolve the
+      // caller BEFORE minting one — the session that ran submit-pr
+      // hears its own verdict through the existing wake law
+      if (!val("from")) {
+        const caller = resolveCaller(process.cwd())
+        if (caller) {
+          args.push("--from", caller.from)
+          console.log(`parent: ${caller.from} (${caller.via}) — this session hears the verdict`)
+        }
+      }
       if (!val("from")) {
         const pr = val("pr")
         if (!pr || !/^\d+$/.test(pr)) {
@@ -470,6 +481,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
           cwd: out,
           logPath: join(out, "supervisor.log"),
         })
+        console.log(`parent: none traceable (no --from/WHL_FROM, no OPENCODE_SESSION_ID, no herdr opencode pane) — the rare path`)
         console.log(`supervisor: pid ${s.pid} owns the review of PR #${pr} (log: ${s.logPath})`)
         console.log(`verdict: will land at ${join(out, "data", "review", "verdict.json")} and as a comment on the PR`)
         return
