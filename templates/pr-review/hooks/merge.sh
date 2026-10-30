@@ -7,18 +7,129 @@
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
+
+# THE OUTCOME MARKER (principles-4004): the commission ends with THIS
+# stage — the verdict the prove stage wrote lands two stages earlier,
+# so a watcher waiting on the verdict speaks before the feedback map
+# exists and before the merge ran. The merge stage writes the
+# commission's end into the STAGED program dir, and the watcher waits
+# on exactly that seat.
+outcome() { # $1 = accept|reject|refused
+  local payload
+  payload="{\"outcome\":\"$1\",\"head\":\"${HEAD_SHA:-}\",\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  # the run's own copy (the job's run dir — the rail's record)
+  printf '%s\n' "$payload" >>"$prog/data/review/merge.json" 2>/dev/null || true
+  # and the STAGED program's seat (where the watcher waits)
+  local seat="${STAGED_DIR:-$prog}/data/review/merge.json"
+  mkdir -p "$(dirname "$seat")" 2>/dev/null || true
+  printf '%s\n' "$payload" >"$seat" 2>/dev/null || true
+}
+
+# EVERY exit writes the seat (momentum-909): the nine refusal paths
+# left the watcher's seat empty and the PR heard "unknown" — the
+# commission's end is a FACT, whatever the end was. (The trap proper
+# is set inside the verdict case — that is the subshell that runs it.)
 node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
   | { read -r verdict
+# the outcome trap lives INSIDE this subshell: the case runs on the
+# pipeline's right side, so a trap set outside would see the parent's
+# value ("refused") and write the WRONG outcome (momentum-909's control)
+MERGE_OUTCOME=refused
+trap 'outcome "$MERGE_OUTCOME"' EXIT
 case "$verdict" in
   accept)
     if [ -n "${MERGE_CMD:-}" ]; then
-      sh -c "$MERGE_CMD" || { echo "merge: MERGE_CMD failed" >&2; exit 1; }
+      # THE HEAD-DRIFT GUARD (momentum-902, the base twin): the
+      # MERGE_CMD arm merges the PR's CURRENT head — a push during the
+      # review would land bytes no verdict judged. The local arm merges
+      # HEAD_SHA by construction; this arm must prove the branch still
+      # points at the judged sha before it hands the merge over. The
+      # local ref is the proof we always have; the PR's remote head is
+      # the stronger one when gh answers.
+      judged_head="$HEAD_SHA"
+      # THE BRANCH HALF (questions-2 / tests-1): HEAD_BRANCH is the
+      # branch NAME (the door derives it from the judged sha ✓) — ask
+      # where it points NOW. The earlier ref-sweep arm was vacuous:
+      # `for-each-ref --points-at` lists only refs that STILL point at
+      # the judged sha, so it could never observe a move.
+      branch_head=""
+      if [ -n "${HEAD_BRANCH:-}" ] && [ "$HEAD_BRANCH" != "$judged_head" ]; then
+        # --verify: a plain rev-parse ECHOES the unresolved arg to
+        # stdout while erroring on stderr — `2>/dev/null || true` kept
+        # the echo, and a branch name compared like a sha refused an
+        # honest merge. --verify prints nothing on failure.
+        branch_head="$(git -C "$REPO" rev-parse --verify "$HEAD_BRANCH^{commit}" 2>/dev/null || true)"
+        if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
+          echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+          exit 1
+        fi
+      fi
+      # NOT the user's checkout (principles-105 / questions-29): the
+      # reviewed tree is the judged sha on its BRANCH — the operator's
+      # working copy is routinely parked on the trunk while the PR's
+      # bytes sit on the feature branch, and a guard that compares the
+      # checkout's HEAD refuses an accept whose bytes the verdict did
+      # judge. The branch tip above and the PR's remote head below are
+      # the two honest witnesses; the checkout is neither.
+      # and every ref that pointed at the judged sha, read again
+      drifted=""
+      for ref in $(git -C "$REPO" for-each-ref --points-at "$judged_head" --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
+        now="$(git -C "$REPO" rev-parse "$ref" 2>/dev/null || true)"
+        if [ -n "$now" ] && [ "$now" != "$judged_head" ]; then
+          drifted="$drifted $ref($now)"
+        fi
+      done
+      if [ -n "$drifted" ]; then
+        echo "merge: the branch moved since the review ($judged_head ->$drifted) — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+        exit 1
+      fi
+      if [ -n "${PR_NUM:-}" ] && command -v gh >/dev/null 2>&1; then
+        remote_head="$(gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+        if [ -z "$remote_head" ]; then
+          echo "merge: PR #$PR_NUM's head could not be read — the merge would land bytes no verdict judged; refusing" >&2
+          exit 1
+        fi
+        if [ "$remote_head" != "$judged_head" ]; then
+          echo "merge: PR #$PR_NUM is at $remote_head but the review judged $judged_head — unreviewed bytes would ride the merge; re-run the review" >&2
+          exit 1
+        fi
+      fi
+      # THE BASE'S HALF (principles-108): the local arm below has
+      # guarded base drift since r8b; the MERGE_CMD arm checked the
+      # HEAD four times and the BASE never — yet this arm merges the
+      # PR onto its base, so a base that moved during the review lands
+      # unreviewed commits inside the accepted merge. A base we cannot
+      # NAME (BASE_BRANCH empty or sha-like, questions-30) cannot be
+      # verified at all — refuse rather than merge blind.
+      if [ -z "${BASE_BRANCH:-}" ] || printf '%s' "$BASE_BRANCH" | grep -qE '^[0-9a-f]{7,40}$'; then
+        echo "merge: the base cannot be named (BASE_BRANCH='${BASE_BRANCH:-}') — its drift cannot be verified; refusing (re-run the review naming the base branch)" >&2
+        exit 1
+      fi
+      now_base="$(git -C "$REPO" rev-parse --verify "$BASE_BRANCH^{commit}" 2>/dev/null || true)"
+      if [ -z "$now_base" ]; then
+        echo "merge: base $BASE_BRANCH could not be read — its drift cannot be verified; refusing" >&2
+        exit 1
+      fi
+      if [ "$now_base" != "$BASE_SHA" ]; then
+        echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
+        exit 1
+      fi
+      # THE MERGE SEAT (momentum-901): the gate runs in the job's run
+      # dir — which is not a git work tree, so `gh pr merge` could not
+      # resolve the repository and every accept died at MERGE_CMD
+      # failed while the verdict already said accept. Run the merge
+      # command FROM THE REPO.
+      (cd "$REPO" && sh -c "$MERGE_CMD") || { echo "merge: MERGE_CMD failed" >&2; exit 1; }
     else
       # the review judged BASE_SHA..HEAD_SHA (self-review r8b
       # momentum-1): a base BRANCH that moved since intake would land
       # unreviewed commits inside the accepted merge — re-observe the
       # label and refuse on drift
-      now_base=$(git -C "$REPO" rev-parse "$BASE_BRANCH")
+      now_base="$(git -C "$REPO" rev-parse --verify "$BASE_BRANCH^{commit}" 2>/dev/null || true)"
+      if [ -z "$now_base" ]; then
+        echo "merge: base $BASE_BRANCH could not be read — its drift cannot be verified; refusing" >&2
+        exit 1
+      fi
       if [ "$now_base" != "$BASE_SHA" ]; then
         echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
         exit 1
@@ -28,10 +139,17 @@ case "$verdict" in
         || { echo "merge: git merge failed (conflicts? base moved?)" >&2; exit 1; }
     fi
     echo "merge: accepted — $TITLE ($HEAD_SHA) merged"
+    MERGE_OUTCOME=accept
     ;;
   reject)
     n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/data/review/verdict.json")
     echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at data/review/verdict.json" >&2
+    MERGE_OUTCOME=reject
+    # the fixer's exit (the 2026-10-30 ruling): the reviewer reminds, the
+    # owner decides. Fix what you accept; after round 1 you may REJECT
+    # THE REJECTION — every blocked finding answered with a one-line why,
+    # merged under a recorded override, never stealth
+    echo "merge: the fixer's exit — fix + adopt the repros, or (after round 1) overrule: whl ship <repo> --pr <n> --overrule <file.json> (every blocked finding answered, receipt on the PR)" >&2
     exit 1
     ;;
   *)

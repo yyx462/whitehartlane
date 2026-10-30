@@ -98,18 +98,51 @@ export function spurIdOf(input: { spurId?: string; name?: string; toml: string }
 
 // the version of a program: sha1 over the staged files, sorted —
 // cheap, deterministic, and every content change is a new version.
-export function contentHashOf(dir: string): string {
+// the OUTPUT SEATS — files that land DURING a run as the chain's own
+// record (the verdict link, the merge marker). They are skipped at
+// EVERY root (principles-109): the program root hashes data/review/
+// merge.json, but the copyBeside site hashes with root = source/DATA,
+// where the same file's relative path is review/merge.json — a
+// root-relative skip set was neutral at one site and INPUT at the
+// other, and the identity moved mid-run exactly there.
+const OUTPUT_SEATS = ["data/review/verdict.json", "data/review/merge.json"]
+const isOutputSeat = (rel: string): boolean =>
+  OUTPUT_SEATS.some((s) => rel === s || rel.endsWith(`/${s}`) || rel === s.slice("data/".length))
+export function contentHashOf(dir: string, exclude: string[] = []): string {
   const h = createHash("sha1")
-  const walk = (d: string) => {
+  // the verdict SEAT is output, never input (questions-20): a symlink
+  // at data/review/verdict.json (into the job's run dir) must never
+  // move the program's identity — the consumer's receipt compares the
+  // hash and calls a moved seat "program changed since booking". The
+  // merge stage's outcome marker (questions-26) is the same kind of
+  // seat: it lands DURING the run, so it must be just as neutral.
+  const skip = new Set([...OUTPUT_SEATS, ...exclude])
+  const walk = (d: string, rel: string) => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
     for (const e of entries) {
       const p = join(d, e.name)
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (skip.has(r) || isOutputSeat(r)) continue
       h.update(e.name)
-      if (e.isDirectory()) walk(p)
-      else h.update(readFileSync(p))
+      if (e.isDirectory()) walk(p, r)
+      else if (e.isSymbolicLink()) {
+        // a LINK is a seat, not content (2026-10-30, principles-3000):
+        // the staged program's verdict seat points into the job's run
+        // dir and resolves only once the rail has judged. Hashing its
+        // TARGET would make every re-levy look like a different program
+        // (the settled fold then re-runs every lens).
+        h.update(`link:${e.name}`)
+      } else {
+        try {
+          h.update(readFileSync(p))
+        } catch (err) {
+          if ((err as { code?: string }).code !== "ENOENT") throw err
+          h.update(`link:${e.name}`)
+        }
+      }
     }
   }
-  walk(dir)
+  walk(dir, "")
   return h.digest("hex").slice(0, 12)
 }
 

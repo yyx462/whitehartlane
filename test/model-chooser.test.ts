@@ -29,12 +29,21 @@ test("remainingCandidates drops the dead and keeps the rest for the judge", () =
   assert.deepEqual(remainingCandidates(ORDER, new Set()), ORDER)
 })
 
-test("questions cover exactly the live candidates, with real rates and GLM-first policy", () => {
+test("questions cover exactly the live candidates, with real rates and the cheapest-first policy", () => {
   const q = chooserQuestions(["xai/grok-4.7"]) as { pick: { criteria: Record<string, string>; instructions: string } }
   assert.deepEqual(Object.keys(q.pick.criteria), ["xai/grok-4.7"])
   assert.match(q.pick.criteria["xai/grok-4.7"], /most expensive/)
   assert.match(q.pick.instructions, /GLM coding plan/)
-  assert.match(q.pick.instructions, /strongly preferred/)
+  // the CHEAPEST-FIRST policy (the owner's ruling, 2026-10-30 — the
+  // old wording called the plan "strongly preferred" while the catalog
+  // ranked the paid rung last: the prompt contradicted the ladder it
+  // describes)
+  assert.match(q.pick.instructions, /CHEAPEST FIRST/)
+  assert.match(q.pick.instructions, /cheapest one that can carry the work/)
+  assert.ok(
+    !/strongly preferred/.test(q.pick.instructions),
+    "the prompt must not call the paid rung preferred while the ladder ranks it last",
+  )
   assert.match(chooserQuestions(ORDER).pick.criteria["zhipuai-coding-plan/glm-5.3-flash"], /\$0\.15/)
   assert.match(chooserQuestions(ORDER).pick.criteria["zhipuai-coding-plan/glm-5.3"], /\$1\.40/)
   assert.ok(CATALOG["zhipuai-coding-plan/glm-5.3"])

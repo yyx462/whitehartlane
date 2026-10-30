@@ -38,15 +38,20 @@ stall_ms = 1800000
 born_ms = 300000
 
 [fallback]
-# the plan-limit ladder (2026-10-29, the r28 receipt): a Zhipu 5h
+# the plan-limit ladder (2026-10-29, the r28 receipt): a provider's 5h
 # window closing mid-run is a PROVIDER FAULT, not silence — with no
 # ladder the four lenses stalled to the 30-min ceiling and the run
 # died verdict-less. Switch INSIDE the live session (the rail's
-# in-session switch — the conversation survives the provider) to
-# Grok 4.7 on the xai coding plan. Key-side rotation (the operator's
-# two Zhipu plans) is the manual twin: `zhipu-key switch next`.
+# in-session switch — the conversation survives the provider).
+#
+# COST ORDER (2026-10-30, the owner's ruling): the cheapest reviewer
+# runs first — MiniMax-M3.1-Flash on minimax.cn; the Zhipu AI Coding
+# Plan's GLM-5.3-Flash is the SECOND rung; Grok 4.7 on xai stays the
+# last resort. The ladder is also the DEFAULT story: a review that
+# costs a coding-plan seat when a flash model would do is the rail
+# burning the owner's budget on its own ceremony.
 mode = "auto"
-order = ["zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"]
+order = ["minimax-cn/MiniMax-M3.1-Flash", "zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"]
 
 [[stage]]
 id = "intake"
@@ -57,7 +62,7 @@ run = "bash hooks/intake.sh"
 id = "lenses"
 topology = "fan-out"
 grade = false
-preamble = "Read ../../data/REVIEWER.md first — it is the law for every lens. Then read ../../data/INVARIANTS.md (what right means here) and ../../data/QUESTIONS.md (the fixed questions). You are reviewing someone else's change: the repo under review is at ../../data/review/head (read-only except test/review/), the BASE it grew from at ../../data/review/base, the diff at ../../data/review/diff.patch. Your own hunk order is ../../data/review/order-<your-id>.txt — read the diff THERE, in that order. You do not have the author's reasoning and must not try to reconstruct it. OUTPUT CONTRACT (the shape is checked mechanically, and a violation costs you a revise round — copy it exactly): units/<your-id>/findings.jsonl holds ONE JSON OBJECT PER LINE, extra fields allowed, but with EXACTLY these required fields — {\"id\":\"<your-id>-1\",\"lens\":\"<your-id>\",\"severity\":\"P0|P1|P2|P3\",\"claim\":\"one sentence\",\"location\":{\"file\":\"src/x.ts\",\"line_start\":1},\"invariant\":\"INV-n (when one applies)\",\"scenario\":\"the path that breaks\",\"repro\":{\"test_path\":\"test/review/<your-id>-1.test.ts\",\"command\":\"node --test test/review/<your-id>-1.test.ts\",\"expected_failure\":\"what the assertion says\"}} — id is prefixed with YOUR unit id and lens IS your unit id (verbatim, no suffixes); every P0/P1 carries a repro whose test file you WROTE under ../../data/review/head/ and RAN; a finding you cannot make fail is P2 at most. Also in your unit dir: coverage.md (the receipt — decisions traced, sites checked with file:line, questions answered, what you declined to judge) and result.md (one line). An empty findings.jsonl is legal; a thin coverage.md with it is not."
+preamble = "Read ../../data/REVIEWER.md first — it is the law for every lens. Then read ../../data/INVARIANTS.md (what right means here) and ../../data/QUESTIONS.md (the fixed questions). You are reviewing someone else's change: the repo under review is at ../../data/review/head (read-only except test/review/), the BASE it grew from at ../../data/review/base, the diff at ../../data/review/diff.patch. Your own hunk order is ../../data/review/order-<your-id>.txt — read the diff THERE, in that order. You do not have the author's reasoning and must not try to reconstruct it. SCRATCH DRIVES (the leaked-lens receipt, 2026-10-30): when you hand-drive a door in a scratch sandbox, export AGENTIC_OS_ORCHESTRATOR pointing at a no-op stub first — a scratch drive must never book a real workflow; reviewer-spawned reviewer panes are zombies that outlive your sandbox. OUTPUT CONTRACT (the shape is checked mechanically, and a violation costs you a revise round — copy it exactly): units/<your-id>/findings.jsonl holds ONE JSON OBJECT PER LINE, extra fields allowed, but with EXACTLY these required fields — {\"id\":\"<your-id>-1\",\"lens\":\"<your-id>\",\"severity\":\"P0|P1|P2|P3\",\"claim\":\"one sentence\",\"location\":{\"file\":\"src/x.ts\",\"line_start\":1},\"invariant\":\"INV-n (when one applies)\",\"scenario\":\"the path that breaks\",\"repro\":{\"test_path\":\"test/review/<your-id>-1.test.ts\",\"command\":\"node --test test/review/<your-id>-1.test.ts\",\"expected_failure\":\"what the assertion says\"}} — id is prefixed with YOUR unit id and lens IS your unit id (verbatim, no suffixes); every P0/P1 carries a repro whose test file you WROTE under ../../data/review/head/ and RAN; a finding you cannot make fail is P2 at most. Also in your unit dir: coverage.md (the receipt — decisions traced, sites checked with file:line, questions answered, what you declined to judge) and result.md (one line). An empty findings.jsonl is legal; a thin coverage.md with it is not."
 check = "bash hooks/findings-check.sh"
 units = [
   { id = "principles", temperature = 0.2, brief = "Lens: PRINCIPLES + TWIN PATHS. For every decision the diff changes (one phrase each: 'when is a pane done', 'how long to wait'), grep the WHOLE repo for every other site making the same decision — synonyms: sleep, setTimeout, settle, retire, drain, idle, done, wait, timeout. Read each site in full, not the hunk. A decision living in two places is itself a finding even when they currently agree. Then walk ../../data/INVARIANTS.md line by line and try to violate each with this change. Read the repo's own direction docs (AGENTS.md, docs/prd/) and judge the change against them. For every P0/P1 write a failing repro test at ../../data/review/head/test/review/principles-<n>.test.ts and RUN it (cwd ../../data/review/head) — if you cannot make it fail, do not raise it." },

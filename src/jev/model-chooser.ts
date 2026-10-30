@@ -1,10 +1,11 @@
 // The JEV chooser: the judge picks the model, code owns the policy.
 //
-// Pricing parity (human-set, 2026-10-15): glm-5.3 costs the same as
-// grok-4.7; flash is 1/5. So the frontier that matters is depth ×
-// availability, not cents: flash for mechanical work, the full tier
-// otherwise, and between the two full-price models choose on depth and
-// availability (the zhipu plan's 5-hour cap binds, grok is metered).
+// Pricing parity (human-set, 2026-10-15) plus the owner's cost ruling
+// (2026-10-30): the ladder runs CHEAPEST FIRST — minimax.cn's flash
+// seat is the default for reviewers, the Zhipu plan's flash the second
+// rung, the paid GLM and Grok the escalation rungs. Between the two
+// full-price models choose on depth and availability (the zhipu plan's
+// 5-hour cap binds, grok is metered).
 //
 // Detecting the fault itself is NOT a judgment — the session-message
 // API field (provider.rate-limit) does that deterministically. JEV only
@@ -19,13 +20,21 @@ import { join } from "node:path"
 export type CatalogEntry = { cost: string; depth: string }
 
 export const CATALOG: Record<string, CatalogEntry> = {
-  "zhipuai-coding-plan/glm-5.3": {
-    cost: "$1.40 in / $4.40 out per 1M tokens; covered by the operator's GLM coding plan (the preferred workhorse)",
-    depth: "full-depth agentic work: multi-step verification, code migration, deep debugging; 1M context",
+  // CHEAPEST FIRST (the owner's ruling, 2026-10-30): the reviewers
+  // burned the coding plan on every review because the paid model sat
+  // at the head of the zero-config order. The flash rung on minimax.cn
+  // is the default seat; the paid rungs are escalation, not the plan.
+  "minimax-cn/MiniMax-M3.1-Flash": {
+    cost: "the cheap rung (minimax.cn plan tier) — the default seat for reviewers; pricing per minimax's current plan",
+    depth: "flash-depth agentic work: multi-step verification, code reading, focused fixes; the reviewer lenses live here",
   },
   "zhipuai-coding-plan/glm-5.3-flash": {
     cost: "$0.15 in / $0.50 out per 1M tokens — ~1/9 of glm-5.3, also plan-covered; shares the GLM plan's 5-hour cap pool with glm-5.3",
     depth: "mechanical runs, log greps, simple edits, short replies",
+  },
+  "zhipuai-coding-plan/glm-5.3": {
+    cost: "$1.40 in / $4.40 out per 1M tokens; covered by the operator's GLM coding plan (the escalation rung)",
+    depth: "full-depth agentic work: multi-step verification, code migration, deep debugging; 1M context",
   },
   "xai/grok-4.7": {
     cost: "$2.00 in / $6.00 out per 1M tokens (above 200k context up to $4.40/$13.20) — the most expensive option; metered, outside the GLM plan",
@@ -85,10 +94,17 @@ export function chooserQuestions(remaining: string[]): Record<string, unknown> {
       type: "choice",
       instructions:
         "Which model should run `member`'s next stretch of work, given `work` and `fault`? " +
-        "The operator holds a GLM coding plan, so GLM candidates are plan-covered and strongly preferred: " +
-        "prefer a live GLM candidate over grok-4.7 whenever it can carry the work. " +
-        "Otherwise pick the cheapest candidate that can still carry the work to completion, and " +
-        "escalate to grok-4.7 only when no GLM candidate is live (`fault`, candidate notes) or the work clearly exceeds GLM's depth. " +
+        // CHEAPEST FIRST (the owner's ruling, 2026-10-30): the judge
+        // reads the ladder in the order the catalog declares it, so the
+        // prompt must say the same thing the catalog says — the
+        // cheapest candidate that can carry the work wins, and the
+        // paid rungs are escalation (tests-5: a prompt that still
+        // calls the plan "strongly preferred" ranks the paid rung
+        // first while the catalog ranks it last).
+        "The ladder is CHEAPEST FIRST: the candidates are listed from cheapest to priciest — " +
+        "pick the cheapest one that can carry the work to completion. " +
+        "The operator holds a GLM coding plan, so the GLM rungs are plan-covered: use them when the cheaper rung cannot carry the work. " +
+        "Escalate to grok-4.7 only when no cheaper candidate is live (`fault`, candidate notes) or the work clearly exceeds it. " +
         "When `fault` shows a model just failed, do not pick that model or anything its notes say shares the same cap.",
       criteria,
     },

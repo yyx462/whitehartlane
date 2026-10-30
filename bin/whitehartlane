@@ -20,9 +20,11 @@ import { homedir, tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
-import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
+import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
-import { gateReceipt, runGate } from "../src/doors/review-gate.ts"
+import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
+import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
+import { overruleComment, shipCheck, verdictsForBranch, verdictsForHead } from "../src/doors/ship.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -313,6 +315,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       --out <dir> --title "<pr title>" --model <provider/model> \\
       --merge-cmd "<cmd>" --unattended
 
+  the auto ship flow (gwt submit-pr's tail; review-gate.toml auto=true):
+    whl review <repo> --pr <n> --auto [--model <provider/model>]
+    the gate decides first; a skip posts its receipt to the PR. A
+    review with no traceable parent (--from / WHL_FROM) MINTS one: a
+    one-shot supervisor agent owns the levy, hears the finish, posts
+    the verdict to the PR, and dies (one wake per commission).
+
   hard rules
     - --model is REQUIRED as provider/model when the template's
       temperature pins have nothing to ride (bare ids are refused)
@@ -334,17 +343,34 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model"])
+    const flagVals = new Set(["--base", "--head", "--head-branch", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
-    const spawner = spawnerFromArgs(args)
+    let spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
     const gateOnly = args.includes("--gate-only")
     if (!positional) {
       console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
       console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>] [--gate-only]")
-      console.error("                               [--from <tool>:<sid> | --unattended]")
+      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto] [--roster <lenses>]")
       process.exitCode = 2
       return
+    }
+    // --roster <csv>: the commissioner ALREADY decided (the --auto mint
+    // runs the gate once and hands its decision down — one commission,
+    // one gate row; the minted levy must not re-ask a stochastic judge
+    // the same question, principles-1001/tests-2). A pinned roster
+    // skips the gate wholesale: no second draw, no second ledger row.
+    const rosterRaw = val("roster")
+    let rosterPin = undefined
+    if (rosterRaw) {
+      const ids = rosterRaw.split(",").map((s) => s.trim()).filter(Boolean)
+      const bad = ids.filter((i) => !LENSES.includes(i))
+      if (ids.length === 0 || bad.length > 0) {
+        console.error(`review: --roster wants a comma list of lenses (${LENSES.join(",")}) — got '${rosterRaw}'`)
+        process.exitCode = 2
+        return
+      }
+      rosterPin = ids
     }
     // the gate runs FIRST (review-gate.ts): facts → one `jev run`
     // (four noul, one per lens) → roster + dropout audit + ledger row.
@@ -352,7 +378,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // the kill-switch (legacy full-rail behavior).
     let gateRoster = undefined
     let gateAudit = false
-    if (process.env.WHL_GATE !== "off") {
+    let gateHeadSha = undefined
+    let gateBaseSha = undefined
+    if (rosterPin) {
+      console.log(`roster: pinned (${rosterPin.join(",")}) — the gate decision was made by the commissioner; no second draw, no second row`)
+      gateRoster = rosterPin
+    } else if (process.env.WHL_GATE !== "off") {
       // ONE trunk decision (gate-r14 tests-1): the door auto-detects
       // master/main/trunk — the gate's default answers the same, or a
       // main-only repo (the git/GitHub default layout) is gate-broken
@@ -361,10 +392,25 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const headRef = val("head") ?? "HEAD"
       try {
         const g = runGate(resolve(positional), baseRef, headRef)
+        // the gate's OWN resolution is the one "which bytes" site
+        // (momentum-200): the mint hands THIS sha down — a re-resolve
+        // at mint time is a second site that can disagree with the
+        // ledger row when the ref moves during the gate's own jev call
+        gateHeadSha = g.features.headSha
+        gateBaseSha = g.features.baseSha
         console.log(gateReceipt(g.features, g.decision))
         // a skip STANDS only when unaudited (gate-r1 momentum-2: the
         // ledger records the judgment; the ESCALATION still levies)
-        if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
+        if (g.decision.action === "skip" && !g.decision.audit) {
+          // --pr: the receipt rides to the PR itself — the submit-pr
+          // flow's reader is the PR page, not this terminal
+          const prSkip = val("pr")
+          if (prSkip) {
+            const c = ghPrComment(prSkip, resolve(positional), `ship-gate: skip\n\n\`\`\`\n${gateReceipt(g.features, g.decision)}\n\`\`\``)
+            if (!c.ok) console.error(`review: skip receipt did not reach PR #${prSkip} (${c.out.split("\n")[0]}) — the gate's ledger row still stands`)
+          }
+          return // receipt + ledger row; nothing levied
+        }
         gateAudit = g.decision.audit === true
         // THE SUBSET QUESTION lives in the DOOR's parse (gate-r21
         // principles-41, the bin seat of r20 tests-5001's class): the
@@ -411,13 +457,168 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       }
       return
     }
+    // --auto: the parentless ship flow (gwt submit-pr's tail calls
+    // this with --pr). The gate has decided above; the only question
+    // left is WHO hears the verdict. A traceable parent (--from, or
+    // WHL_FROM exported by the calling agent) keeps the existing wake
+    // law — this process levies below and the session hears the
+    // finish. No parent → MINT one: the ship supervisor, a one-shot
+    // headless agent that owns the commission, delivers the verdict to
+    // the PR, and dies (ship-supervisor.ts). --auto under the
+    // kill-switch is a contradiction: auto IS the gate's flow.
+    if (args.includes("--auto")) {
+      if (!val("from") && process.env.WHL_FROM) args.push("--from", process.env.WHL_FROM)
+      // the commissioner is an agent most of the time (2026-10-30, the
+      // user's rule: the supervisor is the RARE fallback): resolve the
+      // caller BEFORE minting one — the session that ran submit-pr
+      // hears its own verdict through the existing wake law
+      if (!val("from")) {
+        const caller = resolveCaller(process.cwd())
+        if (caller) {
+          args.push("--from", caller.from)
+          console.log(`parent: ${caller.from} (${caller.via}) — this session hears the verdict`)
+        }
+      }
+      if (!val("from")) {
+        const pr = val("pr")
+        if (!pr || !/^\d+$/.test(pr)) {
+          console.error("review: --auto wants --pr <number> — the submit-pr flow passes it; by hand add the PR number")
+          process.exitCode = 2
+          return
+        }
+        // BOX-IN-BOX, this seat too (principles-4003): the law has one
+        // seat (the orchestrator's spawn) — but the --auto supervisor
+        // is a REAL headless agent, and a review run that mints one
+        // books a worker from inside a review job: reviewer-spawned
+        // reviewer panes. Refuse here the way the runner refuses there.
+        if (process.env.AGENTIC_OS_JID) {
+          console.error(`review: --auto inside review job ${process.env.AGENTIC_OS_JID} would book a supervisor from inside a review job — box-in-box is refused (the ladder's own law; the rail seat refuses it too)`)
+          process.exitCode = 1
+          return
+        }
+        if (process.env.WHL_GATE === "off") {
+          console.error("review: --auto is the gate's flow, but WHL_GATE=off killed the gate — unset the kill-switch or levy by hand")
+          process.exitCode = 1
+          return
+        }
+        const repoAbs = resolve(positional)
+        const model = val("model") ?? shipConfigOf(repoAbs).model
+        if (!model) {
+          console.error('review: --auto needs --model (or model = "…" in the repo\'s review-gate.toml) — the lenses must be pinned')
+          process.exitCode = 2
+          return
+        }
+        // ONE grammar, the door's (principles-1002): the mint must not
+        // accept a model pin its own door refuses on the next line
+        if (!/^[^/\s]+\/[^/\s]+$/.test(model)) {
+          console.error(`review: --auto model must be provider/model — bare ids are refused here, at the door — got '${model}'`)
+          process.exitCode = 2
+          return
+        }
+        // the --out dir is NEVER pre-created (principles-1000, the P0):
+        // the door's replace-guard refuses an existing non-program dir,
+        // and the supervisor's log must live BESIDE the run dir — an
+        // in-dir log made every parentless auto review dead on arrival
+        const out = val("out") ?? join(homeRoot(), "auto-reviews", `pr${pr}-${new Date().toISOString().replaceAll(":", "-")}`)
+        const baseRef = val("base") ?? detectTrunk(repoAbs) ?? "master"
+        const headRef = val("head") ?? "HEAD"
+        // the levy judges the EXACT bytes the gate decided on (momentum-2
+        // + momentum-200): ONE "which bytes" site — the gate's own
+        // resolution, handed down verbatim. The rev-parse fallback only
+        // serves the broken-gate path (no gate row exists to desync
+        // from); a ref that will not resolve falls through and the door
+        // refuses it with its own message.
+        let headPinned = headRef
+        if (gateHeadSha) {
+          headPinned = gateHeadSha
+        } else {
+          try {
+            headPinned = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
+          } catch {
+            /* the door below owns the refusal */
+          }
+        }
+        const title = val("title") ?? `PR #${pr}`
+        const mergeCmd = val("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: accept (#${pr})"`
+        // the decision rides down (principles-1001/tests-2): the gate
+        // above already decided and ledgered — the minted levy pins the
+        // roster and carries --pr so an inner skip still reaches the PR
+        const rosterCsv = (gateRoster ?? [...LENSES]).join(",")
+        // the MINTING door, by path (momentum-907): a bare "whl" on
+        // PATH may be an OLD install that knows none of this hand-down
+        // (--roster, --pr, the pinned shas, the verdict seat) — the
+        // levy must run the door that minted the commission
+        const mintingDoor = join(import.meta.dirname, "whitehartlane")
+        const levy = [
+          mintingDoor, "review", q(repoAbs),
+          // the BASE rides as the BRANCH NAME (principles-1 / questions-4):
+          // the merge gate checks the base out before merging — a sha
+          // there is a detached HEAD and the accept never advances the
+          // base branch (it "merged" into nowhere). The door resolves
+          // the sha into BASE_SHA ✓ and the base-drift guard compares
+          // the name's tip ✓.
+          "--base", q(baseRef), "--head", q(headPinned),
+          // the BRANCH NAME rides beside the pinned sha: the inner
+          // run's config must be able to ask "did the branch move?"
+          // (momentum-906 / principles-4001 — a sha answers itself)
+          ...(headRef !== "HEAD" ? ["--head-branch", q(headRef)] : []),
+          "--model", q(model), "--title", q(title),
+          "--out", q(out), "--merge-cmd", q(mergeCmd),
+          "--roster", q(rosterCsv), "--pr", pr,
+          "--unattended",
+        ].join(" ")
+        const s = spawnSupervisor({
+          brief: supervisorBrief({ levyCmd: levy, runDir: out, pr, repo: repoAbs }),
+          cwd: dirname(out),
+          logPath: `${out}.supervisor.log`,
+          outDir: out,
+          pr,
+          repo: repoAbs,
+        })
+        if (!s.ok) {
+          // infra as infra (questions-18): a failed spawn is never an
+          // owned commission — report the fault, own nothing
+          console.error(`review: cannot mint the ship supervisor (${s.why}) — the PR is NOT under review; fix the supervisor bin or levy by hand`)
+          process.exitCode = 1
+          return
+        }
+        console.log(`parent: none traceable (no --from/WHL_FROM, no OPENCODE_SESSION_ID, no herdr opencode pane) — the rare path`)
+        console.log(`supervisor: pid ${s.pid} owns the review of PR #${pr} (log: ${s.logPath})`)
+        console.log(`verdict: will land at ${join(out, "data", "review", "verdict.json")} and as a comment on the PR`)
+        return
+      }
+      // a traceable parent: fall through — the levy below carries
+      // --from and the wake goes to that session. RECOMPUTE the spawner
+      // (tests-1): --from may have been pushed AFTER the first read at
+      // the top of this verb — a stale spawner meant "levies nothing".
+      // And ONE --from law (principles-1003): spawnerFromArgs owns the
+      // grammar — a pointer it refuses is not a parent, and a malformed
+      // WHL_FROM here would silently levy NOTHING (no spawner, no
+      // --unattended) while the gate's ledger row promised review.
+      spawner = spawnerFromArgs(args)
+      if (val("from") && !spawner) {
+        console.error(`review: --auto got a malformed parent pointer '${val("from")}' — want <tool>:<session-id>, the same law the door's --from enforces. The PR is NOT under review`)
+        process.exitCode = 1
+        return
+      }
+    }
     const ready = prepareReview(
       {
         repo: positional,
-        base: val("base"),
-        head: val("head"),
+        // the gate's OWN resolution rides down on EVERY arm (momentum-300):
+        // the mint pins it in the levy, the fall-through pins it here —
+        // a raw ref re-resolved inside prepareReview is a second
+        // "which bytes" site that can disagree with the ledgered sha
+        // across the gate's own jev window
+        base: gateBaseSha ?? val("base"),
+        head: gateHeadSha ?? val("head"),
         title: val("title"),
         author: val("author"),
+        // the branch NAME and the PR number travel with the review
+        // (the head-drift guard and the gh arm need them; a pinned
+        // sha alone answers its own question forever)
+        headBranch: val("head-branch"),
+        prNum: val("pr"),
         mergeCmd: val("merge-cmd"),
         traceDir: val("trace-dir"),
         bodyFile: val("body-file"),
@@ -472,6 +673,14 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = runReady.code
       return
     }
+    // THE VERDICT SEAT (principles-3000 / momentum-903): the door
+    // PROMISES the verdict at <out>/data/review/verdict.json and the
+    // supervisor's bounded wait polls exactly that path — link the
+    // staged seat to the job's run dir, where prove.sh writes it. The
+    // door re-materializes the program on every re-levy (which wipes
+    // the dir), so the seat is (re)established HERE — after the
+    // booking that names the run dir.
+    linkVerdictSeat(ready.dir, runReady.job.dir)
     if (spawner) {
       runReady.job.spawner = spawner
       saveJob(runReady.job)
@@ -488,6 +697,135 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     console.log(`verdict: will land at ${join(ready.dir, "data", "review", "verdict.json")} (the staged run dir carries it)`)
     console.log(`log: ${runReady.log}`)
     console.log(`trace: ${runReady.trace}`)
+    return
+  }
+
+  if (cmd === "ship") {
+    // ship — the fixer's right to reject a rejection (2026-10-30 ruling):
+    // after round 1, the branch owner may overrule a reject, answering
+    // EVERY blocked finding with a one-line why, and merge the EXACT
+    // bytes the verdict judged. Recorded: ledger row action=override +
+    // a PR comment naming each overruled fact and its why. The reviewer
+    // reminds; the owner decides; the override is never stealth.
+    const sArgs = process.argv.slice(3)
+    const sVal = (name) => {
+      const i = sArgs.indexOf(`--${name}`)
+      return i !== -1 ? sArgs[i + 1] : undefined
+    }
+    const sFlags = new Set(["--pr", "--head", "--base", "--overrule", "--merge-cmd", "--by"])
+    const sRepo = sArgs.find((a, i) => i === 0 || (a && !a.startsWith("-") && !sFlags.has(sArgs[i - 1])))
+    const usage = () => {
+      console.error("usage: whitehartlane ship <repo> --pr <n> --overrule <file.json> [--base <trunk>] [--head <ref>] [--merge-cmd <cmd>] [--by <who>]")
+      console.error("       the overrule file: { \"<finding-id>\": \"one line why\", … } — every blocked finding answered")
+    }
+    if (!sRepo || !sVal("pr") || !sVal("overrule")) {
+      usage()
+      process.exitCode = 2
+      return
+    }
+    // ONE --pr grammar, both seats (tests-10010): the --auto flow enforces
+    // digits at its door; ship interpolates the value into a merge command
+    // run through sh -c — anything but digits is shell statements
+    if (!/^\d+$/.test(sVal("pr"))) {
+      console.error(`ship: --pr wants a number — got '${sVal("pr")}' (the same digit grammar the --auto flow enforces)`)
+      usage()
+      process.exitCode = 2
+      return
+    }
+    const repoAbs = resolve(sRepo)
+    const baseRef = sVal("base") ?? detectTrunk(repoAbs) ?? "master"
+    const headRef = sVal("head") ?? "HEAD"
+    let headSha = ""
+    try {
+      headSha = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
+    } catch {
+      console.error(`ship: cannot resolve ${headRef} in ${repoAbs}`)
+      process.exitCode = 2
+      return
+    }
+    // the base's sha — the rounds AT the base belong to other PRs
+    // (questions-1 / tests-2)
+    let baseSha = ""
+    try {
+      baseSha = execFileSync("git", ["-C", repoAbs, "rev-parse", `${baseRef}^{commit}`], { encoding: "utf8" }).trim()
+    } catch {
+      baseSha = ""
+    }
+    const rounds = verdictsForHead(headSha)
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForBranch(repoAbs, headSha, { base: baseSha }).length })
+    if (!check.ok) {
+      console.error(`ship: ${check.why}`)
+      process.exitCode = check.code
+      return
+    }
+    // the merged bytes ARE the judged bytes (the momentum-200 class,
+    // overrule arm): a verdict about old shas must not bless a moved head
+    const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")
+    const pr = sVal("pr")
+    // NEVER STALE BYTES AT THE MERGE BOUNDARY (momentum-500, principles-16,
+    // tests-10011): the verdict judged one sha; `gh pr merge <n>` merges
+    // the PR's CURRENT remote head. Verify the two are the same bytes at
+    // the last possible seat — and a query failure refuses (unverified is
+    // unmerged; the fail-safe direction)
+    let prHead = ""
+    try {
+      prHead = execFileSync("gh", ["pr", "view", pr, "--json", "headRefOid", "--jq", ".headRefOid"], { cwd: repoAbs, encoding: "utf8", timeout: 30_000 }).trim()
+    } catch {
+      prHead = ""
+    }
+    const judgedSha = check.verdict.head ?? headSha
+    if (prHead !== judgedSha) {
+      console.error(`ship: the PR is at ${prHead.slice(0, 12) || "(unverifiable)"} but the verdict judged ${judgedSha.slice(0, 12)} — bytes no verdict judged would ride the override. Re-review the moved head, then ship.`)
+      process.exitCode = 1
+      return
+    }
+    // the ledger row lands HERE, after every refusal (principles-107):
+    // a row written before the stale-bytes check recorded an override
+    // for a PR that was never overridden — the ledger is a record of
+    // what HAPPENED, not what was attempted
+    const ledgerRow = gateFeatures(repoAbs, baseRef, headSha)
+    appendLedgerRow({
+      repo: repoAbs,
+      head: headRef,
+      headSha,
+      klass: ledgerRow.klass,
+      files: ledgerRow.files.length,
+      churn: ledgerRow.churn,
+      hot: ledgerRow.hotFiles,
+      ps: null,
+      roster: [],
+      action: "override",
+      audit: false,
+    })
+    const mergeCmd = sVal("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: override-merge (#${pr})"`
+    try {
+      execFileSync("sh", ["-c", mergeCmd], { cwd: repoAbs, encoding: "utf8", timeout: 120_000 })
+    } catch (err) {
+      console.error(`ship: the merge command failed (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — the overrule is ledgered, the PR is NOT merged`)
+      process.exitCode = 1
+      return
+    }
+    const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by }))
+    if (!c.ok) {
+      console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands; post the receipt by hand`)
+      console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt not delivered, ledger row written`)
+    } else {
+      console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt on the PR, ledger row written`)
+    }
+    return
+  }
+
+  if (cmd === "ship-config") {
+    // ship-config — the per-project contract, parsed by the ONE parser
+    // (questions-1, round 6): gwt's auto-levy tail consumed file
+    // PRESENCE, so `auto = false` still levied. This probe is the value's
+    // one reader outside the door — gwt asks, never re-derives from TOML
+    // text (every textual derivation stays one grammar behind forever).
+    const cfgRepo = resolve(process.argv[3] ?? process.cwd())
+    const cfg = shipConfigOf(cfgRepo)
+    console.log(cfg.auto ? "auto: true" : "auto: false")
+    if (cfg.model) console.log(`model: ${cfg.model}`)
+    console.log(`strictness: ${cfg.strictness}`)
     return
   }
 

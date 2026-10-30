@@ -29,6 +29,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { homeRoot, sessionsRoot } from "../adapters/store.ts"
 import { DOCS_ONLY, DOCS_PATH } from "./review.ts"
+import { parse as parseToml } from "smol-toml"
 
 export const LENSES = ["principles", "tests", "momentum", "questions"] as const
 export type Lens = (typeof LENSES)[number]
@@ -135,8 +136,11 @@ type LedgerRow = {
   hot: { file: string; findings: number }[]
   ps: Partial<Record<Lens, number>> | null
   roster: Lens[]
-  action: "skip" | "review"
+  action: "skip" | "review" | "override"
   audit: boolean
+  // the band that made the decision (absent on rows older than the
+  // band table — they were all medium by definition)
+  strictness?: Strictness
 }
 
 export function appendLedgerRow(row: Omit<LedgerRow, "ts">, path = ledgerPath()): void {
@@ -188,7 +192,12 @@ export type ClassStats = { greens: number; reds: number; audits: number; rate: n
 // last red — `reds > 0` pinned every class that ever caught a real
 // bug at 1.0 forever, dead-coding the documented "can only loosen as
 // greens accumulate". Pure.
-export function classStats(rows: LedgerRow[], labels: Map<string, { red: boolean }>, klass: GateClass): ClassStats {
+export function classStats(
+  rows: LedgerRow[],
+  labels: Map<string, { red: boolean }>,
+  klass: GateClass,
+  band: GateBand = BANDS.medium,
+): ClassStats {
   let greens = 0
   let reds = 0
   let audits = 0
@@ -214,7 +223,7 @@ export function classStats(rows: LedgerRow[], labels: Map<string, { red: boolean
       sinceRed += 1
     }
   }
-  const rate = sinceRed < 3 ? 1.0 : sinceRed < 8 ? 0.25 : 0.1
+  const rate = band.audit(sinceRed)
   return { greens, reds, audits, rate }
 }
 
@@ -304,13 +313,102 @@ export function jevLenses(
 
 // ---- the decision
 
-export const LENS_KEEP_THRESHOLD = 0.35 // a lens runs unless jev is fairly sure it's not needed
+// strictness — the per-project bar, selected by review-gate.toml at
+// the repo root (absent/unparsable → medium, never vanish). The two
+// design laws ride UNCHANGED through every band: jev judges, the
+// script enforces (a band selects NUMBERS, never outcomes), and the
+// fail-safe direction is absolute (jev down → full rail; a red in a
+// skipped class re-tightens the ladder to every-skip — loose is legal
+// BECAUSE the dropout stays measured).
+export type Strictness = "strict" | "medium" | "loose"
+
+export type GateBand = {
+  // a lens runs unless jev's p(needed) falls BELOW keepP — the higher
+  // the bar, the more sure jev must be that a lens is pointless
+  keepP: number
+  // the dropout ladder over greens-since-last-red
+  audit: (sinceRed: number) => number
+  // prior PROVEN findings on diff files outrank the judgment
+  hotFileForce: boolean
+}
+
+export const BANDS: Record<Strictness, GateBand> = {
+  // strict: the flagship posture — jev must be 85% sure a lens is
+  // pointless to drop it, the ladder loosens half as far and twice as
+  // slow, and a repeat-offender file forces the full rail (a fact
+  // beats a probability)
+  strict: { keepP: 0.15, audit: (g) => (g < 4 ? 1.0 : g < 10 ? 0.5 : 0.25), hotFileForce: true },
+  // medium: today's exact numbers (the old LENS_KEEP_THRESHOLD 0.35
+  // and the 3/8 ladder) — the default every repo gets until it opts in
+  medium: { keepP: 0.35, audit: (g) => (g < 3 ? 1.0 : g < 8 ? 0.25 : 0.1), hotFileForce: false },
+  // loose: trust the greens — jev keeps a lens at a mere 0.40 doubt,
+  // the ladder decays at 2/5 to a 0.05 floor. Cheaper reviews, same
+  // safety net: any red re-tightens to 1.0 and stays re-decayable
+  loose: { keepP: 0.6, audit: (g) => (g < 2 ? 1.0 : g < 5 ? 0.1 : 0.05), hotFileForce: false },
+}
+
+// the per-project ship contract, versioned with the code it gates:
+//   auto = true            levy the review after every gwt submit-pr
+//   model = "provider/m"  the levy's model pin (auto = true requires it)
+//   strictness = "medium" the band above
+export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness }
+
+export function shipConfigOf(repo: string, opts: { head?: string; base?: string } = {}): ShipConfig {
+  // the band comes from the TRUSTED SIDE — the BASE commit (momentum-910):
+  // the gate diffs base..head out of git, so a band read from the
+  // checkout means one diff is gated differently per checkout, and a PR
+  // can ADD the file that lowers the bar gating it. The base's contract
+  // governs the review of the diff against it.
+  const local = (() => {
+    const p = join(repo, "review-gate.toml")
+    if (!existsSync(p)) return { auto: false, model: undefined as string | undefined }
+    try {
+      const t = parseToml(readFileSync(p, "utf8")) as { auto?: unknown; model?: unknown }
+      return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined }
+    } catch {
+      return { auto: false, model: undefined as string | undefined }
+    }
+  })()
+  const commit = opts.base ?? opts.head
+  if (commit) {
+    // the TRUSTED side's contract, and NOTHING else: a commit that
+    // carries no contract means the DEFAULT band — never a fallback to
+    // the working tree (that fallback is the checkout-dependence the
+    // finding named: the PR's own "loose" file lowering the bar that
+    // reviews it)
+    let raw: string
+    try {
+      raw = execFileSync("git", ["-C", repo, "show", `${commit}:review-gate.toml`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+    } catch {
+      // the base declares no contract → the DEFAULT band (never a
+      // fallback to the working tree: that fallback is the
+      // checkout-dependence the finding named)
+      return { auto: local.auto, model: local.model, strictness: "medium" }
+    }
+    const t = parseToml(raw) as { strictness?: unknown }
+    const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
+    return { auto: local.auto, model: local.model, strictness }
+  }
+  return { auto: local.auto, model: local.model, strictness: "medium" }
+}
+
+function parseShipConfig(raw: string): ShipConfig {
+  try {
+    const t = parseToml(raw) as { auto?: unknown; model?: unknown; strictness?: unknown }
+    const strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
+    return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined, strictness }
+  } catch {
+    // an unparsable contract is not a reason to skip anything
+    return { auto: false, strictness: "medium" }
+  }
+}
 
 export function decideGate(
   f: GateFeatures,
   ps: Partial<Record<Lens, number>> | null,
   stats: ClassStats,
   roll = Math.random(),
+  band: GateBand = BANDS.medium,
 ): GateDecision {
   if (f.klass === "docs_only") {
     // the one mechanical rule, kept by construction: the blocking
@@ -331,11 +429,16 @@ export function decideGate(
     // reads action + audit.
     return { action: "skip", roster: [], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong, no judgment to audit" }
   }
+  // strict band's fact-beats-probability rule: a file with prior
+  // PROVEN findings reviews in full whatever jev thinks of the diff
+  if (band.hotFileForce && f.hotFiles.length > 0) {
+    return { action: "review", roster: [...LENSES], ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `strict band: hot file(s) ${f.hotFiles.map((h) => h.file).join(", ")} — ${f.hotFiles.reduce((n, h) => n + h.findings, 0)} prior proven findings outrank the judgment` }
+  }
   if (ps === null) {
     return { action: "review", roster: [...LENSES], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev unavailable — fail-safe full rail" }
   }
   // a MISSING probability is never a reason to drop a lens (fail-safe)
-  const roster = LENSES.filter((l) => (ps[l] ?? 1) >= LENS_KEEP_THRESHOLD)
+  const roster = LENSES.filter((l) => (ps[l] ?? 1) >= band.keepP)
   if (roster.length === 0) {
     // same law as docs_only: the JUDGMENT is skip; the audit escalates
     const audit = roll < stats.rate
@@ -346,17 +449,24 @@ export function decideGate(
   return { action: "review", roster, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `jev roster (${roster.join(",")})` }
 }
 
-// one gate evaluation: features → stats → jev → decision → ledger row
+// one gate evaluation: features → stats → jev → decision → ledger row.
+// The band comes from the repo's own review-gate.toml unless the
+// caller pins one — the per-project contract selects the numbers.
 export function runGate(
   repo: string,
   base: string,
   head: string,
-  opts: { jev?: boolean } = {},
+  opts: { jev?: boolean; strictness?: Strictness } = {},
 ): { features: GateFeatures; decision: GateDecision } {
   const features = gateFeatures(repo, base, head)
-  const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass)
+  // the band comes from the BASE COMMIT (momentum-910) — a PR must not
+  // be able to add the file that lowers the bar gating it (the resolved
+  // merge base, not the moving ref)
+  const strictness = opts.strictness ?? shipConfigOf(repo, { base: features.baseSha }).strictness
+  const band = BANDS[strictness]
+  const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass, band)
   const ps = opts.jev === false || features.klass === "docs_only" ? null : jevLenses(features, stats)
-  const decision = decideGate(features, ps, stats)
+  const decision = decideGate(features, ps, stats, Math.random(), band)
   appendLedgerRow({
     repo: features.repo,
     head: features.head,
@@ -369,6 +479,7 @@ export function runGate(
     roster: decision.roster,
     action: decision.action,
     audit: decision.audit,
+    strictness,
   })
   return { features, decision }
 }
