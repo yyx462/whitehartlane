@@ -760,20 +760,6 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     }
     // the merged bytes ARE the judged bytes (the momentum-200 class,
     // overrule arm): a verdict about old shas must not bless a moved head
-    const ledgerRow = gateFeatures(repoAbs, baseRef, headSha)
-    appendLedgerRow({
-      repo: repoAbs,
-      head: headRef,
-      headSha,
-      klass: ledgerRow.klass,
-      files: ledgerRow.files.length,
-      churn: ledgerRow.churn,
-      hot: ledgerRow.hotFiles,
-      ps: null,
-      roster: [],
-      action: "override",
-      audit: false,
-    })
     const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")
     const pr = sVal("pr")
     // NEVER STALE BYTES AT THE MERGE BOUNDARY (momentum-500, principles-16,
@@ -793,6 +779,24 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 1
       return
     }
+    // the ledger row lands HERE, after every refusal (principles-107):
+    // a row written before the stale-bytes check recorded an override
+    // for a PR that was never overridden — the ledger is a record of
+    // what HAPPENED, not what was attempted
+    const ledgerRow = gateFeatures(repoAbs, baseRef, headSha)
+    appendLedgerRow({
+      repo: repoAbs,
+      head: headRef,
+      headSha,
+      klass: ledgerRow.klass,
+      files: ledgerRow.files.length,
+      churn: ledgerRow.churn,
+      hot: ledgerRow.hotFiles,
+      ps: null,
+      roster: [],
+      action: "override",
+      audit: false,
+    })
     const mergeCmd = sVal("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: override-merge (#${pr})"`
     try {
       execFileSync("sh", ["-c", mergeCmd], { cwd: repoAbs, encoding: "utf8", timeout: 120_000 })

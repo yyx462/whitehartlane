@@ -86,10 +86,13 @@ test("the door's promised verdict path is a path the rail writes", async () => {
     "the rail writes the verdict at the job's run dir (prove.sh:190)",
   )
 
-  // the supervisor's bounded wait watches the door's promised path
+  // the supervisor's bounded wait watches the door's promised seat —
+  // the MERGE seat (the twin-seat law, 2026-10-30): the verdict seat
+  // below is still the rail's record, but the WAIT resolves on the
+  // commission's end, which only the last stage writes
   const brief = supervisor.supervisorBrief({ levyCmd: "whl review '/repo' --unattended", runDir: out, pr: "42", repo })
   assert.ok(
-    brief.includes(join(out, "data", "review", "verdict.json")),
+    brief.includes(join(out, "data", "review", "merge.json")),
     "the supervisor's bounded wait must watch the path the door promises",
   )
 

@@ -60,25 +60,33 @@ export function verdictsForRepo(repo: string, root = sessionsRoot()): Array<{ ve
 // the owner's ROUNDS on THIS branch (questions-1 / tests-2): the
 // repo's whole review history counted (other PRs included), so a
 // brand-new PR's FIRST reject opened the override exit — the gate the
-// exit exists to keep. The owner's rounds are the verdicts whose head
-// is ON this branch's history — and the BASE's verdicts are NOT this
-// PR's rounds (a verdict AT the base sha judged some other branch's
-// diff against that base).
+// exit exists to keep. This branch's rounds are the verdicts whose
+// head is on THIS branch's own history — which is the span base..head,
+// NOT the trunk's: a verdict reachable from the BASE (the trunk's own
+// earlier PRs, merged before this PR was cut) judged some OTHER PR's
+// diff and is not a round of this one (momentum-920 / principles-103
+// / questions-27 — three lenses, one law).
 export function verdictsForBranch(
   repo: string,
   headSha: string,
   opts: { base?: string; root?: string } = {},
 ): Array<{ verdict: Verdict; at: number; path: string }> {
-  const onBranch = (sha: string | undefined): boolean => {
-    if (!sha) return false
-    if (sha === headSha) return true
-    if (opts.base && sha === opts.base) return false
+  const isAncestor = (sha: string, of: string): boolean => {
     try {
-      execFileSync("git", ["-C", repo, "merge-base", "--is-ancestor", sha, headSha], { stdio: ["ignore", "ignore", "ignore"] })
+      execFileSync("git", ["-C", repo, "merge-base", "--is-ancestor", sha, of], { stdio: ["ignore", "ignore", "ignore"] })
       return true
     } catch {
       return false
     }
+  }
+  const onBranch = (sha: string | undefined): boolean => {
+    if (!sha) return false
+    if (sha === headSha) return true
+    // reachable from the base = the trunk's history, not this PR's
+    // span (a commit is its own ancestor, so the base sha itself is
+    // excluded by the same test)
+    if (opts.base && isAncestor(sha, opts.base)) return false
+    return isAncestor(sha, headSha)
   }
   return verdictsForRepo(repo, opts.root ?? sessionsRoot()).filter((h) => onBranch(h.verdict.head))
 }

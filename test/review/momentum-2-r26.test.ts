@@ -53,16 +53,18 @@ test("the brief's job-run-dir pattern must resolve under the home the verdict ac
       pr: "7",
       repo: "/repo",
     })
-    // the pattern as the supervisor's sh would expand it
-    const m = brief.match(/pattern (\S+\/sessions\/\*\/jobs\/<jid>\/run\/data\/review\/verdict\.json)/)
+    // the pattern as the supervisor's sh would expand it — the job's
+    // run dir itself (the 2026-10-30 twin-seat law: the FINDINGS live
+    // in the job's record there; the WAIT lives on the merge seat)
+    const m = brief.match(/pattern (\S+\/sessions\/\*\/jobs\/<jid>\/run)/)
     assert.ok(m, "the brief states a job-run-dir pattern")
     const expanded = m[1].replace("$AGENTIC_OS_HOME", process.env.AGENTIC_OS_HOME ?? "")
     // ONE wake per commission needs a FINDABLE finish: the path the
-    // hearer is told to watch must live under the root the rail
+    // hearer is told to read must live under the root the rail
     // actually writes (sessionsRoot(), the readers' own home).
     assert.ok(
       expanded.startsWith(sessionsRoot()),
-      `the brief's verdict pattern must expand under the real verdict root ${sessionsRoot()} — it expands to ${expanded} (empty $AGENTIC_OS_HOME on the default install; the staged ${out}/data/review/verdict.json fallback is the program dir, which prove.sh never writes)`,
+      `the brief's job-run-dir pattern must expand under the real record root ${sessionsRoot()} — it expands to ${expanded} (empty $AGENTIC_OS_HOME on the default install; the staged ${out}/data/review/ seats are the program dir, which the job copies from)`,
     )
   } finally {
     if (hadHome !== undefined) process.env.AGENTIC_OS_HOME = hadHome

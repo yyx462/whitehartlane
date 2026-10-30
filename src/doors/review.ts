@@ -1091,8 +1091,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // the BASE rides as the BRANCH NAME too (principles-1 /
     // questions-25): the merge gate checks the base out before merging
     // — a sha there is a detached HEAD and the accept never advances
-    // the base branch (it "merged" into nowhere)
-    `BASE_BRANCH=${shellQuote(args.baseBranch ?? branchOf(baseSha) ?? base)}`,
+    // the base branch (it "merged" into nowhere). The FALLBACK must
+    // never emit a sha (questions-30): when no branch points at the
+    // base sha any more (the base moved during the review), an empty
+    // name is the honest value — the merge arms refuse a base they
+    // cannot name instead of checking out a dangling head and
+    // reporting a merge that never landed
+    `BASE_BRANCH=${shellQuote(args.baseBranch ?? branchOf(baseSha) ?? (/^[0-9a-f]{7,40}$/.test(base) ? "" : base))}`,
     `BASE_SHA=${shellQuote(baseSha)}`,
     // the BRANCH NAME, not the pinned sha (momentum-906 /
     // principles-4001 / questions-21): the head-drift guard asks

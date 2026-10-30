@@ -54,18 +54,23 @@ case "$verdict" in
       # the judged sha, so it could never observe a move.
       branch_head=""
       if [ -n "${HEAD_BRANCH:-}" ] && [ "$HEAD_BRANCH" != "$judged_head" ]; then
-        branch_head="$(git -C "$REPO" rev-parse "$HEAD_BRANCH" 2>/dev/null || true)"
+        # --verify: a plain rev-parse ECHOES the unresolved arg to
+        # stdout while erroring on stderr — `2>/dev/null || true` kept
+        # the echo, and a branch name compared like a sha refused an
+        # honest merge. --verify prints nothing on failure.
+        branch_head="$(git -C "$REPO" rev-parse --verify "$HEAD_BRANCH^{commit}" 2>/dev/null || true)"
         if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
           echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
           exit 1
         fi
       fi
-      # the reviewed tree's own head — the honest local question
-      work_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
-      if [ -n "$work_head" ] && [ "$work_head" != "$judged_head" ]; then
-        echo "merge: the reviewed tree moved ($judged_head -> $work_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
-        exit 1
-      fi
+      # NOT the user's checkout (principles-105 / questions-29): the
+      # reviewed tree is the judged sha on its BRANCH — the operator's
+      # working copy is routinely parked on the trunk while the PR's
+      # bytes sit on the feature branch, and a guard that compares the
+      # checkout's HEAD refuses an accept whose bytes the verdict did
+      # judge. The branch tip above and the PR's remote head below are
+      # the two honest witnesses; the checkout is neither.
       # and every ref that pointed at the judged sha, read again
       drifted=""
       for ref in $(git -C "$REPO" for-each-ref --points-at "$judged_head" --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
@@ -89,6 +94,26 @@ case "$verdict" in
           exit 1
         fi
       fi
+      # THE BASE'S HALF (principles-108): the local arm below has
+      # guarded base drift since r8b; the MERGE_CMD arm checked the
+      # HEAD four times and the BASE never — yet this arm merges the
+      # PR onto its base, so a base that moved during the review lands
+      # unreviewed commits inside the accepted merge. A base we cannot
+      # NAME (BASE_BRANCH empty or sha-like, questions-30) cannot be
+      # verified at all — refuse rather than merge blind.
+      if [ -z "${BASE_BRANCH:-}" ] || printf '%s' "$BASE_BRANCH" | grep -qE '^[0-9a-f]{7,40}$'; then
+        echo "merge: the base cannot be named (BASE_BRANCH='${BASE_BRANCH:-}') — its drift cannot be verified; refusing (re-run the review naming the base branch)" >&2
+        exit 1
+      fi
+      now_base="$(git -C "$REPO" rev-parse --verify "$BASE_BRANCH^{commit}" 2>/dev/null || true)"
+      if [ -z "$now_base" ]; then
+        echo "merge: base $BASE_BRANCH could not be read — its drift cannot be verified; refusing" >&2
+        exit 1
+      fi
+      if [ "$now_base" != "$BASE_SHA" ]; then
+        echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
+        exit 1
+      fi
       # THE MERGE SEAT (momentum-901): the gate runs in the job's run
       # dir — which is not a git work tree, so `gh pr merge` could not
       # resolve the repository and every accept died at MERGE_CMD
@@ -100,7 +125,11 @@ case "$verdict" in
       # momentum-1): a base BRANCH that moved since intake would land
       # unreviewed commits inside the accepted merge — re-observe the
       # label and refuse on drift
-      now_base=$(git -C "$REPO" rev-parse "$BASE_BRANCH")
+      now_base="$(git -C "$REPO" rev-parse --verify "$BASE_BRANCH^{commit}" 2>/dev/null || true)"
+      if [ -z "$now_base" ]; then
+        echo "merge: base $BASE_BRANCH could not be read — its drift cannot be verified; refusing" >&2
+        exit 1
+      fi
       if [ "$now_base" != "$BASE_SHA" ]; then
         echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
         exit 1

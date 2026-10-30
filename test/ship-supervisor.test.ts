@@ -32,7 +32,11 @@ test("supervisorBrief: the whole commission, copy-safe", () => {
   assert.match(b, /NEVER nohup/)
   // the verdict reaches the PR; the hearer stops
   assert.match(b, /gh pr comment 42/)
-  assert.match(b, /\/run\/data\/review\/verdict\.json/)
+  // the wait is ONE seat, the LAST stage's (the twin-seat law): the
+  // brief polls the MERGE seat, never the verdict (three stages
+  // earlier) — and names its bare relative path beside the absolute
+  assert.match(b, /\/run\/data\/review\/merge\.json/)
+  assert.match(b, /data\/review\/merge\.json, the MERGE seat/)
   assert.match(b, /do NOT merge again/)
   assert.match(b, /STOP/)
 })

@@ -59,7 +59,7 @@
 // templates/pr-review/hooks/merge.sh → the prove gate classifies this as
 // an incomplete-fix.
 import assert from "node:assert/strict"
-import { spawnSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -80,15 +80,34 @@ function stagedProgram(verdict: Record<string, unknown>, mergeCmd: string) {
   mkdirSync(join(prog, "data", "review"), { recursive: true })
   mkdirSync(join(staged, "data", "review"), { recursive: true })
   mkdirSync(repo, { recursive: true })
+  // a real base the guard can read (principles-108): the MERGE_CMD arm
+  // verifies the base branch still sits at BASE_SHA before merging —
+  // a repo without one is a refusal, not an accept
+  const g = (...a: string[]) => execFileSync("git", a, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+  g("init", "-q", "-b", "main", ".")
+  g("config", "user.email", "t@t.local")
+  g("config", "user.name", "t")
+  writeFileSync(join(repo, "base.txt"), "base\n")
+  g("add", "-A")
+  g("commit", "-qm", "base")
+  const baseSha = g("rev-parse", "main").trim()
+  // and a real reviewed HEAD (a feat branch at the judged sha): a fake
+  // HEAD_SHA lets no arm of the guard say anything honest
+  g("checkout", "-qb", "feat")
+  writeFileSync(join(repo, "feat.txt"), "feat\n")
+  g("add", "-A")
+  g("commit", "-qm", "feat")
+  const headSha = g("rev-parse", "feat").trim()
+  g("checkout", "-q", "main")
   writeFileSync(join(prog, "hooks", "merge.sh"), readFileSync(MERGE_HOOK, "utf8"))
   writeFileSync(
     join(prog, "data", "review", "config.sh"),
     [
       `REPO='${repo}'`,
       `BASE_BRANCH='main'`,
-      `BASE_SHA='${"a".repeat(40)}'`,
+      `BASE_SHA='${baseSha}'`,
       `HEAD_BRANCH='feat'`,
-      `HEAD_SHA='${"b".repeat(40)}'`,
+      `HEAD_SHA='${headSha}'`,
       `TITLE='t'`,
       `AUTHOR=''`,
       `MERGE_CMD='${mergeCmd}'`,

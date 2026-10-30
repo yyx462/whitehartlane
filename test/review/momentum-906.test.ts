@@ -96,6 +96,11 @@ test("the auto-ship accept must land the bytes the verdict judged", () => {
       `TITLE=${q("PR #42")}`,
       `AUTHOR=${q("")}`,
       `MERGE_CMD=${q(mergeCmd)}`,
+      // the door's own derivation (questions-21): prOf reads the PR
+      // out of the merge command (`gh pr merge 42 …` → 42), so a real
+      // config carries PR_NUM — and the remote-head arm can do its
+      // job (the moved-PR refusal this repro pins rides on it)
+      `PR_NUM='42'`,
     ].join("\n") + "\n",
   )
   writeFileSync(

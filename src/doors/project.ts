@@ -98,6 +98,16 @@ export function spurIdOf(input: { spurId?: string; name?: string; toml: string }
 
 // the version of a program: sha1 over the staged files, sorted —
 // cheap, deterministic, and every content change is a new version.
+// the OUTPUT SEATS — files that land DURING a run as the chain's own
+// record (the verdict link, the merge marker). They are skipped at
+// EVERY root (principles-109): the program root hashes data/review/
+// merge.json, but the copyBeside site hashes with root = source/DATA,
+// where the same file's relative path is review/merge.json — a
+// root-relative skip set was neutral at one site and INPUT at the
+// other, and the identity moved mid-run exactly there.
+const OUTPUT_SEATS = ["data/review/verdict.json", "data/review/merge.json"]
+const isOutputSeat = (rel: string): boolean =>
+  OUTPUT_SEATS.some((s) => rel === s || rel.endsWith(`/${s}`) || rel === s.slice("data/".length))
 export function contentHashOf(dir: string, exclude: string[] = []): string {
   const h = createHash("sha1")
   // the verdict SEAT is output, never input (questions-20): a symlink
@@ -106,13 +116,13 @@ export function contentHashOf(dir: string, exclude: string[] = []): string {
   // hash and calls a moved seat "program changed since booking". The
   // merge stage's outcome marker (questions-26) is the same kind of
   // seat: it lands DURING the run, so it must be just as neutral.
-  const skip = new Set(["data/review/verdict.json", "data/review/merge.json", ...exclude])
+  const skip = new Set([...OUTPUT_SEATS, ...exclude])
   const walk = (d: string, rel: string) => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
     for (const e of entries) {
       const p = join(d, e.name)
       const r = rel ? `${rel}/${e.name}` : e.name
-      if (skip.has(r)) continue
+      if (skip.has(r) || isOutputSeat(r)) continue
       h.update(e.name)
       if (e.isDirectory()) walk(p, r)
       else if (e.isSymbolicLink()) {

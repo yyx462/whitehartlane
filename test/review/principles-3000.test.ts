@@ -109,12 +109,15 @@ test("principles-3000: the supervisor's foreground wait must poll a path the rai
     }
     assert.ok(argv, "the supervisor stub captured its brief")
     const brief = argv.trim().split("\n").slice(2).join("\n")
-    // the brief's foreground wait spell polls exactly the staged out dir
+    // the brief's foreground wait spell polls exactly the staged out dir's
+    // MERGE seat (the 2026-10-30 twin-seat law: one seat, the LAST
+    // stage's — the verdict is written three stages earlier and a wait
+    // on it posts a receipt before the commission ended)
     const spell = brief.split("\n").find((l) => l.includes("until [ -f"))
     assert.ok(spell, "the brief carries its foreground wait spell")
     assert.ok(
-      spell.includes(join(out, "data", "review", "verdict.json")),
-      `the spell's polled path is the staged --out dir's verdict path (spell: ${spell.slice(0, 160)}…)`,
+      spell.includes(join(out, "data", "review", "merge.json")),
+      `the spell's polled path is the staged --out dir's merge-seat path (spell: ${spell.slice(0, 160)}…)`,
     )
 
     // 3. run the levy VERBATIM, as the supervisor would — with an
