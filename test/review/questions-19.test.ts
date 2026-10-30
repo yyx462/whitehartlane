@@ -64,7 +64,9 @@ test("questions-2: the verbatim levy in the supervisor brief addresses THE repo 
       if (existsSync(argvPath)) argv = readFileSync(argvPath, "utf8")
     }
     if (!argv.trim()) return // BASE behavior: no --auto door, no supervisor minted — nothing to hold to account
-    const levy = argv.split("\n").map((l) => l.trim()).find((l) => l.startsWith("whl review "))
+    // the door that minted it is named BY PATH (momentum-907) — the
+    // line starts with the door, then `review`, then the repo
+    const levy = argv.split("\n").map((l) => l.trim()).find((l) => /^\S+\s+review\s/.test(l))
     assert.ok(levy, "the brief carries the levy command")
     // the round-trip the supervisor itself performs: run the levy line
     // through a REAL /bin/sh and look at the argv the shell hands over

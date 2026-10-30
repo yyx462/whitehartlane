@@ -134,7 +134,7 @@ test("principles-3000: the supervisor's foreground wait must poll a path the rai
         `writeFileSync(${JSON.stringify(marker)}, jobDir + "\\n")`,
       ].join("\n"),
     )
-    const m = brief.match(/^\s*whl review .+$/m)
+    const m = brief.match(/^\s*\S+\s+review\s.+$/m)
     assert.ok(m, "the brief carries the levy verbatim")
     const nodeWhl = `${JSON.stringify(process.execPath)} --experimental-strip-types ${JSON.stringify(BIN)}`
     const levyCmd = m[0].replace(/^(\s*)whl /, `$1${nodeWhl} `).trim()

@@ -103,7 +103,7 @@ test("momentum-200: a ref that moves between the gate's read and the mint's re-r
     }
     assert.ok(argv, "the supervisor stub captured its argv (run --standalone <brief>)")
     const brief = argv.trim().split("\n").slice(2).join("\n")
-    const m = brief.match(/^\s*whl review .+$/m)
+    const m = brief.match(/^\s*\S+\s+review\s.+$/m)
     assert.ok(m, "the brief carries the levy verbatim")
     const levy = m[0].trim()
     const hm = levy.match(/--head\s+('([^']*)'|\S+)/)

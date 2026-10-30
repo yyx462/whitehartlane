@@ -454,7 +454,11 @@ function book(
   if (dupStages.length > 0) {
     return { ok: false, why: `duplicate stage id(s) in workflow.toml: ${dupStages.join(", ")} — rename one`, code: 1 }
   }
-  const version = contentHashOf(dir)
+  // the verdict SEAT is output, never input (questions-20): its
+  // presence (a link into the run dir) or absence must not change the
+  // spur's version either — a version that flips on a seat makes the
+  // spur look like a different program ("program changed since booking")
+  const version = contentHashOf(dir, ["data/review/verdict.json"])
   const dup = registerSpur(proj.pid, spurId.spurId, version, dir)
   if (dup) warnings.push(dup)
   // ── the session is the spur's lineage, scoped by the commissioning

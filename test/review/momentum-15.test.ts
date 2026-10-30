@@ -92,7 +92,7 @@ test("momentum-15: --auto's commission must still reach the PR when the levy end
     }
     assert.ok(brief, "the supervisor was minted and its commission captured (the caller's gate said review)")
     const b = brief.trim().split("\n").slice(2).join("\n") // drop `run` / `--standalone`
-    const levy = b.match(/^\s*(whl review .+)$/m)?.[1] ?? ""
+    const levy = b.match(/^\s*(\S+ review .+)$/m)?.[1] ?? ""
     assert.ok(levy, "the brief carries the levy command verbatim")
     // THE LAW (INV-6 — one wake per commission): a verdict-LESS finish
     // of the levy (the inner gate re-decides skip; the inner door

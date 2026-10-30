@@ -7,6 +7,23 @@
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
+
+# THE OUTCOME MARKER (principles-4004): the commission ends with THIS
+# stage — the verdict the prove stage wrote lands two stages earlier,
+# so a watcher waiting on the verdict speaks before the feedback map
+# exists and before the merge ran. The merge stage writes the
+# commission's end into the STAGED program dir, and the watcher waits
+# on exactly that seat.
+outcome() { # $1 = accept|reject
+  local payload
+  payload="{\"outcome\":\"$1\",\"head\":\"${HEAD_SHA:-}\",\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  # the run's own copy (the job's run dir — the rail's record)
+  printf '%s\n' "$payload" >>"$prog/data/review/merge.json" 2>/dev/null || true
+  # and the STAGED program's seat (where the watcher waits)
+  local seat="${STAGED_DIR:-$prog}/data/review/merge.json"
+  mkdir -p "$(dirname "$seat")" 2>/dev/null || true
+  printf '%s\n' "$payload" >"$seat" 2>/dev/null || true
+}
 node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
   | { read -r verdict
 case "$verdict" in
@@ -20,14 +37,35 @@ case "$verdict" in
       # local ref is the proof we always have; the PR's remote head is
       # the stronger one when gh answers.
       judged_head="$HEAD_SHA"
-      branch_head="$(git -C "$REPO" rev-parse "$HEAD_BRANCH" 2>/dev/null || true)"
-      if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
-        echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+      # THE LOCAL HALF'S TEETH (momentum-906 / principles-4001 /
+      # questions-21): the auto flow hands down the JUDGED SHA, so
+      # asking "what does $HEAD_BRANCH point at" answers itself
+      # forever — the guard could never fire. The worktree's CURRENT
+      # head is the honest question: the reviewed tree moved.
+      work_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
+      if [ -n "$work_head" ] && [ "$work_head" != "$judged_head" ]; then
+        echo "merge: the reviewed tree moved ($judged_head -> $work_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+        exit 1
+      fi
+      # and every ref that pointed at the judged sha, read again
+      drifted=""
+      for ref in $(git -C "$REPO" for-each-ref --points-at "$judged_head" --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
+        now="$(git -C "$REPO" rev-parse "$ref" 2>/dev/null || true)"
+        if [ -n "$now" ] && [ "$now" != "$judged_head" ]; then
+          drifted="$drifted $ref($now)"
+        fi
+      done
+      if [ -n "$drifted" ]; then
+        echo "merge: the branch moved since the review ($judged_head ->$drifted) — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
         exit 1
       fi
       if [ -n "${PR_NUM:-}" ] && command -v gh >/dev/null 2>&1; then
         remote_head="$(gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
-        if [ -n "$remote_head" ] && [ "$remote_head" != "$judged_head" ]; then
+        if [ -z "$remote_head" ]; then
+          echo "merge: PR #$PR_NUM's head could not be read — the merge would land bytes no verdict judged; refusing" >&2
+          exit 1
+        fi
+        if [ "$remote_head" != "$judged_head" ]; then
           echo "merge: PR #$PR_NUM is at $remote_head but the review judged $judged_head — unreviewed bytes would ride the merge; re-run the review" >&2
           exit 1
         fi
@@ -53,10 +91,12 @@ case "$verdict" in
         || { echo "merge: git merge failed (conflicts? base moved?)" >&2; exit 1; }
     fi
     echo "merge: accepted — $TITLE ($HEAD_SHA) merged"
+    outcome accept
     ;;
   reject)
     n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/data/review/verdict.json")
     echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at data/review/verdict.json" >&2
+    outcome reject
     # the fixer's exit (the 2026-10-30 ruling): the reviewer reminds, the
     # owner decides. Fix what you accept; after round 1 you may REJECT
     # THE REJECTION — every blocked finding answered with a one-line why,

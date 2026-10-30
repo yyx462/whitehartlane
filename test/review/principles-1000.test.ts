@@ -96,7 +96,7 @@ test("principles-1000: the minted levy must be admissible at its own door (INV-3
       await sleep(50)
       if (existsSync(join(tmp, "argv.txt"))) argv = readFileSync(join(tmp, "argv.txt"), "utf8")
     }
-    const m = argv.match(/^\s*whl review .+$/m)
+    const m = argv.match(/^\s*\S+\s+review\s.+$/m)
     assert.ok(m, `the brief carries the levy verbatim (argv: ${argv.slice(0, 200)})`)
     const nodeWhl = `${JSON.stringify(process.execPath)} --experimental-strip-types ${JSON.stringify(BIN)}`
     const levyCmd = m[0].replace(/^(\s*)whl /, `$1${nodeWhl} `).trim()

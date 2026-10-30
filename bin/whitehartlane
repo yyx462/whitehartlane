@@ -24,7 +24,7 @@ import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.t
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
-import { overruleComment, shipCheck, verdictsForHead } from "../src/doors/ship.ts"
+import { overruleComment, shipCheck, verdictsForHead, verdictsForRepo } from "../src/doors/ship.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -343,7 +343,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
+    const flagVals = new Set(["--base", "--head", "--head-branch", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
     let spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
@@ -486,6 +486,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
           process.exitCode = 2
           return
         }
+        // BOX-IN-BOX, this seat too (principles-4003): the law has one
+        // seat (the orchestrator's spawn) — but the --auto supervisor
+        // is a REAL headless agent, and a review run that mints one
+        // books a worker from inside a review job: reviewer-spawned
+        // reviewer panes. Refuse here the way the runner refuses there.
+        if (process.env.AGENTIC_OS_JID) {
+          console.error(`review: --auto inside review job ${process.env.AGENTIC_OS_JID} would book a supervisor from inside a review job — box-in-box is refused (the ladder's own law; the rail seat refuses it too)`)
+          process.exitCode = 1
+          return
+        }
         if (process.env.WHL_GATE === "off") {
           console.error("review: --auto is the gate's flow, but WHL_GATE=off killed the gate — unset the kill-switch or levy by hand")
           process.exitCode = 1
@@ -534,9 +544,18 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // above already decided and ledgered — the minted levy pins the
         // roster and carries --pr so an inner skip still reaches the PR
         const rosterCsv = (gateRoster ?? [...LENSES]).join(",")
+        // the MINTING door, by path (momentum-907): a bare "whl" on
+        // PATH may be an OLD install that knows none of this hand-down
+        // (--roster, --pr, the pinned shas, the verdict seat) — the
+        // levy must run the door that minted the commission
+        const mintingDoor = join(import.meta.dirname, "whitehartlane")
         const levy = [
-          "whl", "review", q(repoAbs),
+          mintingDoor, "review", q(repoAbs),
           "--base", q(gateBaseSha ?? baseRef), "--head", q(headPinned),
+          // the BRANCH NAME rides beside the pinned sha: the inner
+          // run's config must be able to ask "did the branch move?"
+          // (momentum-906 / principles-4001 — a sha answers itself)
+          ...(headRef !== "HEAD" ? ["--head-branch", q(headRef)] : []),
           "--model", q(model), "--title", q(title),
           "--out", q(out), "--merge-cmd", q(mergeCmd),
           "--roster", q(rosterCsv), "--pr", pr,
@@ -589,6 +608,11 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         head: gateHeadSha ?? val("head"),
         title: val("title"),
         author: val("author"),
+        // the branch NAME and the PR number travel with the review
+        // (the head-drift guard and the gh arm need them; a pinned
+        // sha alone answers its own question forever)
+        headBranch: val("head-branch"),
+        prNum: val("pr"),
         mergeCmd: val("merge-cmd"),
         traceDir: val("trace-dir"),
         bodyFile: val("body-file"),
@@ -714,7 +738,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       return
     }
     const rounds = verdictsForHead(headSha)
-    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds })
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForRepo(repoAbs).length })
     if (!check.ok) {
       console.error(`ship: ${check.why}`)
       process.exitCode = check.code
@@ -764,8 +788,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       return
     }
     const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by }))
-    if (!c.ok) console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands`)
-    console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt on the PR, ledger row written`)
+    if (!c.ok) {
+      console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands; post the receipt by hand`)
+      console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt not delivered, ledger row written`)
+    } else {
+      console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt on the PR, ledger row written`)
+    }
     return
   }
 

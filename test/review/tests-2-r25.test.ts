@@ -125,7 +125,8 @@ test("minted supervisor's levy delivers the review the gate already decided", as
       else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
     }
     assert.ok(brief, "the supervisor was minted and received its brief")
-    const levy = brief.split("\n").map((l) => l.trim()).find((l) => l.startsWith("whl review"))
+    // the minting door is named BY PATH (momentum-907): <door> review <repo> …
+    const levy = brief.split("\n").map((l) => l.trim()).find((l) => /^\S+\s+review\s/.test(l))
     assert.ok(levy, `the brief carries the levy command (got: ${brief.slice(0, 300)})`)
     // the supervisor runs the levy verbatim in a shell — do exactly that
     const levyRun = spawnSync("sh", ["-c", levy], { env, encoding: "utf8", timeout: 60_000 })

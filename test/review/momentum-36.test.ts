@@ -95,7 +95,7 @@ test("momentum-2: the minted levy must pin the head SHA the gate judged — neve
     assert.ok(argv, "the supervisor stub captured its argv (run --standalone <brief>)")
     // argv.txt: line1 "run", line2 "--standalone", lines 3.. = the brief (multi-line)
     const brief = argv.trim().split("\n").slice(2).join("\n")
-    const m = brief.match(/^\s*whl review .+$/m)
+    const m = brief.match(/^\s*\S+\s+review\s.+$/m)
     assert.ok(m, "the brief carries the levy verbatim")
     const levy = m[0].trim()
     const hm = levy.match(/--head\s+('([^']*)'|\S+)/)

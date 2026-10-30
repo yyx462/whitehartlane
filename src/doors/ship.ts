@@ -13,6 +13,7 @@
 //   never stale bytes   the merged head IS the head the verdict names
 //   never on round 1    good faith comes first; the exit opens after it
 //   never stealth       the overrule is ledgered and posted to the PR
+import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { homeRoot, sessionsRoot } from "../adapters/store.ts"
@@ -32,6 +33,31 @@ export type Verdict = {
 // recency is the file's mtime (the gate-r7 law: never enumeration
 // order), the same read the gate itself trusts
 export function verdictsForHead(headSha: string, root = sessionsRoot()): Array<{ verdict: Verdict; at: number; path: string }> {
+  return allVerdicts(root).filter((h) => h.verdict.head === headSha)
+}
+
+// every verdict for ONE REPO, newest first (principles-4002): the
+// overrule exit counts the owner's ROUNDS, not the rounds of one
+// sha — a fixer who changed bytes (a new head) and was rejected again
+// is on round 2, not on "round 1 of 1"; counting per sha locked the
+// exit against exactly the fixer it was built for.
+// MEMBERSHIP, not a field: a verdict carries no repo name, but its
+// head sha EXISTS in exactly one repo — so "this verdict judged THIS
+// repo" is answered by git.
+export function verdictsForRepo(repo: string, root = sessionsRoot()): Array<{ verdict: Verdict; at: number; path: string }> {
+  const inRepo = (sha: string | undefined): boolean => {
+    if (!sha) return false
+    try {
+      execFileSync("git", ["-C", repo, "cat-file", "-e", `${sha}^{commit}`], { stdio: ["ignore", "ignore", "ignore"] })
+      return true
+    } catch {
+      return false
+    }
+  }
+  return allVerdicts(root).filter((h) => h.verdict.repo === repo || inRepo(h.verdict.head))
+}
+
+function allVerdicts(root: string): Array<{ verdict: Verdict; at: number; path: string }> {
   const hits: Array<{ verdict: Verdict; at: number; path: string }> = []
   if (!existsSync(root)) return hits
   for (const sid of readdirSync(root)) {
@@ -42,7 +68,7 @@ export function verdictsForHead(headSha: string, root = sessionsRoot()): Array<{
       if (!existsSync(v)) continue
       try {
         const parsed = JSON.parse(readFileSync(v, "utf8")) as Verdict
-        if (parsed.head === headSha) hits.push({ verdict: parsed, at: statSync(v).mtimeMs, path: v })
+        hits.push({ verdict: parsed, at: statSync(v).mtimeMs, path: v })
       } catch {
         /* unreadable verdict: not our fact */
       }
@@ -61,14 +87,19 @@ export function shipCheck(opts: {
   headSha: string
   overruleFile: string
   rounds: Array<{ verdict: Verdict; at: number }>
+  repoRounds?: number
   minRounds?: number
 }): ShipCheck {
   const minRounds = opts.minRounds ?? 2
   if (opts.rounds.length === 0) return { ok: false, code: 2, why: `no review verdict exists for head ${opts.headSha.slice(0, 12)} — nothing to overrule; levy a review first` }
   const latest = opts.rounds[0].verdict
   if (latest.verdict !== "reject") return { ok: false, code: 2, why: `the latest verdict for this head is '${latest.verdict}', not reject — nothing to overrule` }
-  if (opts.rounds.length < minRounds) {
-    return { ok: false, code: 2, why: `round 1 of ${opts.rounds.length}: the overrule opens after good faith — fix what you accept and re-review first (the exit unlocks at ${minRounds} verdicts)` }
+  // the ROUNDS are the owner's rounds for this REPO (principles-4002):
+  // a fixer who changed bytes and was rejected again is on round 2, not
+  // "round 1 of 1" — the exit must open for exactly that fixer
+  const rounds = Math.max(opts.rounds.length, opts.repoRounds ?? 0)
+  if (rounds < minRounds) {
+    return { ok: false, code: 2, why: `round 1 of ${rounds}: the overrule opens after good faith — fix what you accept and re-review first (the exit unlocks at ${minRounds} rounds)` }
   }
   let overrules: Record<string, string> = {}
   try {

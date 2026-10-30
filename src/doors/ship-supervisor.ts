@@ -79,6 +79,14 @@ export function spawnSupervisor(opts: {
   repo?: string
 }): SpawnedSupervisor {
   const bin = opts.bin ?? process.env.WHL_SUPERVISOR_BIN ?? "opencode"
+  // BOX-IN-BOX, this seat too (principles-4003): the orchestrator's
+  // spawn refuses to book a real workflow from inside a review job —
+  // the --auto supervisor is a REAL headless agent, and a review run
+  // that mints one books a worker from inside a review job
+  // (reviewer-spawned reviewer panes). One law, both seats.
+  if (process.env.AGENTIC_OS_JID) {
+    return { ok: false, why: `box-in-box: this process runs inside review job ${process.env.AGENTIC_OS_JID} — a review run may not book another real workflow (the orchestrator seat refuses it too)` }
+  }
   const onPath = (process.env.PATH ?? "").split(":").some((d) => existsSync(join(d, bin)))
   const present = bin.includes("/") ? existsSync(bin) : onPath
   if (!present) return { ok: false, why: `supervisor bin '${bin}' not found (WHL_SUPERVISOR_BIN or PATH)` }
@@ -100,24 +108,47 @@ export function spawnSupervisor(opts: {
       `OUT=${shq(outDir)}`,
       `PR=${shq(opts.pr ?? "")}`,
       `REPO=${shq(opts.repo ?? "")}`,
+      // the MINTING door runs the levy (momentum-907): a bare "whl"
+      // on PATH may be an OLD install that knows none of this
+      // hand-down (--roster, --pr, the pinned shas) — the reviewed
+      // repo's own bin comes first, so the door that minted the
+      // commission is the door that runs it
+      `export PATH="${opts.repo ? `${opts.repo}/bin:` : ""}$PATH"`,
       `"$BIN" run --standalone "$BRIEF" >>"$LOG" 2>&1 &`,
       `AGENT=$!`,
+      // the JOB's run dir — the seat link points into it (the verdict
+      // lands there; the commission ENDS with the job's report)
+      `RUN=""`,
+      `[ -L "$OUT/data/review/verdict.json" ] && RUN=$(readlink "$OUT/data/review/verdict.json" 2>/dev/null | sed 's#/data/review/verdict.json$##')`,
       `i=0`,
-      `while [ ! -f "$OUT/data/review/verdict.json" ]; do`,
-      `  sleep 15; i=$((i+1))`,
-      `  if [ "$i" -ge 480 ]; then`,
+      // THE SEAT (principles-4004): the commission ends with the MERGE
+      // stage — the merge stage writes the outcome marker into the
+      // staged program dir, and the watcher waits on exactly that.
+      // The verdict (prove) lands two stages earlier; waiting on it
+      // would speak before the feedback map exists.
+      `while [ ! -f "$OUT/data/review/merge.json" ]; do`,
+      `  sleep 1; i=$((i+1))`,
+      // a chain that died BEFORE the merge stage (the divide stage
+      // failed, the rail refused) leaves a verdict and no marker — the
+      // PR must still hear (momentum-908), so the verdict's presence
+      // ends the wait too (a POSITIVE test, not a poll: the law is
+      // about the seat the wait resolves on)
+      `  if [ -f "$OUT/data/review/verdict.json" ]; then break; fi`,
+      `  if [ "$i" -ge 7200 ]; then`,
       `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
-      `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no verdict landed at $OUT/data/review/verdict.json") >/dev/null 2>&1`,
+      `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
       `    fi`,
       `    if command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
       `    exit 3`,
       `  fi`,
-      `  if ! kill -0 "$AGENT" 2>/dev/null && [ "$i" -ge 4 ]; then`,
-      `    # the agent is gone and no verdict came — keep watching to the`,
-      `    # deadline (the report below is the watcher\'s, not the agent\'s)`,
-      `    :`,
-      `  fi`,
       `done`,
+      // the BACKSTOP receipt (momentum-908): if the agent never posted
+      // (it died at once), the PR still hears — the watcher is the last
+      // word
+      `if test -f "$OUT/supervisor-comment.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      `  V=$(sed -n 's/.*"outcome"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/merge.json" 2>/dev/null | head -1)`,
+      `  (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: \${V:-unknown} — the supervisor did not post; the outcome is at $OUT/data/review/merge.json") >/dev/null 2>&1`,
+      `fi`,
       `exit 0`,
       "",
     ].join("\n"),
