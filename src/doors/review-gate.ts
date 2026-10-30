@@ -378,7 +378,7 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
     // reviews it)
     let raw: string
     try {
-      raw = execFileSync("git", ["-C", repo, "show", `${commit}:review-gate.toml`], { encoding: "utf8" })
+      raw = execFileSync("git", ["-C", repo, "show", `${commit}:review-gate.toml`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
     } catch {
       // the base declares no contract → the DEFAULT band (never a
       // fallback to the working tree: that fallback is the

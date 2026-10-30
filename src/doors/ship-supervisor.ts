@@ -133,12 +133,19 @@ export function spawnSupervisor(opts: {
       // PR must still hear (momentum-908), so the verdict's presence
       // ends the wait too (a POSITIVE test, not a poll: the law is
       // about the seat the wait resolves on)
+      // THE GONE-WORLD EXIT (the zombie-watcher receipt, 2026-10-30):
+      // a watcher whose staged dir was deleted (a test's tmp dir, a
+      // cancelled round) has NOTHING to watch and NOBODY to tell —
+      // exit quietly, never ride the deadline to a notify nobody wants
+      `  if [ ! -d "$OUT" ]; then exit 4; fi`,
       `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then break; fi`,
       `  if [ "$i" -ge 7200 ]; then`,
       `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
       `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
       `    fi`,
-      `    if command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      // the notify only fires with a PR to name — a nameless timeout
+      // DM is noise (the receipt: "PR # review timed out")
+      `    if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
       `    exit 3`,
       `  fi`,
       `done`,
