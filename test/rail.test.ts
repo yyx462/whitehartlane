@@ -194,7 +194,87 @@ test("a gray-zone path is denied, then a repeated ask escalates to allow", async
   one.blocked.add(label) // the pane blocks again on the same path
   assert.equal(one.rail.answerPermission("w-peru"), "allow")
   const enter = one.calls.filter((c) => c.tool === "herdr" && c.args[1] === "send-keys" && c.args[3] === "enter")
-  assert.equal(enter.length, 1, "enter sent exactly once — on the escalation")
+  assert.ok(enter.length >= 1 && enter.length <= 2, "the grant's enter, plus at most one delivery-verification re-send — never a stream of keys")
+})
+
+test("an allow that does not close the dialog is re-sent and reported (the stuck-ask receipt)", async () => {
+  const taskDir = await mkdtempSync(join(tmpdir(), "rail-allow-send-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "reviewer", "utf8"))
+  const logs: string[] = []
+  // a dialog that survives the FIRST enter (the receipt: the rail
+  // granted, sent enter, and the pane kept waiting at the prompt)
+  let enters = 0
+  const one = makeRail({
+    taskDir,
+    logs,
+    judge: () => 1,
+    herdrRunner: (args) => {
+      if (args[0] === "agent" && args[1] === "get") {
+        return { status: 0, stdout: `{"result":{"agent":"${args[2]}","agent_status":"blocked"}}` }
+      }
+      if (args[0] === "agent" && args[1] === "read") {
+        return { status: 0, stdout: enters >= 2 ? "" : "Permission required\nwrite to /Users/tester/notes.txt" }
+      }
+      if (args[0] === "agent" && args[1] === "send-keys" && args[3] === "enter") {
+        enters++
+        return { status: 0, stdout: "" }
+      }
+      return { status: 0, stdout: "" }
+    },
+  })
+  assert.equal(one.rail.spawnWorker("w-ask", "opencode", briefPath, taskDir), true)
+  one.blocked.add(one.rail.scopedName("w-ask"))
+  assert.equal(one.rail.answerPermission("w-ask"), "allow")
+  assert.equal(enters, 2, "the grant's enter, then ONE verification re-send — the dialog must actually close")
+  assert.ok(
+    logs.some((l) => /SURVIVED the allow/.test(l)),
+    `a dialog that survived the allow must be reported (logs: ${logs.join(" | ")})`,
+  )
+})
+
+test("the one label seat: every spelling of a unit resolves to the label herdr knows (the blocked-divide receipt)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-seat-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "divide the findings", "utf8"))
+  const one = makeRail({ taskDir, term: askFor(join(taskDir, "sub", "file.txt")), judge: () => 1 })
+  assert.equal(one.rail.spawnWorker("w-divide", "opencode", briefPath, taskDir), true)
+  const label = one.rail.scopedName("w-divide")
+  assert.ok(label.startsWith("w-divide-"), `the pane lives under the w- form (${label})`)
+  // the fault lane speaks the BARE unit id; the engine says "w-<unit>";
+  // both must resolve to the SAME label — re-deriving from the bare
+  // spelling minted a label herdr never had, so the sweep skipped a
+  // BLOCKED pane and the fault lane called the worker dead
+  assert.equal(one.rail.scopedName("divide"), label, "the bare spelling resolves to the registered label")
+  assert.equal(one.rail.scopedName("w-divide"), label, "the engine spelling resolves to the same label")
+  // and the sweep SEES the blocked pane (the fake herdr answers by the
+  // label it is asked about — a wrong label reads "idle" and skips)
+  one.blocked.add(label)
+  const swept = one.rail.tickPrivilege()
+  assert.ok(swept.answered.has("w-divide"), `the blocked pane was answered (answered: ${[...swept.answered].join(",")})`)
+  assert.ok(
+    one.calls.some((c) => c.tool === "herdr" && c.args[0] === "agent" && c.args[1] === "get" && c.args[2] === label),
+    "the sweep asked herdr about the REGISTERED label",
+  )
+})
+
+test("a label herdr cannot resolve is reported, not skipped in silence (the seam drifted)", async () => {
+  const taskDir = await mkdtemp(join(tmpdir(), "rail-miss-"))
+  const briefPath = join(taskDir, "brief.md")
+  await import("node:fs/promises").then((fs) => fs.writeFile(briefPath, "worker", "utf8"))
+  const logs: string[] = []
+  // herdr knows NO agent under any name: the sweep must say so
+  const one = makeRail({
+    taskDir,
+    logs,
+    herdrRunner: (args) => ({ status: 0, stdout: args[0] === "agent" && args[1] === "get" ? "" : "" }),
+  })
+  assert.equal(one.rail.spawnWorker("w-ghost", "opencode", briefPath, taskDir), true)
+  one.rail.tickPrivilege()
+  assert.ok(
+    logs.some((l) => /label miss/.test(l)),
+    `a label miss must be loud — a blocked pane behind it waits forever (logs: ${logs.join(" | ")})`,
+  )
 })
 
 test(`a deny pattern ends in "capped" at ${PERMISSION_CAP} denies and the caller finished_by`, async () => {
@@ -374,7 +454,7 @@ test("mixed path forms of one ask share a ladder (j-2b508e)", async () => {
   one.blocked.add(label) // the pane blocks again — same ask, stripped form
   assert.equal(one.rail.answerPermission("w-g0"), "allow", "the second form escalates on the first's ladder")
   const enter = one.calls.filter((c) => c.tool === "herdr" && c.args[1] === "send-keys" && c.args[3] === "enter")
-  assert.equal(enter.length, 1, "enter sent exactly once — on the escalation")
+  assert.ok(enter.length >= 1 && enter.length <= 2, "the grant's enter, plus at most one delivery-verification re-send — never a stream of keys")
   const ledger = one.rail.ledger as ReturnType<typeof fakeLedger>
   assert.equal(ledger.events.filter((e) => e.kind === "permission").at(-1)?.payload.path, full)
 })
