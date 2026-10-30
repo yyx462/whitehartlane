@@ -6,7 +6,10 @@
 auto = true
 
 # the levy's model pin (required when auto = true — the lenses must be pinned)
-model = "zhipuai-coding-plan/glm-5.3"
+# CHEAPEST FIRST (the owner's ruling, 2026-10-30): the flash model on
+# minimax.cn reviews this repo; the paid coding plan is the fallback
+# rung, not the default seat.
+model = "minimax-cn/MiniMax-M3.1-Flash"
 
 # the band: strict — jev must be 85% sure a lens is pointless to drop
 # it, the dropout ladder loosens half as far, and a repeat-offender

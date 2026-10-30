@@ -29,7 +29,7 @@ test("remainingCandidates drops the dead and keeps the rest for the judge", () =
   assert.deepEqual(remainingCandidates(ORDER, new Set()), ORDER)
 })
 
-test("questions cover exactly the live candidates, with real rates and GLM-first policy", () => {
+test("questions cover exactly the live candidates, with real rates and the cheapest-first policy", () => {
   const q = chooserQuestions(["xai/grok-4.7"]) as { pick: { criteria: Record<string, string>; instructions: string } }
   assert.deepEqual(Object.keys(q.pick.criteria), ["xai/grok-4.7"])
   assert.match(q.pick.criteria["xai/grok-4.7"], /most expensive/)
