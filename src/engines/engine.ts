@@ -104,6 +104,7 @@ export function fanOutEngine(
       // the rail verbs the shared lane drives.
       faults: {
         sessionOf: (unitId) => rail.bookedSessionOf(unitId),
+        rebook: (unitId) => rail.tryBookSession(unitId) ?? undefined,
         cwdOf: () => worktreeLadderOf(rail) ?? rail.taskDir,
         workerStatus: (name) => rail.workerStatus(name),
         latestSessionFault: (sid, cwd) => rail.latestSessionFault(sid, cwd),

@@ -37,8 +37,25 @@ git -C "$REPO" worktree add --detach "$prog/data/review/head" "$HEAD_SHA" >/dev/
 git -C "$REPO" worktree add --detach "$prog/data/review/base" "$BASE_SHA" >/dev/null
 
 # the diff + file list
-git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/diff.patch"
-git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files.txt"
+# THE REPRO CORPUS RIDES, THE READING DOES NOT (2026-10-30, the user's
+# convergence verdict): every lens re-read a 25k-line diff of which
+# 21k was test/review/ — the adopted repros. In 33 rounds that corpus
+# generated exactly ONE finding (r2, a suite test asserting the wrong
+# thing) while costing the round its context budget — the lenses
+# stall near limits reading proof they already trust: the suite RUNS
+# every repro on every round (the prove gate + npm test), which is
+# the regression guarantee. The lens diff excludes the corpus; the
+# checkouts above keep every file (prove re-runs the repros from the
+# checkout, and a lens MAY still open a specific repro by path when
+# a finding cites one).
+# files-all.txt is the UNFILTERED list (gate-r34 tests-10002): prove's
+# incomplete-fix classification keys on the diff-file set — filtering
+# it demoted every corpus-test finding to 'pre-existing' advisory
+# forever, structurally killing the one class this corpus DID
+# generate (r2). Machine truth stays whole; only the reading shrank.
+git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
+git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
+git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files-all.txt"
 
 # pr.md — the claims, not the story. The body (when the CLI was given
 # one) is claims the author WROTE ABOUT THE CODE; the author's session
@@ -86,7 +103,31 @@ shuffle_order() { # $1 seed
   ' "$1" < "$prog/data/review/diff.patch"
 }
 i=0
-for lens in principles tests momentum questions; do
+# the roster is the materialized units, never the hardcoded four (the
+# gate materializes subsets); dead order files for absent lenses were
+# harmless dead weight — this reads the truth instead
+# the lens derivation — ONE reader, extracted verbatim by
+# test/review/principles-26.test.ts (marker-delimited: edit the
+# pipeline here, never in the test — the test runs these exact bytes)
+# :lens-derivation-start
+# THE ONE READER (gate-r17 — the design replacement the grammar grind
+# forced): the door's own smol-toml parse derived the lens roster ONCE
+# at materialization into data/review/lenses.txt; this hook READS the
+# handoff — it does not re-derive from TOML text. Every textual
+# re-derivation (sed/grep/awk) stayed one legal spelling behind the
+# grammar forever: quotes, padding, key order, quoted keys, trailing
+# comments, spaced headers, braces in briefs — one silent miss each.
+# A missing or empty handoff is a door bug: REFUSE, never silently
+# derive nothing (a lens without its order file reads diff.patch in
+# the shared native order — the correlated first-attention the
+# shuffle exists to kill).
+if [ ! -s "$prog/data/review/lenses.txt" ]; then
+  echo "intake: $prog/data/review/lenses.txt is missing or empty — the door did not hand off the lens roster (this is a door bug; report it)" >&2
+  exit 1
+fi
+lenses=$(cat "$prog/data/review/lenses.txt")
+# :lens-derivation-end
+for lens in $lenses; do
   i=$((i+1))
   shuffle_order "$((7 * i + 13))" > "$prog/data/review/order-$lens.txt"
 done

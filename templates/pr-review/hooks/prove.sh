@@ -34,8 +34,18 @@ if (!fs.existsSync(head) || !fs.existsSync(base)) die("intake checkouts missing 
 // or 'src/engines/../doors/x.ts' defeated the diff-implication test
 // and flipped a proven bug's verdict to accept)
 const normFile = (p) => path.normalize(String(p ?? "").replace(/^\.\//, "")).replace(/^\.\/+/, "")
+// the diff-file set for the incomplete-fix classification reads the
+// UNFILTERED files-all.txt (gate-r34 tests-10002) — falling back to
+// files.txt for program dirs older than that intake (fabricated
+// fixtures, pre-existing programs): absent never crashes the gate.
+const filesAll = path.join(prog, "data", "review", "files-all.txt")
+const filesList = path.join(prog, "data", "review", "files.txt")
 const diffFiles = new Set(
-  fs.readFileSync(path.join(prog, "data", "review", "files.txt"), "utf8").split("\n").filter(Boolean).map(normFile),
+  fs
+    .readFileSync(fs.existsSync(filesAll) ? filesAll : filesList, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map(normFile),
 )
 const findings = []
 for (const unit of fs.readdirSync(path.join(prog, "units"))) {

@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { abortJob, bookingStale, continueJob, killPane, listJobs, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
+import { abortJob, bookingStale, claimRevivalFlip, killPane, listJobs, liveLeaseHolder, loadJob, saveJob, type JobRecord } from "./store.ts"
 
 export type SpawnOutcome = { ok: true; pid: number } | { ok: false; why: string }
 
@@ -22,7 +22,44 @@ export function spawnRunner(
 ): SpawnOutcome {
   const door = runnerDoor(orchestratorRoot)
   if (!existsSync(door)) return { ok: false, why: `no orchestrator at ${door}` }
-  const logFd = openSync(join(job.dir, "orchestrator.log"), "a")
+  // THE CLAIM PRECEDES THE SPAWN (gate-r22 momentum-50): the child's
+  // boot enforces the stand-down law on "not running" (rail.ts), so a
+  // child spawned against a record still reading PAUSED kills its own
+  // revival whenever its boot read lands before the parent's flip —
+  // and the parent then stamped a running receipt naming the dead
+  // child. Claim first (write-site guards included): the child always
+  // boots into a record that says running. A fresh booking (record
+  // born running, pid-less) claims nothing — the no-op branch.
+  // the one-writer session read AT THE WRITE (gate-r23 momentum-60):
+  // the ceremony door checked at entry, then spent the retire window
+  // (30s per un-died pane, errors swallowed) — a booking admitted
+  // inside it rode past the door's one-shot veto into two live
+  // writers on one program dir. The commit point re-reads the
+  // session; a fresh booking (the only running Job on its session)
+  // sails through.
+  // THE VETO PRECEDES THE CLAIM (gate-r25 momentum-70/questions-16):
+  // claim-first left a veto REFUSAL holding a lying record — flipped
+  // to running, the pause receipt deleted, continues bumped — and the
+  // refusal's own prescribed recovery (`whl continue`) dead-ends at
+  // the continue verb's parked-state gate. The veto reads; only a
+  // passing veto claims. A refusal mutates nothing.
+  const veto = successorVetoWhy(job)
+  if (veto) return { ok: false, why: veto }
+  // THE LOG SEAT PRECEDES EVERY MUTATION (gate-r33b tests-9001): the
+  // open was unguarded AND after the claim — a job whose run dir is
+  // gone made openSync throw ENOENT with the record already flipped
+  // to running and its pause receipt deleted: 'a refusal mutates
+  // nothing' one step later than the arm above. Open (guarded) after
+  // the read-only veto, before the mutating claim; only a spawnable
+  // job claims.
+  let logFd: number
+  try {
+    logFd = openSync(join(job.dir, "orchestrator.log"), "a")
+  } catch (err) {
+    return { ok: false, why: `cannot open ${join(job.dir, "orchestrator.log")} (${err instanceof Error ? err.message : String(err)}) — the run dir is gone; refusing without mutating the record` }
+  }
+  const claim = claimRevivalFlip(job)
+  if (!claim.ok) return { ok: false, why: claim.why }
   const child = spawn(process.execPath, ["--experimental-strip-types", door, job.dir], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
@@ -52,6 +89,31 @@ export function spawnRunner(
 // generation's stragglers (a live pane from the parked generation
 // would double-write a unit dir), then hand the Job to a fresh runner —
 // which books the continue on the record.
+// The rebirth refusal's exit code — ONE decision, one site (gate-r4
+// tests-60: the /successor booking/ classifier lived as a regex at
+// both bin revival verbs; one decision answered twice drifts). A
+// successor conflict is the one-writer veto speaking: exit 2.
+export function rebirthExitCode(why: string): number {
+  return /successor booking/.test(why) ? 2 : 1
+}
+
+// the successor veto (r25 principles-22): a live successor booking on
+// this lineage session forbids another live writer on the program
+// dir. ONE seat for the question, asked at the ceremony door (fail
+// fast, before a pane dies) and again AT THE WRITE (gate-r23
+// momentum-60: the retire window — 30s per un-died pane, errors
+// swallowed — outlived the door's one-shot check; a booking admitted
+// mid-ceremony rode into the two-live-writers split brain the veto's
+// own message names).
+export function successorVetoWhy(job: JobRecord): string | null {
+  const successor = listJobs(job.sid).find(
+    (j) => j.id !== job.id && j.state === "running" && !bookingStale(j, Date.now()),
+  )
+  return successor
+    ? `a successor booking (${successor.id}) is live on this program dir — reviving ${job.id} beside it is two live writers; abort the successor first`
+    : null
+}
+
 export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOutcome {
   // The door refuses first (j-93d652 gap #2): retiring panes under a
   // LIVE holder's feet is the damage a double continue does — fail
@@ -67,15 +129,12 @@ export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOu
   // continue's rebirth): a live successor booking on this lineage
   // session vetoes the rebirth — two live writers on one program dir
   // is the split brain the booking probe's veto exists to prevent.
-  // One seat, not one per caller.
-  const successor = listJobs().find(
-    (j) => j.id !== job.id && j.sid === job.sid && j.state === "running" && !bookingStale(j, Date.now()),
-  )
-  if (successor) {
-    return {
-      ok: false,
-      why: `a successor booking (${successor.id}) is live on this program dir — reviving ${job.id} beside it is two live writers; abort the successor first`,
-    }
+  // One seat, not one per caller — and asked AGAIN at the write
+  // (spawnRunner, beside the claim): this entry check only fails
+  // fast; it cannot promise the window behind it.
+  const veto = successorVetoWhy(job)
+  if (veto) {
+    return { ok: false, why: veto }
   }
   for (const pane of job.panes.filter((p) => p.died === undefined)) {
     try {
@@ -84,7 +143,11 @@ export function rebirthRunner(job: JobRecord, orchestratorRoot: string): SpawnOu
     killPane(job, pane.label)
   }
   const out = spawnRunner(job, orchestratorRoot)
-  if (out.ok) continueJob(job, out.pid)
+  // no continueJob tail (gate-r22 momentum-50): the CLAIM now precedes
+  // the spawn inside spawnRunner (the child must boot into a running
+  // record), and the child stamps its own pid at boot (rail.ts) — a
+  // flip+stamp tail over this ceremony's stale snapshot would only
+  // trip the twin guard against the claim this ceremony itself wrote
   return out
 }
 

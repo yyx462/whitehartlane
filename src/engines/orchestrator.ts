@@ -112,6 +112,8 @@ export type CycleDeps = {
   slots?: number
   stallMs?: number
   briefGraceMs?: number
+  /** the birth judge's patience (default 3 min; workflow.born_ms) */
+  bornMs?: number
   now?: () => number
   emit?: (kind: string, payload: Record<string, unknown>) => void
   worktree?: string
@@ -162,10 +164,19 @@ export type CycleDeps = {
   // The provider-fault lane's rail seam (j-93d652 gap #4): fan-out
   // workers get the jev ladder coworker members always had. Optional —
   // a test shep without it simply runs lane-less, as before.
-  faults?: { sessionOf: (unitId: string) => string | undefined; cwdOf: (unitId: string) => string } & FaultRail
+  faults?: {
+    sessionOf: (unitId: string) => string | undefined
+    rebook?: (unitId: string) => string | undefined
+    cwdOf: (unitId: string) => string
+  } & FaultRail
 }
 
 const DEFAULT_SLOTS = 2
+// the birth judge's patience: how long an unboarded pane may sit
+// before it is judged dead at birth (j-4a0009: 3 dead-at-births rode
+// the full 30-min stall ceiling). Default 3 min; workflow.born_ms
+// tunes it (30s..10min).
+const DEFAULT_BORN_MS = 180_000
 const DEFAULT_STALL_MS = 10 * 60_000
 const DEFAULT_BRIEF_GRACE_MS = 90_000
 // Grace recheck cadence once the window has passed but the pane is
@@ -474,6 +485,14 @@ export type Ruling =
       wake?: string
     }
   | { kind: "carry" }
+  | {
+      // dead at birth (j-4a0009, r8's j-3f4065): the pane lives but
+      // the agent never boarded — no session after bornMs and one
+      // re-resolve. Kill the empty pane, count the attempt, arm the
+      // #165 respawn; the unit re-claims with a fresh pane
+      kind: "rebirth"
+      event?: [string, Record<string, unknown>]
+    }
   | { kind: "defer"; why: string; event?: [string, Record<string, unknown>] }
   | {
       kind: "reprompt"
@@ -486,24 +505,31 @@ export type Ruling =
     }
   | { kind: "none" }
 
-export type JudgeSeat = "marker" | "liveness" | "privilege" | "grace" | "pen" | "stall"
+export type JudgeSeat = "marker" | "liveness" | "privilege" | "grace" | "birth" | "pen" | "stall"
 // Generic over the beat: every court observes its own subject (the
 // fan-out Beat above, the coworker MemberBeat one engine over) — the
 // protocol (a typed beat, ordered judges, one bailiff) is what is
 // shared, never the observation's shape.
 export type Judge<B = Beat> = (beat: B) => Ruling
 
-// The seating — composed once per cycle from the declared mode. This// IS the precedence: marker beats liveness beats privilege beats
-// grace; the pen (armed only by settle_mode = "status-first") hears
-// idle panes before the stall ladder can; the stall judge is unseated
-// by fallback_ladder = false (the ADR 0015 trial window) and by every
-// drain. Pure: tests pin the seating without building a run.
+// The seating — composed once per cycle from the declared mode. This
+// IS the precedence: marker beats liveness beats privilege beats
+// grace beats birth; the pen (armed only by settle_mode =
+// "status-first") hears idle panes before the stall ladder can; the
+// stall judge is unseated by fallback_ladder = false (the ADR 0015
+// trial window) and by every drain. Pure: tests pin the seating
+// without building a run.
 export function benchOrder(mode: {
   settleMode?: "marker" | "status-first"
   fallbackLadder?: boolean
   draining?: boolean
+  faults?: boolean
 }): JudgeSeat[] {
   const seats: JudgeSeat[] = ["marker", "liveness", "privilege", "grace"]
+  // the birth judge needs session visibility (deps.faults) — without
+  // it, it cannot tell boarded from never-born and stays seated out;
+  // the stall ladder remains the backstop
+  if (mode.faults) seats.push("birth")
   if (mode.settleMode === "status-first") seats.push("pen")
   if (mode.fallbackLadder !== false && !mode.draining) seats.push("stall")
   return seats
@@ -525,16 +551,41 @@ export function firstRuling<B>(bench: Judge<B>[], beat: B): Ruling {
 // Per-run fault-lane state, keyed by the stable shep object (cycle
 // rebuilds its deps literal per tick; the shep — the rail — is one
 // object for the run's life).
-const faultStateOf = new WeakMap<
+const faultStateMap = new WeakMap<
   object,
   { awaitingTurn: Set<string>; actedFault: Map<string, string>; deadModels: Map<string, Set<string>>; overrides: Map<string, string> }
 >()
+// the getter the fault lane always called — written as a function from
+// the start, declared as a WeakMap from the start, and the mismatch
+// was masked because input.faults was never forwarded (dead code
+// cannot crash; the birth judge's tests unmasked both)
+function faultStateOf(shep: object) {
+  let st = faultStateMap.get(shep)
+  if (st === undefined) {
+    st = { awaitingTurn: new Set(), actedFault: new Map(), deadModels: new Map(), overrides: new Map() }
+    faultStateMap.set(shep, st)
+  }
+  return st
+}
 
 // Per-run check-reprompt memory, keyed by the stable shep object (the
 // settle path re-runs per tick; the shep — the rail — is one object
 // for the run's life). One revise round per unit, never more.
 const checkRetriedOfMap = new WeakMap<object, Set<string>>()
-function checkRetriedOf(shep: object): Set<string> {
+// Per-run REBIRTH count, keyed the same way. NOT deps.attempts — the
+// claim path deletes that map's rows on every SUCCESSFUL respawn, so
+// a rebirth counter riding it would reset every generation (the
+// dead-at-birth pane "successfully" spawns each time; only the agent
+// never boards). Single writer: the rebirth ruling.
+const rebirthCountMap = new WeakMap<object, Map<string, number>>()
+function rebirthCountOf(shep: object): Map<string, number> {
+  let m = rebirthCountMap.get(shep)
+  if (m === undefined) {
+    m = new Map()
+    rebirthCountMap.set(shep, m)
+  }
+  return m
+}function checkRetriedOf(shep: object): Set<string> {
   let s = checkRetriedOfMap.get(shep)
   if (s === undefined) {
     s = new Set()
@@ -547,6 +598,7 @@ export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
   const briefGraceMs = deps.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
+  const bornMs = deps.bornMs ?? DEFAULT_BORN_MS
   const now = deps.now ?? Date.now
   // one sweep per cycle: every blocked pane the rail holds gets its
   // dialog answered at the rail (queued notes ride the sweep) —
@@ -744,6 +796,14 @@ export function cycle(deps: CycleDeps): boolean {
       stage: "unit",
       pass: false,
       row: { unit: b.id, result: "pane dead", pass: false },
+      // faultsCanary FALSE, fault TRUE (gate-r22 principles-42): a
+      // pane dying without answering is the FOURTH transport-class
+      // close (its twins: birth judge r16, fault lane r16, spawn-fail
+      // r19) — infra says nothing about the plan, and
+      // "canary-stopped" is the label reserved for "a REAL answer
+      // failed" (#144's honest-label law)
+      faultsCanary: false,
+      fault: true,
       detail: "pane not live in herdr",
       wake: "pane not live in herdr",
     }
@@ -854,6 +914,20 @@ export function cycle(deps: CycleDeps): boolean {
   // working: the only honest verdict left is stalled.
   const stallJudge: Judge = (b) => {
     if (deps.draining || deps.fallbackLadder === false) return { kind: "none" }
+    // A NEVER-BOARDING pane's death is the BIRTH judge's question
+    // (gate-r30 momentum-103): inside the birth window the birth seat
+    // returns none (it rules only at born_ms), and with stall_ms <
+    // born_ms — legal config; the born DEFAULT alone is 180s, so every
+    // stall_ms in [60s, 180s) hits it — this seat answered first and
+    // settled the transport death as a plain FAILED answer card
+    // (faultsCanary defaults true): 'canary-stopped' with no answer
+    // anywhere on the path, a card regrade cannot re-enter. Log
+    // quietness is NOT evidence for an unboarded pane (the birth
+    // judge's own doctrine); carry — the birth seat rules at born_ms,
+    // transport-class, on every ordering. ONLY where the birth judge
+    // is ARMED (deps.faults exists — session visibility): unarmed, it
+    // can never rule, and this ladder is the pane's only guard.
+    if (deps.faults && !b.booked && b.age <= bornMs) return { kind: "none" }
     if (b.logGrew || b.silentFor <= stallMs) return { kind: "none" }
     if (b.booked) {
       // booked wait: a live child spur holds this pane (ADR 0006) —
@@ -881,11 +955,61 @@ export function cycle(deps: CycleDeps): boolean {
     }
   }
 
+  // The birth judge (j-4a0009, the third dead-at-birth): a pane that
+  // never boarded — NO SESSION, not a quiet one (r6's momentum sat
+  // log-silent 22 min and finished; it HAD a session). Session
+  // existence is the only key; log quietness is NOT evidence. After
+  // bornMs (+ one re-resolve — bookSessionLate only looked at +5s),
+  // an unboarded pane is transport class: kill it, respawn it, cap
+  // it. Grace's reprompt already had its chance (it seats first).
+  const birthJudge: Judge = (b) => {
+    if (!deps.faults || deps.draining) return { kind: "none" }
+    if (b.marker !== null) return { kind: "none" }
+    // 'working' exempts a pane only INSIDE the birth window (gate-r11
+    // tests-1): a transport that reports working forever — the #249
+    // auth-chrome class, where agent_status lies — must not give a
+    // never-boarding pane a lifetime exemption from BOTH this judge
+    // and the stall ladder's defer. After born_ms, session existence
+    // is the only key (the judge's own r6 doctrine): boarded-quiet
+    // panes spare via sessionOf above/below; unboarded ones rebirth.
+    if (b.paneStatus === "working" && b.age <= bornMs) return { kind: "none" } // boarding right now
+    if (deps.faults.sessionOf(b.id)) return { kind: "none" } // boarded — however quiet (r6)
+    if (b.age <= bornMs) return { kind: "none" }
+    const sid = deps.faults.rebook?.(b.id) // one last look, then judge
+    if (sid) return { kind: "none" }
+    // the cap reads the REBIRTH count (spawn-fail attempts reset on
+    // every successful respawn — this pane spawns fine, it just never
+    // boards); the ruling writes it, this judge only reads
+    const rebirths = rebirthCountOf(deps.shep).get(b.id) ?? 0
+    if (rebirths + 1 >= RETRY_CAP) {
+      return {
+        kind: "close",
+        stage: "unit",
+        pass: false,
+        row: { unit: b.id, result: "dead at birth", pass: false },
+        // transport, never an answer (gate-r16 tests-2): the judge's
+        // own doctrine calls the never-boarded pane transport class —
+        // the close settles as a FAULT (grade-fault card, regrade can
+        // re-enter) and never trips the canary (#144: infra says
+        // nothing about the plan)
+        faultsCanary: false,
+        fault: true,
+        detail: `no agent session ${bornMs}ms after spawn, ${rebirths + 1} attempts`,
+        wake: "dead at birth — the pane never boarded (issue #249 class)",
+      }
+    }
+    return {
+      kind: "rebirth",
+      event: ["unit.reborn", { unit: b.id, rebirth: rebirths + 1, after_ms: bornMs }],
+    }
+  }
+
   const judges: Record<JudgeSeat, Judge> = {
     marker: markerJudge,
     liveness: livenessJudge,
     privilege: privilegeJudge,
     grace: graceJudge,
+    birth: birthJudge,
     pen: penJudge,
     stall: stallJudge,
   }
@@ -920,6 +1044,18 @@ export function cycle(deps: CycleDeps): boolean {
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
         return
+      case "rebirth": {
+        // dead at birth: retire the empty pane, count the REBIRTH (the
+        // map above — deps.attempts resets on successful respawn),
+        // arm the near-term respawn — the unit re-claims next wake
+        deps.shep.retire(`w-${id}`)
+        deps.inFlight.delete(id)
+        const count = rebirthCountOf(deps.shep)
+        count.set(id, (count.get(id) ?? 0) + 1)
+        if (ruling.event) deps.emit?.(ruling.event[0], ruling.event[1])
+        deps.onSpawnRetry?.(id, count.get(id) ?? 1)
+        return
+      }
       case "defer":
         flight.lastChange = now()
         if (ruling.event) deps.emit?.(ruling.event[0], ruling.event[1])
@@ -951,11 +1087,7 @@ export function cycle(deps: CycleDeps): boolean {
   // rail — is one object for the run's life).
   const faultLane = () => {
     if (!deps.faults) return
-    let st = faultStateOf(deps.shep)
-    if (st === undefined) {
-      st = { awaitingTurn: new Set(), actedFault: new Map(), deadModels: new Map(), overrides: new Map() }
-      faultStateOf.set(deps.shep, st)
-    }
+    const st = faultStateOf(deps.shep)
     let toml = ""
     try {
       toml = readFileSync(join(deps.taskDir, "workflow.toml"), "utf8")
@@ -976,7 +1108,12 @@ export function cycle(deps: CycleDeps): boolean {
       policy: readModelsFile(deps.taskDir, toml, join(import.meta.dirname, "..", "..")),
       rail: deps.faults,
       close: (id, why) => {
-        finish(id, false, { unit: id, result: why, pass: false }, "unit", true, true)
+        // faultsCanary FALSE (gate-r16 principles-38): an exhausted
+        // model ladder is pure transport — the provider died, the plan
+        // said nothing — and the stop-the-line label ("a REAL answer
+        // failed") is reserved for answers. The grade-fault twin one
+        // seat away passes false for exactly this reason (#144).
+        finish(id, false, { unit: id, result: why, pass: false }, "unit", false, true)
         deps.shep.retire(`w-${id}`)
         deps.inFlight.delete(id)
         deps.attempts.delete(id)
@@ -1012,11 +1149,19 @@ export function cycle(deps: CycleDeps): boolean {
       const gate = deps.chain.gateOf(unit.id, finishedIds, failedIds)
       if (gate.open) spawnable.push(unit)
       else if (gate.blockedBy) {
+        // faultsCanary FALSE, fault TRUE (gate-r28b principles-100 /
+        // momentum-101): a wave blocked by a FAILED BLOCKER is the
+        // FIFTH transport-class close — the blocker's death (a grade
+        // FAULT, pure infra) is what closed this unit; this unit never
+        // answered anything. Its four sibling closes (birth judge,
+        // fault lane, spawn-fail, pane-dead) pass false:true for the
+        // same reason (#144: infra says nothing about the plan;
+        // "canary-stopped" is reserved for "a REAL answer failed").
         finish(unit.id, false, {
           unit: unit.id,
           result: `wave blocked by failed ${gate.blockedBy}`,
           pass: false,
-        }, "wave")
+        }, "wave", false, true)
       }
     }
     unfinished = spawnable
@@ -1057,11 +1202,17 @@ export function cycle(deps: CycleDeps): boolean {
       const attempts = (deps.attempts.get(unit.id) ?? 0) + 1
       deps.attempts.set(unit.id, attempts)
       if (attempts >= RETRY_CAP) {
+        // faultsCanary FALSE, fault TRUE (gate-r19 principles-40): a
+        // spawn that keeps failing is pure transport — the third close
+        // of the same infra class as the fault-lane and birth-judge
+        // closes, which pass false for exactly this reason (#144:
+        // infra says nothing about the plan; "canary-stopped" is the
+        // label reserved for "a REAL answer failed")
         finish(unit.id, false, {
           unit: unit.id,
           result: "spawn failed",
           pass: false,
-        }, "spawn", true, false, `spawn failed ${attempts} times`)
+        }, "spawn", false, true, `spawn failed ${attempts} times`)
         deps.shep.wake(unit.id, "blocked", `spawn failed ${attempts} times`)
       } else {
         // #165: arm a near-term retry — never ride the stall ladder for a
@@ -1101,6 +1252,7 @@ export async function runOrchestrator(input: {
   layout?: Layout
   slots?: number
   stallMs?: number
+  bornMs?: number
   briefGraceMs?: number
   checkMs?: number
   logPollMs?: number
@@ -1123,6 +1275,10 @@ export async function runOrchestrator(input: {
   // live child spur names the pane's session as its spawner, the wait
   // is booked and the stall stands down.
   bookedWait?: (unitId: string) => boolean
+  // the provider-fault lane + the birth judge's rail seam — engine.ts
+  // builds it; the run loop forwards it to every cycle (it used to
+  // build it and drop it: the lane was dead code)
+  faults?: CycleDeps["faults"]
   // completion-detection: "status-first" arms the platform pen (idle +
   // present deliverable settles, no marker). Absent = manifest's
   // workflow.settle_mode, absent that = "marker" (byte-identical).
@@ -1190,6 +1346,11 @@ export async function runOrchestrator(input: {
   // receipt — a review lens synthesizing over a big diff out-silences
   // the 10-minute default and gets ruled stalled minutes before done)
   const stallMs = input.stallMs ?? manifest.workflow.stall_ms ?? DEFAULT_STALL_MS
+  // the birth judge's patience (workflow.born_ms; the j-4a0009
+  // receipt — a pane that never boarded rode the whole stall ceiling;
+  // 3 min default, an unboarded pane is transport class long before
+  // 30)
+  const bornMs = input.bornMs ?? manifest.workflow.born_ms ?? DEFAULT_BORN_MS
   const settleMode = input.settleMode ?? manifest.workflow.settle_mode ?? "marker"
   const fallbackLadder = input.fallbackLadder ?? manifest.workflow.fallback_ladder ?? true
   const briefGraceMs = input.briefGraceMs ?? DEFAULT_BRIEF_GRACE_MS
@@ -1259,7 +1420,14 @@ export async function runOrchestrator(input: {
         slots,
         stallMs,
         briefGraceMs,
+        bornMs,
         now,
+        // the provider-fault lane's wiring (j-93d652 gap #4) built this
+        // object in engine.ts and NEVER FORWARDED it — the lane has
+        // been dead code since it merged, and its first line would have
+        // crashed (faultStateOf was a WeakMap called as a function).
+        // The birth judge rides the same seam: no faults, no birth seat.
+        faults: input.faults,
         worktree: input.worktree,
         canary,
         draining,
@@ -1691,6 +1859,17 @@ export async function runOrchestrator(input: {
         // reprompt still fires when the pane goes idle.
         waits.push(graceWait > 0 ? graceWait : GRACE_RECHECK_MS)
       }
+      // the birth judge's deadline (gate-r7 momentum-21/principles-27):
+      // an unboarded pane's FIRST judge look must land AT bornMs — the
+      // judge was written to END the stall-ceiling ride, but this loop
+      // never woke for it, so the first dead-at-birth kill rode the very
+      // ceiling bornMs exists to cut. Unconditional while positive (a
+      // log line is NOT boarding — the worker protocol's first breath
+      // writes one; only a session boards): a boarded pane's judge look
+      // returns none at the no-op wake, and the wait self-consumes once
+      // bornMs passes. A rebirth mints a fresh flight with its own clock.
+      const birthWait = flight.spawnedAt + bornMs - now()
+      if (birthWait > 0) waits.push(birthWait)
       waits.push(flight.lastChange + stallMs - now())
     }
     if (stepPending.checks > 0 || stepPending.stations > 0) waits.push(gateCheckMs)

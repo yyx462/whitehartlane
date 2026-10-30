@@ -1,69 +1,121 @@
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import test from "node:test"
-import { prepareReview } from "../../src/doors/review.ts"
+import { writeWorkerPermissions } from "../../src/adapters/store.ts"
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url))
 
-// INV-3 (one function per decision) / INV-4 (claims are honest):
-// "was a model supplied?" is decided TWICE in src/doors/review.ts with
-// two different predicates: the format check and the missing-model
-// check treat `model === ""` differently.
-//   - review.ts:71  `if (args.model && !regex)`        — "" is FALSY  → no format check
-//   - review.ts:133 `hasModel = typeof args.model === "string" || …` — "" is a STRING → "model supplied"
-//   - review.ts:163 `if (args.model)`                  — "" is FALSY  → no pin written
-// Net on HEAD: `whl review <repo> --model ""` (an unset env var: the
-// classic `--model "$WHL_MODEL"`) materializes a program whose
-// workflow.toml keeps the template's temperature pins with NO model —
-// every lens spawn is then refused by the host ("temperature … has no
-// model to pin against — refusing spawn", src/adapters/opencode-host.ts:95).
-// That is the exact four-lenses-late death the diff's own help text
-// promises cannot happen ("--model is REQUIRED … bare ids are refused").
-// BASE refused this input (the removed else-branch, base review.ts:147,
-// caught "" via truthiness → hasTempPin && !hasModel → refuse, code 2),
-// so the hole is INTRODUCED by this change. The repo's own twin at
-// src/engines/coworker.ts:43 (`model !== undefined && !/^[^/\s]+\/[^/\s]+$/.test(model)`)
-// also refuses "" — the door is now the one site that lets it through.
-test("an empty --model is refused at the door, not materialized into a dead program", () => {
-  const repo = mkdtempSync(join(tmpdir(), "whl-tests1-repo-"))
-  const outRoot = mkdtempSync(join(tmpdir(), "whl-tests1-out-"))
-  const out = join(outRoot, "program") // must NOT exist beforehand
-  try {
-    const g = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" })
-    g("init", "-q", "-b", "master")
-    g("config", "user.email", "review@test")
-    g("config", "user.name", "review")
-    writeFileSync(join(repo, "README.md"), "base\n")
-    g("add", "-A")
-    g("commit", "-q", "-m", "base")
-    g("checkout", "-q", "-b", "feat")
-    mkdirSync(join(repo, "src"), { recursive: true })
-    writeFileSync(join(repo, "src", "app.ts"), "export const one = 1\n")
-    g("add", "-A")
-    g("commit", "-q", "-m", "feat")
+// globalMcpNames caches its answer process-wide (mcpNamesCache), so the
+// broken-probe case must run BEFORE any successful probe in THIS file,
+// and the control runs in its own child process with a fresh cache.
 
-    const r = prepareReview(
-      // the CLI reachability: `whl review <repo> --model ""` — val("model")
-      // hands the empty argv string straight through (bin/whitehartlane)
-      { repo, base: "master", head: "feat", model: "", out },
-      join(ROOT, "templates"),
+// Meta-ACH: empty input to the isolation probe. The diff's own comment
+// (store.ts writeWorkerPermissions) claims "the isolation keys
+// (permission, mcp) FORCE-win" over the merged prior. The mcp half of
+// that claim is keyed on globalMcpNames() returning NON-EMPTY:
+//     const mcp = globalMcpNames()
+//     if (mcp.length > 0) { config.mcp = …enabled:false… }
+// When the probe answers EMPTY — `opencode` missing from PATH, the 20s
+// timeout under load, or this very cache poisoned at [] by one failed
+// call (the diff's adopted questions-7 observed a cold probe under a
+// concurrent run sitting at []) — the merge keeps whatever `mcp` block
+// the prior file carried, ENABLED entries included. On BASE the write
+// replaced the file wholesale, so no prior mcp block could survive any
+// re-seed: the merge reintroduces survival of exactly the key the
+// isolation contract names, one probe-failure later. The pane-hang
+// class mcp isolation exists to prevent (the r4 divide-pane incident:
+// an enabled server pops auth chrome no API field exposes, hanging an
+// innocent pane until a human clicks) is back on that path — and the
+// unit dir is the worker's own writable cwd, so the prior block is not
+// only the door's own past writes.
+
+function priorConfig(where: string, mcp: Record<string, unknown>): void {
+  mkdirSync(where, { recursive: true })
+  writeFileSync(
+    join(where, "opencode.json"),
+    JSON.stringify({
+      model: "acme/strong",
+      mcp,
+      permission: { external_directory: { "/etc": "allow" } },
+    }),
+  )
+}
+
+test("the isolation mcp force-win holds even when the probe fails — an enabled prior server never survives a re-seed", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "whl-t1-"))
+  try {
+    const runDir = join(tmp, "unit")
+    priorConfig(runDir, {
+      evil: { type: "stdio", command: ["curl", "evil.example"], enabled: true },
+      "auth-chrome": { type: "stdio", command: ["connect-integration"], enabled: true },
+    })
+    // the probe fails: no `opencode` anywhere on PATH → execFileSync
+    // throws ENOENT inside globalMcpNames → cache [] → the merge branch
+    const realPath = process.env.PATH
+    process.env.PATH = ""
+    try {
+      writeWorkerPermissions(runDir)
+    } finally {
+      process.env.PATH = realPath
+    }
+    const cfg = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8")) as {
+      mcp?: Record<string, { enabled?: boolean }>
+      permission?: { external_directory?: Record<string, string> }
+      model?: string
+    }
+    const enabled = Object.entries(cfg.mcp ?? {}).filter(([, v]) => v?.enabled === true).map(([k]) => k)
+    assert.deepEqual(
+      enabled,
+      [],
+      `INV-2 (an accepted isolation decision must reach its consumer — refuse, never vanish) / the diff's own claim ` +
+        `(store.ts writeWorkerPermissions: "the isolation keys (permission, mcp) FORCE-win, everything else the ` +
+        `sandbox earned survives the re-seed"): with the MCP probe answering EMPTY (no opencode on PATH — the same ` +
+        `state a timeout or the process-wide cache poisoned at [] leaves; the diff's own questions-7 observed it ` +
+        `live), the merge kept the prior file's ENABLED mcp servers ${JSON.stringify(enabled)}: the force-win is ` +
+        `keyed on mcp.length > 0, so a failed probe silently re-grants every server the prior generation (or ` +
+        `anyone who could write the unit dir — it is the worker's own cwd) declared enabled. On BASE impossible: ` +
+        `the write clobbered the file wholesale. Isolation must win unconditionally — a probe that answers nothing ` +
+        `must still strip or disable the prior's mcp block, never inherit it enabled (the auth-chrome pane-hang ` +
+        `class, r4's divide-pane incident).`,
     )
-    assert.equal(
-      r.ok,
-      false,
-      `INV-3/INV-4: an empty --model must be refused at the door. The door's two "was a model ` +
-        `supplied?" predicates disagree on "": review.ts:133 (typeof === "string") says supplied, ` +
-        `review.ts:71/163 (truthiness) say absent — the program materializes with temperature pins ` +
-        `and no model, and every lens spawn dies at src/adapters/opencode-host.ts:95 ("no model to ` +
-        `pin against — refusing spawn"), the exact late death the help's hard rule refuses at the door. ` +
-        `BASE refused this input (base review.ts:147); HEAD materialized it: ${JSON.stringify(r)}`,
-    )
+    // the OTHER isolation key keeps its promise on the same path
+    assert.ok(!cfg.permission?.external_directory?.["/etc"], "the permission force-win holds even on the broken-probe path")
+    assert.equal(cfg.model, "acme/strong", "the merge keeps the earned model pin (#249) — only the isolation keys are under test")
   } finally {
-    rmSync(repo, { recursive: true, force: true })
-    rmSync(outRoot, { recursive: true, force: true })
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test("control: when the probe succeeds the merge replaces the prior mcp block wholesale (fresh process, fresh cache)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "whl-t1-ctl-"))
+  try {
+    const runDir = join(tmp, "unit")
+    // a stub opencode whose `mcp list` names one server — the
+    // force-win fires (replace) and must not carry the prior's entries
+    const stubBin = join(tmp, "bin")
+    mkdirSync(stubBin, { recursive: true })
+    writeFileSync(join(stubBin, "opencode"), "#!/bin/sh\nprintf '%s\\n' '✓  some-server  connected'\n", { mode: 0o755 })
+    priorConfig(runDir, { evil: { type: "stdio", command: ["curl"], enabled: true } })
+    const script = [
+      `const { writeWorkerPermissions } = await import(${JSON.stringify(join(ROOT, "src/adapters/store.ts"))})`,
+      `writeWorkerPermissions(${JSON.stringify(runDir)})`,
+    ].join(";")
+    const r = spawnSync(process.execPath, ["--experimental-strip-types", "-e", script], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${stubBin}:${process.env.PATH ?? ""}` },
+    })
+    assert.equal(r.status, 0, `control harness: the child writer ran (${r.stderr})`)
+    const cfg = JSON.parse(readFileSync(join(runDir, "opencode.json"), "utf8")) as {
+      mcp?: Record<string, { enabled?: boolean }>
+    }
+    assert.equal(cfg.mcp?.evil, undefined, "control: the probe succeeded, so the prior's enabled server is replaced, not inherited")
+    assert.equal(cfg.mcp?.["some-server"]?.enabled, false, "control: the probe's own server is neutralized")
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
   }
 })

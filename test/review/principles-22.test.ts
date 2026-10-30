@@ -74,11 +74,18 @@ test("refresh refuses to revive a parked Job while a successor booking is live o
       `const record = join(home, "sessions", process.env.WHL_P22_SID, "jobs", process.env.WHL_P22_JID, "job.json")`,
       `writeFileSync(process.env.WHL_P22_READY, "ok")`,
       `process.on("SIGTERM", () => {`,
-      `  const j = JSON.parse(readFileSync(record, "utf8"))`,
-      `  j.state = "paused"`,
-      `  j.pause = { reason: "drain", panesRemaining: 0, at: new Date().toISOString() }`,
-      `  writeFileSync(record, JSON.stringify(j))`,
-      `  process.exit(0)`,
+      // a deliberate 300ms drain before the paused write: refresh's
+      // FIRST poll load must observe running and ENTER its 500ms wait;
+      // the flip then lands inside that tick, so the successor books
+      // before refresh's rebirth can observe it (the scripted
+      // interleave, no timing — the repro's own header contract)
+      `  setTimeout(() => {`,
+      `    const j = JSON.parse(readFileSync(record, "utf8"))`,
+      `    j.state = "paused"`,
+      `    j.pause = { reason: "drain", panesRemaining: 0, at: new Date().toISOString() }`,
+      `    writeFileSync(record, JSON.stringify(j))`,
+      `    process.exit(0)`,
+      `  }, 300)`,
       `})`,
       `setInterval(() => {}, 1 << 30)`,
     ].join("\n"),
@@ -134,9 +141,15 @@ test("refresh refuses to revive a parked Job while a successor booking is live o
   let stderr = ""
   cli.stderr?.on("data", (d) => (stderr += String(d)))
 
-  // the drain books paused (the drainer exits right after the write —
-  // an OBSERVED wait, not a timer)
-  await new Promise<void>((res) => drainerProc.once("exit", () => res()))
+  // the drain books paused 300ms after the SIGTERM (the drainer's
+  // deliberate delay above) — observed on the RECORD (not the exit
+  // event), so the successor books the moment the park lands, well
+  // inside refresh's 500ms poll tick
+  await (async () => {
+    for (let i = 0; i < 400 && loadJob(jobA.sid, jobA.id)?.state !== "paused"; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+    }
+  })()
   assert.equal(
     loadJob(jobA.sid, jobA.id)?.state,
     "paused",

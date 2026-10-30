@@ -20,7 +20,7 @@
 import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
-import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
+import { parse as parseToml } from "smol-toml"
 
 export type ReviewArgs = {
   repo: string
@@ -34,19 +34,29 @@ export type ReviewArgs = {
   out?: string
   template?: string
   model?: string
+  /** the gate's lens roster (review-gate.ts); omit = all four lenses */
+  roster?: string[]
+  /**
+   * a dropout-audit levy (gate-r2 momentum-15): the gate judged skip
+   * but the dropout sample escalated to a full review — the docs-only
+   * pre-flight skip does NOT apply (the audit exists to measure the
+   * skipped class; a skipped audit can produce no verdict, no label,
+   * no greens, and the rate pins at 1.0 forever).
+   */
+  auditLevy?: boolean
 }
 
 export type ReviewReady =
-  | { ok: true; dir: string; skipped: false; headShort: string }
+  | { ok: true; dir: string; skipped: false; headShort: string; untuned?: true }
   | { ok: true; dir: null; skipped: true; why: string; files: number }
   | { ok: false; why: string; code: 1 | 2 }
 
-const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
+export const DOCS_ONLY = /\.(md|markdown|txt|png|jpe?g|gif|svg|webp|pdf|licen[cs]e|gitignore)$/i
 // directory matches are TOP-LEVEL docs/ ONLY (self-review r2 tests-1):
 // assets/, images/, licence/ DIRECTORIES can hold code in real repos
 // (assets/gen.ts) — the extensions above already cover real image and
 // license FILES, so the directory whitelist stays minimal
-const DOCS_PATH = /^(docs?|doc)\//i
+export const DOCS_PATH = /^(docs?|doc)\//i
 
 // no shell, ever (self-review r5 tests-1: raw --base/--head used to
 // ride execSync strings — a substitution in a branch name would
@@ -68,15 +78,622 @@ const shellQuote = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'
 // re-serialize: every parseable form lands; comments in a third-party
 // template are the documented trade. Undefined only when the consumer
 // reads no [workflow] table at all.
+// The pin's landing — TEXT-PRESERVING, never a re-serialization
+// (gate-r1 momentum-1/principles-14/questions-2: the parse→stringify
+// landing rewrote the whole document — the template's inline
+// `units = [ … ]` became [[stage.units]] tables, intake.sh's
+// `^units = [` anchor matched nothing, and every model-pinned review
+// derived ZERO lens order files on the normal path). The parser is
+// the VERIFIER, not the writer: this function performs surgical line
+// edits, and the caller re-parses the result to prove workflow.model
+// landed. Arms, in order (gate-r2 principles-15/tests-2 — every form
+// the consumer parses must land):
+//   1. a [workflow] header block — interior spaces tolerated
+//      ("[ workflow ]" is legal TOML)
+//   2. dotted keys (workflow.model = "…" / workflow.* siblings)
+//   3. a single-line inline table (workflow = { … }) — that ONE line
+//      is reconstructed from the parse (scalars only); everything
+//      else in the document survives verbatim
 function pinIntoWorkflowTable(templateToml: string, model: string): string | undefined {
-  try {
-    const parsed = parseToml(templateToml) as { workflow?: { model?: string } }
-    if (!parsed.workflow || typeof parsed.workflow !== "object") return undefined
-    parsed.workflow.model = model
-    return stringifyToml(parsed)
-  } catch (err) {
-    return undefined // unparseable: the caller's own parse-guard refuses
+  const pin = `model = ${JSON.stringify(model)}`
+  const lines = templateToml.split("\n")
+  // THE PARSE VERIFIES THE LANDING (gate-r20 tests-5003): every seat
+  // is located by TEXT, and text matches inside string values too — a
+  // `[workflow]` line quoted in a documentation string matched first,
+  // the pin landed INSIDE the string, the verify parse read no
+  // workflow.model, and the door refused a template the consumer reads
+  // perfectly. String content never becomes parse data (tests-9101's
+  // law, applied to the pin arm): a landing COUNTS only when the
+  // whole-document parse says workflow.model === the pin. Each arm
+  // tries every candidate; the first the parse blesses wins; a form
+  // whose candidates all fail falls through to the next arm.
+  const landsPinned = (text: string): boolean => {
+    try {
+      const p = parseToml(text) as { workflow?: { model?: unknown } }
+      return p.workflow?.model === model
+    } catch {
+      return false // a landing that does not parse is not a landing
+    }
   }
+  // 1) the [workflow] table header — tolerant: interior spaces, a
+  // trailing comment (gate-r2 tests-41: "[ workflow ]" parses fine),
+  // and a QUOTED table key (gate-r18 tests-3001: ["workflow"] is
+  // legal TOML smol-toml parses into the same workflow table)
+  const headerRe = /^\[\s*["']?workflow["']?\s*\]\s*(#.*)?$/
+  for (let headerIdx = 0; headerIdx < lines.length; headerIdx++) {
+    if (!headerRe.test(lines[headerIdx].trim())) continue
+    let end = lines.length
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      if (/^\[/.test(lines[i].trim())) {
+        end = i
+        break
+      }
+    }
+    // EVERY LANDING FOR THIS HEADER, UNTIL ONE VERIFIES (gate-r29
+    // tests-42): the old arm tried ONE candidate per header — the
+    // first model-looking line — and on its parse-verify failure
+    // walked to the next HEADER, never to the other landings of THIS
+    // header. A [workflow] table whose multi-line string quotes a
+    // line-initial `model = "…"` example had its in-string line
+    // replaced (the pin landed inside the string), the verify
+    // refused, and the door answered 'no [workflow] table' — a false
+    // premise for a template the consumer reads and one of the
+    // refusal's own named forms. Candidates: insert under the header
+    // AND replacing each model-looking line in turn; the parse picks.
+    const insertLanding = lines.slice()
+    insertLanding.splice(headerIdx + 1, 0, pin)
+    const candidates: string[] = [insertLanding.join("\n")]
+    for (let i = headerIdx + 1; i < end; i++) {
+      if (!/^[ \t]*model\s*=/.test(lines[i])) continue
+      const replaceLanding = lines.slice()
+      replaceLanding[i] = pin
+      candidates.push(replaceLanding.join("\n"))
+    }
+    for (const landed of candidates) {
+      if (landsPinned(landed)) return landed
+    }
+  }
+  // 2) dotted-key form (workflow.model = "…" at top level)
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^workflow\.model\s*=/.test(lines[i])) continue
+    const cand = lines.slice()
+    cand[i] = pin.replace(/^model = /, "workflow.model = ")
+    const landed = cand.join("\n")
+    if (landsPinned(landed)) return landed
+  }
+  for (let firstDotted = 0; firstDotted < lines.length; firstDotted++) {
+    if (!/^workflow\./.test(lines[firstDotted])) continue
+    const cand = lines.slice()
+    cand.splice(firstDotted, 0, pin.replace(/^model = /, "workflow.model = "))
+    const landed = cand.join("\n")
+    if (landsPinned(landed)) return landed
+  }
+  // 3) single-line inline table (workflow = { k = v, … }) — gate-r2
+  // principles-15: smol-toml parses a complete workflow table from
+  // these bytes; refusing was a false premise. The ONE line is rebuilt
+  // from the parse (scalars only — nested values are not a form this
+  // arm rewrites); the rest of the document is untouched.
+  const inlineIdx = lines.findIndex((l) => /^[ \t]*workflow[ \t]*=[ \t]*\{.*\}[ \t]*(#.*)?$/.test(l))
+  if (inlineIdx !== -1) {
+    try {
+      const parsed = parseToml(templateToml) as { workflow?: Record<string, unknown> }
+      const wf = parsed.workflow
+      if (!wf || typeof wf !== "object") return undefined
+      // the SHARED TOTAL serializer (gate-r21 tests-9502): this arm's
+      // own scalar-only twin refused — false premise — a single-line
+      // inline workflow table carrying a nested value the run-time's
+      // own parse reads fine; the roster strip's serializer was TOTAL
+      // over the same shapes one function over. One serializer.
+      const entries: string[] = []
+      let modelLanded = false
+      for (const [k, v] of Object.entries(wf)) {
+        const s = inlineTomlValue(v)
+        if (s === undefined) return undefined
+        if (k === "model") {
+          entries.push(`model = ${JSON.stringify(model)}`)
+          modelLanded = true
+        } else {
+          entries.push(`${k} = ${s}`)
+        }
+      }
+      if (!modelLanded) entries.push(`model = ${JSON.stringify(model)}`)
+      const cand = lines.slice()
+      cand[inlineIdx] = `workflow = { ${entries.join(", ")} }`
+      const landed = cand.join("\n")
+      return landsPinned(landed) ? landed : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return undefined // no arm landed a candidate the parse verifies — the caller's refusal names the true premise
+}
+
+// The trunk's name is ONE decision (gate-r14 tests-1): the door
+// auto-detects master/main/trunk, and the gate's bin default must
+// answer the same — a hardcoded "master" left main-only repos (the
+// git/GitHub default layout) gate-broken on every review, no ledger
+// row ever written.
+export function detectTrunk(repo: string): string | undefined {
+  for (const d of ["master", "main", "trunk"]) {
+    try {
+      git(repo, "rev-parse", "--verify", d)
+      return d
+    } catch {
+      /* try the next */
+    }
+  }
+  return undefined
+}
+
+// The roster's surgical filter (review-gate.ts subset materialization):
+// removes unit entries whose id is not in `keep`, from every
+// `units = [ … ]` block. TWO array forms (gate-r5 tests-1/2): the
+// multi-line block (entries on their own lines — line surgery) and the
+// SINGLE-LINE inline array (all entries on the `units = [` line —
+// rebuilt from the parse, scalars only; the briefs carry literal
+// braces, so text-side brace matching is doomed). Returns null when no
+// units block exists or a value cannot be re-serialized.
+// THE TOTAL inline serializer (gate-r15 tests-1: nested tables and
+// arrays), SHARED by every arm that rewrites inline TOML (gate-r21
+// tests-9502: the model pin's inline-table arm carried its own
+// scalar-only twin that bailed on any nested value — refusing, with a
+// false premise, a single-line inline workflow table the run-time's
+// own parse reads fine — while this serializer one function over was
+// explicitly TOTAL over the same shapes. One serializer, every seat.)
+function inlineTomlValue(v: unknown): string | undefined {
+  if (typeof v === "string") return JSON.stringify(v)
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  // A TOML DATE is a value class of its own (gate-r33b tests-9002):
+  // smol-toml hands dates back as TomlDate (extends Date), and the
+  // plain-object branch below re-serialized it into an EMPTY inline
+  // table (Object.entries(Date) = []) — silently replacing a declared
+  // field with garbage under ok:true. ISO offset date-time is valid
+  // TOML and round-trips through the consumer's own parse.
+  if (v instanceof Date) return v.toISOString()
+  if (Array.isArray(v)) {
+    const items = v.map(inlineTomlValue)
+    return items.some((x) => x === undefined) ? undefined : `[${items.join(", ")}]`
+  }
+  if (v && typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>).map(([k, x]) => {
+      const s = inlineTomlValue(x)
+      return s === undefined ? null : `${k} = ${s}`
+    })
+    if (entries.some((e) => e === null)) return undefined
+    return `{ ${entries.join(", ")} }`
+  }
+  return undefined
+}
+
+// The shared parse-driven units-block rewriter (gate-r17): THE PARSE// IS THE DECISION — which entries exist and what they carry comes
+// from smol-toml ONCE, and each `units = [` block in the text is
+// REPLACED by its parse-kept rebuild. The former text arms (entry-id
+// regexes, header counters, block-end scans, quote and padding
+// tolerances) each stayed one legal spelling behind the TOML grammar
+// forever — the parse cannot. Stages-with-units in the parse, in
+// order, answer to units blocks in the text, in order (the zip the
+// misindex class tests-901 pinned). `edit` answers per unit: the
+// (possibly modified) object to keep, or null to drop the entry.
+// Returns null when the document does not parse (the caller's verify
+// refuses honestly). The inline serializer is TOTAL over the parse's
+// own value shapes (gate-r15 tests-1: nested tables and arrays).
+// the whole-document stage-entry ids for an array key — the
+// CONTAINMENT ORACLE both strip arms share (gate-r19 tests-9101's
+// law: string content never becomes parse data; a "block" whose
+// entries do not exist in the document's parse is a quoted example
+// inside a string value). Throws on unparseable bytes — the callers
+// refuse honestly.
+function documentStageIds(toml: string, key: string, identity: "id" | "name"): Set<string> {
+  const whole = parseToml(toml) as { stage?: unknown }
+  const stages = Array.isArray(whole.stage) ? whole.stage : whole.stage !== undefined ? [whole.stage] : []
+  return new Set(
+    (stages as Array<Record<string, unknown>>)
+      .flatMap((s) => {
+        const entries = s?.[key]
+        return Array.isArray(entries) ? entries : []
+      })
+      .map((u) => (u && typeof u === "object" && typeof (u as Record<string, unknown>)[identity] === "string" ? ((u as Record<string, string>)[identity]) : null))
+      .filter((x): x is string => x !== null),
+  )
+}
+
+function rebuildInlineArray(
+  toml: string,
+  key: string,
+  identity: "id" | "name",
+  edit: (u: Record<string, unknown>) => Record<string, unknown> | null,
+): { text: string; saw: boolean; changed: boolean } | null {
+  const lines = toml.split("\n")
+  // block DETECTOR: spacing-tolerant (gate-r11 momentum-24) and
+  // quoted-key-tolerant — `["units"] = [` is legal TOML. One rewriter
+  // for both stage arrays (units — gate-r17; members — gate-r25
+  // principles-60): same grammar, same oracles.
+  const arrayLine = new RegExp(`^[ \t]*["']?${key}["']?[ \t]*=[ \t]*\\[`)
+  let saw = false
+  let changed = false
+  // STRING-EMBEDDED FALSE POSITIVES (gate-r19 tests-9101): a
+  // `units = [` line inside a multi-line brief string matches the
+  // textual detector, and its slice can even PARSE standalone when the
+  // quoted example carries its own closing bracket — the oracle would
+  // rewrite a lens's quoted law. The discriminator: string content
+  // never becomes parse data. A REAL block's entry ids all exist in the
+  // WHOLE-document parse's stage arrays; a quoted example's ids do not.
+  // (Residual, stated: a brief quoting the program's OWN unit ids
+  // verbatim passes containment and its example is rewritten — the
+  // pathological self-documentating template.)
+  let documentIds: Set<string>
+  try {
+    documentIds = documentStageIds(toml, key, identity)
+  } catch {
+    return null // the whole document does not parse — the verify refuses honestly
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (!arrayLine.test(lines[i])) continue
+    // THE PARSE IS THE EXTENT ORACLE (gate-r18 tests-3002/3003,
+    // momentum-33): the block ends at the SMALLEST line-prefix from
+    // here that parses as TOML. No closer scan (a ']'-initial line
+    // inside a multi-line basic string cut the splice mid-string and
+    // manufactured invalid TOML); no cross-stage zip (an
+    // array-of-tables stage ahead of an inline stage misaligned the
+    // document's stage order and rebuilt the WRONG stage's units,
+    // silently inverting the roster). Each block carries ITS OWN
+    // parse; the document's stage order never enters. An arrayLine
+    // match with NO parseable extent (e.g. the bytes sit inside a
+    // multi-line string elsewhere) refuses honestly here.
+    let end = -1
+    let blockEntries: Array<Record<string, unknown>> | null = null
+    for (let e = i; e < lines.length && e < i + 500; e++) {
+      try {
+        const p = parseToml(lines.slice(i, e + 1).join("\n")) as Record<string, unknown>
+        if (Array.isArray(p[key])) {
+          blockEntries = p[key] as Array<Record<string, unknown>>
+          end = e
+          break
+        }
+      } catch {
+        /* extend the span until the parse closes the array */
+      }
+    }
+    if (end === -1) {
+      // In a document the WHOLE-parse already accepted (top of this
+      // function), a real inline block's prefix closes somewhere
+      // parseable — inline arrays are self-contained. No parseable
+      // extent therefore means a quoted example whose own bracket
+      // never closes inside the string (gate-r19 tests-9101-2): skip
+      // the false positive, never dead-end the strip on it.
+      continue
+    }
+    const entries = blockEntries.filter((u): u is Record<string, unknown> => !!u && typeof u === "object")
+    // the containment discriminator above: a "block" whose parsed ids
+    // do not exist in the document's stage arrays is a quoted example
+    // inside a string value — not the strip's to edit. Skip it WITHOUT
+    // counting it as a seen block (a template whose only inline-looking
+    // line is a quoted example is served by its real entries, wherever
+    // they are declared — never refused as "no units block")
+    const blockIds = entries.map((u) => (typeof u[identity] === "string" ? (u[identity] as string) : null)).filter((x): x is string => x !== null)
+    if (blockIds.length > 0 && !blockIds.every((id) => documentIds.has(id))) {
+      continue
+    }
+    saw = true
+    const kept: string[] = []
+    for (const u of entries) {
+      const next = edit(u)
+      if (next === null) continue
+      const serialized = Object.entries(next).map(([k, v]) => {
+        const s = inlineTomlValue(v)
+        return s === undefined ? null : `${k} = ${s}`
+      })
+      if (serialized.some((e) => e === null)) return null
+      kept.push(`{ ${serialized.join(", ")} }`)
+    }
+    const rebuilt = `${key} = [ ${kept.join(", ")} ]`
+    const blockWas = lines.slice(i, end + 1).join("\n")
+    lines.splice(i, end + 1 - i, rebuilt)
+    if (blockWas !== rebuilt) changed = true
+  }
+  return { text: changed ? lines.join("\n") : toml, saw, changed }
+}
+
+// "is this line a [[stage.units]] unit-block header?" — ONE seat
+// (gate-r24 principles-51): the roster strip's anchor and the
+// temperature strip's block detector used to be two grammars that
+// disagreed on legal TOML (quoted key segments — [[stage."units"]] —
+// and trailing comments — [[stage.units]] # lenses — matched one and
+// not the other), so a model-less dropout audit of such a template
+// dead-ended at its own verify ("the strip regex missed a form … this
+// is a door bug") while the roster strip read the same line fine.
+// Spacing-tolerant (gate-r16 tests-1), quoted-key-tolerant,
+// comment-tolerant — the parser's grammar, one spelling. The same
+// grammar answers the members twin ([[stage.members]]) — one builder.
+function stageArrayHeaderRe(key: string): RegExp {
+  return new RegExp(`^\\[\\[\\s*stage\\s*\\.\\s*["']?${key}["']?\\s*\\]\\]\\s*(#.*)?$`)
+}
+function isStageUnitsHeader(line: string): boolean {
+  return stageArrayHeaderRe("units").test(line.trim())
+}
+function isStageMembersHeader(line: string): boolean {
+  return stageArrayHeaderRe("members").test(line.trim())
+}
+
+function stripUnitsToRoster(toml: string, keep: Set<string>): string | null {
+  const lines = toml.split("\n")
+  let sawTable = false
+  let tableChanged = false
+  // the [[stage.units]] array-of-tables form (gate-r6 tests-102): drop
+  // whole blocks whose id is not in the roster. THE PARSE IS THE
+  // EXTENT ORACLE FOR THE TABLE FORM TOO (gate-r23 principles-43):
+  // the old text scan — a quote-blind header anchor plus "first
+  // trimmed line starting with [" as the end — never matched the
+  // legal [[stage."units"]] header, and cut a multi-line brief
+  // carrying a bracketed example line mid-string, then refused "no
+  // units block" for a template the door's own parse reads: a false
+  // premise that killed the gate's subset review entirely. The header
+  // is located by isStageUnitsHeader (ONE seat, shared with the
+  // temperature strip — gate-r24 principles-51); the EXTENT is the
+  // FIRST candidate boundary whose slice parses standalone to exactly
+  // one unit entry (a candidate that cuts a multi-line string fails
+  // the parse and falls through); and containment against the
+  // whole-document parse decides which "headers" are quoted examples
+  // — tests-9101's law, both arms.
+  let documentUnitIds: Set<string>
+  try {
+    documentUnitIds = documentStageIds(toml, "units", "id")
+  } catch {
+    return null // the whole document does not parse — the verify refuses honestly
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (!isStageUnitsHeader(lines[i])) continue
+    // candidate boundaries: every later trimmed line opening a table
+    // header, or EOF. The first whose slice [i..e) parses standalone
+    // with exactly ONE unit entry is the block's extent.
+    let end = -1
+    let id: string | null = null
+    for (let e = i + 1; e <= lines.length; e++) {
+      if (e < lines.length && !/^\[/.test(lines[e].trim())) continue
+      const slice = lines.slice(i, e).join("\n")
+      try {
+        const p = parseToml(slice) as { stage?: unknown }
+        const stages = Array.isArray(p.stage) ? p.stage : p.stage !== undefined ? [p.stage] : []
+        const ids = (stages as Array<{ units?: unknown }>)
+          .flatMap((s) => (Array.isArray(s.units) ? s.units : []))
+          .map((u) => (u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string" ? (u as { id: string }).id : null))
+          .filter((x): x is string => x !== null)
+        if (ids.length === 1) {
+          end = e
+          id = ids[0]
+          break
+        }
+      } catch {
+        /* the candidate cuts the block mid-string — try the next */
+      }
+    }
+    if (end === -1) continue // no parseable single-unit extent — not this arm's to touch
+    // containment (tests-9101's law): a "header" whose block's id does
+    // not exist in the document's parse is a quoted example inside a
+    // string value — skip it, un-counted
+    if (id === null || !documentUnitIds.has(id)) {
+      i = end - 1
+      continue
+    }
+    sawTable = true
+    if (!keep.has(id)) {
+      lines.splice(i, end - i)
+      tableChanged = true
+      i--
+    } else {
+      i = end - 1
+    }
+  }
+  // every `units = [` block — single-line and multi-line, ONE arm —
+  // replaced by its parse-kept rebuild
+  const res = rebuildInlineArray(lines.join("\n"), "units", "id", (u) =>
+    typeof u.id === "string" && keep.has(u.id) ? u : null,
+  )
+  if (res === null) return null
+  if (!res.saw && !sawTable) return null
+  return res.changed || tableChanged ? res.text : toml
+}
+
+// THE SCREEN ANSWERS ITS CONSUMERS' QUESTION (gate-r22 tests-6101,
+// widened gate-r25 principles-60, flattened gate-r26 principles-61):
+// "does this program pin a temperature the RUN-TIME will enforce?" —
+// an ENTRY-LEVEL temperature key on a stage unit or a coworker member
+// (the only shape any consumer reads: the manifest hands
+// entry.temperature to the host birth, which refuses any temperature
+// spawn with no model). Tables no consumer reads stay out of scope
+// (the tests-6101 law), and so do NESTED keys inside an entry
+// (tuning = { temperature = 0.3 } is data, not a pin — loadManifest
+// ignores it; the deep walk refused templates the run-time runs
+// untuned, the false-refusal class one nesting level down). One
+// question, one level, every enforced seat — the screen and the
+// strip's post-strip verify.
+function pinsSpawnTemperature(parsed: unknown): boolean {
+  const stage = (parsed as { stage?: unknown })?.stage
+  const stages = Array.isArray(stage) ? stage : []
+  return stages.some((s) => {
+    if (s == null || typeof s !== "object") return false
+    const stageObj = s as { units?: unknown; members?: unknown }
+    return [stageObj.units, stageObj.members].some(
+      (arr) => Array.isArray(arr) && arr.some((e) => e != null && typeof e === "object" && "temperature" in e),
+    )
+  })
+}
+
+// THE PIN-PLAN ASKS THE CONSUMER'S QUESTION (gate-r27 principles-1):
+// every entry that pins temperature AND has NO model to ride by
+// NEAREST declaration — the same resolution the seat that acts uses
+// (hooks modelPlanFromStages: unit.model ?? stage.model; the host
+// birth: … ?? modelIn — the workflow pin; --model above all). Keyed
+// `<array>:<identity>` for the strip's per-entry discrimination. A
+// pin is model-less only when the entry's own model, its stage's
+// model, the workflow model, AND --model are ALL absent.
+function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined): Set<string> {
+  const workflowModel = (parsed as { workflow?: { model?: unknown } })?.workflow?.model
+  const workflowModelValid =
+    (typeof workflowModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(workflowModel)) || false
+  const stage = (parsed as { stage?: unknown })?.stage
+  const stages = Array.isArray(stage) ? stage : []
+  const unresolved = new Set<string>()
+  for (const s of stages) {
+    if (s == null || typeof s !== "object") continue
+    const stageObj = s as Record<string, unknown>
+    const stageModel = stageObj.model
+    // UNITS resolve unit.model ?? stage.model (modelPlanFromStages);
+    // MEMBERS resolve member.model ONLY — no acting seat reads
+    // stage.model for a member (gate-r34 principles-301: the plan
+    // walks solo stages and fan-out units, never member arrays; a
+    // member pin "riding" the stage model died at every member birth
+    // while the door said ok:true)
+    for (const [key, identity, ridesStageModel] of [
+      ["units", "id", true],
+      ["members", "name", false],
+    ] as const) {
+      const entries = stageObj[key]
+      if (!Array.isArray(entries)) continue
+      for (const e of entries) {
+        if (e == null || typeof e !== "object" || !("temperature" in e)) continue
+        const entry = e as Record<string, unknown>
+        const rides =
+          (typeof entry.model === "string" && entry.model.length > 0) ||
+          (ridesStageModel && typeof stageModel === "string" && stageModel.length > 0) ||
+          workflowModelValid ||
+          typeof cliModel === "string"
+        if (!rides) {
+          const who = entry[identity]
+          if (typeof who === "string") unresolved.add(`${key}:${who}`)
+        }
+      }
+    }
+  }
+  return unresolved
+}
+
+// A model-less dropout audit's untuned materialization (gate-r2
+// momentum-15): remove `temperature = <num>` keys — the pins are tuning
+// that needs a model to ride; without one the lenses spawn on the host
+// default, untuned (stated in the receipt). BOTH unit forms (gate-r10
+// tests-1): the inline-array arm rewrites `{ id =` entry lines, and the
+// [[stage.units]] arm drops temperature-key LINES inside unit blocks
+// (the form gate-r6 blessed — the strip missing it dead-ended every
+// audited escalation on table-form templates).
+// a temperature-pin LINE (the [[stage.units]] arm's unit of work): the
+// KEY matched textually (bare or quoted — the roster strip's
+// tolerance), the VALUE judged by the PARSE (gate-r20 tests-5002: the
+// old decimal-only regex `[0-9]+(\.[0-9]+)?` missed the exponential
+// spelling `temperature = 0.2e0` — legal TOML, the same 0.2 to
+// smol-toml — so the pin survived the line strip and the gate-audited
+// dropout levy dead-ended at its own verify: no program, no verdict,
+// the audit measuring nothing. The strip speaks the parser's grammar:
+// a value the parse reads as a number is a pin; anything else is not
+// this arm's to touch, and the parse-verify backstops the residual.)
+function isTemperaturePinLine(line: string): boolean {
+  const m = line.match(/^[ \t]*["']?temperature["']?[ \t]*=[ \t]*(.+)$/)
+  if (!m) return false
+  // KEY PRESENCE IS THE QUESTION (gate-r29 tests-44): the screen
+  // (pinsSpawnTemperature), the pin-plan (unresolvedTemperaturePins)
+  // and the host birth all decide 'is this a pin?' by the KEY
+  // whatever the value type — a string-valued `temperature = "0.4"`
+  // is a pin to every one of them, so the line probe accepts ANY
+  // value the parser reads (one decision, every arm, one answer);
+  // the number-only probe left the identical pin in place and
+  // dead-ended the audit at its own verify.
+  try {
+    parseToml(`__probe = ${m[1]}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function stripTemperaturePins(toml: string, unresolved: Set<string>): string {
+  const lines = toml.split("\n")
+  // arm 2: [[stage.units]] AND [[stage.members]] blocks (gate-r25
+  // principles-60: member temperature rides the same host birth and
+  // is refused there with no model — the audit's receipt "temperature
+  // pins dropped" must cover every enforced seat) — drop
+  // temperature-key LINES, but ONLY in blocks whose pin has NO model
+  // to ride (gate-r27 principles-1: a pin carrying its own nearest
+  // model is declared tuning that works without --model; stripping it
+  // shipped an untuned receipt for lenses the run-time would have run
+  // TUNED). TOML KEY ORDER IS FREE (gate-r28b questions-1/tests-602):
+  // the identity line may FOLLOW the temperature line — the block is
+  // decided from any of its lines, never from line order. THE PARSE
+  // IS THE EXTENT ORACLE HERE TOO (gate-r29 tests-43): the raw
+  // next-header scan cut a block whose brief quotes a bracket-initial
+  // example line (`  [workflow]`) mid-string — the real pin after the
+  // string survived and the audit dead-ended at its own verify. The
+  // extent is the FIRST candidate boundary whose slice parses
+  // standalone to exactly one entry; identity comes from that parse;
+  // containment against the document's ids kills quoted-example
+  // headers — full parity with the roster arm (tests-9101's law).
+  const stageIds: { units: Set<string>; members: Set<string> } = { units: new Set(), members: new Set() }
+  try {
+    stageIds.units = documentStageIds(toml, "units", "id")
+    stageIds.members = documentStageIds(toml, "members", "name")
+  } catch {
+    return toml // the document does not parse — the verify refuses honestly
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (!isStageUnitsHeader(t) && !isStageMembersHeader(t)) continue
+    const key: "units" | "members" = isStageUnitsHeader(t) ? "units" : "members"
+    const identity = key === "units" ? "id" : "name"
+    let end = -1
+    let entry: Record<string, unknown> | null = null
+    for (let e = i + 1; e <= lines.length; e++) {
+      if (e < lines.length && !/^\[/.test(lines[e].trim())) continue
+      const slice = lines.slice(i, e).join("\n")
+      try {
+        const p = parseToml(slice) as Record<string, unknown>
+        const stageArr = Array.isArray(p.stage) ? p.stage : p.stage !== undefined ? [p.stage] : []
+        const entries = (stageArr as Array<Record<string, unknown>>).flatMap((s) => {
+          const arr = s?.[key]
+          return Array.isArray(arr) ? (arr as unknown[]) : []
+        })
+        if (entries.length === 1 && entries[0] != null && typeof entries[0] === "object") {
+          end = e
+          entry = entries[0] as Record<string, unknown>
+          break
+        }
+      } catch {
+        /* the candidate cuts the block mid-string — try the next */
+      }
+    }
+    if (end === -1 || entry === null) continue // no parseable single-entry extent — not this arm's to touch
+    const who = entry[identity]
+    if (typeof who !== "string" || !stageIds[key].has(who)) {
+      i = end - 1
+      continue // a quoted example inside a string — containment kills it
+    }
+    if (unresolved.has(`${key}:${who}`)) {
+      for (let j = i + 1; j < end; j++) {
+        if (isTemperaturePinLine(lines[j])) lines[j] = ""
+      }
+    }
+    i = end - 1
+  }
+  // arm 1: the inline forms — THE PARSE DECIDES (gate-r17 tests-2005):
+  // pins are KEYS; only the parse knows a key from a word in a string.
+  // Each block is rebuilt from the parse with the UNRESOLVED entries'
+  // temperature keys deleted (string values re-serialize verbatim);
+  // entries whose pin rides a nearest model keep it. BOTH stage
+  // arrays — units and members (gate-r25 principles-60), one rewriter.
+  const dropUnresolvedTemperature =
+    (key: "units" | "members", identity: "id" | "name") =>
+    (u: Record<string, unknown>): Record<string, unknown> => {
+      if (!("temperature" in u)) return u
+      const who = u[identity]
+      if (typeof who === "string" && !unresolved.has(`${key}:${who}`)) return u // its pin rides — keep it
+      const next = { ...u }
+      delete next.temperature
+      return next
+    }
+  const unitsPass = rebuildInlineArray(lines.join("\n"), "units", "id", dropUnresolvedTemperature("units", "id"))
+  const membersPass =
+    unitsPass !== null
+      ? rebuildInlineArray(unitsPass.text, "members", "name", dropUnresolvedTemperature("members", "name"))
+      : null
+  return membersPass?.text ?? unitsPass?.text ?? lines.join("\n")
 }
 
 export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewReady {
@@ -101,13 +718,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   const head = args.head ?? headBranch
   let base = args.base
   if (!base) {
-    for (const d of ["master", "main", "trunk"]) {
-      try {
-        git(repo, "rev-parse", "--verify", d)
-        base = d
-        break
-      } catch { /* try the next */ }
-    }
+    base = detectTrunk(repo)
     if (!base) return { ok: false, why: "no --base given and no master/main/trunk branch found", code: 2 }
   }
   let headSha: string, baseSha: string, files: string[]
@@ -131,12 +742,32 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   }
   files = git(repo, "diff", "--name-only", baseSha, headSha).split("\n").filter(Boolean)
   if (files.length === 0) {
-    return { ok: true, dir: null, skipped: true, why: "empty diff", files: 0 }
+    // an audit levy arriving at an EMPTY diff means the class flipped
+    // under it (a force-push between the gate's read and the levy's) —
+    // the levy still runs (the audit measures the judgment the gate
+    // made on the diff it saw; an all-green verdict on nothing accrues
+    // honestly) rather than dead-ending with a ledger row claiming
+    // audit:true and nothing levied (gate-r8 tests-1's shape). The
+    // plain spell skips with a receipt.
+    if (args.auditLevy) {
+      // fall through: the audit measures the class, even an emptied one
+    } else {
+      return { ok: true, dir: null, skipped: true, why: "empty diff", files: 0 }
+    }
   }
   // The docs-only skip is a PRE-FLIGHT, not a chain stage: a declared
   // chain cannot shed its units mid-run (ADR 0014), so the skip has to
-  // happen before anything is booked. Receipt, not silence.
-  if (files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
+  // happen before anything is booked. Receipt, not silence. The
+  // auditLevy fall-through is the RACE GUARD (gate-r13
+  // momentum-26/principles-36), the same law the empty-diff arm above
+  // states: the gate NEVER audits docs_only on its own judgment (a
+  // file-list fact is mechanical — gate-r12 momentum-25), so an audited
+  // levy arriving at a docs-only diff means the class FLIPPED under it
+  // between the gate's read and this one (--gate-only makes the window
+  // caller-controlled) — the ledger row is already written, and an
+  // audit nobody runs measures nothing. One decision, one answer at
+  // both arms of "the class flipped under it".
+  if (!args.auditLevy && files.every((f) => DOCS_ONLY.test(f) || DOCS_PATH.test(f))) {
     return { ok: true, dir: null, skipped: true, why: "docs-only diff", files: files.length }
   }
   // ONE truthiness rule for a declared model (r10: four lenses caught
@@ -160,18 +791,46 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the recovery the message itself prescribed was dead-ended). A
   // docs-only diff never needs a model: nothing spawns, nothing pins.
   //
-  // THE pin-plan (r17 principles-10/tests-1: one computation, one
-  // anchor; r19 tests-1: verified by the parser; r20 principles-12/
-  // tests-30/tests-31: EVERY model question is answered by the
-  // consumer's own smol-toml read — hasModel, the landing, and the
-  // verify — never by a table-blind regex; malformed TOML is a code-2
-  // door refusal, never an escaped stack).
-  let pinnedWorkflowToml: string | undefined
+  // THE CONTENT PIPELINE (gate-r5: the pin-plan grew three captured
+  // arms — pin, untuned, legacy staged strip — and the no-model strip
+  // had no verify behind it, so a silent no-op inverted the gate's
+  // roster decision with no refusal and no receipt). ONE string, an
+  // ordered chain of TEXT transforms, each VERIFIED by the parser as
+  // it lands, ONE write at materialization:
+  //   roster strip (units ⊆ roster, verified — both model paths)
+  //   → temperature strip (audit + no model; no temperature keys, verified)
+  //   → model pin (workflow.model === --model, verified)
+  // Every model question is answered by the consumer's own smol-toml
+  // read (r20 principles-12); malformed TOML is a code-2 door refusal,
+  // never an escaped stack (r20 tests-30).
+  let workflowTomlOut: string | undefined
+  // the FINAL materialized bytes, captured INSIDE the pipeline's scope
+  // (gate-r18 principles-39: the lens handoff used to read
+  // `workflowTomlOut ?? templateToml` OUTSIDE the block that declares
+  // templateToml — ?? short-circuits, so every pipeline-changed path
+  // skipped the right operand and the suite stayed green, while a
+  // changed-NOTHING path (no --model, nothing to strip — the
+  // model-less audit levy's own shape) evaluated it and threw
+  // ReferenceError before any ReviewReady)
+  let materializedToml: string | undefined
+  // set by the audit strip branch — the bin's receipt reports it
+  // (gate-r26 principles-62)
+  let untunedAudit = false
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
-    let parsedTemplate: { workflow?: { model?: string } }
+    let toml = templateToml
+    // THE SUBSET QUESTION (gate-r20 tests-5001): "does this roster
+    // name fewer units than the template DECLARES?" — answered by set
+    // difference against the template's own parse, never by the
+    // canonical gate size. The old `roster.length < 4` keyed the strip
+    // and the verify on a magic constant, so a four-element roster over
+    // a FIVE-unit template skipped every roster check and materialized
+    // all five units — at exactly the length where "full rail" and
+    // "subset" stop coinciding, silently running a lens the gate's
+    // decision excluded.
+    let parsedOriginal: { workflow?: { model?: string }; stage?: unknown }
     try {
-      parsedTemplate = parseToml(templateToml) as { workflow?: { model?: string } }
+      parsedOriginal = parseToml(templateToml) as typeof parsedOriginal
     } catch (err) {
       return {
         ok: false,
@@ -179,57 +838,145 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         code: 2,
       }
     }
-    // the temp-pin question, answered by the consumer's own read too
-    // (r23 tests-40: the table-blind regex matched "temperature" in
-    // comments and string values, refusing legal model-less
-    // materializations) — a deep walk over the PARSED document: a
-    // temperature KEY anywhere (workflow table, stage tables, unit
-    // entries) pins; the word in a comment or a value does not.
-    const hasTempPin = (function walk(node: unknown): boolean {
-      if (Array.isArray(node)) return node.some(walk)
-      if (node && typeof node === "object") {
-        return Object.entries(node as Record<string, unknown>).some(
-          ([k, v]) => k === "temperature" || walk(v),
-        )
-      }
-      return false
-    })(parsedTemplate)
-    // "a model to ride" = declared in the template OR supplied via
-    // --model — the consumer's read for the former, the argv for the
-    // latter (r20 principles-12 kept the parser; this disjunct is the
-    // supplied half — dropping it refused every --model call)
-    // "a model to ride" = a grammar-legal model DECLARED in the template
-    // (the run path's own grammar — an illegal template model like ""
-    // or a bare id is NOT a declared model: the temp-pin refusal fires
-    // and the operator's --model wins — r21 tests-1) OR supplied via
-    // --model (the argv half; r20 principles-12 kept the parser read
-    // for the template half)
-    const templateModel = parsedTemplate?.workflow?.model
-    const hasModel = (typeof templateModel === "string" && /^[^/\s]+\/[^/\s]+$/.test(templateModel)) || typeof args.model === "string"
-    if (hasTempPin && !hasModel) {
+    let rosterSubsets = false
+    // THE STAGE/UNITS SHAPE LAW, ONE SEAT, BOTH PATHS (gate-r25
+    // questions-15): a singular [stage] table or a singular units
+    // table ([stage.units] / units = {… }) is legal TOML the parse
+    // hands back as a plain object, and every units reader downstream
+    // assumed the array — the singular-STAGE twin is typed-refused
+    // while the units twin crashed with an escaped TypeError. The
+    // run's own law: stages AND units must be arrays. Guarded once,
+    // here, at the unconditional pre-build parse — before any side
+    // effect, both paths; the strip writes only array forms, so the
+    // materialized bytes cannot regress into the guarded shape.
+    if (parsedOriginal.stage !== undefined && !Array.isArray(parsedOriginal.stage)) {
       return {
         ok: false,
-        why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`,
+        why: `the template's [stage] is a singular table — the run requires [[stage]] array-of-tables entries (stages must be an array); rewrite the stage headers`,
         code: 2,
+      }
+    }
+    for (const s of (parsedOriginal.stage as Array<{ units?: unknown }> | undefined) ?? []) {
+      if (s != null && typeof s === "object" && s.units !== undefined && !Array.isArray(s.units)) {
+        return {
+          ok: false,
+          why: `the template's units is a singular table — the run requires units array entries ([[stage.units]] or units = [ … ]); rewrite the units declaration`,
+          code: 2,
+        }
+      }
+    }
+    if (args.roster) {
+      const templateIds = ((parsedOriginal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
+        .flatMap((s) => (s.units ?? []).map((u) => u?.id))
+        .filter((x): x is string => typeof x === "string")
+      const keep = new Set(args.roster)
+      rosterSubsets = templateIds.some((id) => !keep.has(id))
+      if (rosterSubsets) {
+        const stripped = stripUnitsToRoster(toml, keep)
+        if (stripped === null) {
+          return { ok: false, why: `template has no units block for roster subsetting`, code: 1 }
+        }
+        toml = stripped
+      }
+    }
+    let parsedTemplate: { workflow?: { model?: string }; stage?: Array<{ units?: Array<{ id?: string }> }> }
+    try {
+      parsedTemplate = parseToml(toml) as typeof parsedTemplate
+    } catch (err) {
+      return {
+        ok: false,
+        why: `the template's workflow.toml is not valid TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template or pass --template pointing at a valid one`,
+        code: 2,
+      }
+    }
+    // the roster verify — UNCONDITIONAL behind the strip (gate-r5
+    // tests-2: the no-model strip no-op'd with no verify behind it,
+    // materializing all four units while the gate decided two): the
+    // consumer's own read must agree the subset landed. AND non-empty
+    // (gate-r7 principles-28): a roster naming ZERO of the template's
+    // units dropped every lens and the strays-only check passed on zero
+    // survivors — a zero-lens review with ok:true, the exact shape the
+    // empty-roster guard refuses. Keyed on the SAME parse-derived flag
+    // as the strip (gate-r20 tests-5001 — one law, one seat).
+    if (rosterSubsets && args.roster) {
+      const keep = new Set(args.roster)
+      const ids = (parsedTemplate.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id))
+      const stray = ids.filter((id) => id !== undefined && !keep.has(id))
+      if (stray.length > 0) {
+        return {
+          ok: false,
+          why: `roster subsetting failed post-verify — units outside the roster survived the strip: ${stray.join(", ")} (this is a door bug; report it)`,
+          code: 2,
+        }
+      }
+      const survivors = ids.filter((id) => id !== undefined)
+      if (survivors.length === 0) {
+        return {
+          ok: false,
+          why: `the roster names no unit in this template (roster [${args.roster.join(", ")}] ∩ template units = ∅) — a zero-lens review is the empty-roster shape the door refuses; this is gate/template drift (the gate read a different template than the door)`,
+          code: 2,
+        }
+      }
+    }
+    const hasTempPin = pinsSpawnTemperature(parsedTemplate)
+    // gate-r27 principles-1: the nearest-declaration walk — see
+    // unresolvedTemperaturePins above. hasModel = every pin rides.
+    const unresolvedPins = unresolvedTemperaturePins(parsedTemplate, args.model)
+    const hasModel = unresolvedPins.size === 0
+    if (hasTempPin && !hasModel) {
+      if (args.auditLevy === true && args.model === undefined) {
+        // a MODEL-LESS dropout audit (gate-r2 momentum-15): refusing
+        // here dead-ends the audit. The pins are TUNING, not law — but
+        // ONLY the pins with NO model to ride (gate-r27 principles-1):
+        // a pin carrying its own nearest model is declared tuning that
+        // works without --model, and stripping it shipped an untuned
+        // receipt for lenses the run-time would have run TUNED. The
+        // strip drops the UNRESOLVED pins only; the verify asks the
+        // same nearest-declaration question of the stripped bytes.
+        const stripped = stripTemperaturePins(toml, unresolvedPins)
+        let clean = false
+        try {
+          // the verify asks the SAME nearest-declaration question of
+          // the stripped bytes (gate-r27 principles-1): every pin
+          // either rides a model or is gone
+          clean = unresolvedTemperaturePins(parseToml(stripped), args.model).size === 0
+        } catch {
+          clean = false
+        }
+        if (!clean) {
+          return {
+            ok: false,
+            why: `the dropout audit's temperature strip could not strip every pin (the strip regex missed a form) — refusing rather than shipping pins the receipt claims were dropped (this is a door bug; report it)`,
+            code: 2,
+          }
+        }
+        toml = stripped
+        // THE RECEIPT'S FACT, ANSWERED AT THE ONE SEAT THAT KNOWS
+        // (gate-r26 principles-62): "were the pins dropped?" is this
+        // branch's own decision — the bin used to print "temperature
+        // pins dropped" gated only on (audit && no --model), but this
+        // strip runs only when the TEMPLATE also declares no model; a
+        // model-carrying template kept its pins under a receipt that
+        // claimed they were dropped. The bin reports this flag; it no
+        // longer predicts.
+        untunedAudit = true
+      } else {
+        return {
+          ok: false,
+          why: `the template pins per-unit temperature but no model is declared — pass --model <provider/model> (the temperature pin rides the model's settings)`,
+          code: 2,
+        }
       }
     }
     if (typeof args.model === "string") {
       // r19 tests-1: the landing must be inside the [workflow] table
-      // THE RUN-TIME READS — a `model =` line in any other table sailed
-      // the old regex verify while loadManifest read workflow.model =
-      // undefined. Text-preserving landing + a parse of the result:
-      // the verification is the consumer's own read.
-      pinnedWorkflowToml = pinIntoWorkflowTable(templateToml, args.model)
+      // THE RUN-TIME READS. Text-preserving landing + a parse of the
+      // result: the verification is the consumer's own read.
+      const pinned = pinIntoWorkflowTable(toml, args.model)
       let parsed: { workflow?: { model?: string } } | undefined
       try {
-        parsed = pinnedWorkflowToml !== undefined
-          ? parseToml(pinnedWorkflowToml) as { workflow?: { model?: string } }
-          : undefined
+        parsed = pinned !== undefined ? (parseToml(pinned) as { workflow?: { model?: string } }) : undefined
       } catch (err) {
-        // r20 tests-30: the pin's landing can produce bytes the run-
-        // time cannot parse (e.g. a duplicated model key the template's
-        // own indentation hid) — a door refusal naming the template,
-        // never an escaped TomlError
         return {
           ok: false,
           why: `the model pin's landing does not parse as TOML (${err instanceof Error ? err.message.split("\n")[0] : String(err)}) — fix the template's [workflow] table or pass --template pointing at a valid one`,
@@ -239,16 +986,32 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       if (parsed?.workflow?.model !== args.model) {
         return {
           ok: false,
-          why: `the template's workflow.toml has no [workflow] table — the model pin has nowhere to land (add a [workflow] table to the template, or pass --template pointing at one)`,
+          why: `the template's workflow.toml has no [workflow] table the door can pin text-preservingly (a [workflow] header block, dotted workflow.* keys, or a single-line inline table — re-serializing the whole document would mangle the units layout): rewrite the table in one of those forms, or pass --template pointing at one`,
           code: 2,
         }
       }
+      toml = pinned
     }
+    workflowTomlOut = toml !== templateToml ? toml : undefined
+    materializedToml = toml
   }
 
   const headShort = headSha.slice(0, 8)
   const slug = `${basename(repo)}-${head === headBranch && headBranch !== "HEAD" ? headBranch.replace(/[^a-zA-Z0-9-]/g, "-") : headShort}`
   const dir = args.out ? resolve(args.out) : join(repo, ".whl-review", slug)
+  // the gate's roster (review-gate.ts): a subset materializes ONLY
+  // those lens units — one decision, made once at the door (ADR 0014:
+  // a chain cannot shed units mid-run, so the roster is pre-flight).
+  // An EMPTY roster refuses BEFORE ANY SIDE EFFECT (gate-r21
+  // tests-9501): this check used to fire after mkdir+cpSync but
+  // before data/review existed, leaving a half-built dir the door's
+  // own replace-guard ("workflow.toml && data/review") classifies as
+  // not-ours — the prescribed re-run at the same --out dead-ended on
+  // the debris, and the default --out sits inside the repo under
+  // review. Refusals precede the build; nothing is left to clean up.
+  if (args.roster && args.roster.length === 0) {
+    return { ok: false, why: `empty roster — the gate decided skip; do not materialize (this is a door bug if you see it)`, code: 2 }
+  }
   // an unguarded rmSync on a caller-supplied path is a footgun (the
   // self-review r4's momentum-1): a typo'd --out must refuse, never
   // recursively delete whatever was there. Replacing OUR OWN
@@ -266,11 +1029,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // provider.<p>.models.<id>.temperature): --model lands as the
   // workflow pin. The MISSING-model refusal lives at the door now
   // (pre-materialization, above) — this branch only writes the pin.
-  // the pin-plan was computed and verified PRE-materialization — the
-  // materialization writes exactly those bytes (r17 principles-10/
-  // tests-1: one computation, one anchor)
-  if (pinnedWorkflowToml !== undefined) {
-    writeFileSync(join(dir, "workflow.toml"), pinnedWorkflowToml)
+  // THE CONTENT PIPELINE's single write (gate-r5: three arms — pin,
+  // untuned, legacy staged strip — became one verified chain; the
+  // materialization writes whatever the chain changed, nothing else)
+  if (workflowTomlOut !== undefined) {
+    writeFileSync(join(dir, "workflow.toml"), workflowTomlOut)
   }
 
   const title = args.title ?? `${head} → ${base}`
@@ -291,6 +1054,50 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // the door's own law, not by a new one.
   mkdirSync(join(dir, "data", "review"), { recursive: true })
   writeFileSync(join(dir, "data", "review", "config.sh"), lines.join("\n") + "\n")
+  // THE ONE READER (gate-r17 — the design replacement the grammar grind
+  // forced): "which lens units did this program materialize?" is
+  // answered ONCE, by the door's own smol-toml parse of the FINAL
+  // materialized bytes, and intake.sh reads THIS file. Four textual
+  // shadow-readers (sed/grep/awk arms) each stayed one legal TOML
+  // spelling behind the grammar forever — quotes, padding, key order,
+  // quoted keys, trailing comments, spaced headers, braces in briefs —
+  // one P1 per spelling per round. The parse is the reader; this file
+  // is the handoff; intake no longer re-derives.
+  {
+    const finalToml = materializedToml ?? readFileSync(join(template, "workflow.toml"), "utf8")
+    let ids: string[] = []
+    try {
+      const parsedFinal = parseToml(finalToml) as { stage?: unknown }
+      // singular [stage]: same typed refusal as the roster verify —
+      // the run requires an array; never .flatMap an object
+      // (gate-r18 tests-2006's twin crash site)
+      // the stage/units shape law lives at ONE seat now (gate-r25
+      // questions-15): the unconditional pre-build guard on
+      // parsedOriginal — the strip writes only array forms, so the
+      // materialized bytes cannot regress into a singular shape
+      ids = ((parsedFinal.stage as Array<{ units?: Array<{ id?: string }> }> | undefined) ?? [])
+        .flatMap((s) => (s.units ?? []).map((u) => u?.id))
+        .filter((x): x is string => typeof x === "string")
+    } catch {
+      return { ok: false, why: `the final materialized workflow.toml does not parse — cannot hand off the lens roster (this is a door bug; report it)`, code: 2 }
+    }
+    // ONE doctrine, both paths (gate-r19 questions-14): the roster
+    // path already refuses a template whose parse reads zero stage
+    // units ("a zero-lens review is the empty-roster shape the door
+    // refuses") — the plain path used to materialize it ok:true with
+    // an EMPTY handoff, and the run's own intake gate exited 1 on
+    // exactly that ("missing or empty handoff … this is a door bug"):
+    // a booked job dead at its first gate, holding a receipt that
+    // blames the door for the shape the door just shipped.
+    if (ids.length === 0) {
+      return {
+        ok: false,
+        why: `the template declares no stage units — a zero-lens review is the empty-roster shape the door refuses (the run's intake gate would exit on the empty handoff)`,
+        code: 2,
+      }
+    }
+    writeFileSync(join(dir, "data", "review", "lenses.txt"), ids.join("\n") + "\n")
+  }
   // refuse, never vanish (the self-review's tests-4): a --body-file
   // that does not exist is a typo'd path, and silently ignoring it
   // reviews a PR missing the claims the caller thought it carried
@@ -320,7 +1127,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     if (!existsSync(args.traceDir)) return { ok: false, why: `--trace-dir ${args.traceDir} does not exist`, code: 2 }
     cpSync(args.traceDir, join(dir, "data", "trace"), { recursive: true })
   }
-  return { ok: true, dir, skipped: false, headShort }
+  return { ok: true, dir, skipped: false, headShort, ...(untunedAudit ? { untuned: true as const } : {}) }
 }
 
 // The receipt the door prints after materializing (before any levy) —

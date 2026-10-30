@@ -10,6 +10,7 @@ import { execSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
+import { opencodeSessionActiveSince } from "../adapters/transcripts.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { chooseModel } from "../jev/model-chooser.ts"
 import { runFaultLane } from "./fault-lane.ts"
@@ -94,13 +95,36 @@ export async function runCoworker(
   const commitRelay = () => writeRelayLedger(taskDir, { delivered, refused, refusedDetail: [...refusedDetail.values()] })
   // A parked member continues its own booked session (write-ahead at
   // birth); a member without one is born fresh, held idle until mail.
+  // THE ONE SPELLING, coworker edition (gate-r24 principles-50): a
+  // member's pane row is matched by its EXACT unit — members inhabit
+  // under their name verbatim (inhabitPane(m.name, …)), so the
+  // bare-name disjunct and the dash-prefix startsWith arm were pure
+  // collision surface (member api answering api-v2's row): a member
+  // that never boarded was born resumed into its sibling's session —
+  // held idle, its brief never delivered, the exchange deadlocked.
+  // The same law rail.bookedSessionOf's w- form states: exact match,
+  // no variants. AND THE POINTER IS EVIDENCE ONLY WHEN IT IS ACTIVE
+  // THIS GENERATION (gate-r27, momentum-90's law at the coworker
+  // seat): existence alone reads a surviving predecessor's untouched
+  // session as boarding — verify opencode pointers against the store
+  // before answering.
   const bookedSessionOf = (name: string): string | undefined => {
     if (!ledger) return undefined
     const latest = ledger.job.panes
-      .filter((p) => (p.unit === name || p.unit?.startsWith(`${name}-`)) && p.transcript)
+      .filter((p) => p.unit === name && p.transcript)
       .sort((a, b) => a.born.localeCompare(b.born))
       .pop()
-    return latest?.transcript?.session_id
+    const sid = latest?.transcript?.session_id
+    if (sid === undefined) return undefined
+    // ACTIVITY IS THE ORACLE (gate-r27, momentum-90's law at the
+    // coworker seat): a readable store with no row disproves the
+    // pointer; an unreadable store spares (momentum-34) — never a
+    // store-less world answering 'dead'.
+    if (latest?.transcript?.tool === "opencode") {
+      const bornMs = Date.parse(latest.born)
+      if (!Number.isNaN(bornMs) && !opencodeSessionActiveSince(sid, bornMs)) return undefined
+    }
+    return sid
   }
   const resumeOf = new Map<string, string>()
   if (ledger) {
@@ -415,6 +439,82 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     }
   }
 
+  // BIRTH (gate-r30 principles-202, the fan-out bench's twin law):
+  // "how long may an unboarded pane ride?" is ONE decision — the
+  // fan-out bench answers at born_ms (orchestrator.ts birthJudge:
+  // session existence is the only key, the working exemption dies at
+  // bornMs, transport never an answer). This bench accepted the field
+  // (hooks validates workflow.born_ms) with NO consumer: the stall
+  // judge deferred the never-boarding ball-holder on "working"
+  // unconditionally and the exchange rode a member nobody will ever
+  // hear. Working does not exempt past the window — the #249
+  // agent_status-lies class, gate-r11 tests-1's fan-out twin. Respawn
+  // while retries remain (the liveness judge's transport ceremony),
+  // close honestly at the cap.
+  // THE BIRTH PATIENCE IS THE DECLARED FIELD ALONE (gate-r32
+  // momentum-105): the fan-out twin honors born_ms alone —
+  // `if (b.age <= bornMs) return none` — and one decision answers one
+  // way: the r30 min(born_ms, stall_ms) silently overrode the
+  // operator's declared patience whenever the stall ceiling sat lower,
+  // birth-retrying members tens of seconds early while the fan-out
+  // bench spared the same manifest.
+  const bornPatience = manifest.workflow.born_ms ?? 180_000
+  // "did this member EVER board — ACTIVELY, THIS GENERATION?" — the
+  // momentum-90 law at the birth seat (gate-r31 momentum-104): a raw
+  // row's pointer can be the RESUME arc's verbatim booking of a dead
+  // predecessor's session (the same file's bookedSessionOf disproves
+  // exactly such pointers via opencodeSessionActiveSince), and the raw
+  // read spared a never-boarding respawned member forever — the ride
+  // this seat exists to cut. Per row: opencode pointers verify against
+  // the store (an unreadable store or an unstamped row spares — the
+  // momentum-34 fail direction); other tools' pointers ride stated.
+  const everBoardedActive = (name: string): boolean => {
+    if (!ledger) return false
+    return ledger.job.panes.some((p) => {
+      if (p.unit !== name) return false
+      const t = p.transcript
+      if (!t?.session_id) return false
+      if (t.tool !== "opencode") return true
+      const rowBornMs = Date.parse(p.born ?? "")
+      if (Number.isNaN(rowBornMs)) return true
+      return opencodeSessionActiveSince(t.session_id, rowBornMs)
+    })
+  }
+  const memberBirthJudge: Judge<MemberBeat> = (b) => {
+    if (!b.holdsBall) return { kind: "none" }
+    if (everBoardedActive(b.id)) return { kind: "none" } // boarded — however quiet, this court is not its seat
+    // JURISDICTION (the court's own law): only the shape the stall
+    // ladder CANNOT judge — a member 'working'-deferred forever (the
+    // #249 agent_status-lies class; an idle unboarded member is the
+    // nudge ladder's: prompt, refuse, kill — the standing law). This
+    // seat exists because the stall judge defers on "working"
+    // UNCONDITIONALLY, and a never-boarding member rode the whole
+    // exchange behind that defer.
+    if (b.status !== "working") return { kind: "none" }
+    if (Date.now() - (bornAt.get(b.id) ?? 0) <= bornPatience) return { kind: "none" }
+    const spent = retriesUsed.get(b.id) ?? 0
+    if (spent < retryCap && respawnMember(memberOf(b.id))) {
+      retriesUsed.set(b.id, spent + 1)
+      ledger?.emit("retry", { member: b.id, attempt: spent + 1, why: "never boarded by the birth patience" })
+      log(`member ${b.id} never boarded within ${bornPatience}ms — respawned (transport retry ${spent + 1}/${retryCap})`)
+      return { kind: "defer", why: "birth retry — never boarded within the patience" }
+    }
+    return {
+      kind: "close",
+      stage: "member",
+      pass: false,
+      row: {
+        unit: b.id,
+        result: `dead at birth (${bornPatience}ms, ${spent + 1} attempts)`,
+        pass: false,
+      },
+      faultsCanary: false,
+      fault: true,
+      detail: `no agent session ${bornPatience}ms after spawn, ${spent + 1} attempts`,
+      wake: `member ${b.id} never boarded — dead at birth (issue #249 class)`,
+    }
+  }
+
   // stall — the nudge ladder. Only the ball holder is judged: working
   // defers, a booked wait stands the clock down (ADR 0006), two
   // nudges (refusals quoted at their sender), one guidance-deferred
@@ -466,7 +566,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
   // the seating — the precedence IS the design (pinned in
   // test/coworker-run.test.ts, the way benchOrder's is).
-  const memberBench: Judge<MemberBeat>[] = [privilegeJudge, livenessJudge, stallJudge]
+  const memberBench: Judge<MemberBeat>[] = [privilegeJudge, livenessJudge, memberBirthJudge, stallJudge]
 
   // the bailiff: close = the one dead record; defer/reprompt = the
   // ball's clock resets (only the holder's silence is the exchange's)

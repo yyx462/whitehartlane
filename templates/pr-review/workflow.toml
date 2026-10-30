@@ -31,6 +31,22 @@ canary = false
 # long stretches — the 10-minute default stall ladder killed a lens
 # minutes before its done marker landed (r6, j-9f3d35). 30 min.
 stall_ms = 1800000
+# a pane that never BOARDS (no agent session) is transport class, not
+# silence — kill + respawn within minutes, never ride the 30-min
+# ceiling (j-4a0009, the third dead-at-birth). Sessions land ~5s
+# after spawn when healthy; 5 min is generous.
+born_ms = 300000
+
+[fallback]
+# the plan-limit ladder (2026-10-29, the r28 receipt): a Zhipu 5h
+# window closing mid-run is a PROVIDER FAULT, not silence — with no
+# ladder the four lenses stalled to the 30-min ceiling and the run
+# died verdict-less. Switch INSIDE the live session (the rail's
+# in-session switch — the conversation survives the provider) to
+# Grok 4.7 on the xai coding plan. Key-side rotation (the operator's
+# two Zhipu plans) is the manual twin: `zhipu-key switch next`.
+mode = "auto"
+order = ["zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"]
 
 [[stage]]
 id = "intake"

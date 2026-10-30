@@ -417,7 +417,7 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean; stall_ms?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean; stall_ms?: number; born_ms?: number }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
   // only for coworker-run's legacy-toml warning (that file's concern)
   hooks: { units?: string; grade?: string; counts?: string; verdict?: string }
@@ -518,7 +518,14 @@ function hookTimeoutMs(): number {
   if (Number.isFinite(raw) && raw >= 1_000) return Math.min(raw, 3_600_000)
   return DEFAULT_HOOK_TIMEOUT_MS
 }
-const SHEP_SAFE_ID = /^[a-z][a-z0-9_-]{0,31}$/
+// THE unit/stage/member id grammar (gate-r8: four readers answered it
+// four ways — the strip's [a-z]+ and intake's [a-z]* silently dropped
+// digit/dash ids SHEP_SAFE_ID legalizes). The CLASS is exported for
+// composition into larger patterns (SHEP_SAFE_ID.source carries its ^
+// and $ anchors — composing those mid-pattern matched nothing, the
+// gate-r8 debug); the anchored form is the validator.
+export const SHEP_ID_CLASS = "[a-z][a-z0-9_-]{0,31}"
+export const SHEP_SAFE_ID = new RegExp(`^${SHEP_ID_CLASS}$`)
 
 export function loadManifest(taskDir: string, warn?: (message: string) => void): Manifest {
   const path = join(taskDir, "workflow.toml")
@@ -586,6 +593,16 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     stallMs = Number(workflow.stall_ms)
     if (!Number.isInteger(stallMs) || stallMs < 60_000 || stallMs > 3_600_000) {
       throw new HookError(`workflow.stall_ms must be an integer 60000-3600000 (ms): ${workflow.stall_ms}`)
+    }
+  }
+  // the birth judge's patience (workflow.born_ms; the j-4a0009
+  // receipt — a pane that never boarded rode the full stall ceiling;
+  // dead-at-birth is transport class and must die in minutes)
+  let bornMs: number | undefined
+  if (workflow.born_ms !== undefined) {
+    bornMs = Number(workflow.born_ms)
+    if (!Number.isInteger(bornMs) || bornMs < 30_000 || bornMs > 600_000) {
+      throw new HookError(`workflow.born_ms must be an integer 30000-600000 (ms): ${workflow.born_ms}`)
     }
   }
   // completion-detection — the settle lane. "marker" (default) is the
@@ -661,7 +678,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     throw new HookError('[gates] detectors are retired with the spur step file they served — the rail-acted verdict is a [[stage]] with topology = "gate" and run (docs/STAGES.md, ADR 0014)')
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, born_ms: bornMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}), ...(workflow.settle_mode !== undefined ? { settle_mode: workflow.settle_mode } : {}), ...(workflow.fallback_ladder !== undefined ? { fallback_ladder: workflow.fallback_ladder } : {}) },
     hooks: {
       grade: optHook(hooks.grade, "hooks.grade"),
       counts: optHook(hooks.counts, "hooks.counts", {

@@ -975,11 +975,21 @@ export function pidAlive(pid: number | null): boolean {
 // suspect" is the honest bound
 export const BOOKING_GRACE_MS = LEASE_TTL_MS
 export function bookingStale(
-  job: { state: string; pid?: number; created: string },
+  job: { state: string; pid?: number; created: string; lease?: { holder: string; epoch: number; renewed: string; expires: string } },
   nowMs: number,
   live = pidAlive,
 ): boolean {
   if (job.state !== "running") return false
+  // THE LEASE RIDES THE SAME RECORD (gate-r21 momentum-41): the
+  // double-continue residue leaves record.pid holding the lease's
+  // LOSER while the lease crowns a live winner still beating the job —
+  // reading the pid half alone orphans a live run, fires the mate wake
+  // for a commission still running, and admits a successor booking
+  // beside the leader. A lease whose holder is alive and not expired
+  // is the repo's own answer that this Job is NOT abandoned.
+  if (job.lease?.expires && live(leaseHolderPid(job.lease) ?? -1) && nowMs <= Date.parse(job.lease.expires) + LEASE_TTL_MS) {
+    return false
+  }
   if (job.pid !== undefined && job.pid !== null) return !live(job.pid)
   return nowMs - Date.parse(job.created) > BOOKING_GRACE_MS
 }
@@ -1072,21 +1082,124 @@ export function pauseJob(job: JobRecord, reason: string, panesRemaining: number)
 // Continue is user-decided, never automatic, and never hard-capped —
 // the counter is a soft warning in `jobs`, not a gate (the relaunch
 // cap guarded crash-loops; a typed continue is deliberate).
+// CLAIM THE REVIVAL BEFORE THE SPAWN (gate-r22 momentum-50): flip a
+// parked record to running — with the same write-site guards
+// continueJob carries (the twin revival stands; a superseding receipt
+// stands) — BEFORE the runner child exists to read it. The child's
+// boot enforces the stand-down law on "not running", so spawning
+// against a still-paused record lets a fast child kill its own
+// revival while the parent then writes a running receipt naming the
+// dead child. A record already reading "running" (a fresh booking)
+// claims nothing and bumps nothing — `continues` counts revivals.
+export function claimRevivalFlip(job: JobRecord): { ok: true } | { ok: false; why: string } {
+  const fresh = loadJob(job.sid, job.id) ?? job
+  // THE TWIN REVIVAL (gate-r21 momentum-40): a fresh record already
+  // running over a non-running snapshot is another writer's revival —
+  // its runner holds the lease and keeps the record. Stand down.
+  if (fresh.state === "running" && job.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.twin-revival",
+      jid: job.id,
+      why: `another revival (crowned by the live lease) landed — the leader's record stands`,
+    })
+    Object.assign(job, fresh)
+    return { ok: false, why: `another revival holds ${job.id} — the leader's record stands` }
+  }
+  // a differing receipt stands (abort/pause/orphan/retired flips
+  // landed inside the ceremony window)
+  if (fresh.state !== job.state && fresh.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.superseded",
+      jid: job.id,
+      why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands`,
+    })
+    Object.assign(job, fresh)
+    return { ok: false, why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands` }
+  }
+  if (fresh.state !== "running") {
+    fresh.state = "running"
+    fresh.continues = (fresh.continues ?? 0) + 1
+    fresh.pause = undefined
+    fresh.abort = undefined
+    fresh.orphan = undefined
+    fresh.finished = undefined
+    saveJob(fresh)
+    appendEvent(job.sid, { actor: "levy", kind: "job.claimed", jid: job.id })
+  }
+  Object.assign(job, fresh)
+  return { ok: true }
+}
+
 export function continueJob(job: JobRecord, pid: number): JobRecord {
-  job.state = "running"
-  job.continues = (job.continues ?? 0) + 1
-  job.pause = undefined
-  job.abort = undefined
-  job.orphan = undefined
-  job.finished = undefined
-  job.pid = pid
-  saveJob(job)
+  // the FIFTH writer joins the single-act law (gate-r11 principles-33):
+  // the caller holds a boot-time snapshot across a LONG ceremony (the
+  // drain rebirth spans minutes; continue's straggler retire 30s/pane)
+  // — an abort/pause/orphan flip landing inside that window must
+  // survive this write, not be clobbered back to running with its
+  // receipt deleted and a live pid stamped. The FRESH record decides:
+  // a receipt that differs from the caller's snapshot STANDS (the
+  // operator superseded the revival); the live pid is recorded so
+  // `whl continue` can re-claim, and the flip operates on the fresh
+  // record so ceremony-time writes (lease, spawned panes) survive.
+  // RETIRED is a differing receipt too (gate-r14 questions-10): the
+  // fail button writes state:"retired" + a failed receipt on a PARKED
+  // job (it refuses only running), and retired is not continuable by
+  // design — the only way this window ever sees it is the exact race
+  // the law was written for. Every state except "running" carries (or
+  // implies) a receipt; resurrecting any of them splits the brain.
+  const fresh = loadJob(job.sid, job.id) ?? job
+  // THE TWIN REVIVAL (gate-r21 momentum-40): the caller's snapshot is
+  // PARKED (this ceremony IS a revival; the running-flip is its own
+  // tail, not yet executed), so a fresh record already reading
+  // "running" is ANOTHER writer's revival that landed mid-ceremony —
+  // its runner holds the lease and keeps the record. Stamp our pid
+  // over the leader's and the record names a dead child while a live
+  // lease beats beside it — the exact double-continue residue the
+  // booking probe then orphans a live run on (momentum-41). Stand down
+  // ENTIRELY, the superseded-receipt's spirit one divergence wider:
+  // no flip, no bump, no pid — the leader's record stands.
+  if (fresh.state === "running" && job.state !== "running") {
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.twin-revival",
+      jid: job.id,
+      pid,
+      why: `another revival (crowned by the live lease) landed mid-ceremony — the leader's record stands; the caller's child dies at the lease it never won`,
+    })
+    Object.assign(job, fresh) // the caller's reference mirrors the leader's record
+    return job
+  }
+  const superseded = fresh.state !== job.state && fresh.state !== "running"
+  if (superseded) {
+    fresh.pid = pid
+    saveJob(fresh)
+    appendEvent(job.sid, {
+      actor: "levy",
+      kind: "job.continue.superseded",
+      jid: job.id,
+      pid,
+      why: `the record flipped to ${fresh.state} during the revival ceremony — the receipt stands; the pid is recorded`,
+    })
+    Object.assign(job, fresh) // the caller's reference stays coherent with the disk
+    return job
+  }
+  fresh.state = "running"
+  fresh.continues = (fresh.continues ?? 0) + 1
+  fresh.pause = undefined
+  fresh.abort = undefined
+  fresh.orphan = undefined
+  fresh.finished = undefined
+  fresh.pid = pid
+  saveJob(fresh)
+  Object.assign(job, fresh) // same: the flip lands on the fresh record, the caller's reference mirrors it
   appendEvent(job.sid, {
     actor: "levy",
     kind: "job.continued",
     jid: job.id,
     pid,
-    continues: job.continues,
+    continues: fresh.continues,
   })
   return job
 }
@@ -1400,7 +1513,7 @@ export function addWorkerRoot(runDir: string, root: string): void {
 // servers neutralized them — `opencode mcp list` → "No MCP servers
 // configured"). Best-effort: an unparseable list changes nothing.
 let mcpNamesCache: string[] | null = null
-function globalMcpNames(): string[] {
+export function globalMcpNames(): string[] {
   if (mcpNamesCache !== null) return mcpNamesCache
   try {
     const out = execFileSync("opencode", ["mcp", "list"], { timeout: 20_000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
@@ -1417,17 +1530,47 @@ function globalMcpNames(): string[] {
 
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
   try {
+    const cfgPath = join(runDir, "opencode.json")
+    // MERGE, never clobber (issue #249): a unit dir may already carry
+    // the model pin and provider settings from an earlier generation —
+    // the isolation keys (permission, mcp) FORCE-win, everything else
+    // the sandbox earned survives the re-seed. A TORN/UNREADABLE prior
+    // must not kill the isolation write (gate-r1 tests-36: the parse
+    // sat inside the one outer catch that swallows everything — one
+    // corrupt file silently re-granted the unit the operator's
+    // interactive global config, #249's own failure reintroduced by
+    // this feature): isolation wins over merge-preservation.
+    let prior: Record<string, unknown> = {}
+    if (existsSync(cfgPath)) {
+      try {
+        prior = JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>
+      } catch {
+        prior = {} // the corrupt prior is replaced, not obeyed
+      }
+    }
     const config: Record<string, unknown> = {
+      ...prior,
       $schema: "https://opencode.ai/config.json",
       permission: { external_directory: allowGlobs([runDir, ...extraRoots]) },
     }
-    const model = modelIn(runDir)
-    if (model) config.model = model
-    const mcp = globalMcpNames()
-    if (mcp.length > 0) {
-      config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
+    try {
+      const model = modelIn(runDir)
+      if (model) config.model = model
+    } catch {
+      // a sandbox dir with no discoverable model stays model-less —
+      // the isolation write must survive that (the whole point)
     }
-    writeFileSync(join(runDir, "opencode.json"), `${JSON.stringify(config, null, 2)}\n`)
+    const mcp = globalMcpNames()
+    // THE ISOLATION KEYS FORCE-WIN UNCONDITIONALLY (gate-r31 tests-1):
+    // the empty-probe path (no opencode on PATH, the 20s timeout under
+    // load, the process-wide cache poisoned at []) used to inherit the
+    // prior file's ENABLED mcp servers — the force-win was keyed on
+    // mcp.length > 0, so a failed probe silently re-granted every
+    // server the prior generation (or anyone who could write the unit
+    // dir) declared enabled. An empty probe STRIPS the block; a live
+    // probe re-seeds it disabled-only.
+    config.mcp = Object.fromEntries(mcp.map((name) => [name, { type: "stdio", command: ["true"], enabled: false }]))
+    writeFileSync(cfgPath, `${JSON.stringify(config, null, 2)}\n`)
   } catch {
     // permissions scoping is best-effort; the run works without it
   }

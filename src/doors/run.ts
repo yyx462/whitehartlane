@@ -230,7 +230,19 @@ function copyBeside(source: string, store: string): void {
     if (completed) {
       logRunNote(store, "fold: prior run completed — fresh minds, nothing folded")
     } else {
-      const done = settled.done.filter((u) => existsSync(join(prior, "units", u)))
+      // the fold's screen is the DELIVERABLE, not the directory (gate-r15
+      // momentum-31): a done card plus an existing dir proves nothing —
+      // the torn-prior shape (dir present, result.md gone to a crash
+      // mid-copy or a cleanup hand) folded an INCOMPLETE settle that the
+      // new run's own grade hook would fail. result.md present and
+      // non-empty, or the unit re-runs (wrong-fresh beats wrong-replay).
+      const done = settled.done.filter((u) => {
+        try {
+          return statSync(join(prior, "units", u, "result.md")).size > 0
+        } catch {
+          return false
+        }
+      })
       for (const u of done) {
         // the fold is an OPTIMIZATION (r26 tests-1): an unreadable unit
         // dir must never abort the booking. cpSync-recursive is

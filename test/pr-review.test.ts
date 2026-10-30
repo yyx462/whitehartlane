@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
 import { runOrchestrator, type ShepPort } from "../src/engines/orchestrator.ts"
+import { parse as parseToml } from "smol-toml"
 import { prepareReview, reviewReceipt, type ReviewArgs } from "../src/doors/review.ts"
 import { prepareRun } from "../src/doors/run.ts"
 
@@ -221,6 +222,17 @@ function progFixture(setup: (p: Prog) => void): Prog {
   writeFileSync(join(p.base, "src", "wait.ts"), "")
   mkdirSync(join(dir, "units", "principles"), { recursive: true })
   writeFileSync(join(dir, "data", "review", "config.sh"), "REPO='/tmp/prog-fixture'\nBASE_BRANCH='main'\nBASE_SHA='deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'\nHEAD_BRANCH='feat'\nHEAD_SHA='cafebabecafebabecafebabecafebabecafebabe'\nTITLE='fixture'\nAUTHOR=''\nMERGE_CMD=''\n")
+  // gate-r17: intake reads the door's parse-derived handoff
+  // (data/review/lenses.txt). This fixture stages a program WITHOUT
+  // the door, so it stages the same handoff the door would write —
+  // one id per line, from the template's own parse.
+  {
+    const parsed = parseToml(readFileSync(join(dir, "workflow.toml"), "utf8")) as {
+      stage?: Array<{ units?: Array<{ id?: string }> }>
+    }
+    const ids = (parsed.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u?.id)).filter((x): x is string => !!x)
+    writeFileSync(join(dir, "data", "review", "lenses.txt"), ids.join("\n") + (ids.length ? "\n" : ""))
+  }
   setup(p)
   return p
 }
