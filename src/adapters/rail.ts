@@ -1076,6 +1076,17 @@ export class Rail implements ShepPort {
       const parent = verdict.path.replace(/\/[^/]*$/, "")
       addWorkerRoot(cwd, parent === "" || parent === "/" ? verdict.path : parent)
       this.transport.exec("agent", "send-keys", label, "enter")
+      // DELIVERY VERIFICATION for the ALLOW arm (the 2026-10-30
+      // receipt: the rail granted the path, sent enter, and the dialog
+      // STAYED UP — the worker waited at the prompt forever while the
+      // job's own log said "allow". One keystroke closed it). The deny
+      // arm has had this since issue #82; the allow arm needs it too:
+      // re-read, and if the dialog survived, send again and say so.
+      const allowStillUp = this.transport.exec("agent", "read", label).stdout.lastIndexOf("Permission required") >= 0
+      if (allowStillUp) {
+        this.transport.exec("agent", "send-keys", label, "enter")
+        this.log(`permission ${label}: dialog SURVIVED the allow — re-sent enter (the grant holds either way)`)
+      }
     } else {
       this.transport.exec("agent", "send-keys", label, "esc")
       // Delivery verification (issue #82): a verdict the pane cannot
