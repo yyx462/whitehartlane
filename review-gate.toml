@@ -1,0 +1,15 @@
+# the ship contract for THIS repo — read by `whl review` (the gate's
+# band) and `gwt submit-pr` (the auto levy). Versioned with the code
+# it gates; absent/unparsable = medium + no auto levy.
+
+# every gwt submit-pr levies the review gate right after the PR opens
+auto = true
+
+# the levy's model pin (required when auto = true — the lenses must be pinned)
+model = "zhipuai-coding-plan/glm-5.3"
+
+# the band: strict — jev must be 85% sure a lens is pointless to drop
+# it, the dropout ladder loosens half as far, and a repeat-offender
+# file forces the full rail. This repo is the harness itself; it ships
+# the strict posture it sells.
+strictness = "strict"

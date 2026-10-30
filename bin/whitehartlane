@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
-import { gateReceipt, runGate } from "../src/doors/review-gate.ts"
+import { gateReceipt, runGate, shipConfigOf } from "../src/doors/review-gate.ts"
+import { ghPrComment, q, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -313,6 +314,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       --out <dir> --title "<pr title>" --model <provider/model> \\
       --merge-cmd "<cmd>" --unattended
 
+  the auto ship flow (gwt submit-pr's tail; review-gate.toml auto=true):
+    whl review <repo> --pr <n> --auto [--model <provider/model>]
+    the gate decides first; a skip posts its receipt to the PR. A
+    review with no traceable parent (--from / WHL_FROM) MINTS one: a
+    one-shot supervisor agent owns the levy, hears the finish, posts
+    the verdict to the PR, and dies (one wake per commission).
+
   hard rules
     - --model is REQUIRED as provider/model when the template's
       temperature pins have nothing to ride (bare ids are refused)
@@ -334,7 +342,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model"])
+    const flagVals = new Set(["--base", "--head", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
     const spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
@@ -342,7 +350,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     if (!positional) {
       console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
       console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>] [--gate-only]")
-      console.error("                               [--from <tool>:<sid> | --unattended]")
+      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto]")
       process.exitCode = 2
       return
     }
@@ -364,7 +372,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         console.log(gateReceipt(g.features, g.decision))
         // a skip STANDS only when unaudited (gate-r1 momentum-2: the
         // ledger records the judgment; the ESCALATION still levies)
-        if (g.decision.action === "skip" && !g.decision.audit) return // receipt + ledger row; nothing levied
+        if (g.decision.action === "skip" && !g.decision.audit) {
+          // --pr: the receipt rides to the PR itself — the submit-pr
+          // flow's reader is the PR page, not this terminal
+          const prSkip = val("pr")
+          if (prSkip) {
+            const c = ghPrComment(prSkip, resolve(positional), `ship-gate: skip\n\n\`\`\`\n${gateReceipt(g.features, g.decision)}\n\`\`\``)
+            if (!c.ok) console.error(`review: skip receipt did not reach PR #${prSkip} (${c.out.split("\n")[0]}) — the gate's ledger row still stands`)
+          }
+          return // receipt + ledger row; nothing levied
+        }
         gateAudit = g.decision.audit === true
         // THE SUBSET QUESTION lives in the DOOR's parse (gate-r21
         // principles-41, the bin seat of r20 tests-5001's class): the
@@ -410,6 +427,55 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         return
       }
       return
+    }
+    // --auto: the parentless ship flow (gwt submit-pr's tail calls
+    // this with --pr). The gate has decided above; the only question
+    // left is WHO hears the verdict. A traceable parent (--from, or
+    // WHL_FROM exported by the calling agent) keeps the existing wake
+    // law — this process levies below and the session hears the
+    // finish. No parent → MINT one: the ship supervisor, a one-shot
+    // headless agent that owns the commission, delivers the verdict to
+    // the PR, and dies (ship-supervisor.ts). --auto under the
+    // kill-switch is a contradiction: auto IS the gate's flow.
+    if (args.includes("--auto")) {
+      if (!val("from") && process.env.WHL_FROM) args.push("--from", process.env.WHL_FROM)
+      if (!val("from")) {
+        const pr = val("pr")
+        if (!pr || !/^\d+$/.test(pr)) {
+          console.error("review: --auto wants --pr <number> — the submit-pr flow passes it; by hand add the PR number")
+          process.exitCode = 2
+          return
+        }
+        if (process.env.WHL_GATE === "off") {
+          console.error("review: --auto is the gate's flow, but WHL_GATE=off killed the gate — unset the kill-switch or levy by hand")
+          process.exitCode = 1
+          return
+        }
+        const repoAbs = resolve(positional)
+        const model = val("model") ?? shipConfigOf(repoAbs).model
+        if (!model) {
+          console.error('review: --auto needs --model (or model = "…" in the repo\'s review-gate.toml) — the lenses must be pinned')
+          process.exitCode = 2
+          return
+        }
+        const out = val("out") ?? join(homeRoot(), "auto-reviews", `pr${pr}-${new Date().toISOString().replaceAll(":", "-")}`)
+        mkdirSync(out, { recursive: true })
+        const baseRef = val("base") ?? detectTrunk(repoAbs) ?? "master"
+        const headRef = val("head") ?? "HEAD"
+        const title = val("title") ?? `PR #${pr}`
+        const mergeCmd = val("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: accept (#${pr})"`
+        const levy = ["whl", "review", repoAbs, "--base", baseRef, "--head", headRef, "--model", model, "--title", q(title), "--out", out, "--merge-cmd", q(mergeCmd), "--unattended"].join(" ")
+        const s = spawnSupervisor({
+          brief: supervisorBrief({ levyCmd: levy, runDir: out, pr, repo: repoAbs }),
+          cwd: out,
+          logPath: join(out, "supervisor.log"),
+        })
+        console.log(`supervisor: pid ${s.pid} owns the review of PR #${pr} (log: ${s.logPath})`)
+        console.log(`verdict: will land at ${join(out, "data", "review", "verdict.json")} and as a comment on the PR`)
+        return
+      }
+      // a traceable parent: fall through — the levy below carries
+      // --from and the wake goes to that session
     }
     const ready = prepareReview(
       {
