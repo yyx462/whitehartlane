@@ -353,11 +353,48 @@ export const BANDS: Record<Strictness, GateBand> = {
 //   strictness = "medium" the band above
 export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness }
 
-export function shipConfigOf(repo: string): ShipConfig {
-  const p = join(repo, "review-gate.toml")
-  if (!existsSync(p)) return { auto: false, strictness: "medium" }
+export function shipConfigOf(repo: string, opts: { head?: string; base?: string } = {}): ShipConfig {
+  // the band comes from the TRUSTED SIDE — the BASE commit (momentum-910):
+  // the gate diffs base..head out of git, so a band read from the
+  // checkout means one diff is gated differently per checkout, and a PR
+  // can ADD the file that lowers the bar gating it. The base's contract
+  // governs the review of the diff against it.
+  const local = (() => {
+    const p = join(repo, "review-gate.toml")
+    if (!existsSync(p)) return { auto: false, model: undefined as string | undefined }
+    try {
+      const t = parseToml(readFileSync(p, "utf8")) as { auto?: unknown; model?: unknown }
+      return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined }
+    } catch {
+      return { auto: false, model: undefined as string | undefined }
+    }
+  })()
+  const commit = opts.base ?? opts.head
+  if (commit) {
+    // the TRUSTED side's contract, and NOTHING else: a commit that
+    // carries no contract means the DEFAULT band — never a fallback to
+    // the working tree (that fallback is the checkout-dependence the
+    // finding named: the PR's own "loose" file lowering the bar that
+    // reviews it)
+    let raw: string
+    try {
+      raw = execFileSync("git", ["-C", repo, "show", `${commit}:review-gate.toml`], { encoding: "utf8" })
+    } catch {
+      // the base declares no contract → the DEFAULT band (never a
+      // fallback to the working tree: that fallback is the
+      // checkout-dependence the finding named)
+      return { auto: local.auto, model: local.model, strictness: "medium" }
+    }
+    const t = parseToml(raw) as { strictness?: unknown }
+    const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
+    return { auto: local.auto, model: local.model, strictness }
+  }
+  return { auto: local.auto, model: local.model, strictness: "medium" }
+}
+
+function parseShipConfig(raw: string): ShipConfig {
   try {
-    const t = parseToml(readFileSync(p, "utf8")) as { auto?: unknown; model?: unknown; strictness?: unknown }
+    const t = parseToml(raw) as { auto?: unknown; model?: unknown; strictness?: unknown }
     const strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
     return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined, strictness }
   } catch {
@@ -421,9 +458,12 @@ export function runGate(
   head: string,
   opts: { jev?: boolean; strictness?: Strictness } = {},
 ): { features: GateFeatures; decision: GateDecision } {
-  const strictness = opts.strictness ?? shipConfigOf(repo).strictness
-  const band = BANDS[strictness]
   const features = gateFeatures(repo, base, head)
+  // the band comes from the BASE COMMIT (momentum-910) — a PR must not
+  // be able to add the file that lowers the bar gating it (the resolved
+  // merge base, not the moving ref)
+  const strictness = opts.strictness ?? shipConfigOf(repo, { base: features.baseSha }).strictness
+  const band = BANDS[strictness]
   const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass, band)
   const ps = opts.jev === false || features.klass === "docs_only" ? null : jevLenses(features, stats)
   const decision = decideGate(features, ps, stats, Math.random(), band)

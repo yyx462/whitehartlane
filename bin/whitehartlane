@@ -24,7 +24,7 @@ import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.t
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
-import { overruleComment, shipCheck, verdictsForHead, verdictsForRepo } from "../src/doors/ship.ts"
+import { overruleComment, shipCheck, verdictsForBranch, verdictsForHead } from "../src/doors/ship.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -551,7 +551,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         const mintingDoor = join(import.meta.dirname, "whitehartlane")
         const levy = [
           mintingDoor, "review", q(repoAbs),
-          "--base", q(gateBaseSha ?? baseRef), "--head", q(headPinned),
+          // the BASE rides as the BRANCH NAME (principles-1 / questions-4):
+          // the merge gate checks the base out before merging — a sha
+          // there is a detached HEAD and the accept never advances the
+          // base branch (it "merged" into nowhere). The door resolves
+          // the sha into BASE_SHA ✓ and the base-drift guard compares
+          // the name's tip ✓.
+          "--base", q(baseRef), "--head", q(headPinned),
           // the BRANCH NAME rides beside the pinned sha: the inner
           // run's config must be able to ask "did the branch move?"
           // (momentum-906 / principles-4001 — a sha answers itself)
@@ -737,8 +743,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 2
       return
     }
+    // the base's sha — the rounds AT the base belong to other PRs
+    // (questions-1 / tests-2)
+    let baseSha = ""
+    try {
+      baseSha = execFileSync("git", ["-C", repoAbs, "rev-parse", `${baseRef}^{commit}`], { encoding: "utf8" }).trim()
+    } catch {
+      baseSha = ""
+    }
     const rounds = verdictsForHead(headSha)
-    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForRepo(repoAbs).length })
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForBranch(repoAbs, headSha, { base: baseSha }).length })
     if (!check.ok) {
       console.error(`ship: ${check.why}`)
       process.exitCode = check.code

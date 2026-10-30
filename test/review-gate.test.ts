@@ -109,11 +109,16 @@ test("shipConfigOf: review-gate.toml is the per-project contract", () => {
   // absent → medium, auto off
   const bare = shipConfigOf(repo)
   assert.deepEqual([bare.auto, bare.strictness], [false, "medium"])
-  // the contract, parsed
+  // the LOCAL contract, parsed: auto/model are the operator's own
+  // (momentum-910 — the BAND is not: it comes from the base commit)
   writeFileSync(join(repo, "review-gate.toml"), 'auto = true\nmodel = "acme/strong"\nstrictness = "strict"\n')
   const full = shipConfigOf(repo)
-  assert.deepEqual([full.auto, full.strictness], [true, "strict"])
+  assert.deepEqual([full.auto, full.strictness], [true, "medium"], "the band never comes from the checkout")
   assert.equal(full.model, "acme/strong")
+  // the BASE's contract governs the band
+  execSync("git add -A && git commit -qm contract", { cwd: repo, encoding: "utf8" })
+  const base = execSync("git rev-parse HEAD", { cwd: repo, encoding: "utf8" }).trim()
+  assert.equal(shipConfigOf(repo, { base }).strictness, "strict", "the base commit's band governs")
   // unknown band and garbage toml → medium, never vanish
   writeFileSync(join(repo, "review-gate.toml"), 'strictness = "yolo"\n')
   assert.equal(shipConfigOf(repo).strictness, "medium")
@@ -125,7 +130,12 @@ test("shipConfigOf: review-gate.toml is the per-project contract", () => {
 test("runGate: the repo's band decides, and the ledger row names it", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-gate-band-"))
   const repo = fixtureRepo(join(tmp, "repo"))
+  // the band comes from the BASE COMMIT (momentum-910) — the trusted
+  // side's contract, so the contract is COMMITTED on the BASE branch
+  // (a file only in the working tree, or added by the PR, does not
+  // lower the bar that reviews it)
   writeFileSync(join(repo, "review-gate.toml"), 'strictness = "strict"\n')
+  execSync("git checkout -q main && git add -A && git commit -qm contract && git checkout -q feat", { cwd: repo, encoding: "utf8" })
   // this test's OWN ledger — file-order isolation: other tests in
   // this file count rows in the shared one
   const prevLedger = process.env.WHL_GATE_LEDGER

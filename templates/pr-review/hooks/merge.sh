@@ -14,7 +14,7 @@ prog="$(cd "$(dirname "$0")/.." && pwd)"
 # exists and before the merge ran. The merge stage writes the
 # commission's end into the STAGED program dir, and the watcher waits
 # on exactly that seat.
-outcome() { # $1 = accept|reject
+outcome() { # $1 = accept|reject|refused
   local payload
   payload="{\"outcome\":\"$1\",\"head\":\"${HEAD_SHA:-}\",\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
   # the run's own copy (the job's run dir — the rail's record)
@@ -24,8 +24,18 @@ outcome() { # $1 = accept|reject
   mkdir -p "$(dirname "$seat")" 2>/dev/null || true
   printf '%s\n' "$payload" >"$seat" 2>/dev/null || true
 }
+
+# EVERY exit writes the seat (momentum-909): the nine refusal paths
+# left the watcher's seat empty and the PR heard "unknown" — the
+# commission's end is a FACT, whatever the end was. (The trap proper
+# is set inside the verdict case — that is the subshell that runs it.)
 node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
   | { read -r verdict
+# the outcome trap lives INSIDE this subshell: the case runs on the
+# pipeline's right side, so a trap set outside would see the parent's
+# value ("refused") and write the WRONG outcome (momentum-909's control)
+MERGE_OUTCOME=refused
+trap 'outcome "$MERGE_OUTCOME"' EXIT
 case "$verdict" in
   accept)
     if [ -n "${MERGE_CMD:-}" ]; then
@@ -37,11 +47,20 @@ case "$verdict" in
       # local ref is the proof we always have; the PR's remote head is
       # the stronger one when gh answers.
       judged_head="$HEAD_SHA"
-      # THE LOCAL HALF'S TEETH (momentum-906 / principles-4001 /
-      # questions-21): the auto flow hands down the JUDGED SHA, so
-      # asking "what does $HEAD_BRANCH point at" answers itself
-      # forever — the guard could never fire. The worktree's CURRENT
-      # head is the honest question: the reviewed tree moved.
+      # THE BRANCH HALF (questions-2 / tests-1): HEAD_BRANCH is the
+      # branch NAME (the door derives it from the judged sha ✓) — ask
+      # where it points NOW. The earlier ref-sweep arm was vacuous:
+      # `for-each-ref --points-at` lists only refs that STILL point at
+      # the judged sha, so it could never observe a move.
+      branch_head=""
+      if [ -n "${HEAD_BRANCH:-}" ] && [ "$HEAD_BRANCH" != "$judged_head" ]; then
+        branch_head="$(git -C "$REPO" rev-parse "$HEAD_BRANCH" 2>/dev/null || true)"
+        if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
+          echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+          exit 1
+        fi
+      fi
+      # the reviewed tree's own head — the honest local question
       work_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
       if [ -n "$work_head" ] && [ "$work_head" != "$judged_head" ]; then
         echo "merge: the reviewed tree moved ($judged_head -> $work_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
@@ -91,12 +110,12 @@ case "$verdict" in
         || { echo "merge: git merge failed (conflicts? base moved?)" >&2; exit 1; }
     fi
     echo "merge: accepted — $TITLE ($HEAD_SHA) merged"
-    outcome accept
+    MERGE_OUTCOME=accept
     ;;
   reject)
     n=$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.blocked.length)' "$prog/data/review/verdict.json")
     echo "merge: REJECTED — $n proven finding(s); feedback/ names the responsible parties; verdict at data/review/verdict.json" >&2
-    outcome reject
+    MERGE_OUTCOME=reject
     # the fixer's exit (the 2026-10-30 ruling): the reviewer reminds, the
     # owner decides. Fix what you accept; after round 1 you may REJECT
     # THE REJECTION — every blocked finding answered with a one-line why,

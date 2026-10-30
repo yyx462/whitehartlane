@@ -133,7 +133,7 @@ export function spawnSupervisor(opts: {
       // PR must still hear (momentum-908), so the verdict's presence
       // ends the wait too (a POSITIVE test, not a poll: the law is
       // about the seat the wait resolves on)
-      `  if [ -f "$OUT/data/review/verdict.json" ]; then break; fi`,
+      `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then break; fi`,
       `  if [ "$i" -ge 7200 ]; then`,
       `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
       `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
@@ -144,10 +144,16 @@ export function spawnSupervisor(opts: {
       `done`,
       // the BACKSTOP receipt (momentum-908): if the agent never posted
       // (it died at once), the PR still hears — the watcher is the last
-      // word
+      // word. The OUTCOME comes from the seat: the merge marker when
+      // the chain reached it, else the verdict itself (a chain that
+      // died before merge still judged — principles-5002: "unknown"
+      // was a FABRICATED outcome)
       `if test -f "$OUT/supervisor-comment.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
       `  V=$(sed -n 's/.*"outcome"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/merge.json" 2>/dev/null | head -1)`,
-      `  (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: \${V:-unknown} — the supervisor did not post; the outcome is at $OUT/data/review/merge.json") >/dev/null 2>&1`,
+      `  if [ -z "$V" ]; then`,
+      `    V=$(sed -n 's/.*"verdict"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/verdict.json" 2>/dev/null | head -1)`,
+      `  fi`,
+      `  (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: \${V:-unfinished} — the supervisor did not post; the outcome is at $OUT/data/review/merge.json") >/dev/null 2>&1`,
       `fi`,
       `exit 0`,
       "",

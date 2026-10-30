@@ -103,8 +103,10 @@ export function contentHashOf(dir: string, exclude: string[] = []): string {
   // the verdict SEAT is output, never input (questions-20): a symlink
   // at data/review/verdict.json (into the job's run dir) must never
   // move the program's identity — the consumer's receipt compares the
-  // hash and calls a moved seat "program changed since booking"
-  const skip = new Set(["data/review/verdict.json", ...exclude])
+  // hash and calls a moved seat "program changed since booking". The
+  // merge stage's outcome marker (questions-26) is the same kind of
+  // seat: it lands DURING the run, so it must be just as neutral.
+  const skip = new Set(["data/review/verdict.json", "data/review/merge.json", ...exclude])
   const walk = (d: string, rel: string) => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
     for (const e of entries) {

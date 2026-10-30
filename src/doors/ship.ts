@@ -57,6 +57,32 @@ export function verdictsForRepo(repo: string, root = sessionsRoot()): Array<{ ve
   return allVerdicts(root).filter((h) => h.verdict.repo === repo || inRepo(h.verdict.head))
 }
 
+// the owner's ROUNDS on THIS branch (questions-1 / tests-2): the
+// repo's whole review history counted (other PRs included), so a
+// brand-new PR's FIRST reject opened the override exit — the gate the
+// exit exists to keep. The owner's rounds are the verdicts whose head
+// is ON this branch's history — and the BASE's verdicts are NOT this
+// PR's rounds (a verdict AT the base sha judged some other branch's
+// diff against that base).
+export function verdictsForBranch(
+  repo: string,
+  headSha: string,
+  opts: { base?: string; root?: string } = {},
+): Array<{ verdict: Verdict; at: number; path: string }> {
+  const onBranch = (sha: string | undefined): boolean => {
+    if (!sha) return false
+    if (sha === headSha) return true
+    if (opts.base && sha === opts.base) return false
+    try {
+      execFileSync("git", ["-C", repo, "merge-base", "--is-ancestor", sha, headSha], { stdio: ["ignore", "ignore", "ignore"] })
+      return true
+    } catch {
+      return false
+    }
+  }
+  return verdictsForRepo(repo, opts.root ?? sessionsRoot()).filter((h) => onBranch(h.verdict.head))
+}
+
 function allVerdicts(root: string): Array<{ verdict: Verdict; at: number; path: string }> {
   const hits: Array<{ verdict: Verdict; at: number; path: string }> = []
   if (!existsSync(root)) return hits
