@@ -377,6 +377,8 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // the kill-switch (legacy full-rail behavior).
     let gateRoster = undefined
     let gateAudit = false
+    let gateHeadSha = undefined
+    let gateBaseSha = undefined
     if (rosterPin) {
       console.log(`roster: pinned (${rosterPin.join(",")}) — the gate decision was made by the commissioner; no second draw, no second row`)
       gateRoster = rosterPin
@@ -389,6 +391,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const headRef = val("head") ?? "HEAD"
       try {
         const g = runGate(resolve(positional), baseRef, headRef)
+        // the gate's OWN resolution is the one "which bytes" site
+        // (momentum-200): the mint hands THIS sha down — a re-resolve
+        // at mint time is a second site that can disagree with the
+        // ledger row when the ref moves during the gate's own jev call
+        gateHeadSha = g.features.headSha
+        gateBaseSha = g.features.baseSha
         console.log(gateReceipt(g.features, g.decision))
         // a skip STANDS only when unaudited (gate-r1 momentum-2: the
         // ledger records the judgment; the ESCALATION still levies)
@@ -503,16 +511,21 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         const out = val("out") ?? join(homeRoot(), "auto-reviews", `pr${pr}-${new Date().toISOString().replaceAll(":", "-")}`)
         const baseRef = val("base") ?? detectTrunk(repoAbs) ?? "master"
         const headRef = val("head") ?? "HEAD"
-        // the levy judges the EXACT bytes the gate decided on (momentum-2):
-        // a moving ref (--head HEAD) lets the branch move between mint
-        // and levy — pin the resolved commit, the same sha the gate's
-        // ledger row names. A ref that will not resolve falls through
-        // and the door refuses it with its own message.
+        // the levy judges the EXACT bytes the gate decided on (momentum-2
+        // + momentum-200): ONE "which bytes" site — the gate's own
+        // resolution, handed down verbatim. The rev-parse fallback only
+        // serves the broken-gate path (no gate row exists to desync
+        // from); a ref that will not resolve falls through and the door
+        // refuses it with its own message.
         let headPinned = headRef
-        try {
-          headPinned = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
-        } catch {
-          /* the door below owns the refusal */
+        if (gateHeadSha) {
+          headPinned = gateHeadSha
+        } else {
+          try {
+            headPinned = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
+          } catch {
+            /* the door below owns the refusal */
+          }
         }
         const title = val("title") ?? `PR #${pr}`
         const mergeCmd = val("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: accept (#${pr})"`
@@ -522,7 +535,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         const rosterCsv = (gateRoster ?? [...LENSES]).join(",")
         const levy = [
           "whl", "review", q(repoAbs),
-          "--base", q(baseRef), "--head", q(headPinned),
+          "--base", q(gateBaseSha ?? baseRef), "--head", q(headPinned),
           "--model", q(model), "--title", q(title),
           "--out", q(out), "--merge-cmd", q(mergeCmd),
           "--roster", q(rosterCsv), "--pr", pr,
