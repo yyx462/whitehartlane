@@ -546,6 +546,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
           brief: supervisorBrief({ levyCmd: levy, runDir: out, pr, repo: repoAbs }),
           cwd: dirname(out),
           logPath: `${out}.supervisor.log`,
+          outDir: out,
+          pr,
+          repo: repoAbs,
         })
         if (!s.ok) {
           // infra as infra (questions-18): a failed spawn is never an

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse as parseToml } from "smol-toml"
@@ -120,7 +120,34 @@ export function stageRun(source: string, store: string): void {
     return existsSync(abs) ? `${pre}${abs}${post}` : m
   })
   writeFileSync(join(store, "workflow.toml"), raw)
+  // the seat BEFORE the fold's identity is computed (run.ts's copyBeside
+  // hashes the program's data/ dir): a link created after the hash
+  // would make every re-levy look like a different program, and the
+  // settled fold would re-run every lens
+  linkVerdictSeat(source, store)
   copyBeside(source, store)
+}
+
+// The verdict seat (2026-10-30, the principles-3000 / momentum-903
+// receipt): prove.sh writes the verdict into the RUN dir ($prog is the
+// run dir), while the door PROMISES it at the staged dir
+// (<out>/data/review/verdict.json) and the supervisor's bounded wait
+// polls exactly that path — a path nothing ever wrote, so every
+// parentless --auto review burned its 7200s deadline on a dead file
+// and then reported a false timeout. The staged dir is the SOURCE of
+// the run's copy; link the verdict seat from the source to the run's
+// copy (a dangling link until the verdict lands — then it resolves).
+// The seat holds OUTPUT, never input: whatever sits there is stale
+// (the truth lives in the run dir), so it is replaced by the link.
+function linkVerdictSeat(source: string, store: string): void {
+  const seat = join(source, "data", "review", "verdict.json")
+  try {
+    if (existsSync(seat) || lstatSync(seat, { throwIfNoEntry: false })) rmSync(seat, { force: true })
+    mkdirSync(dirname(seat), { recursive: true })
+    symlinkSync(join(store, "data", "review", "verdict.json"), seat)
+  } catch {
+    /* the seat is a convenience link — a failure must never break staging */
+  }
 }
 
 function copyBeside(source: string, store: string): void {
@@ -139,7 +166,14 @@ function copyBeside(source: string, store: string): void {
   // a program may carry a data/ folder — the files the briefs and hooks
   // read; it is staged beside the spur so the run is self-contained
   const data = join(source, "data")
-  if (existsSync(data)) cpSync(data, join(store, "data"), { recursive: true })
+  if (existsSync(data)) {
+    cpSync(data, join(store, "data"), { recursive: true })
+    // the verdict seat is a LINK into the run dir (the door's promise);
+    // the copy must not carry a self-referential link (ELOOP) — the
+    // run's verdict is a REAL file, written by prove.sh
+    const seat = join(store, "data", "review", "verdict.json")
+    if (lstatSync(seat, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(seat, { force: true })
+  }
   // a coworker program carries member briefs in members/<name>.md
   const members = join(source, "members")
   if (existsSync(members)) cpSync(members, join(store, "members"), { recursive: true })

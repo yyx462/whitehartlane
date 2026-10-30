@@ -106,7 +106,21 @@ export function contentHashOf(dir: string): string {
       const p = join(d, e.name)
       h.update(e.name)
       if (e.isDirectory()) walk(p)
-      else h.update(readFileSync(p))
+      else if (e.isSymbolicLink()) {
+        // a LINK is a seat, not content (2026-10-30, principles-3000):
+        // the staged program's verdict seat points into the job's run
+        // dir and resolves only once the rail has judged. Hashing its
+        // TARGET would make every re-levy look like a different program
+        // (the settled fold then re-runs every lens).
+        h.update(`link:${e.name}`)
+      } else {
+        try {
+          h.update(readFileSync(p))
+        } catch (err) {
+          if ((err as { code?: string }).code !== "ENOENT") throw err
+          h.update(`link:${e.name}`)
+        }
+      }
     }
   }
   walk(dir)

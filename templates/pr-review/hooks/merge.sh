@@ -12,7 +12,32 @@ node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf
 case "$verdict" in
   accept)
     if [ -n "${MERGE_CMD:-}" ]; then
-      sh -c "$MERGE_CMD" || { echo "merge: MERGE_CMD failed" >&2; exit 1; }
+      # THE HEAD-DRIFT GUARD (momentum-902, the base twin): the
+      # MERGE_CMD arm merges the PR's CURRENT head — a push during the
+      # review would land bytes no verdict judged. The local arm merges
+      # HEAD_SHA by construction; this arm must prove the branch still
+      # points at the judged sha before it hands the merge over. The
+      # local ref is the proof we always have; the PR's remote head is
+      # the stronger one when gh answers.
+      judged_head="$HEAD_SHA"
+      branch_head="$(git -C "$REPO" rev-parse "$HEAD_BRANCH" 2>/dev/null || true)"
+      if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
+        echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+        exit 1
+      fi
+      if [ -n "${PR_NUM:-}" ] && command -v gh >/dev/null 2>&1; then
+        remote_head="$(gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+        if [ -n "$remote_head" ] && [ "$remote_head" != "$judged_head" ]; then
+          echo "merge: PR #$PR_NUM is at $remote_head but the review judged $judged_head — unreviewed bytes would ride the merge; re-run the review" >&2
+          exit 1
+        fi
+      fi
+      # THE MERGE SEAT (momentum-901): the gate runs in the job's run
+      # dir — which is not a git work tree, so `gh pr merge` could not
+      # resolve the repository and every accept died at MERGE_CMD
+      # failed while the verdict already said accept. Run the merge
+      # command FROM THE REPO.
+      (cd "$REPO" && sh -c "$MERGE_CMD") || { echo "merge: MERGE_CMD failed" >&2; exit 1; }
     else
       # the review judged BASE_SHA..HEAD_SHA (self-review r8b
       # momentum-1): a base BRANCH that moved since intake would land

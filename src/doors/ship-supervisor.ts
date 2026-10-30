@@ -11,9 +11,12 @@
 // absent by construction; here the supervisor IS the hearer. One wake,
 // kept by design.
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, mkdirSync, openSync } from "node:fs"
+import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { sessionsRoot } from "../adapters/store.ts"
+
+// POSIX single-quote escaping for the watcher's own spelling
+const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`
 
 // single-quote shell escaping — the levy command is COPIED into the
 // supervisor's brief and run verbatim; a title with an apostrophe must
@@ -57,21 +60,90 @@ export function ghPrComment(pr: string, repo: string, body: string): { ok: boole
 // cannot crash the caller as an unhandled event.
 export type SpawnedSupervisor = { ok: true; pid: number; logPath: string } | { ok: false; why: string }
 
-export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: string; bin?: string }): SpawnedSupervisor {
+// mint the owner: a detached WATCHER that runs the supervisor agent
+// and outlives it (2026-10-30, momentum-905). "pid N owns the review"
+// is a claim about a LIVE process: an agent that dies at once (no
+// auth, no model, a bad flag) left the PR unreviewed AND unreported,
+// because the 2h timeout lived INSIDE the agent. The watcher is the
+// watch: it runs the agent, waits for the verdict at the seat the door
+// PROMISED (the staged dir's link into the job's run dir), and reports
+// the silence itself when the deadline passes — so the commission is
+// watched even when its agent is not.
+export function spawnSupervisor(opts: {
+  brief: string
+  cwd: string
+  logPath: string
+  bin?: string
+  outDir?: string
+  pr?: string
+  repo?: string
+}): SpawnedSupervisor {
   const bin = opts.bin ?? process.env.WHL_SUPERVISOR_BIN ?? "opencode"
   const onPath = (process.env.PATH ?? "").split(":").some((d) => existsSync(join(d, bin)))
   const present = bin.includes("/") ? existsSync(bin) : onPath
   if (!present) return { ok: false, why: `supervisor bin '${bin}' not found (WHL_SUPERVISOR_BIN or PATH)` }
   mkdirSync(dirname(opts.logPath), { recursive: true })
+  // the brief travels in a FILE — the watcher reads it (a brief with
+  // quotes in it must not break the watcher's own spelling)
+  const briefPath = `${opts.logPath}.brief`
+  writeFileSync(briefPath, opts.brief)
+  const outDir = opts.outDir ?? opts.cwd
+  const wrapperPath = `${opts.logPath}.watch`
+  writeFileSync(
+    wrapperPath,
+    [
+      "#!/bin/sh",
+      `# the ship watcher (momentum-905): the watch outlives the agent`,
+      `BIN=${shq(bin)}`,
+      `BRIEF=$(cat ${shq(briefPath)})`,
+      `LOG=${shq(opts.logPath)}`,
+      `OUT=${shq(outDir)}`,
+      `PR=${shq(opts.pr ?? "")}`,
+      `REPO=${shq(opts.repo ?? "")}`,
+      `"$BIN" run --standalone "$BRIEF" >>"$LOG" 2>&1 &`,
+      `AGENT=$!`,
+      `i=0`,
+      `while [ ! -f "$OUT/data/review/verdict.json" ]; do`,
+      `  sleep 15; i=$((i+1))`,
+      `  if [ "$i" -ge 480 ]; then`,
+      `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no verdict landed at $OUT/data/review/verdict.json") >/dev/null 2>&1`,
+      `    fi`,
+      `    if command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      `    exit 3`,
+      `  fi`,
+      `  if ! kill -0 "$AGENT" 2>/dev/null && [ "$i" -ge 4 ]; then`,
+      `    # the agent is gone and no verdict came — keep watching to the`,
+      `    # deadline (the report below is the watcher\'s, not the agent\'s)`,
+      `    :`,
+      `  fi`,
+      `done`,
+      `exit 0`,
+      "",
+    ].join("\n"),
+  )
   const fd = openSync(opts.logPath, "a")
-  const child = spawn(bin, ["run", "--standalone", opts.brief], {
+  const child = spawn("sh", [wrapperPath], {
     cwd: opts.cwd,
-    detached: true, // submit-pr returns now; the supervisor outlives it BY DESIGN
+    detached: true, // submit-pr returns now; the watcher outlives it BY DESIGN
     stdio: ["ignore", fd, fd],
   })
   child.on("error", () => {}) // preflight raced: the fd-holding caller reports via log silence instead of a crash
   child.unref()
   if (typeof child.pid !== "number" || child.pid <= 0) return { ok: false, why: `spawn returned pid ${child.pid}` }
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const until = Date.now() + 400
+  while (Date.now() < until) {
+    if (!alive(child.pid)) return { ok: false, why: `the watcher died at once (pid ${child.pid}) — nothing would watch the commission` }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40)
+  }
   return { ok: true, pid: child.pid, logPath: opts.logPath }
 }
 
@@ -119,10 +191,17 @@ export function resolveCaller(cwd: string, opts: { env?: Record<string, string>;
       | { result?: { agent?: { agent?: string } } }
       | null
     if (info?.result?.agent?.agent === "opencode") {
-      const list = runJson(ocBin, ["session", "list", "--format", "json", "-n", "5"], cwd) as
+      // The window must be BIG enough to prove uniqueness (momentum-904,
+      // tests-1): the uniqueness law is decided over the list the CLI
+      // returns — a five-item window hides a sixth session, and a
+      // project with two sessions then reads as one (a guessed owner
+      // labeled "the project's ONLY session"). A WINDOW THAT FILLED UP
+      // is a truncated view: uniqueness is unproven → refuse (the
+      // supervisor is the honest answer).
+      const list = runJson(ocBin, ["session", "list", "--format", "json", "-n", "200"], cwd) as
         | Array<{ id: string; directory: string; updated: number }>
         | null
-      if (Array.isArray(list) && list.length > 0) {
+      if (Array.isArray(list) && list.length > 0 && list.length < 200) {
         const under = (dir: string) => cwd === dir || cwd.startsWith(`${dir}/`)
         const matching = list.filter((s) => under(s.directory))
         // identity by UNIQUENESS, never by order or recency (momentum-1):
