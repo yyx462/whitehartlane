@@ -107,6 +107,30 @@ test("resolveCaller: herdr's opencode pane + the project's newest session", () =
   rmSync(tmp, { recursive: true, force: true })
 })
 
+test("resolveCaller: the coworker law — an equally fresh sibling REFUSES the bind", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-caller-cw-"))
+  const repo = join(tmp, "repo")
+  mkdirSync(repo)
+  const herdr = stubBin(tmp, "herdr", JSON.stringify({ result: { agent: { agent: "opencode" } } }))
+  const now = 1793339266367
+  // a whl fan-out: two members, same project, both mid-turn
+  const busy = stubBin(tmp, "oc-busy", JSON.stringify([
+    { id: "ses_a", directory: repo, updated: now },
+    { id: "ses_b", directory: repo, updated: now - 60_000 },
+  ]))
+  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "wK:pSV", WHL_HERDR_BIN: herdr, WHL_OPENCODE_BIN: busy }
+  assert.equal(resolveCaller(repo, { env, now: now + 30_000 }), null, "newest is not identity while a sibling is fresh — guessing the commissioner is the wrong-owner wake")
+  // the sibling long quiet: the newest binds again
+  const quiet = stubBin(tmp, "oc-quiet", JSON.stringify([
+    { id: "ses_a", directory: repo, updated: now },
+    { id: "ses_b", directory: repo, updated: now - 45 * 60 * 1000 },
+  ]))
+  const c = resolveCaller(repo, { env: { ...env, WHL_OPENCODE_BIN: quiet }, now: now + 30_000 })
+  assert.equal(c?.from, "opencode:ses_a")
+  assert.match(c?.via ?? "", /siblings quiet/)
+  rmSync(tmp, { recursive: true, force: true })
+})
+
 test("resolveCaller: a NON-opencode pane, a dead herdr, no herdr — all null (the supervisor's cases)", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-caller2-"))
   const repo = join(tmp, "repo")

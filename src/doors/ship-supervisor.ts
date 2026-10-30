@@ -75,9 +75,17 @@ export function spawnSupervisor(opts: { brief: string; cwd: string; logPath: str
 //      trusted — herdr's liveness word replaces a freshness window
 //      (a window on `updated` breaks long turns; `updated` ticks per
 //      turn, not per tool call), and the directory-ancestor check
-//      keeps the wake inside the commissioning project
+//      keeps the wake inside the commissioning project. COWORKER LAW:
+//      a whl fan-out puts SEVERAL live sessions in one project —
+//      "newest" stops being identity when the runner-up is equally
+//      fresh, and binding then GUESSES the commissioner (a
+//      wrong-owner wake violates the one-wake law worse than minting
+//      a supervisor). The newest binds only when it is decisively
+//      newest: every other session in the project must be quiet.
 //   anything else → null → the supervisor (rare by construction)
 export type Caller = { from: string; via: string }
+
+const COWORKER_QUIET_MS = 10 * 60 * 1000
 
 const runJson = (bin: string, args: string[], cwd: string, timeout = 15_000): unknown => {
   try {
@@ -105,10 +113,13 @@ export function resolveCaller(cwd: string, opts: { env?: Record<string, string>;
         | null
       if (Array.isArray(list) && list.length > 0) {
         const under = (dir: string) => cwd === dir || cwd.startsWith(`${dir}/`)
-        const hit = list.find((s) => under(s.directory))
-        if (hit) {
-          const ageS = Math.max(0, Math.round(((opts.now ?? Date.now()) - (hit.updated ?? 0)) / 1000))
-          return { from: `opencode:${hit.id}`, via: `herdr pane ${env.HERDR_PANE_ID} runs opencode; newest session in project (updated ${ageS}s ago)` }
+        const matching = list.filter((s) => under(s.directory))
+        const hit = matching[0] // newest-first
+        const now = opts.now ?? Date.now()
+        const busySibling = matching.slice(1).find((s) => now - (s.updated ?? 0) < COWORKER_QUIET_MS)
+        if (hit && !busySibling) {
+          const ageS = Math.max(0, Math.round((now - (hit.updated ?? 0)) / 1000))
+          return { from: `opencode:${hit.id}`, via: `herdr pane ${env.HERDR_PANE_ID} runs opencode; newest session in project, siblings quiet (updated ${ageS}s ago)` }
         }
       }
     }
