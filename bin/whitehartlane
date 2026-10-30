@@ -503,6 +503,17 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         const out = val("out") ?? join(homeRoot(), "auto-reviews", `pr${pr}-${new Date().toISOString().replaceAll(":", "-")}`)
         const baseRef = val("base") ?? detectTrunk(repoAbs) ?? "master"
         const headRef = val("head") ?? "HEAD"
+        // the levy judges the EXACT bytes the gate decided on (momentum-2):
+        // a moving ref (--head HEAD) lets the branch move between mint
+        // and levy — pin the resolved commit, the same sha the gate's
+        // ledger row names. A ref that will not resolve falls through
+        // and the door refuses it with its own message.
+        let headPinned = headRef
+        try {
+          headPinned = execFileSync("git", ["-C", repoAbs, "rev-parse", `${headRef}^{commit}`], { encoding: "utf8" }).trim()
+        } catch {
+          /* the door below owns the refusal */
+        }
         const title = val("title") ?? `PR #${pr}`
         const mergeCmd = val("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: accept (#${pr})"`
         // the decision rides down (principles-1001/tests-2): the gate
@@ -511,7 +522,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         const rosterCsv = (gateRoster ?? [...LENSES]).join(",")
         const levy = [
           "whl", "review", q(repoAbs),
-          "--base", q(baseRef), "--head", q(headRef),
+          "--base", q(baseRef), "--head", q(headPinned),
           "--model", q(model), "--title", q(title),
           "--out", q(out), "--merge-cmd", q(mergeCmd),
           "--roster", q(rosterCsv), "--pr", pr,
@@ -537,8 +548,17 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       // a traceable parent: fall through — the levy below carries
       // --from and the wake goes to that session. RECOMPUTE the spawner
       // (tests-1): --from may have been pushed AFTER the first read at
-      // the top of this verb — a stale spawner meant "levies nothing"
+      // the top of this verb — a stale spawner meant "levies nothing".
+      // And ONE --from law (principles-1003): spawnerFromArgs owns the
+      // grammar — a pointer it refuses is not a parent, and a malformed
+      // WHL_FROM here would silently levy NOTHING (no spawner, no
+      // --unattended) while the gate's ledger row promised review.
       spawner = spawnerFromArgs(args)
+      if (val("from") && !spawner) {
+        console.error(`review: --auto got a malformed parent pointer '${val("from")}' — want <tool>:<session-id>, the same law the door's --from enforces. The PR is NOT under review`)
+        process.exitCode = 1
+        return
+      }
     }
     const ready = prepareReview(
       {
