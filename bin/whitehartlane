@@ -769,7 +769,11 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // declared in the base commit's [stop] block — the door reads it
     // for the eligibility fact; the gate must hear it too
     const stopCfg = stopConfigOf(repoAbs, { base: baseSha })
-    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForBranch(repoAbs, headSha, { base: baseSha }).length, minRounds: stopCfg.minRounds })
+    // repoRounds counts HEADS, not rows (momentum-9201's twin seat):
+    // the caller fed the verdict-row count, so a re-levy at unchanged
+    // bytes still opened the override through the repoRounds door.
+    const repoRounds = new Set(verdictsForBranch(repoAbs, headSha, { base: baseSha }).map((r) => r.verdict.head)).size
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds, minRounds: stopCfg.minRounds })
     if (!check.ok) {
       console.error(`ship: ${check.why}`)
       process.exitCode = check.code

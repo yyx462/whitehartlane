@@ -27,7 +27,7 @@
 //   run B  --base <sha>  → the base is NOT NAMED → the door MERGES (bug)
 import assert from "node:assert/strict"
 import { execSync, spawnSync } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -51,23 +51,32 @@ test("whl ship: a base that cannot be NAMED must refuse the override merge (merg
     g("checkout -qb feat")
     writeFileSync(join(repo, "src", "wait.ts"), "export const wait = () => false\n")
     g("add -A && git commit -qm feat")
+    const judged1 = g("rev-parse HEAD").trim()
+    // the fix after round 1's rejection — the honest round 2 is a
+    // rejection of FIXED bytes (momentum-9201: two verdicts at ONE head
+    // are one round; a re-levy is not good faith)
+    writeFileSync(join(repo, "src", "wait.ts"), "export const wait = () => false // fix\n")
+    g("add -A && git commit -qm fix")
     const headSha = g("rev-parse HEAD").trim()
 
-    // TWO reject rounds on this head (the good-faith floor is 2) and the
+    // TWO reject rounds on TWO heads (the good-faith floor is 2) and the
     // verdict names the base it judged — the real rail verdict shape.
-    for (const sid of ["s-r1", "s-r2"]) {
+    for (const [sid, head, ago] of [["s-r1", judged1, 60], ["s-r2", headSha, 0]] as const) {
       const dir = join(home, "sessions", sid, "jobs", "j1", "run", "data", "review")
       mkdirSync(dir, { recursive: true })
+      const vf = join(dir, "verdict.json")
       writeFileSync(
-        join(dir, "verdict.json"),
+        vf,
         JSON.stringify({
           verdict: "reject",
           repo,
           base: baseSha,
-          head: headSha,
+          head,
           blocked: [{ id: "m-1", severity: "P1", claim: "asserts the wrong requirement" }],
         }),
       )
+      const t = Date.now() / 1000 - ago // stagger mtimes: the store orders rows by mtime
+      utimesSync(vf, t, t)
     }
 
     // THE TRUNK MOVED after the review: an unreviewed commit on main.

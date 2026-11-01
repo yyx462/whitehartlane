@@ -90,16 +90,35 @@ case "$verdict" in
       # checkout's HEAD refuses an accept whose bytes the verdict did
       # judge. The branch tip above and the PR's remote head below are
       # the two honest witnesses; the checkout is neither.
-      # and every ref that pointed at the judged sha, read again
+      # and every ref that EVER pointed at the judged sha (questions-2:
+      # --points-at lists only refs that STILL point there, so the old
+      # sweep could never observe a move — a branch that moved after
+      # the review sailed through unnamed). The reflog is the only
+      # local witness of "used to": a ref whose log carries the judged
+      # sha and whose tip no longer does has moved.
       drifted=""
-      for ref in $(git -C "$REPO" for-each-ref --points-at "$judged_head" --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
-        now="$(git -C "$REPO" rev-parse "$ref" 2>/dev/null || true)"
-        if [ -n "$now" ] && [ "$now" != "$judged_head" ]; then
+      for ref in $(git -C "$REPO" for-each-ref --format='%(refname)' refs/heads refs/remotes 2>/dev/null); do
+        now="$(git -C "$REPO" rev-parse "$ref^{commit}" 2>/dev/null || true)"
+        [ -z "$now" ] && continue
+        [ "$now" = "$judged_head" ] && continue
+        # NO -q (the questions-39 receipt): grep -q exits on the first
+        # match, git then dies of SIGPIPE, and under this script's
+        # pipefail the pipeline reads as FAILED exactly when it
+        # matched. Full-read grep, status 0 on a real match.
+        if git -C "$REPO" reflog show "$ref" --format=%H 2>/dev/null | grep -F "$judged_head" >/dev/null; then
           drifted="$drifted $ref($now)"
         fi
       done
       if [ -n "$drifted" ]; then
         echo "merge: the branch moved since the review ($judged_head ->$drifted) — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
+        exit 1
+      fi
+      # NO WITNESS, NO MERGE — gh INCLUDED (tests-2): with no nameable
+      # branch ($branch_head empty) the PR's remote head is the ONLY
+      # witness; the old gate skipped the whole block when gh was
+      # absent and merged witnessless — the exact law this file states.
+      if [ -n "${PR_NUM:-}" ] && [ -z "$branch_head" ] && ! command -v gh >/dev/null 2>&1; then
+        echo "merge: no nameable branch and no gh to read PR #$PR_NUM's head — NO WITNESS, NO MERGE; refusing" >&2
         exit 1
       fi
       if [ -n "${PR_NUM:-}" ] && command -v gh >/dev/null 2>&1; then

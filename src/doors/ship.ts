@@ -128,10 +128,16 @@ export function shipCheck(opts: {
   if (opts.rounds.length === 0) return { ok: false, code: 2, why: `no review verdict exists for head ${opts.headSha.slice(0, 12)} — nothing to overrule; levy a review first` }
   const latest = opts.rounds[0].verdict
   if (latest.verdict !== "reject") return { ok: false, code: 2, why: `the latest verdict for this head is '${latest.verdict}', not reject — nothing to overrule` }
-  // the ROUNDS are the owner's rounds for this REPO (principles-4002):
-  // a fixer who changed bytes and was rejected again is on round 2, not
-  // "round 1 of 1" — the exit must open for exactly that fixer
-  const rounds = Math.max(opts.rounds.length, opts.repoRounds ?? 0)
+  // the ROUNDS are HEADS, not rows (momentum-9201 / questions-3 /
+  // tests-10502): two verdicts for the SAME head — a re-levy at
+  // unchanged bytes — are ONE rejection round, not two; counting
+  // verdict rows opened the override on the first reject and the
+  // receipt reported a fabricated "round 2". Distinct judged heads
+  // (with the repo's own rounds, principles-4002: a fixer who changed
+  // bytes and was rejected again is on round 2) — the exit opens for
+  // exactly that fixer.
+  const judgedHeads = new Set(opts.rounds.map((r) => r.verdict.head))
+  const rounds = Math.max(judgedHeads.size, opts.repoRounds ?? 0)
   if (rounds < minRounds) {
     return { ok: false, code: 2, why: `round 1 of ${rounds}: the overrule opens after good faith — fix what you accept and re-review first (the exit unlocks at ${minRounds} rounds)` }
   }
@@ -149,7 +155,7 @@ export function shipCheck(opts: {
   if (missing.length > 0) {
     return { ok: false, code: 2, why: `unanswered blocked finding(s): ${missing.map((b) => b.id).join(", ")} — every rejection you reject carries a one-line why` }
   }
-  return { ok: true, verdict: latest, rounds: opts.rounds.length, overrules }
+  return { ok: true, verdict: latest, rounds: judgedHeads.size, overrules }
 }
 
 export function overruleComment(opts: { pr: string; verdict: Verdict; overrules: Record<string, string>; by: string; stop?: string }): string {

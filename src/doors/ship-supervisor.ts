@@ -147,12 +147,21 @@ export function spawnSupervisor(opts: {
       `  if [ "$seen" = "1" ] && [ ! -d "$OUT" ]; then exit 4; fi`,
       `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then break; fi`,
       `  if [ "$i" -ge 7200 ]; then`,
-      `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
-      `      (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
-      `    fi`,
+      // A LIVE AGENT OWNS THE RECEIPT (principles-6001): the 2h arm
+      // published over a supervisor that could still be alive — one
+      // commission, two receipts, two wakes. The backstop arm below
+      // posts only over a DEAD agent; this arm keeps the same law:
+      // over a live agent it ends the watch in silence and lets the
+      // agent's own flow (its brief: "your process IS the watch")
+      // finish the story.
+      `    if ! kill -0 "$AGENT" 2>/dev/null; then`,
+      `      if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      `        (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
+      `      fi`,
       // the notify only fires with a PR to name — a nameless timeout
       // DM is noise (the receipt: "PR # review timed out")
-      `    if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      `      if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      `    fi`,
       `    exit 3`,
       `  fi`,
       `done`,
