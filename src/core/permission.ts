@@ -23,6 +23,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, normalize, resolve } from "node:path"
 import { loadPrompt, loadThreshold } from "../jev/jev-prompts.ts"
+import { homeRoot } from "./home.ts"
 import { jevNoulQ } from "../jev/jev.ts"
 
 // The deny cap every rail surface shares: a worker may be DENIED this
@@ -329,11 +330,12 @@ export function decidePermission(
   // harness home, or an ancestor of the Job's own roots inside its
   // parent, is allowed without the judge. Outside that bound (an ask
   // for ~ itself, ~/Library, any user tree) the gray zone keeps its
-  // judge. The home is the STORE'S resolution, not the raw env — the
-  // production orchestrator runs with the default home and no
-  // AGENTIC_OS_HOME exported (the r16 receipt: the rung existed and
-  // still did not fire).
-  const harnessHome = process.env.AGENTIC_OS_HOME || join(homedir(), ".local/share/agentic-os")
+  // judge. The home is THE STORE'S resolution — the ONE function from
+  // core/home.ts (the momentum-1007 receipt: hand-spelling the disk
+  // path picked the LEGACY agentic-os spelling where the store
+  // resolves the ADR-0011 whitehartlane default, and the rung was
+  // inert on the exact disk it existed to guard).
+  const harnessHome = homeRoot()
   const harnessTree = resolve(harnessHome, "..")
   if (under(path, harnessHome) || (under(path, harnessTree) && allowedRoots.some((root) => under(root, path)))) {
     return {

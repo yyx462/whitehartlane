@@ -388,7 +388,18 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
       // checkout-dependence the finding named)
       return { auto: local.auto, model: local.model, strictness: "medium" }
     }
-    const t = parseToml(raw) as { strictness?: unknown }
+    // an UNPARSABLE contract is not a crash (principles-5106 /
+    // questions-35 / tests-10404): the contract's own header promises
+    // "absent/unparsable = medium" — the trusted-side reader is the
+    // only one of the three that did not guard the parse, and a
+    // malformed review-gate.toml on the base branch killed the gate
+    // instead of gating at the default band.
+    let t: { strictness?: unknown }
+    try {
+      t = parseToml(raw) as { strictness?: unknown }
+    } catch {
+      return { auto: local.auto, model: local.model, strictness: "medium" }
+    }
     const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
     return { auto: local.auto, model: local.model, strictness }
   }

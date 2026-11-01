@@ -804,6 +804,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 1
       return
     }
+    // THE NAMEABILITY HALF (momentum-1006 / questions-37 /
+    // tests-10403): merge.sh refuses a base that cannot be NAMED — a
+    // sha passed as --base resolves to itself forever, the drift
+    // check compares a sha with itself, and a moved trunk rides the
+    // override merge. This door keeps BOTH halves now.
+    if (/^[0-9a-f]{7,40}$/.test(baseRef)) {
+      console.error(`ship: --base ${baseRef.slice(0, 12)} is a sha — the base's drift cannot be verified (a sha resolves to itself forever); name the base branch and re-review`)
+      process.exitCode = 1
+      return
+    }
     {
       let trunkNow = ""
       try {
