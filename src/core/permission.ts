@@ -21,7 +21,7 @@
 // queue for a human.
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join, normalize, resolve } from "node:path"
 import { loadPrompt, loadThreshold } from "../jev/jev-prompts.ts"
 import { jevNoulQ } from "../jev/jev.ts"
 
@@ -249,7 +249,13 @@ function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
     }
   }
   // a directory rendered with its trailing slash is the same path
-  return p.replace(/\/+$/, "") || p
+  // LEXICAL NORMALIZATION (the tests-10302 receipt, 2026-11-01): a
+  // `..`-laden ask is a TRAVERSAL — the harness-tree rung matched the
+  // ask as TEXT, so `…/agentic-os/../../../../../etc/passwd` was
+  // under the harness home by spelling while RESOLVING outside it.
+  // Every comparison downstream sees the normalized path: dot-segments
+  // collapse before any rung or judge reads it.
+  return normalize(p.replace(/\/+$/, "")) || p
 }
 
 // THE verdict: one entry point for "may this worker touch this path?"

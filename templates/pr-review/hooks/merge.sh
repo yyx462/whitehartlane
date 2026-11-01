@@ -47,6 +47,16 @@ case "$verdict" in
       # local ref is the proof we always have; the PR's remote head is
       # the stronger one when gh answers.
       judged_head="$HEAD_SHA"
+      # NO WITNESS, NO MERGE (tests-10301): a HEAD_BRANCH that is
+      # empty means the door could not name the reviewed branch — the
+      # local arm cannot verify, so the PR's remote head becomes the
+      # ONLY witness; without a PR number there is nothing to verify
+      # against at all, and the accept refuses rather than merge a
+      # branch nobody can prove still holds the judged bytes.
+      if [ -z "${HEAD_BRANCH:-}" ] && [ -z "${PR_NUM:-}" ]; then
+        echo "merge: the reviewed branch cannot be named (no HEAD_BRANCH) and no PR number exists to verify the remote head — unreviewed bytes would ride the merge; re-run the review naming the branch" >&2
+        exit 1
+      fi
       # THE BRANCH HALF (questions-2 / tests-1): HEAD_BRANCH is the
       # branch NAME (the door derives it from the judged sha ✓) — ask
       # where it points NOW. The earlier ref-sweep arm was vacuous:

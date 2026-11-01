@@ -33,7 +33,7 @@ export function supervisorBrief(opts: { levyCmd: string; runDir: string; pr: str
     `2. STAY ALIVE until the commission resolves — your process IS the watch. Keep a FOREGROUND blocking wait for the commission's END, BOUNDED BY ITS OWN SPELL (a counted deadline, so the never-lands arc can still reach steps 4 and 7): V=<the staged ${runDir}/data/review/merge.json — the staged tree's data/review/merge.json, the MERGE seat, written by the chain's LAST stage>; i=0; until [ -f "$V" ]; do sleep 15; i=$((i+1)); [ "$i" -ge 480 ] && break; done — 480 x 15s is the 7200s deadline. Wait on NOTHING EARLIER: the verdict is written three stages before the end, and a supervisor that wakes on it posts a receipt before the feedback map exists and announces a merge that has not run (the 2026-10-30 twin-seat lesson: the brief and the watcher are two answers to ONE question — this is the seat they share). Do NOT end your turn with nothing pending; a supervisor that exits early abandons the commission (the receipt: the first live supervisor died exactly this way and PR #259 went silent).`,
     `3. The merge seat's payload names the outcome (accept/reject/refused). The FINDINGS for the receipt live in the job's own record: the levy's stdout names the job it booked (a line like 'job: j-XXXX'); that job's run dir — pattern ${sessionsRoot()}/*/jobs/<jid>/run — carries the verdict file and the feedback/ map. Resolve <jid> from the levy output and read them from there (and from the staged dir's review folder beside the seat).`,
     `4. When the wait ends, read the outcome. If the seat exists (or its payload reached the job run dir): go to step 5. If the seat is ABSENT after the deadline (no outcome — the inner door refused, or infra failed): the levy carried --pr so its skip receipt may already be on PR #${pr}; post ONE comment yourself naming the outcome and the levy's printed reason — the PR is NEVER left silent.`,
-    `5. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md — the outcome, each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from the job run dir's feedback/MAP.md when it exists.`,
+    `5. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md — the outcome, each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from the job run dir's feedback/MAP.md when it exists. ONLY AFTER the comment command SUCCEEDS, write ${runDir}/supervisor-posted.md (one line: the comment's url or id) — that file is the watcher's PROOF the PR heard; the comment FILE alone proves nothing (it exists before the post, and a post that dies on expired auth or a rate limit leaves the PR silent).`,
     `6. accept: the rail's merge command already merged the PR (the seat's payload is written AFTER the merge ran) — do NOT merge again. reject: do NOT merge, do NOT fix anything, do NOT re-run the review — the authors own the fixes.`,
     `7. If the wait exceeds 2 hours: post a timeout comment on PR #${pr} and (best effort) run: notify "ship-gate" "PR #${pr} review timed out — supervisor log beside ${runDir}" — so a human hears the silence.`,
     `8. Write one line to ${runDir}/supervisor-result.md (verdict or outcome + PR number). Then STOP — your commission is complete.`,
@@ -167,7 +167,13 @@ export function spawnSupervisor(opts: {
       // speak only over a DEAD agent that never posted.
       `w=0`,
       `while kill -0 "$AGENT" 2>/dev/null && [ "$w" -lt 3600 ]; do sleep 2; w=$((w+2)); done`,
-      `if test -f "$OUT/supervisor-comment.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1 && ! kill -0 "$AGENT" 2>/dev/null; then`,
+      // the PROOF is the POST RECEIPT, not the comment file
+      // (momentum-1005): the brief writes supervisor-comment.md BEFORE
+      // posting — a post that dies on expired auth or a kill between
+      // write and post left the file present and the PR silent while
+      // the watcher stayed quiet. supervisor-posted.md is written only
+      // after gh answers.
+      `if test -f "$OUT/supervisor-posted.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1 && ! kill -0 "$AGENT" 2>/dev/null; then`,
       `  V=$(sed -n 's/.*"outcome"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/merge.json" 2>/dev/null | head -1)`,
       `  if [ -z "$V" ]; then`,
       `    V=$(sed -n 's/.*"verdict"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/verdict.json" 2>/dev/null | head -1)`,

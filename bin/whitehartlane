@@ -344,7 +344,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       const i = args.indexOf(`--${name}`)
       return i !== -1 ? args[i + 1] : undefined
     }
-    const flagVals = new Set(["--base", "--head", "--head-branch", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
+    const flagVals = new Set(["--base", "--head", "--head-branch", "--base-branch", "--title", "--author", "--merge-cmd", "--trace-dir", "--body-file", "--out", "--template", "--from", "--model", "--pr", "--roster"])
     const positional = args.find((a, i) => i === 0 || (a && !a.startsWith("-") && !flagVals.has(args[i - 1])))
     let spawner = spawnerFromArgs(args)
     const unattended = args.includes("--unattended")
@@ -550,18 +550,26 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // (--roster, --pr, the pinned shas, the verdict seat) — the
         // levy must run the door that minted the commission
         const mintingDoor = join(import.meta.dirname, "whitehartlane")
+        // a pure-hex sha rides BARE (momentum-1004's reader compares
+        // the token verbatim); anything else keeps single-quote safety
+        const qHex = (s) => (/^[0-9a-f]{7,40}$/.test(s) ? s : q(s))
         const levy = [
           mintingDoor, "review", q(repoAbs),
-          // the BASE rides as the BRANCH NAME (principles-1 / questions-4):
-          // the merge gate checks the base out before merging — a sha
-          // there is a detached HEAD and the accept never advances the
-          // base branch (it "merged" into nowhere). The door resolves
-          // the sha into BASE_SHA ✓ and the base-drift guard compares
-          // the name's tip ✓.
-          "--base", q(baseRef), "--head", q(headPinned),
-          // the BRANCH NAME rides beside the pinned sha: the inner
+          // the BASE rides PINNED — the gate's own resolution, the one
+          // "which bytes" site (momentum-1004): a REF here re-resolves
+          // at levy time, and a trunk that moves between the gate's
+          // decision and the levy's materialization changes the judged
+          // range while the ledger row still names the old one. The
+          // NAME rides beside it (the merge gate checks the branch
+          // out; a sha there is a detached HEAD — principles-1). A
+          // pure-hex sha needs no shell quoting — the pin rides BARE
+          // so the brief's reader sees exactly the sha (momentum-1004's
+          // receipt compared the token verbatim).
+          "--base", qHex(gateBaseSha ?? baseRef), "--head", qHex(headPinned),
+          // the BRANCH NAMES ride beside the pinned shas: the inner
           // run's config must be able to ask "did the branch move?"
           // (momentum-906 / principles-4001 — a sha answers itself)
+          ...(baseRef !== "HEAD" ? ["--base-branch", q(baseRef)] : []),
           ...(headRef !== "HEAD" ? ["--head-branch", q(headRef)] : []),
           "--model", q(model), "--title", q(title),
           "--out", q(out), "--merge-cmd", q(mergeCmd),
@@ -618,7 +626,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // is the single "which bytes" answer, the NAME is the single
         // "which branch" answer — deriving the branch from the sha is
         // an alphabetical guess that names a branch nobody named
-        baseBranch: val("base"),
+        baseBranch: val("base-branch") ?? val("base"),
         headBranch: val("head-branch") ?? val("head"),
         title: val("title"),
         author: val("author"),
@@ -756,7 +764,12 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       baseSha = ""
     }
     const rounds = verdictsForHead(headSha)
-    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForBranch(repoAbs, headSha, { base: baseSha }).length })
+    // the stop rule's OWN parameters reach the overrule gate
+    // (principles-46): min_rounds is the good-faith floor the OWNER
+    // declared in the base commit's [stop] block — the door reads it
+    // for the eligibility fact; the gate must hear it too
+    const stopCfg = stopConfigOf(repoAbs, { base: baseSha })
+    const check = shipCheck({ headSha, overruleFile: sVal("overrule"), rounds, repoRounds: verdictsForBranch(repoAbs, headSha, { base: baseSha }).length, minRounds: stopCfg.minRounds })
     if (!check.ok) {
       console.error(`ship: ${check.why}`)
       process.exitCode = check.code
@@ -770,12 +783,40 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // override forever: eligible overrules and stubborn overrules are
     // distinguishable in the ledger (the honesty trail)
     const branchVerdicts = verdictsForBranch(repoAbs, headSha, { base: baseSha })
-    const stopCfg = stopConfigOf(repoAbs, { base: baseSha })
     const stop = stopEligibility(
       branchVerdicts.slice().reverse().map((h) => h.verdict.blocked),
       stopCfg,
     )
     console.log(`ship: the gate's stop rule — ${stop.why}`)
+    // THE BASE'S HALF (principles-45 / questions-34): this door is a
+    // SECOND merge site, and until now it kept only the HEAD half of
+    // merge.sh's drift guards — a base that moved during the review
+    // lands unreviewed commits inside the accepted override merge,
+    // the exact case merge.sh refuses (principles-108). The verdict
+    // names the base it judged; the trunk's CURRENT tip must still be
+    // it, or the override re-reviews. A verdict that names NO base
+    // cannot be override-merged at all — the door would have no idea
+    // what base the review judged (questions-34's own header), and
+    // FAIL-SAFE is the only direction (unverifiable is unmerged).
+    const verdictBase = check.verdict.base ?? ""
+    if (!verdictBase) {
+      console.error(`ship: the verdict does not name the base it judged — neither half of the drift story can be verified at the merge boundary; re-review on a named base`)
+      process.exitCode = 1
+      return
+    }
+    {
+      let trunkNow = ""
+      try {
+        trunkNow = execFileSync("git", ["-C", repoAbs, "rev-parse", `${baseRef}^{commit}`], { encoding: "utf8" }).trim()
+      } catch {
+        trunkNow = ""
+      }
+      if (trunkNow && trunkNow !== verdictBase) {
+        console.error(`ship: base ${baseRef} moved (${verdictBase.slice(0, 12)} -> ${trunkNow.slice(0, 12)}) since the review — unreviewed commits would ride the override merge (merge.sh refuses exactly this); re-review on the new base`)
+        process.exitCode = 1
+        return
+      }
+    }
     // the merged bytes ARE the judged bytes (the momentum-200 class,
     // overrule arm): a verdict about old shas must not bless a moved head
     const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")

@@ -29,12 +29,14 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..")
 const git = (repo: string, ...args: string[]): string =>
   execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
 
-const writeVerdict = (home: string, sid: string, head: string, blocked: string[]) => {
+const writeVerdict = (home: string, sid: string, head: string, blocked: string[], base = "") => {
   const dir = join(home, "sessions", sid, "jobs", "j1", "run", "data", "review")
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     join(dir, "verdict.json"),
-    JSON.stringify({ verdict: "reject", head, blocked: blocked.map((id) => ({ id, severity: "P1", claim: "asserts the wrong requirement" })) }),
+    // the verdict names the base it judged (real rail verdicts carry
+    // it; the ship door's base drift guard requires it)
+    JSON.stringify({ verdict: "reject", head, base, blocked: blocked.map((id) => ({ id, severity: "P1", claim: "asserts the wrong requirement" })) }),
   )
 }
 
@@ -51,6 +53,7 @@ test("whl ship: the exit opens after round 1 — a fixed head that was rejected 
     writeFileSync(join(repo, "src", "a.ts"), "export const a = 1\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "base")
+    const baseSha = git(repo, "rev-parse", "main")
     git(repo, "checkout", "-qb", "feat")
     writeFileSync(join(repo, "src", "a.ts"), "export const a = 2\n")
     git(repo, "add", "-A")
@@ -64,8 +67,8 @@ test("whl ship: the exit opens after round 1 — a fixed head that was rejected 
     assert.notEqual(headA, headB, "the fix moved the head")
 
     // round 1 judged head A (rejected); round 2 judged head B (rejected again)
-    writeVerdict(home, "s-r1", headA, ["m-1"])
-    writeVerdict(home, "s-r2", headB, ["m-1"])
+    writeVerdict(home, "s-r1", headA, ["m-1"], baseSha)
+    writeVerdict(home, "s-r2", headB, ["m-1"], baseSha)
 
     // a gh stub: the PR is at head B
     const gh = join(tmp, "gh")

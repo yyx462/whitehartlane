@@ -124,7 +124,15 @@ export function stageRun(source: string, store: string): void {
   // hashes the program's data/ dir): a link created after the hash
   // would make every re-levy look like a different program, and the
   // settled fold would re-run every lens
-  linkVerdictSeat(source, store)
+  // REVIEW PROGRAMS ONLY (principles-44): the verdict seat is a
+  // REVIEW concern — a generic `whl run ./my-program` must not find
+  // its own data/review/verdict.json deleted and replaced by a
+  // symlink into a store it never asked about. config.sh is the
+  // review program's own signature: it exists exactly when this
+  // staging carries a review.
+  if (existsSync(join(source, "data", "review", "config.sh"))) {
+    linkVerdictSeat(source, store)
+  }
   copyBeside(source, store)
 }
 

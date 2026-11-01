@@ -70,6 +70,9 @@ test("one commission, one receipt: the watcher does not publish a second (and fa
         "sleep 3",
         `printf '%s\\n' 'ship-gate: accept — the supervisor own receipt' > ${JSON.stringify(comment)}`,
         `gh pr comment 42 --body-file ${JSON.stringify(comment)}`,
+        // the POST RECEIPT (momentum-1005's contract): written only
+        // after gh answers — the watcher's proof the PR heard
+        `printf '%s\\n' 'posted' > ${JSON.stringify(join(out, "supervisor-posted.md"))}`,
         "",
       ].join("\n"),
     )

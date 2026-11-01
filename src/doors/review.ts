@@ -1063,8 +1063,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   const branchOf = (sha: string): string | undefined => {
     try {
       const out = execFileSync("git", ["-C", repo, "for-each-ref", "--points-at", sha, "--format=%(refname:short)", "refs/heads"], { encoding: "utf8" }).trim()
-      const first = out.split("\n").map((s) => s.trim()).filter(Boolean)[0]
-      return first || undefined
+      const names = out.split("\n").map((s) => s.trim()).filter(Boolean)
+      // ONE name is a fact; MANY is a guess (tests-10301 case B): a
+      // sibling at the judged sha steals the alphabetical first and
+      // the drift guard reads a ref that never moves. An ambiguous
+      // name is NO name — the merge stage's no-witness refusal and
+      // the PR's remote head take over.
+      return names.length === 1 ? names[0] : undefined
     } catch {
       return undefined
     }
@@ -1119,12 +1124,16 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     // tests-10101): the sha is pinned for the bytes; the branch the
     // review is ABOUT is carried, not derived — a SIBLING at the
     // judged sha steals an alphabetical guess and the drift guard
-    // reads a ref that never moves.
+    // reads a ref that never moves. A sha HERE is a guard that
+    // answers itself forever (tests-10301): when no name exists the
+    // honest value is EMPTY — the merge stage then demands the PR's
+    // remote head as its only remaining witness and refuses without
+    // one.
     `HEAD_BRANCH=${shellQuote(
       args.headBranch && !/^[0-9a-f]{7,40}$/.test(args.headBranch)
         ? args.headBranch
         : /^[0-9a-f]{7,40}$/.test(head)
-          ? branchOf(headSha) ?? headSha
+          ? branchOf(headSha) ?? ""
           : head,
     )}`,
     `HEAD_SHA=${shellQuote(headSha)}`,

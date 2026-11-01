@@ -53,17 +53,20 @@ test("tests-2: the ship door must not claim the receipt reached the PR when it d
   g("config user.name t")
   writeFileSync(join(repo, "src", "wait.ts"), "export const wait = () => true\n")
   g("add -A && git commit -qm base")
+  const baseSha = g("rev-parse main").trim()
   g("checkout -qb feat")
   writeFileSync(join(repo, "src", "wait.ts"), "export const wait = () => false\n")
   g("add -A && git commit -qm feat")
   const headSha = g("rev-parse HEAD").trim()
-  // two reject rounds on this head
+  // two reject rounds on this head (the verdict names the base it
+  // judged — real rail verdicts carry it, and the ship door's base
+  // drift guard requires it)
   for (const sid of ["s-r1", "s-r2"]) {
     const dir = join(home, "sessions", sid, "jobs", "j1", "run", "data", "review")
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, "verdict.json"),
-      JSON.stringify({ verdict: "reject", head: headSha, blocked: [{ id: "m-1", severity: "P1", claim: "asserts the wrong requirement" }] }),
+      JSON.stringify({ verdict: "reject", repo, base: baseSha, head: headSha, blocked: [{ id: "m-1", severity: "P1", claim: "asserts the wrong requirement" }] }),
     )
   }
   // the gh stub: `pr view` answers the boundary probe with the judged
