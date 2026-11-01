@@ -116,16 +116,34 @@ export function contentHashOf(dir: string, exclude: string[] = []): string {
   // hash and calls a moved seat "program changed since booking". The
   // merge stage's outcome marker (questions-26) is the same kind of
   // seat: it lands DURING the run, so it must be just as neutral.
-  const skip = new Set([...OUTPUT_SEATS, ...exclude])
-  const walk = (d: string, rel: string) => {
+const skip = new Set([...OUTPUT_SEATS, ...exclude])
+  // EMPTY DIRECTORIES ARE NOT CONTENT (principles-5100, 2026-11-01 —
+  // git's own semantics: it tracks no empty dirs): a directory whose
+  // only children are skipped output seats contributes NOTHING — not
+  // even its name. The seat-minting mkdirSync(data/review) inside a
+  // staged program moved the identity AFTER booking, and every later
+  // comparison read "program changed since booking" for a program the
+  // door itself had merely staged. Bottom-up: a dir hashes its name
+  // only if something beneath it hashed first.
+  const walk = (d: string, rel: string): boolean => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
+    let contributed = false
     for (const e of entries) {
       const p = join(d, e.name)
       const r = rel ? `${rel}/${e.name}` : e.name
       if (skip.has(r) || isOutputSeat(r)) continue
+      if (e.isDirectory()) {
+        // the dir's NAME rides only when something beneath it
+        // contributed (empty-in-git-sense dirs are invisible)
+        if (walk(p, r)) {
+          h.update(`dir:${e.name}`)
+          contributed = true
+        }
+        continue
+      }
       h.update(e.name)
-      if (e.isDirectory()) walk(p, r)
-      else if (e.isSymbolicLink()) {
+      contributed = true
+      if (e.isSymbolicLink()) {
         // a LINK is a seat, not content (2026-10-30, principles-3000):
         // the staged program's verdict seat points into the job's run
         // dir and resolves only once the rail has judged. Hashing its

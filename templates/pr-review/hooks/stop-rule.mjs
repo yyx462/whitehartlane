@@ -29,7 +29,13 @@ const bucketOf = (b) => {
 const clustersOf = (blocked) => [...new Set((blocked ?? []).map(bucketOf))].sort()
 const curBlocked = verdict.blocked ?? []
 const history = [...prior.map((r) => r.buckets ?? []), clustersOf(curBlocked)]
-const p0 = curBlocked.some((b) => b.severity === "P0") || prior.some((r) => r.p0 === true)
+// ONE QUESTION, ONE ANSWER (the momentum-1001 receipt): the module
+// scopes its P0 veto to the WINDOW (the last cfg.rounds rounds); the
+// twin must too — an OR over every hand-down round let a P0 that is
+// fixed and outside the window veto the banner forever while the
+// door said eligible. Window = the current round + the last
+// (cfg.rounds - 1) hand-down entries.
+const p0 = curBlocked.some((b) => b.severity === "P0") || prior.slice(-(cfg.rounds - 1)).some((r) => r.p0 === true)
 const rounds = history.length
 const cur = history[rounds - 1] ?? []
 const prv = history[rounds - 2] ?? []

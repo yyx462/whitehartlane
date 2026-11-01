@@ -121,6 +121,7 @@ export function spawnSupervisor(opts: {
       `RUN=""`,
       `[ -L "$OUT/data/review/verdict.json" ] && RUN=$(readlink "$OUT/data/review/verdict.json" 2>/dev/null | sed 's#/data/review/verdict.json$##')`,
       `i=0`,
+      `seen=0`,
       // THE SEAT (principles-4004): the commission ends with the MERGE
       // stage — the merge stage writes the outcome marker into the
       // staged program dir, and the watcher waits on exactly that.
@@ -133,11 +134,15 @@ export function spawnSupervisor(opts: {
       // PR must still hear (momentum-908), so the verdict's presence
       // ends the wait too (a POSITIVE test, not a poll: the law is
       // about the seat the wait resolves on)
-      // THE GONE-WORLD EXIT (the zombie-watcher receipt, 2026-10-30):
-      // a watcher whose staged dir was deleted (a test's tmp dir, a
-      // cancelled round) has NOTHING to watch and NOBODY to tell —
-      // exit quietly, never ride the deadline to a notify nobody wants
-      `  if [ ! -d "$OUT" ]; then exit 4; fi`,
+      // THE GONE-WORLD EXIT, LATCHED (the zombie receipt 2026-10-30 ×
+      // the momentum-1000 receipt 2026-11-01): exit 4 only when a
+      // world that WAS seen disappears. The --out seat dir does not
+      // exist until the levy inside the spawned agent materializes it
+      // — an unlatched check saw "not created YET", called it "gone",
+      // and quit one second into a healthy commission, leaving the PR
+      // with no watcher at all.
+      `  if [ -d "$OUT" ]; then seen=1; fi`,
+      `  if [ "$seen" = "1" ] && [ ! -d "$OUT" ]; then exit 4; fi`,
       `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then break; fi`,
       `  if [ "$i" -ge 7200 ]; then`,
       `    if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
@@ -155,7 +160,14 @@ export function spawnSupervisor(opts: {
       // the chain reached it, else the verdict itself (a chain that
       // died before merge still judged — principles-5002: "unknown"
       // was a FABRICATED outcome)
-      `if test -f "$OUT/supervisor-comment.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      // "not YET" is not "NEVER" (momentum-1003): the agent posts AFTER
+      // the seat resolves — a backstop that asks "posted yet?" spoke
+      // over a live agent and left TWO receipts, the first stating an
+      // unobserved fact. Wait for the agent to FINISH (bounded), and
+      // speak only over a DEAD agent that never posted.
+      `w=0`,
+      `while kill -0 "$AGENT" 2>/dev/null && [ "$w" -lt 3600 ]; do sleep 2; w=$((w+2)); done`,
+      `if test -f "$OUT/supervisor-comment.md"; then :; elif [ -n "$PR" ] && command -v gh >/dev/null 2>&1 && ! kill -0 "$AGENT" 2>/dev/null; then`,
       `  V=$(sed -n 's/.*"outcome"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/merge.json" 2>/dev/null | head -1)`,
       `  if [ -z "$V" ]; then`,
       `    V=$(sed -n 's/.*"verdict"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/verdict.json" 2>/dev/null | head -1)`,
