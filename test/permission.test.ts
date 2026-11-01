@@ -93,6 +93,31 @@ test("THE ANCESTOR RUNG: an ask for an ancestor of the Job's own roots, inside t
   }
 })
 
+test("THE r16 REGRESSION: the rung fires with AGENTIC_OS_HOME unset — the production orchestrator exports no env, the store's default home governs", () => {
+  // the r16 receipt: the rung existed and still did not fire — it read
+  // the raw env, the production orchestrator runs on the DEFAULT home
+  // with nothing exported, and the deny fell exactly as before. The
+  // home resolution must match the store's: env OR ~/.local/share/
+  // agentic-os (homedir reads $HOME on posix, so the fixture home
+  // rides HOME).
+  const prevHome = process.env.HOME
+  const prevAoh = process.env.AGENTIC_OS_HOME
+  delete process.env.AGENTIC_OS_HOME
+  process.env.HOME = "/Users/me"
+  try {
+    const v = decidePermission({
+      question: "Permission required\n⏎   ┃    ← Access external directory /Users/me/.local/share",
+      scope,
+      home: "/Users/me/",
+      cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/tests",
+    })
+    assert.equal(v.decision, "allow", "the default home resolves the harness tree — the env is not required")
+  } finally {
+    process.env.HOME = prevHome
+    if (prevAoh !== undefined) process.env.AGENTIC_OS_HOME = prevAoh
+  }
+})
+
 test("an ro marker on a MEMBER root refuses at parse — unenforced marking is worse than none", async () => {
   const { parseMembers } = await import("../src/engines/coworker.ts")
   assert.throws(

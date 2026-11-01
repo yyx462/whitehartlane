@@ -319,17 +319,17 @@ export function decidePermission(
   // or a SIBLING inside the job tree (…/jobs/<jid>/jobs) no root
   // contains. Both fell to the tuned judge, whose coin denied them
   // ("deny-unneeded") and starved three rounds to pane-reap. The
-  // harness's own tree is not user territory: an ask under
-  // AGENTIC_OS_HOME, or an ancestor of the Job's own roots inside
-  // dirname(AGENTIC_OS_HOME), is allowed without the judge. Outside
-  // that bound (an ask for ~ itself, ~/Library, any user tree) the
-  // gray zone keeps its judge.
-  const harnessHome = process.env.AGENTIC_OS_HOME ?? ""
-  const harnessTree = harnessHome ? resolve(harnessHome, "..") : ""
-  if (
-    (harnessHome && under(path, harnessHome)) ||
-    (harnessTree && under(path, harnessTree) && allowedRoots.some((root) => under(root, path)))
-  ) {
+  // harness's own tree is not user territory: an ask under the
+  // harness home, or an ancestor of the Job's own roots inside its
+  // parent, is allowed without the judge. Outside that bound (an ask
+  // for ~ itself, ~/Library, any user tree) the gray zone keeps its
+  // judge. The home is the STORE'S resolution, not the raw env — the
+  // production orchestrator runs with the default home and no
+  // AGENTIC_OS_HOME exported (the r16 receipt: the rung existed and
+  // still did not fire).
+  const harnessHome = process.env.AGENTIC_OS_HOME || join(homedir(), ".local/share/agentic-os")
+  const harnessTree = resolve(harnessHome, "..")
+  if (under(path, harnessHome) || (under(path, harnessTree) && allowedRoots.some((root) => under(root, path)))) {
     return {
       decision: "allow",
       path,
