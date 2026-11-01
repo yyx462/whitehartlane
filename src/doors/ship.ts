@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { homeRoot, sessionsRoot } from "../adapters/store.ts"
 
-export type BlockedFinding = { id: string; severity?: string; claim?: string; location?: { file?: string } }
+export type BlockedFinding = { id: string; severity?: string; claim?: string; location?: { file?: string; line_start?: number } }
 
 export type Verdict = {
   verdict: string
@@ -152,10 +152,13 @@ export function shipCheck(opts: {
   return { ok: true, verdict: latest, rounds: opts.rounds.length, overrules }
 }
 
-export function overruleComment(opts: { pr: string; verdict: Verdict; overrules: Record<string, string>; by: string }): string {
+export function overruleComment(opts: { pr: string; verdict: Verdict; overrules: Record<string, string>; by: string; stop?: string }): string {
   const lines = [
     `**ship-gate: MERGED UNDER OVERRIDE — ${Object.keys(opts.overrules).length} finding(s) overruled, answered per finding** *(by ${opts.by})*`,
     ``,
+    ...(opts.stop
+      ? [`The gate's stop rule at merge time: *${opts.stop}*`, ``]
+      : []),
     `The reviewer proved; the owner disagreed. Each overruled fact and the stated why:`,
     ``,
   ]

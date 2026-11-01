@@ -16,3 +16,15 @@ model = "minimax-cn/MiniMax-M3.1-Flash"
 # file forces the full rail. This repo is the harness itself; it ships
 # the strict posture it sells.
 strictness = "strict"
+
+# the owner's stop rule — the diminishing-returns criterion that ends
+# a review loop honestly (the 2026-10-31 diagnosis: "zero findings in
+# a growing diff" is not a reachable fixed point). Rides the TRUSTED
+# side (the BASE commit) exactly like the band: a PR cannot loosen the
+# rule that ends its own review. Defaults below are MEASURED against
+# this repo's own 11-round history (novel≤1 ×2 consecutive rounds,
+# nothing stuck, no P0 — never fires spuriously on the replay).
+[stop]
+min_rounds = 2   # good faith first — never round 1
+rounds = 2       # K: consecutive quiet rounds the criterion demands
+novel_max = 1    # N: novel root-cause buckets allowed per round

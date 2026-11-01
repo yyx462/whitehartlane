@@ -141,6 +141,9 @@ type LedgerRow = {
   // the band that made the decision (absent on rows older than the
   // band table — they were all medium by definition)
   strictness?: Strictness
+  // the stop rule's fact beside an override (absent on older rows):
+  // eligible / not-eligible + the measured why
+  stop?: string
 }
 
 export function appendLedgerRow(row: Omit<LedgerRow, "ts">, path = ledgerPath()): void {

@@ -25,6 +25,7 @@ import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.t
 import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 import { overruleComment, shipCheck, verdictsForBranch, verdictsForHead } from "../src/doors/ship.ts"
+import { stopConfigOf, stopEligibility } from "../src/doors/stop-rule.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
@@ -758,6 +759,20 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = check.code
       return
     }
+    // THE STOP RULE'S FACT (2026-11-01): the owner's measured
+    // diminishing-returns criterion, computed from the PR's own round
+    // history (this branch's span, oldest→newest) against the BASE
+    // commit's [stop] parameters. The fact NEVER gates the door — the
+    // owner is sovereign either way — but it is recorded beside the
+    // override forever: eligible overrules and stubborn overrules are
+    // distinguishable in the ledger (the honesty trail)
+    const branchVerdicts = verdictsForBranch(repoAbs, headSha, { base: baseSha })
+    const stopCfg = stopConfigOf(repoAbs, { base: baseSha })
+    const stop = stopEligibility(
+      branchVerdicts.slice().reverse().map((h) => h.verdict.blocked),
+      stopCfg,
+    )
+    console.log(`ship: the gate's stop rule — ${stop.why}`)
     // the merged bytes ARE the judged bytes (the momentum-200 class,
     // overrule arm): a verdict about old shas must not bless a moved head
     const by = sVal("by") ?? (process.env.OPENCODE_SESSION_ID ? `opencode:${process.env.OPENCODE_SESSION_ID}` : process.env.USER ?? "unknown")
@@ -796,6 +811,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       roster: [],
       action: "override",
       audit: false,
+      // the stop rule's fact beside the override (2026-11-01): eligible
+      // overrules and against-the-rule overrules stay distinguishable
+      stop: stop.why,
     })
     const mergeCmd = sVal("merge-cmd") ?? `gh pr merge ${pr} --merge --subject "pr-review: override-merge (#${pr})"`
     try {
@@ -805,7 +823,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       process.exitCode = 1
       return
     }
-    const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by }))
+    const c = ghPrComment(pr, repoAbs, overruleComment({ pr, verdict: check.verdict, overrules: check.overrules, by, stop: stop.why }))
     if (!c.ok) {
       console.error(`ship: merged, but the overrule receipt did not reach PR #${pr} (${c.out.split("\n")[0]}) — the ledger row stands; post the receipt by hand`)
       console.log(`ship: PR #${pr} merged under override — ${Object.keys(check.overrules).length} finding(s) overruled (round ${check.rounds}), receipt not delivered, ledger row written`)

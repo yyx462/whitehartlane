@@ -150,6 +150,18 @@ case "$verdict" in
     # THE REJECTION — every blocked finding answered with a one-line why,
     # merged under a recorded override, never stealth
     echo "merge: the fixer's exit — fix + adopt the repros, or (after round 1) overrule: whl ship <repo> --pr <n> --overrule <file.json> (every blocked finding answered, receipt on the PR)" >&2
+    # THE STOP RULE'S BANNER (2026-11-01): when the owner's measured
+    # criterion holds (novel root causes within bounds for K rounds,
+    # nothing stuck, no P0), the gate SAYS SO — the loop's honest end
+    # is announced where the fixer reads, not left to owner folklore.
+    # Silence is the ordinary state (not-eligible is not news); the
+    # twin writes its record at data/review/stop.json either way.
+    if [ -f "$prog/hooks/stop-rule.mjs" ] && [ -n "${STOP_HISTORY:-}" ]; then
+      stop_banner="$(node "$prog/hooks/stop-rule.mjs" "$prog/data/review/verdict.json" "$STOP_HISTORY" "${STOP_CFG:-}" 2>/dev/null || true)"
+      if [ -n "$stop_banner" ]; then
+        echo "$stop_banner" >&2
+      fi
+    fi
     exit 1
     ;;
   *)

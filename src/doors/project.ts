@@ -105,7 +105,7 @@ export function spurIdOf(input: { spurId?: string; name?: string; toml: string }
 // where the same file's relative path is review/merge.json — a
 // root-relative skip set was neutral at one site and INPUT at the
 // other, and the identity moved mid-run exactly there.
-const OUTPUT_SEATS = ["data/review/verdict.json", "data/review/merge.json"]
+const OUTPUT_SEATS = ["data/review/verdict.json", "data/review/merge.json", "data/review/stop.json"]
 const isOutputSeat = (rel: string): boolean =>
   OUTPUT_SEATS.some((s) => rel === s || rel.endsWith(`/${s}`) || rel === s.slice("data/".length))
 export function contentHashOf(dir: string, exclude: string[] = []): string {
