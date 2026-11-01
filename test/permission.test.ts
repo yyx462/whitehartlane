@@ -23,8 +23,7 @@ const scope = declareScope(["/Users/me/proj/ui-window", "/Users/me/.local/share/
 // refusal never escalates (the declaration owns it, not insistence)
 const roScope = declareScope(["/Users/me/proj/ui-window", "ro /Users/me/readonly-refs"])
 
-test("an ro root still covers reads (existence + scope), but a write ask into it is refused flat", () => {
-  assert.deepEqual(roScope.ro, ["/Users/me/readonly-refs"])
+test("an ro root still covers reads (existence + scope), but a write ask into it is refused flat", () => {  assert.deepEqual(roScope.ro, ["/Users/me/readonly-refs"])
   assert.ok(roScope.roots.includes("/Users/me/readonly-refs"), "reads stay granted")
   assert.ok(scopeCovers(roScope, "/Users/me/readonly-refs/spec.md"), "the door's coverage screen admits it")
   const v = decidePermission({
@@ -40,6 +39,45 @@ test("an ro root still covers reads (existence + scope), but a write ask into it
     scope,
   })
   assert.equal(w.decision, "allow")
+})
+
+test("THE ANCESTOR RUNG: an ask for an ancestor of the Job's own roots, inside the harness tree, is allowed without the judge", () => {
+  // the r12/r14 receipt: the lens panes live under the sessions root;
+  // a coarse client asks for ~/.local/share — an ANCESTOR the roots
+  // test can never match — and the judge's coin denied it, starving
+  // two whole review rounds
+  const prev = process.env.AGENTIC_OS_HOME
+  process.env.AGENTIC_OS_HOME = "/Users/me/.local/share/agentic-os"
+  try {
+    const v = decidePermission({
+      question: "Permission required\n⏎   ┃    ← Access external directory ~/.local/share",
+      scope,
+      home: "/Users/me/",
+      cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles",
+    })
+    assert.equal(v.decision, "allow")
+    assert.match(v.message, /ancestor of this Job's own roots/)
+    // the BOUND holds: an ask for the home itself (or anything outside
+    // the harness tree) is still the gray zone — the ancestor rung
+    // must not become a coarse-reads hole
+    const home = decidePermission({
+      question: "Permission required\n⏎   ┃    ← Access external directory /Users/me",
+      scope,
+      home: "/Users/me/",
+      cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles",
+    })
+    assert.equal(home.decision, "deny-unneeded", "an ask for ~ itself keeps the judge")
+    const lib = decidePermission({
+      question: "Permission required\n⏎   ┃    ← Access external directory /Users/me/Library",
+      scope,
+      home: "/Users/me/",
+      cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles",
+    })
+    assert.equal(lib.decision, "deny-unneeded", "territory that is not the Job's own tree keeps the judge")
+  } finally {
+    if (prev === undefined) delete process.env.AGENTIC_OS_HOME
+    else process.env.AGENTIC_OS_HOME = prev
+  }
 })
 
 test("an ro marker on a MEMBER root refuses at parse — unenforced marking is worse than none", async () => {

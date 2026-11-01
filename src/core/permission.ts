@@ -21,7 +21,7 @@
 // queue for a human.
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { loadPrompt, loadThreshold } from "../jev/jev-prompts.ts"
 import { jevNoulQ } from "../jev/jev.ts"
 
@@ -309,6 +309,31 @@ export function decidePermission(
       decision: "allow",
       path,
       message: `granted: ${path} is inside this Job's roots.`,
+    }
+  }
+  // THE ANCESTOR RUNG (the r12/r14 receipt, 2026-11-01): a worker's
+  // whole world can sit under the harness home (the lens panes' cwd
+  // is <sessions>/<sid>/jobs/<jid>/run/units/<lens>), and a client
+  // that scopes coarsely asks for the ANCESTOR (~/.local/share) —
+  // which `under(path, root)` can never match (the containment runs
+  // the wrong way). That ask fell to the tuned judge, whose coin
+  // denied it ("deny-unneeded") and starved the chain until
+  // pane-reap — two rounds died exactly there. An ancestor of the
+  // job's own roots is NOT new territory when it stays inside the
+  // harness's own tree (dirname of AGENTIC_OS_HOME, i.e.
+  // ~/.local/share): the ask contains territory the job already
+  // owns. Outside that bound (an ask for ~ itself, or ~/Library), the
+  // gray zone keeps its judge.
+  const harnessTree = process.env.AGENTIC_OS_HOME ? resolve(process.env.AGENTIC_OS_HOME, "..") : ""
+  if (
+    harnessTree &&
+    under(path, harnessTree) &&
+    allowedRoots.some((root) => under(root, path))
+  ) {
+    return {
+      decision: "allow",
+      path,
+      message: `granted: ${path} is an ancestor of this Job's own roots and inside the harness tree — territory the Job already lives in.`,
     }
   }
   // temp scratch is free OUTSIDE home only — a home planted under the
