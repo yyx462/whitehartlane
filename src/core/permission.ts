@@ -311,29 +311,29 @@ export function decidePermission(
       message: `granted: ${path} is inside this Job's roots.`,
     }
   }
-  // THE ANCESTOR RUNG (the r12/r14 receipt, 2026-11-01): a worker's
-  // whole world can sit under the harness home (the lens panes' cwd
-  // is <sessions>/<sid>/jobs/<jid>/run/units/<lens>), and a client
-  // that scopes coarsely asks for the ANCESTOR (~/.local/share) —
-  // which `under(path, root)` can never match (the containment runs
-  // the wrong way). That ask fell to the tuned judge, whose coin
-  // denied it ("deny-unneeded") and starved the chain until
-  // pane-reap — two rounds died exactly there. An ancestor of the
-  // job's own roots is NOT new territory when it stays inside the
-  // harness's own tree (dirname of AGENTIC_OS_HOME, i.e.
-  // ~/.local/share): the ask contains territory the job already
-  // owns. Outside that bound (an ask for ~ itself, or ~/Library), the
+  // THE HARNESS-TREE RUNG (the r12/r14/r15 receipts, 2026-11-01): a
+  // worker's whole world sits under the harness home (the lens panes'
+  // cwd is <sessions>/<sid>/jobs/<jid>/run/units/<lens>), and the
+  // asks that actually arrive are the harness's OWN territory — a
+  // coarse ANCESTOR (~/.local/share) the roots test can never match,
+  // or a SIBLING inside the job tree (…/jobs/<jid>/jobs) no root
+  // contains. Both fell to the tuned judge, whose coin denied them
+  // ("deny-unneeded") and starved three rounds to pane-reap. The
+  // harness's own tree is not user territory: an ask under
+  // AGENTIC_OS_HOME, or an ancestor of the Job's own roots inside
+  // dirname(AGENTIC_OS_HOME), is allowed without the judge. Outside
+  // that bound (an ask for ~ itself, ~/Library, any user tree) the
   // gray zone keeps its judge.
-  const harnessTree = process.env.AGENTIC_OS_HOME ? resolve(process.env.AGENTIC_OS_HOME, "..") : ""
+  const harnessHome = process.env.AGENTIC_OS_HOME ?? ""
+  const harnessTree = harnessHome ? resolve(harnessHome, "..") : ""
   if (
-    harnessTree &&
-    under(path, harnessTree) &&
-    allowedRoots.some((root) => under(root, path))
+    (harnessHome && under(path, harnessHome)) ||
+    (harnessTree && under(path, harnessTree) && allowedRoots.some((root) => under(root, path)))
   ) {
     return {
       decision: "allow",
       path,
-      message: `granted: ${path} is an ancestor of this Job's own roots and inside the harness tree — territory the Job already lives in.`,
+      message: `granted: ${path} is the harness's own tree (an ask inside AGENTIC_OS_HOME${allowedRoots.some((root) => under(root, path)) ? ", an ancestor of this Job's roots" : ""}) — territory the Job already lives in.`,
     }
   }
   // temp scratch is free OUTSIDE home only — a home planted under the

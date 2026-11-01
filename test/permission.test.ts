@@ -56,7 +56,20 @@ test("THE ANCESTOR RUNG: an ask for an ancestor of the Job's own roots, inside t
       cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles",
     })
     assert.equal(v.decision, "allow")
-    assert.match(v.message, /ancestor of this Job's own roots/)
+    assert.match(v.message, /ancestor of this Job's roots/)
+    // the SIBLING case (the r15 receipt): an ask inside the job's own
+    // tree that no root contains (…/jobs/<jid>/jobs) — with the pane's
+    // NARROW scope (cwd only, the shape the rail actually spawns), the
+    // roots test cannot match a sibling; the harness-tree rung must
+    const narrow = declareScope(["/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles"])
+    const sib = decidePermission({
+      question: "Permission required\n⏎   ┃    ← Access external directory /Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/jobs",
+      scope: narrow,
+      home: "/Users/me/",
+      cwd: "/Users/me/.local/share/agentic-os/sessions/s-1/jobs/j-1/run/units/principles",
+    })
+    assert.equal(sib.decision, "allow")
+    assert.match(sib.message, /harness's own tree/)
     // the BOUND holds: an ask for the home itself (or anything outside
     // the harness tree) is still the gray zone — the ancestor rung
     // must not become a coarse-reads hole
