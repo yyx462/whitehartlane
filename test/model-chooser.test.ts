@@ -39,7 +39,14 @@ test("questions cover exactly the live candidates, with real rates and the cheap
   // ranked the paid rung last: the prompt contradicted the ladder it
   // describes)
   assert.match(q.pick.instructions, /CHEAPEST FIRST/)
-  assert.match(q.pick.instructions, /cheapest one that can carry the work/)
+  // the claim is TRUE now (momentum-2005): the prompt never states a
+  // price ORDER the list doesn't have — it routes the ruling through
+  // each candidate's own rung note
+  assert.match(q.pick.instructions, /CHEAPEST rung whose note says it can carry the work/)
+  assert.ok(
+    !/listed from cheapest to priciest/.test(q.pick.instructions),
+    "the prompt must not claim the candidate list is price-ordered — the list arrives in the policy layers' order",
+  )
   assert.ok(
     !/strongly preferred/.test(q.pick.instructions),
     "the prompt must not call the paid rung preferred while the ladder ranks it last",

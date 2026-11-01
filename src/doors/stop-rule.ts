@@ -69,16 +69,26 @@ export function stopEligibility(history: BlockedLike[][], cfg: StopConfig = DEFA
   const window = history.slice(-cfg.rounds)
   const p0 = window.some((r) => r.some((b) => b.severity === "P0"))
   // per-window-round checks: every round in the window must itself be
-  // quiet (novel ≤ novelMax against ITS predecessor, no stuck)
-  const quiet = window.every((r, i) => {
+  // quiet (novel ≤ novelMax against ITS predecessor, no stuck). The
+  // FAILURES are collected — the why must speak for the decision
+  // (momentum-2001 / principles-5302: a window-blocked history fell
+  // through to "novel 1 > 1", a false statement the ledger recorded
+  // forever beside the owner's override).
+  const windowFailures: string[] = []
+  window.every((r, i) => {
     const before = history[history.length - window.length + i - 1]
-    if (!before) return false // the window needs a predecessor to be novel against
+    if (!before) {
+      windowFailures.push(`the window reaches past the first round — ${cfg.rounds} quiet rounds need ${cfg.rounds + 1} of history`)
+      return false
+    }
     const a = clustersOf(r), b = clustersOf(before)
     const n = b.length ? a.filter((x) => !b.includes(x)).length : a.length
     const s = b.length ? a.filter((x) => b.includes(x)) : []
-    return n <= cfg.novelMax && s.length === 0
+    if (s.length > 0) windowFailures.push(`an earlier window round carries ${s.length} stuck bucket(s) (${s.join(", ")})`)
+    else if (n > cfg.novelMax) windowFailures.push(`an earlier window round brought ${n} novel bucket(s) > ${cfg.novelMax}`)
+    return s.length === 0 && n <= cfg.novelMax
   })
-  const eligible = rounds >= cfg.minRounds && !p0 && novel <= cfg.novelMax && stuck.length === 0 && quiet
+  const eligible = rounds >= cfg.minRounds && !p0 && novel <= cfg.novelMax && stuck.length === 0 && windowFailures.length === 0
   const why = eligible
     ? `eligible — novel ${novel} ≤ ${cfg.novelMax} for ${cfg.rounds} consecutive round(s), no P0, no stuck bucket, ${rounds} round(s) of good faith`
     : rounds < cfg.minRounds
@@ -87,7 +97,9 @@ export function stopEligibility(history: BlockedLike[][], cfg: StopConfig = DEFA
         ? `not eligible — a P0 sits in the last ${cfg.rounds} round(s)`
         : stuck.length > 0
           ? `not eligible — ${stuck.length} stuck bucket(s) (${stuck.join(", ")}): a finding persisting across rounds is not diminishing returns, it is unfinished work`
-          : `not eligible — novel ${novel} > ${cfg.novelMax} (new mechanisms keep appearing; the loop is not diminishing)`
+          : windowFailures.length > 0
+            ? `not eligible — ${windowFailures[0]}`
+            : `not eligible — novel ${novel} > ${cfg.novelMax} (new mechanisms keep appearing; the loop is not diminishing)`
   return { rounds, novel, stuck, p0, eligible, why }
 }
 

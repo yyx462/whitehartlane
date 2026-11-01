@@ -47,13 +47,14 @@ case "$verdict" in
       # local ref is the proof we always have; the PR's remote head is
       # the stronger one when gh answers.
       judged_head="$HEAD_SHA"
-      # NO WITNESS, NO MERGE (tests-10301): a HEAD_BRANCH that is
-      # empty means the door could not name the reviewed branch — the
-      # local arm cannot verify, so the PR's remote head becomes the
-      # ONLY witness; without a PR number there is nothing to verify
-      # against at all, and the accept refuses rather than merge a
+      # NO WITNESS, NO MERGE (tests-10301 / tests-20002): a HEAD_BRANCH
+      # that is empty — or a legacy config holding the judged SHA
+      # itself, which answers its own question forever — means the
+      # door could not name the reviewed branch; the local arm cannot
+      # verify, so the PR's remote head becomes the ONLY witness, and
+      # without a PR number the accept refuses rather than merge a
       # branch nobody can prove still holds the judged bytes.
-      if [ -z "${HEAD_BRANCH:-}" ] && [ -z "${PR_NUM:-}" ]; then
+      if { [ -z "${HEAD_BRANCH:-}" ] || printf '%s' "${HEAD_BRANCH:-}" | grep -qE '^[0-9a-f]{7,40}$'; } && [ -z "${PR_NUM:-}" ]; then
         echo "merge: the reviewed branch cannot be named (no HEAD_BRANCH) and no PR number exists to verify the remote head — unreviewed bytes would ride the merge; re-run the review naming the branch" >&2
         exit 1
       fi
@@ -69,7 +70,15 @@ case "$verdict" in
         # the echo, and a branch name compared like a sha refused an
         # honest merge. --verify prints nothing on failure.
         branch_head="$(git -C "$REPO" rev-parse --verify "$HEAD_BRANCH^{commit}" 2>/dev/null || true)"
-        if [ -n "$branch_head" ] && [ "$branch_head" != "$judged_head" ]; then
+        # UNREADABLE IS DRIFT (momentum-2002 / tests-20001): a named
+        # branch that cannot be read was deleted, renamed or pruned
+        # between the review and the merge — skipping the comparison
+        # here handed MERGE_CMD a merge with NO local witness at all.
+        if [ -z "$branch_head" ]; then
+          echo "merge: $HEAD_BRANCH cannot be read (deleted? renamed? pruned?) since the review — the reviewed branch no longer exists locally; re-run the review on the new head" >&2
+          exit 1
+        fi
+        if [ "$branch_head" != "$judged_head" ]; then
           echo "merge: $HEAD_BRANCH moved ($judged_head -> $branch_head) since the review — unreviewed bytes would ride the merge; re-run the review on the new head" >&2
           exit 1
         fi

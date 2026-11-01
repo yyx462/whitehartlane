@@ -815,13 +815,22 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       return
     }
     {
+      // UNREADABLE IS DRIFT HERE TOO (momentum-2003): skipping the
+      // comparison when the base cannot be read let the override
+      // merge proceed on an unverifiable base — the fail-safe law is
+      // one-directional: unverified is unmerged.
       let trunkNow = ""
       try {
         trunkNow = execFileSync("git", ["-C", repoAbs, "rev-parse", `${baseRef}^{commit}`], { encoding: "utf8" }).trim()
       } catch {
         trunkNow = ""
       }
-      if (trunkNow && trunkNow !== verdictBase) {
+      if (!trunkNow) {
+        console.error(`ship: base ${baseRef} cannot be read — the base's drift cannot be verified, and unverified is unmerged; re-review on a readable base`)
+        process.exitCode = 1
+        return
+      }
+      if (trunkNow !== verdictBase) {
         console.error(`ship: base ${baseRef} moved (${verdictBase.slice(0, 12)} -> ${trunkNow.slice(0, 12)}) since the review — unreviewed commits would ride the override merge (merge.sh refuses exactly this); re-review on the new base`)
         process.exitCode = 1
         return

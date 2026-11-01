@@ -94,15 +94,14 @@ export function chooserQuestions(remaining: string[]): Record<string, unknown> {
       type: "choice",
       instructions:
         "Which model should run `member`'s next stretch of work, given `work` and `fault`? " +
-        // CHEAPEST FIRST (the owner's ruling, 2026-10-30): the judge
-        // reads the ladder in the order the catalog declares it, so the
-        // prompt must say the same thing the catalog says — the
-        // cheapest candidate that can carry the work wins, and the
-        // paid rungs are escalation (tests-5: a prompt that still
-        // calls the plan "strongly preferred" ranks the paid rung
-        // first while the catalog ranks it last).
-        "The ladder is CHEAPEST FIRST: the candidates are listed from cheapest to priciest — " +
-        "pick the cheapest one that can carry the work to completion. " +
+        // CHEAPEST FIRST (the owner's ruling, 2026-10-30) — stated as
+        // TRUE facts only (momentum-2005): the candidate LIST arrives
+        // in the policy layers' order, which is not price order, so
+        // the prompt must never claim it is. Each candidate's note
+        // names its RUNG; the ruling rides the notes: the cheap rung
+        // wins whenever it can carry the work.
+        "The ladder is CHEAPEST FIRST: each candidate's note names its rung (the cheap rung, the plan-covered rungs, the paid rung) — " +
+        "pick the CHEAPEST rung whose note says it can carry the work to completion. " +
         "The operator holds a GLM coding plan, so the GLM rungs are plan-covered: use them when the cheaper rung cannot carry the work. " +
         "Escalate to grok-4.7 only when no cheaper candidate is live (`fault`, candidate notes) or the work clearly exceeds it. " +
         "When `fault` shows a model just failed, do not pick that model or anything its notes say shares the same cap.",

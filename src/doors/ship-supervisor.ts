@@ -108,12 +108,14 @@ export function spawnSupervisor(opts: {
       `OUT=${shq(outDir)}`,
       `PR=${shq(opts.pr ?? "")}`,
       `REPO=${shq(opts.repo ?? "")}`,
-      // the MINTING door runs the levy (momentum-907): a bare "whl"
-      // on PATH may be an OLD install that knows none of this
-      // hand-down (--roster, --pr, the pinned shas) — the reviewed
-      // repo's own bin comes first, so the door that minted the
-      // commission is the door that runs it
-      `export PATH="${opts.repo ? `${opts.repo}/bin:` : ""}$PATH"`,
+      // NO PATH REWRITE (momentum-2004 / principles-5301): the old
+      // prepend put the REVIEWED repo's bin/ ahead of the harness's
+      // own tools — a PR that ships bin/opencode, bin/gh or bin/notify
+      // became the agent that hears its own review, or the channel
+      // that reports it. The levy needs no PATH at all: the brief's
+      // levy command invokes the MINTING DOOR by absolute path
+      // (momentum-907's law, kept — a bare `whl` on PATH may be an old
+      // install), and the watcher's own gh/notify resolve normally.
       `"$BIN" run --standalone "$BRIEF" >>"$LOG" 2>&1 &`,
       `AGENT=$!`,
       // the JOB's run dir — the seat link points into it (the verdict
