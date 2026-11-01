@@ -159,6 +159,7 @@ const skip = new Set([...OUTPUT_SEATS, ...exclude])
         }
       }
     }
+    return contributed
   }
   walk(dir, "")
   return h.digest("hex").slice(0, 12)

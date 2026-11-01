@@ -34,8 +34,11 @@ const history = [...prior.map((r) => r.buckets ?? []), clustersOf(curBlocked)]
 // twin must too — an OR over every hand-down round let a P0 that is
 // fixed and outside the window veto the banner forever while the
 // door said eligible. Window = the current round + the last
-// (cfg.rounds - 1) hand-down entries.
-const p0 = curBlocked.some((b) => b.severity === "P0") || prior.slice(-(cfg.rounds - 1)).some((r) => r.p0 === true)
+// (cfg.rounds - 1) hand-down entries. slice(-0) is slice(0) — the
+// WHOLE array (the principles-5202 receipt) — so the window is taken
+// by START INDEX, never a negative slice.
+const winStart = Math.max(0, prior.length - (cfg.rounds - 1))
+const p0 = curBlocked.some((b) => b.severity === "P0") || prior.slice(winStart).some((r) => r.p0 === true)
 const rounds = history.length
 const cur = history[rounds - 1] ?? []
 const prv = history[rounds - 2] ?? []

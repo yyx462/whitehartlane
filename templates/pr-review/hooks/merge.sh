@@ -25,15 +25,15 @@ outcome() { # $1 = accept|reject|refused
   printf '%s\n' "$payload" >"$seat" 2>/dev/null || true
 }
 
-# EVERY exit writes the seat (momentum-909): the nine refusal paths
-# left the watcher's seat empty and the PR heard "unknown" — the
-# commission's end is a FACT, whatever the end was. (The trap proper
-# is set inside the verdict case — that is the subshell that runs it.)
-node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
-  | { read -r verdict
-# the outcome trap lives INSIDE this subshell: the case runs on the
-# pipeline's right side, so a trap set outside would see the parent's
-# value ("refused") and write the WRONG outcome (momentum-909's control)
+# EVERY exit writes the seat (momentum-909 / tests-10201): the nine
+# refusal paths left the watcher's seat empty and the PR heard
+# "unknown" — the commission's end is a FACT, whatever the end was.
+# The trap lives in the MAIN shell now: the verdict read is a command
+# substitution (no pipeline subshell — a pipeline's right side is a
+# subshell whose trap could never cover the exits BEFORE it, and the
+# unreadable-verdict exit happens FIRST), the case sets the outcome,
+# and the one EXIT trap sees every arm's value.
+verdict="$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" 2>/dev/null || true)"
 MERGE_OUTCOME=refused
 trap 'outcome "$MERGE_OUTCOME"' EXIT
 case "$verdict" in
@@ -168,4 +168,4 @@ case "$verdict" in
     echo "merge: verdict.json says '$verdict' — refuse, never guess" >&2
     exit 1
     ;;
-esac; }
+esac

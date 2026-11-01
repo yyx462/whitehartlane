@@ -613,12 +613,15 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // across the gate's own jev window
         base: gateBaseSha ?? val("base"),
         head: gateHeadSha ?? val("head"),
+        // the NAMES the operator typed ride BESIDE the pinned shas
+        // (momentum-111 / principles-5200 / principles-5203): the sha
+        // is the single "which bytes" answer, the NAME is the single
+        // "which branch" answer — deriving the branch from the sha is
+        // an alphabetical guess that names a branch nobody named
+        baseBranch: val("base"),
+        headBranch: val("head-branch") ?? val("head"),
         title: val("title"),
         author: val("author"),
-        // the branch NAME and the PR number travel with the review
-        // (the head-drift guard and the gh arm need them; a pinned
-        // sha alone answers its own question forever)
-        headBranch: val("head-branch"),
         prNum: val("pr"),
         mergeCmd: val("merge-cmd"),
         traceDir: val("trace-dir"),
