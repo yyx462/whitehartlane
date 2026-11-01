@@ -3,10 +3,41 @@
 # configured merge (MERGE_CMD, or the local default — checkout the base
 # branch and --no-ff the head). Reject: exit 1 with the summary — the
 # chain fails honestly, the report goes red, and the wake carries why.
-# The one place in the review that decides without a mind.
+# The one place in the review that decides without a mind. It is also
+# the last stage, so it owns the DEMATERIALIZATION (2026-10-30, the
+# drift receipt: 69 review jobs left 138 detached registrations in the
+# repo's git metadata — intake materializes, nothing dematerialized,
+# and agentic-os keeps job dirs forever so intake's re-entry prune
+# never fired). The checkouts are regenerable from the SHAs; every
+# other receipt (verdict.json, findings, feedback/, diff.patch) stays.
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
+
+# teardown — runs on EVERY exit (accept, reject, refuse): a rejected
+# review leaks too. The divide brief's ADOPT instruction cites repro
+# paths under test/review/, so they ride out to data/review/repros/
+# before the checkout goes — feedback stays resolvable. The order is
+# intake's own re-entry law inverted: rm the dirs FIRST, prune AFTER
+# (prune before rm leaves the metadata and the next `worktree add`
+# dies with 128). Teardown is INFRA: every step is guarded, it never
+# changes the verdict, and a teardown failure is stderr noise, never
+# a failed review.
+teardown() {
+  if [ -d "$prog/data/review/head/test/review" ]; then
+    rm -rf "$prog/data/review/repros"
+    mkdir -p "$prog/data/review/repros/test"
+    cp -R "$prog/data/review/head/test/review" "$prog/data/review/repros/test/review" 2>/dev/null || true
+  fi
+  for side in head base; do
+    if [ -e "$prog/data/review/$side" ]; then
+      rm -rf "$prog/data/review/$side"
+    fi
+  done
+  git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+}
+trap teardown EXIT
+
 node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.verdict)' "$prog/data/review/verdict.json" \
   | { read -r verdict
 case "$verdict" in
