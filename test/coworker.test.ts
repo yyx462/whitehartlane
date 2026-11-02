@@ -138,6 +138,16 @@ test("memberProtocol sends members through THE SEND TOOL — own outbox, peers o
   assert.match(text, /your identity is your\nsandbox folder/)
 })
 
+test("memberProtocol carries the booking marker (#266): the first user message contains the briefs dir the resolver expects", () => {
+  const taskDir = "/sessions/s-cbf439/jobs/j-3dea37/run"
+  // exactly what coworker-run.ts composes into the brief file — and the
+  // brief file's content IS the first user message
+  const first = "the author's brief\n" + memberProtocol("critic", ["actor"], taskDir)
+  // rail.ts's three booking seats derive marker = dirname(briefPath) = <taskDir>/briefs
+  const marker = join(taskDir, "briefs")
+  assert.ok(first.includes(marker), "writer≡reader: the resolver's marker must appear in the message the writer writes — before #266 it never could, no member booked, and the birth judge killed live working members")
+})
+
 test("the relay plan delivers to the named pane only, then honors stop and cap", () => {
   const messages = [
     { file: "0001-backend.json", seq: 1, from: "backend", to: "frontend", type: "note", body: "a" },
