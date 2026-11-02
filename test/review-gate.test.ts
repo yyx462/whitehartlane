@@ -426,3 +426,30 @@ test("appendLedgerRow: one JSON line per decision", () => {
   assert.equal(lines.length, 1)
   assert.equal(JSON.parse(lines[0]).klass, "test_only")
 })
+
+test("the caller's pin rides the parse law: empty is no pin, duplicates dedupe, order normalizes (r267 tests-2/tests-4)", () => {
+  // reversed + duplicated valid roster — one set, one universe
+  const decision = decideGate(mkFeatures(), { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 }, STATS0, 0.99, BANDS.medium, ["questions", "principles", "tests", "principles"])
+  assert.deepEqual(decision.universe, ["principles", "tests", "questions"], "LENSES order wins, duplicates dedupe — the ceiling is a set with a canonical spelling")
+  assert.deepEqual(decision.roster, ["principles", "tests", "questions"])
+})
+
+test("an empty caller pin is no pin — the universe stays all four (r267 tests-1, at runGate's own seat)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-emptypin-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "pin.jsonl")
+  const stub = jevStub(tmp, { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    // jev down + roster: [] — the degenerate pin must not coalesce to a
+    // zero-lens universe; the fail-safe fills to ALL FOUR
+    const { decision } = runGate(repo, "main", "feat", { roster: [], jev: false })
+    assert.equal(decision.universe, undefined, "an empty pin reads as no ceiling")
+    assert.deepEqual(decision.roster, [...LENSES], "the fail-safe fills to all four — never to nothing")
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})

@@ -409,6 +409,16 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         gateHeadSha = g.features.headSha
         gateBaseSha = g.features.baseSha
         console.log(gateReceipt(g.features, g.decision))
+        // a contract typo must never shrink the universe (r267
+        // momentum-2/principles-1) — and the refusal must print on
+        // EVERY path (r267 principles-2: it sat below the unaudited
+        // skip's return and went silent exactly there). Unknown roster
+        // ids are IGNORED (all four lenses are the ceiling); the parse
+        // itself already fell back to the full universe.
+        const cfgUnknown = shipConfigOf(resolve(positional), { base: g.features.baseSha }).rosterUnknown
+        if (cfgUnknown && cfgUnknown.length > 0) {
+          console.error(`gate: review-gate.toml roster carries unknown lens ids (${cfgUnknown.join(",")}) — ignored, ALL FOUR lenses are the ceiling. A typo must never shrink the universe; fix the contract`)
+        }
         // a skip STANDS only when unaudited (gate-r1 momentum-2: the
         // ledger records the judgment; the ESCALATION still levies)
         if (g.decision.action === "skip" && !g.decision.audit) {
@@ -439,14 +449,6 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         // record lying about the run. Every arm with a decision's
         // roster in hand hands it down.
         if ((g.decision.action === "review" || g.decision.audit) && g.decision.roster.length > 0) gateRoster = g.decision.roster
-        // a contract typo must never shrink the universe (r267
-        // momentum-2/principles-1): unknown roster ids are IGNORED (all
-        // four lenses are the ceiling) and the refusal is LOUD — the
-        // parse itself already falls back to the full universe
-        const cfgUnknown = shipConfigOf(resolve(positional), { base: g.features.baseSha }).rosterUnknown
-        if (cfgUnknown && cfgUnknown.length > 0) {
-          console.error(`gate: review-gate.toml roster carries unknown lens ids (${cfgUnknown.join(",")}) — ignored, ALL FOUR lenses are the ceiling. A typo must never shrink the universe; fix the contract`)
-        }
       } catch (err) {
         // the gate must never BLOCK a review (that would be a new
         // failure mode in front of the rail) — a broken gate reviews.

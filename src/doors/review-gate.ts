@@ -383,6 +383,18 @@ export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness
 // the door's loud line. Empty result → no contract — never an empty
 // universe, which would be a silent always-skip.
 function parseRosterKey(v: unknown): { roster?: Lens[]; unknown?: string[] } {
+  // a STRING value is the CLI's csv spelling in the toml's seat
+  // (roster = "principles,tests" — r267 principles-1/tests-3): the
+  // owner's INTENT is honored (valid ids become the ceiling — the
+  // fail-safe fills to what they wrote, never past it) and the
+  // SPELLING is refused loudly (the raw string surfaces as unknown —
+  // the door's line fires; refuse, never vanish). A string with any
+  // invalid id voids the key like the array arm.
+  if (typeof v === "string") {
+    const ids = v.split(",").map((s) => s.trim()).filter(Boolean)
+    const allValid = ids.length > 0 && ids.every((i) => LENSES.includes(i as Lens))
+    return { unknown: [v], roster: allValid ? LENSES.filter((l) => ids.includes(l)) : undefined }
+  }
   if (!Array.isArray(v)) return {}
   const unknownIds = v.filter((x) => typeof x !== "string" || !LENSES.includes(x as Lens)).map((x) => String(x))
   if (unknownIds.length > 0) return { unknown: unknownIds }
@@ -478,6 +490,12 @@ export function decideGate(
   // "no momentum" has not become uncertain about that
   universe: readonly Lens[] = LENSES,
 ): GateDecision {
+  // THE SET LAW (r267 tests-2): the universe is a SET with a canonical
+  // spelling — deduped, LENSES-ordered — normalized HERE, at the one
+  // seat every arm drinks from, so a duplicate-inflated caller list
+  // can never read as "no ceiling" while it drops a lens
+  const uniq = [...new Set(universe)] as Lens[]
+  universe = LENSES.filter((l) => uniq.includes(l))
   // present on the decision only when the ceiling actually caps —
   // absent means all four, the shape readers already know
   const capped: Pick<GateDecision, "universe"> | {} = universe.length < LENSES.length ? { universe: [...universe] } : {}
@@ -498,7 +516,7 @@ export function decideGate(
     // dead code where the manual promises "loosens as greens
     // accumulate". The ledger now tells the truth; the levy (bin)
     // reads action + audit.
-    return { action: "skip", roster: [], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong, no judgment to audit" }
+    return { action: "skip", roster: [], ...capped, ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "docs-only diff — no code to prove wrong, no judgment to audit" }
   }
   // strict band's fact-beats-probability rule: a file with prior
   // PROVEN findings reviews in full whatever jev thinks of the diff
@@ -539,8 +557,13 @@ export function runGate(
   // the universe rides the SAME trusted side (the roster's own law in
   // the ShipConfig comment): a PR must not be able to add the file
   // that shrinks the ceiling reviewing it. opts.roster is the caller's
-  // pin (tests, --roster's seat upstream) — it outranks the file.
-  const universe = opts.roster ?? cfg.roster ?? LENSES
+  // pin (tests, --roster's seat upstream) — it outranks the file, and
+  // it rides the SAME parse law (r267 tests-1/tests-2): an empty pin
+  // is no pin (never a zero-lens review), duplicates dedupe, order
+  // normalizes to LENSES — a pin and a file that declare the same
+  // set cannot read as different universes.
+  const pin = parseRosterKey(opts.roster).roster
+  const universe = pin ?? cfg.roster ?? LENSES
   const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass, band)
   const ps = opts.jev === false || features.klass === "docs_only" ? null : jevLenses(features, stats)
   const decision = decideGate(features, ps, stats, Math.random(), band, universe)
