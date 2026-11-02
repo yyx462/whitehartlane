@@ -262,16 +262,20 @@ case "$verdict" in
     fi
     # THE REFLECTION ASK (the owner's ruling, 2026-11-02): a loop that
     # keeps rejecting has a MECHANISM problem more often than a code
-    # problem. Three or more rounds with the stop criterion not holding,
-    # and the rail itself asks the fixer the owner's question — and the
-    # answer must change the MECHANISM (a law appended to AGENTS.md, a
-    # lens-brief edit, a gate change), not just fix findings: the next
-    # round's lenses read the repo's own direction docs, so an appended
-    # law is READ BACK by the reviewers themselves.
+    # problem. CADENCE (the owner's numbers, 2026-11-02): silent
+    # through round 4 — good faith first, findings get fixed; from
+    # round 5 it asks every THIRD round (5, 8, 11…) — asking every
+    # round would put a mechanism change in every push, which is its
+    # own overfitting; never when eligible (the banner owns that
+    # round). The answer must change the MECHANISM (a law appended to
+    # AGENTS.md, a lens-brief edit, a gate change), not just fix
+    # findings: the next round's lenses read the repo's own direction
+    # docs, so an appended law is READ BACK by the reviewers
+    # themselves.
     if [ -f "$prog/data/review/stop.json" ]; then
-      reflect="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.exit(s.rounds>=3 && !s.eligible ? 0 : 1)' "$prog/data/review/stop.json" 2>/dev/null && echo ask || true)"
+      reflect="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.exit(s.rounds>=5 && (s.rounds-5)%3===0 && !s.eligible ? 0 : 1)' "$prog/data/review/stop.json" 2>/dev/null && echo ask || true)"
       if [ -n "$reflect" ]; then
-        echo "merge: THE REFLECTION ASK — three or more rounds and the stop criterion still does not hold (see data/review/stop.json): WHY is this loop not converging? Answer by changing the MECHANISM — append a law to AGENTS.md, edit the lens briefs, or fix the gate. A finding-fix alone does not answer it." >&2
+        echo "merge: THE REFLECTION ASK — round \$(node -e 'process.stdout.write(String(JSON.parse(require(\"node:fs\").readFileSync(process.argv[1],\"utf8\")).rounds))' "$prog/data/review/stop.json") and the stop criterion still does not hold (asked per the cadence: from round 5, every third round; see data/review/stop.json): WHY is this loop not converging? Answer by changing the MECHANISM — append a law to AGENTS.md, edit the lens briefs, or fix the gate. A finding-fix alone does not answer it." >&2
       fi
     fi
     exit 1
