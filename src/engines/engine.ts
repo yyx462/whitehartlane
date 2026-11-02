@@ -82,8 +82,12 @@ export function fanOutEngine(
         `continue: ${resumes.size} parked unit(s) resume from booked panes (${[...resumes.values()].filter((s) => s.session_id).length} with a session id)`,
       )
     }
-    // deadline_ms on [workflow] is the run's hard ceiling (default 2h);
-    // canary: env (0/1) wins for a run, then [workflow] canary, then on.
+    // deadline_ms on [workflow] is the per-run OVERRIDE seat (ms; this
+    // file's own read). The program's own cliff is deadline_s (s) —
+    // read by the ORCHESTRATOR's manifest arm (loadManifest carries
+    // it; the r25 receipt: a key the loader strips is a key that does
+    // not exist, and a 30-minute cliff ran 95 minutes). Canary below:
+    // env (0/1) wins for a run, then [workflow] canary, then on.
     let deadlineMs: number | undefined
     let wf: { deadline_ms?: number; canary?: boolean } | undefined
     try {
