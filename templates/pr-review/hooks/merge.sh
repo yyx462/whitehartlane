@@ -260,6 +260,20 @@ case "$verdict" in
         echo "$stop_banner" >&2
       fi
     fi
+    # THE REFLECTION ASK (the owner's ruling, 2026-11-02): a loop that
+    # keeps rejecting has a MECHANISM problem more often than a code
+    # problem. Three or more rounds with the stop criterion not holding,
+    # and the rail itself asks the fixer the owner's question — and the
+    # answer must change the MECHANISM (a law appended to AGENTS.md, a
+    # lens-brief edit, a gate change), not just fix findings: the next
+    # round's lenses read the repo's own direction docs, so an appended
+    # law is READ BACK by the reviewers themselves.
+    if [ -f "$prog/data/review/stop.json" ]; then
+      reflect="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.exit(s.rounds>=3 && !s.eligible ? 0 : 1)' "$prog/data/review/stop.json" 2>/dev/null && echo ask || true)"
+      if [ -n "$reflect" ]; then
+        echo "merge: THE REFLECTION ASK — three or more rounds and the stop criterion still does not hold (see data/review/stop.json): WHY is this loop not converging? Answer by changing the MECHANISM — append a law to AGENTS.md, edit the lens briefs, or fix the gate. A finding-fix alone does not answer it." >&2
+      fi
+    fi
     exit 1
     ;;
   *)
