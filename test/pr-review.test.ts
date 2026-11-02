@@ -435,9 +435,26 @@ test("merge: the cold verdict — accept merges, reject exits 1 honestly", () =>
   const head = execSync("git rev-parse feat", { cwd: repo, encoding: "utf8" }).trim()
   const p = progFixture((x) => {
     writeFileSync(join(x.dir, "data", "review", "config.sh"), `REPO='${repo}'\nBASE_BRANCH='main'\nBASE_SHA='${base}'\nHEAD_BRANCH='feat'\nHEAD_SHA='${head}'\nTITLE='t'\nAUTHOR=''\nMERGE_CMD=''\n`)
-    writeFileSync(join(x.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: "reject", blocked: [{ id: "x-1" }], advisory: [] }))
   })
+  // the dematerialization law (2026-10-30, the drift receipt: 69 review
+  // jobs × 2 detached checkouts leaked into the repo's git metadata —
+  // intake materializes, merge owns taking it down). Bite on REAL
+  // registrations: intake materializes, a repro rides in the checkout.
+  const intake = hook("intake.sh", p.dir)
+  assert.equal(intake.code, 0, intake.out)
+  writeFileSync(join(p.dir, "data", "review", "head", "test", "review", "principles-1.test.ts"), "t")
+  const detachedCount = () =>
+    execSync(`git worktree list --porcelain`, { cwd: repo, encoding: "utf8" })
+      .split("\n").filter((l) => l.startsWith("worktree ")).length - 1
+  assert.equal(detachedCount(), 2, "intake registered both detached checkouts")
+  writeFileSync(join(p.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: "reject", blocked: [{ id: "x-1" }], advisory: [] }))
   assert.equal(hook("merge.sh", p.dir).code, 1)
+  // teardown ran on the REJECT path: checkouts dematerialized, no
+  // registration leaks, repros ride out where feedback can still reach
+  assert.ok(!existsSync(p.head), "head checkout dematerialized on reject")
+  assert.ok(!existsSync(p.base), "base checkout dematerialized on reject")
+  assert.equal(detachedCount(), 0, "no detached worktree registrations leak")
+  assert.ok(existsSync(join(p.dir, "data", "review", "repros", "test", "review", "principles-1.test.ts")), "repros preserved for the ADOPT flow")
   writeFileSync(join(p.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: "accept", blocked: [], advisory: [] }))
   const ok = hook("merge.sh", p.dir)
   assert.equal(ok.code, 0, ok.out)
