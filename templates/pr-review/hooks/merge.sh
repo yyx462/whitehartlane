@@ -57,8 +57,15 @@ case "$verdict" in
           span_f="${span_pair%%:*}"; span_h="${span_pair##*:}"
           # starts at or before the frontier…
           if [ "$span_f" != "$span_frontier" ] && ! git -C "$REPO" merge-base --is-ancestor "$span_f" "$span_frontier" 2>/dev/null; then continue; fi
-          # …and reaches past it
-          if git -C "$REPO" merge-base --is-ancestor "$span_h" "$span_frontier" 2>/dev/null; then continue; fi
+          # …and reaches STRICTLY past it, forward only (momentum-3100
+          # / questions-6, r23): the head must DESCEND from the
+          # frontier — "not an ancestor of it" is also true of a SIDE
+          # commit, and the fold could step backward onto an earlier
+          # round's head; and a head EQUAL to the frontier is a no-op
+          # advance that re-arms progress forever — the fold spins and
+          # the accept hangs (the r23 receipt: every tiling merge
+          # timed out).
+          if [ "$span_h" = "$span_frontier" ] || ! git -C "$REPO" merge-base --is-ancestor "$span_frontier" "$span_h" 2>/dev/null; then continue; fi
           span_frontier="$span_h"; span_progress=1
         done
       done
@@ -67,31 +74,53 @@ case "$verdict" in
         exit 1
       fi
     fi
-    # THE UNANSWERED-P0 CHECK (momentum-3002, 2026-11-02): the chain
-    # proves READS; this proves ANSWERS. STOP_HISTORY carries each
-    # prior round's buckets and p0 flags; this verdict's judgedFrom
-    # names where its own reading began. A p0-flagged bucket's FILE
-    # untouched since that point was never fixed and never overruled —
-    # an accept that speaks only for its own span cannot carry it.
-    # (Fixed = the file changed after the reading began; overruled =
-    # the owner's override door, which does not pass through this arm.)
+    # THE UNANSWERED-P0 CHECK (momentum-3002, 2026-11-02; window +
+    # pathspec corrected r23): the chain proves READS; this proves
+    # ANSWERS. Three laws: (1) a P0's era is its FLAGGING round's head
+    # — history index i pairs with judged span i (both oldest-first;
+    # the spans carry one extra, the current round) — NOT this
+    # verdict's reading start, or a fix that landed before the accept
+    # sits outside the delta window and every later round refuses
+    # (momentum-3102); (2) bucket keys are BASENAMES (the stop rule's
+    # cluster keys) and git pathspecs are repo-root-relative, so a
+    # basename is resolved against the files this PR touched before
+    # asking git anything (principles-3001 / questions-1 /
+    # tests-10508 — every subdirectory finding read as 'unchanged');
+    # (3) unchanged since its flagging round = unanswered — fix it or
+    # overrule (overruled = the owner's override door, which does not
+    # pass through this arm).
     if [ -n "${STOP_HISTORY:-}" ]; then
-      p0_files="$(node -e '
-        const h = JSON.parse(process.argv[1])
-        const files = new Set()
-        for (const round of h) if (round.p0) for (const b of round.buckets) files.add(b.split(":")[0])
-        console.log([...files].join(" "))' "$STOP_HISTORY" 2>/dev/null || true)"
-      # where THIS verdict's reading began — the verdict's own
-      # judgedFrom, falling back to the trunk base (pre-delta verdicts
-      # read the full span)
-      p0_from="$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.judgedFrom || process.env.BASE_SHA || "")' "$prog/data/review/verdict.json" 2>/dev/null || true)"
-      if [ -n "$p0_from" ]; then
-        for p0_file in $p0_files; do
-          if ! git -C "$REPO" diff --quiet "$p0_from" "$judged_head" -- "$p0_file" 2>/dev/null; then continue; fi
-          echo "merge: an UNANSWERED P0 rides the merge — $p0_file was P0-flagged by a prior round and its bytes are unchanged since this reading began ($p0_from); fix it or overrule" >&2
-          exit 1
-        done
-      fi
+      p0_from_default="$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.judgedFrom || process.env.BASE_SHA || "")' "$prog/data/review/verdict.json" 2>/dev/null || true)"
+      p0_pairs="$(node -e '
+        const hist = JSON.parse(process.argv[1])
+        const spans = (process.argv[2] || "").split(" ").filter(Boolean).map(p => p.split(":"))
+        const judged = process.argv[3] || ""
+        const out = []
+        hist.forEach((r, i) => {
+          if (!r.p0) return
+          const sp = spans[i]
+          // the flagging head is the head of the round that flagged
+          // it; a history index whose span IS the current round (a
+          // hand-down of priors without their own spans, the
+          // tests-10508 shape) falls to that span START — the era
+          // still opens before the flag.
+          let head = ""
+          if (sp) head = sp[1] === judged ? sp[0] : sp[1]
+          for (const b of r.buckets) out.push(i + " " + b.split(":")[0] + " " + head)
+        })
+        console.log(out.join("\n"))' "$STOP_HISTORY" "${JUDGED_SPANS:-}" "$judged_head" 2>/dev/null || true)"
+      while read -r p0_round p0_base p0_head; do
+        [ -n "$p0_base" ] || continue
+        p0_esc="$(printf '%s' "$p0_base" | sed 's/[.[\*^$()+?{|]/\\&/g')"
+        p0_file="$(git -C "$REPO" diff --name-only "$BASE_SHA" "$judged_head" 2>/dev/null | grep -E "(^|/)$p0_esc$" | head -1 || true)"
+        p0_head="${p0_head:-$p0_from_default}"
+        [ -n "$p0_file" ] && [ -n "$p0_head" ] || continue
+        if ! git -C "$REPO" diff --quiet "$p0_head" "$judged_head" -- "$p0_file" 2>/dev/null; then continue; fi
+        echo "merge: an UNANSWERED P0 rides the merge — $p0_file was P0-flagged by round $((p0_round + 1)) and its bytes are unchanged since ${p0_head:0:12}; fix it or overrule" >&2
+        exit 1
+      done <<EOF
+$p0_pairs
+EOF
     fi
     if [ -n "${MERGE_CMD:-}" ]; then
       # THE HEAD-DRIFT GUARD (momentum-902, the base twin): the
