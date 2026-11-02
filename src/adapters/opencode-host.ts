@@ -143,20 +143,27 @@ export class OpenCodeHost implements AgentHost {
       // its scale is its OWN (the start loop's retries()/backoffBase()
       // clamp to a single attempt under node:test, which silently
       // disarmed the grace reprompt — an env knob still tunes it).
-      // Delivered here, or the birth FAILS HONESTLY: 'ok'/'prompted'
-      // must mean delivered on every path (the held shape carries no
-      // birth brief — its brief rides the first relay, which retries
-      // with the brief at the engine seat).
-      const briefTriesRaw = Number(process.env.AGENTIC_OS_BRIEF_TRIES ?? "")
-      const briefTries = Number.isInteger(briefTriesRaw) && briefTriesRaw >= 1 ? briefTriesRaw : 3
-      const briefPauseRaw = Number(process.env.AGENTIC_OS_BRIEF_BACKOFF_MS ?? "")
-      const briefPauseMs = Number.isFinite(briefPauseRaw) && briefPauseRaw >= 0 ? briefPauseRaw : 1_000
+      // The knobs parse with backoffBase's OWN guard law (r269
+      // momentum-1/principles-1/tests-1): unset/empty must mean the
+      // production default, NEVER the 0 that Number("") produces —
+      // and the pause rides the START LOOP'S OWN scale (backoffMs on
+      // a 5_000 base, growing): a brownout the start guard survives
+      // must not retire a birth whose agent already started (INV-3,
+      // momentum-1: "the same pause scale as agent start"). Delivered
+      // here, or the birth FAILS HONESTLY: 'ok'/'prompted' must mean
+      // delivered on every path (the held shape carries no birth
+      // brief — its brief rides the first relay, which retries with
+      // the brief at the engine seat).
+      const briefTriesRaw = process.env.AGENTIC_OS_BRIEF_TRIES
+      const briefTries = briefTriesRaw !== undefined && briefTriesRaw !== "" && Number.isInteger(Number(briefTriesRaw)) && Number(briefTriesRaw) >= 1 ? Number(briefTriesRaw) : 3
+      const briefPauseRaw = process.env.AGENTIC_OS_BRIEF_BACKOFF_MS
+      const briefPauseBase = briefPauseRaw !== undefined && briefPauseRaw !== "" && Number.isFinite(Number(briefPauseRaw)) && Number(briefPauseRaw) >= 0 ? Number(briefPauseRaw) : 5_000
       let prompt: CmdResult | null = null
       for (let attempt = 1; attempt <= briefTries; attempt++) {
         prompt = this.transport.exec("agent", "prompt", label, brief)
         if (prompt.status === 0) break
         this.log(`brief submission failed for ${label} (rc=${prompt.status}, attempt ${attempt}/${briefTries})`)
-        if (attempt < briefTries) sleepSync(briefPauseMs)
+        if (attempt < briefTries) sleepSync(backoffMs(briefPauseBase, attempt))
       }
       if ((prompt?.status ?? 1) !== 0) {
         this.log(`brief submission failed for ${label} after ${briefTries} attempt(s) — birth fails honestly; no half-born member`)
