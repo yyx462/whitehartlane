@@ -103,3 +103,16 @@ bugs, and the receipts named the habits that would have caught each.
   MECHANISM — append a law here, edit the lens briefs, fix the gate.
   A finding-fix alone does not answer it. The lenses read this file:
   a law appended here is read back by the reviewers next round.
+- **ONE SEAM PER PR.** A PR carries one mechanism change; everything
+  else the work uncovers — adjacent features, refactor urges,
+  "while I'm here" fixes — goes to its OWN PR or a ticket, never this
+  one. The receipt: #252 stacked the rail, the gate, the override,
+  the model ladder and the teardown into one branch and 34 review
+  rounds could not converge — every fix changed bytes another lens
+  was still reading, and the diff grew faster than the findings
+  closed. A small diff lets each reviewer hold the whole change in
+  mind and lets the fixer answer findings surgically; delta rounds
+  help, but the cheapest review is the one that never has to re-read
+  you. When mid-PR work uncovers a second seam: park it (issue or
+  branch), keep this diff single, say so in the PR body.
+
