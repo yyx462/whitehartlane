@@ -26,6 +26,13 @@ name = "pr-review"
 spur_id = "pr-review"
 worker_kind = "opencode"
 slots = 4
+# THE ROUND CLIFF (the owner's ruling, 2026-11-02, after r24): 30
+# minutes, down from the orchestrator's 2h default. The healthy
+# lenses finish in ~18 (principles, questions, r24's receipt); the
+# budget law in the preamble makes the lens STOP before the cliff —
+# the cliff exists for the lens that cannot stop itself (r24's
+# momentum: 82 repro drafts, 2.3M tokens, nothing delivered).
+deadline_s = 1800
 canary = false
 # review lenses read large diffs and synthesize marker-silent for
 # long stretches — the 10-minute default stall ladder killed a lens
