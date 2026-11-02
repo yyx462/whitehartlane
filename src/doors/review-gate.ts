@@ -399,12 +399,19 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
   // governs the review of the diff against it.
   const local = (() => {
     const p = join(repo, "review-gate.toml")
-    if (!existsSync(p)) return { auto: false, model: undefined as string | undefined }
+    if (!existsSync(p)) return { auto: false, model: undefined as string | undefined, roster: undefined as Lens[] | undefined, rosterUnknown: undefined as string[] | undefined }
     try {
-      const t = parseToml(readFileSync(p, "utf8")) as { auto?: unknown; model?: unknown }
-      return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined }
+      const t = parseToml(readFileSync(p, "utf8")) as { auto?: unknown; model?: unknown; roster?: unknown }
+      // the LOCAL file's roster rides along for the no-commit reader
+      // (the ship-config probe — r267 momentum-1/principles-1/
+      // questions-1/tests-1): the GATE itself always reads the BASE
+      // commit below, so this can never loosen what reviews a diff;
+      // it only stops the one external reader from reporting all-four
+      // lenses over a contract that declares a ceiling
+      const rk = parseRosterKey(t.roster)
+      return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined, roster: rk.roster, rosterUnknown: rk.unknown }
     } catch {
-      return { auto: false, model: undefined as string | undefined }
+      return { auto: false, model: undefined as string | undefined, roster: undefined as Lens[] | undefined, rosterUnknown: undefined as string[] | undefined }
     }
   })()
   const commit = opts.base ?? opts.head
@@ -439,7 +446,12 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
     const rk = parseRosterKey(t.roster)
     return { auto: local.auto, model: local.model, strictness, roster: rk.roster, rosterUnknown: rk.unknown }
   }
-  return { auto: local.auto, model: local.model, strictness: "medium" }
+  // the NO-COMMIT reader (the ship-config probe): the local contract
+  // IS the evidence there is — auto/model were always read this way;
+  // the roster joins them (r267's four). The GATE never reaches this
+  // return — it always passes base, and the two catches above keep
+  // the trusted side free of working-tree fallback (momentum-910).
+  return { auto: local.auto, model: local.model, strictness: "medium", roster: local.roster, rosterUnknown: local.rosterUnknown }
 }
 
 function parseShipConfig(raw: string): ShipConfig {
