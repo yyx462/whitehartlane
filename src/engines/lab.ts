@@ -24,7 +24,7 @@ import { runCounts, runEndDetector, runGrade, runSignalDetector } from "../doors
 import { emptyBoard } from "../core/lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
 import { gradeCall } from "../core/live-grade.ts"
-import { actorBrief, paneName } from "../core/roles.ts"
+import { actorBrief, actorBriefPath, paneName } from "../core/roles.ts"
 import { writeReport, type Report } from "../core/report.ts"
 import { drainDeadline } from "../adapters/levy.ts"
 import { waitChange, type Rail, type RailLedger } from "../adapters/rail.ts"
@@ -131,8 +131,8 @@ export async function runLab(
   // typed decider, and a deny-pattern block finished_by blocked — no
   // judgment seat with an unread output channel (decision.txt was
   // never consumed).
-  const actorPath = join(taskDir, "briefs", "actor.md")
-  writeFileSync(actorPath, actorBrief(jobText))
+  const actorPath = actorBriefPath(taskDir)
+  writeFileSync(actorPath, actorBrief(jobText, taskDir))
   // the entry fold (ADR 5): who an earlier generation birthed, and
   // which sessions they were. carried mocks have no pane here — the
   // wave re-inhabits them when protocol.json names them again.
