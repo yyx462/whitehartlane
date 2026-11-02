@@ -21,6 +21,8 @@ import { execFileSync } from "node:child_process"
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { parse as parseToml } from "smol-toml"
+import { verdictsForBranch } from "./ship.ts"
+import { clustersOf, stopConfigOf } from "./stop-rule.ts"
 
 export type ReviewArgs = {
   repo: string
@@ -36,6 +38,22 @@ export type ReviewArgs = {
   model?: string
   /** the gate's lens roster (review-gate.ts); omit = all four lenses */
   roster?: string[]
+  /**
+   * the BRANCH NAME behind a pinned sha (the head-drift guard's
+   * question: "did the branch move since the review" — a sha in the
+   * config answers itself forever, so the guard can never fire)
+   */
+  headBranch?: string
+  /** the base's branch name (the accept checks the base out) */
+  baseBranch?: string
+  /** the PR number the review speaks to (the gh arm + receipts) */
+  prNum?: string
+  /**
+   * the STAGED program dir (the merge stage's outcome marker lands
+   * there; the watcher waits on that seat — the commission ends with
+   * the merge, not with the verdict)
+   */
+  stagedDir?: string
   /**
    * a dropout-audit levy (gate-r2 momentum-15): the gate judged skip
    * but the dropout sample escalated to a full review — the docs-only
@@ -740,7 +758,39 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   } catch {
     return { ok: false, why: `head ${head} is not ahead of base ${base} — merge or rebase base into head first (the review judges exactly base..head)`, code: 2 }
   }
-  files = git(repo, "diff", "--name-only", baseSha, headSha).split("\n").filter(Boolean)
+  // DELTA ROUNDS (the owner's convergence ruling, 2026-11-02) with the
+  // UNRESOLVED-ERA law (principles-3003, r22): a round reads the
+  // commits no ACCEPT has vouched for.
+  //   - the newest prior verdict ACCEPTED at hA → the round reads the
+  //     delta hA..head (the fix/extension commits since the vouch)
+  //   - the newest prior verdict REJECTED (or the rail refused) → the
+  //     round re-reads from the LAST ACCEPT's head, or base when no
+  //     accept exists: the bytes a rejecting verdict blocked stay in
+  //     the reading until some accept vouches for them. The merge
+  //     boundary proves the tiling (merge.sh's JUDGED_SPANS sweep) and
+  //     answers P0s (STOP_HISTORY's p0 flags vs the verdict's
+  //     judgedFrom) — no unjudged, unanswered byte rides.
+  //   - a re-levy at an UNCHANGED head re-reads that verdict's own
+  //     span (its judgedFrom), never more.
+  let spanFrom = baseSha
+  try {
+    const priors = verdictsForBranch(repo, headSha, { base: baseSha })
+    const newest = priors[0]
+    const priorSame = priors.find((r) => r.verdict.head === headSha)
+    const lastAccept = priors.find((r) => r.verdict.verdict === "accept")
+    if (newest && newest.verdict.head === headSha && newest.verdict.judgedFrom) {
+      spanFrom = newest.verdict.judgedFrom
+    } else if (newest?.verdict.verdict === "accept") {
+      spanFrom = newest.verdict.head
+    } else if (newest) {
+      spanFrom = lastAccept?.verdict.head ?? baseSha
+    } else if (priorSame?.verdict.judgedFrom) {
+      spanFrom = priorSame.verdict.judgedFrom
+    }
+  } catch {
+    // no store reachable → the full span (fail-safe: review everything)
+  }
+  files = git(repo, "diff", "--name-only", spanFrom, headSha).split("\n").filter(Boolean)
   if (files.length === 0) {
     // an audit levy arriving at an EMPTY diff means the class flipped
     // under it (a force-push between the gate's read and the levy's) —
@@ -1036,17 +1086,121 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     writeFileSync(join(dir, "workflow.toml"), workflowTomlOut)
   }
 
+  // the BRANCH behind a pinned sha (momentum-906 / principles-4001):
+  // the auto flow hands down the judged sha, so the config's branch
+  // field would be the sha itself — and the head-drift guard's
+  // question ("did the branch move?") would answer itself forever.
+  // Ask git WHICH branch pointed at the judged sha, now, while the
+  // answer still exists.
+  const branchOf = (sha: string): string | undefined => {
+    try {
+      const out = execFileSync("git", ["-C", repo, "for-each-ref", "--points-at", sha, "--format=%(refname:short)", "refs/heads"], { encoding: "utf8" }).trim()
+      const names = out.split("\n").map((s) => s.trim()).filter(Boolean)
+      // ONE name is a fact; MANY is a guess (tests-10301 case B): a
+      // sibling at the judged sha steals the alphabetical first and
+      // the drift guard reads a ref that never moves. An ambiguous
+      // name is NO name — the merge stage's no-witness refusal and
+      // the PR's remote head take over.
+      return names.length === 1 ? names[0] : undefined
+    } catch {
+      return undefined
+    }
+  }
+  // the PR number, DERIVED when the caller did not hand it over
+  // (questions-21): the gh arm of the head-drift guard reads
+  // PR_NUM — nothing produced it, so the remote head was never
+  // checked. Derive it once, here: the merge command NAMES the PR
+  // (`gh pr merge 42 …`), and the PR list is the fallback.
+  const prOf = (branch: string): string => {
+    if (args.prNum) return args.prNum
+    const fromCmd = (args.mergeCmd ?? "").match(/pr\s+merge\s+(\d+)/)
+    if (fromCmd) return fromCmd[1]!
+    const br = branchOf(headSha) ?? branch
+    try {
+      const out = execFileSync("gh", ["pr", "list", "--head", br, "--state", "open", "--json", "number", "--jq", ".[0].number"], { cwd: repo, encoding: "utf8" }).trim()
+      return out || ""
+    } catch {
+      return ""
+    }
+  }
   const title = args.title ?? `${head} → ${base}`
+  // the stop rule's hand-down: the PRIOR rounds of THIS PR's span
+  // (newest first from verdictsForBranch → reversed to oldest first),
+  // each as {buckets, p0} — the cold twin's exact grammar. The same
+  // list feeds the JUDGED_SPANS hand-down (delta rounds, 2026-11-02):
+  // every verdict this branch ever had, as from:head pairs (from =
+  // the verdict's judgedFrom; pre-delta verdicts read the full span,
+  // so their from is their base), plus THIS round's span — merge.sh
+  // sweeps them for gaps before any accept merges.
+  const priorsOldestFirst = verdictsForBranch(repo, headSha, { base: baseSha }).reverse()
+  const stopHistoryHandDown = JSON.stringify(
+    priorsOldestFirst.map((h) => ({ buckets: clustersOf(h.verdict.blocked), p0: h.verdict.blocked.some((b) => b.severity === "P0") })),
+  )
+  const judgedSpansHandDown = [
+    ...priorsOldestFirst.map((r) => `${r.verdict.judgedFrom ?? r.verdict.base}:${r.verdict.head}`),
+    `${spanFrom}:${headSha}`,
+  ].join(" ")
+  const stopCfgHandDown = JSON.stringify(stopConfigOf(repo, { base: baseSha }))
   const lines = [
     "# generated by `whl review` — the review program's single config (sourced by every hook)",
     `REPO=${shellQuote(repo)}`,
-    `BASE_BRANCH=${shellQuote(base)}`,
+    // the BASE rides as the BRANCH NAME — the CALLER'S name first
+    // (momentum-111 / principles-5200 / questions-2-base): the gate
+    // hands the resolved SHA down as `base` (one "which bytes" site,
+    // momentum-300) and the OPERATOR'S NAME as `baseBranch` — the
+    // name is not derivable from the sha (for-each-ref --points-at
+    // answers with an ALPHABETICAL guess), it can only be carried.
+    // The FALLBACK never emits a sha (questions-30): a base that
+    // cannot be named refuses at the merge, never a dangling head.
+    `BASE_BRANCH=${shellQuote(
+      args.baseBranch && !/^[0-9a-f]{7,40}$/.test(args.baseBranch)
+        ? args.baseBranch
+        : /^[0-9a-f]{7,40}$/.test(base)
+          ? branchOf(baseSha) ?? ""
+          : base,
+    )}`,
     `BASE_SHA=${shellQuote(baseSha)}`,
-    `HEAD_BRANCH=${shellQuote(head)}`,
+    // the HEAD's branch NAME, the caller's first (principles-5203 /
+    // tests-10101): the sha is pinned for the bytes; the branch the
+    // review is ABOUT is carried, not derived — a SIBLING at the
+    // judged sha steals an alphabetical guess and the drift guard
+    // reads a ref that never moves. A sha HERE is a guard that
+    // answers itself forever (tests-10301): when no name exists the
+    // honest value is EMPTY — the merge stage then demands the PR's
+    // remote head as its only remaining witness and refuses without
+    // one.
+    `HEAD_BRANCH=${shellQuote(
+      args.headBranch && !/^[0-9a-f]{7,40}$/.test(args.headBranch)
+        ? args.headBranch
+        : /^[0-9a-f]{7,40}$/.test(head)
+          ? branchOf(headSha) ?? ""
+          : head,
+    )}`,
     `HEAD_SHA=${shellQuote(headSha)}`,
+    // DELTA ROUNDS: this round's span start (what the lenses read
+    // from) + the full chain of judged spans for the merge sweep
+    `JUDGED_SPAN_FROM=${shellQuote(spanFrom)}`,
+    `JUDGED_SPANS=${shellQuote(judgedSpansHandDown)}`,
     `TITLE=${shellQuote(title)}`,
     `AUTHOR=${shellQuote(args.author ?? "")}`,
+    // THE STOP RULE'S HAND-DOWN (2026-11-01): the prior rounds' bucket
+    // history + the owner's [stop] parameters, so the cold merge stage
+    // can compute the diminishing-returns fact without reaching into
+    // the sessions root. Writer≡reader with hooks/stop-rule.mjs
+    // (pinned by test/stop-rule.test.ts). The parameters come from the
+    // BASE commit (the trusted side — momentum-910's seat): a PR
+    // cannot loosen the rule that ends its own review.
+    `STOP_HISTORY=${shellQuote(stopHistoryHandDown)}`,
+    `STOP_CFG=${shellQuote(stopCfgHandDown)}`,
     `MERGE_CMD=${shellQuote(args.mergeCmd ?? "")}`,
+    // the PR the review speaks to (the gh arm of the drift guard and
+    // the receipt channel need its number)
+    `PR_NUM=${shellQuote(prOf(head))}`,
+    // the STAGED program dir — the merge stage writes the commission's
+    // outcome marker there, and the watcher waits on THAT (the last
+    // stage's seat: the commission ends with the merge, not with the
+    // verdict the prove stage wrote two stages earlier)
+    `STAGED_DIR=${shellQuote(args.stagedDir ?? dir)}`,
   ]
   // data/ is the DOOR-STAGED carrier (src/doors/run.ts copyBeside): a
   // program's run dir is a staged copy, and everything hooks+briefs

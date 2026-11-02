@@ -188,18 +188,14 @@ export type OsEvent = {
   jid?: string
 } & Record<string, unknown>
 
-export function homeRoot(): string {
-  // TWIN WARNING: scripts/review-trace.mjs replicates this exact
-  // resolution (a .mjs cannot import this TS module) — if you change
-  // the order or the spellings, change both (r13 tests-3).
-  if (process.env.AGENTIC_OS_HOME) return process.env.AGENTIC_OS_HOME
-  // ADR 0011: the disk default is ~/.local/share/whitehartlane; a legacy
-  // agentic-os disk still wins while it is the only one that exists
-  // (read both, write the new spelling — the ADR 0009 pattern).
-  const next = join(homedir(), ".local", "share", "whitehartlane")
-  const old = join(homedir(), ".local", "share", "agentic-os")
-  return existsSync(old) && !existsSync(next) ? old : next
-}
+// the harness home's ONE resolution lives in core (the momentum-1007
+// receipt, 2026-11-01): the permission ladder needed it too, and a
+// second spelling drifted legacy on the exact disk it must guard.
+// Imported for THIS module's own callers and re-exported so every
+// existing import keeps working (an `export … from` alone does not
+// bind the name locally — sessionsRoot calls it too).
+import { homeRoot } from "../core/home.ts"
+export { homeRoot }
 
 export function shortId(prefix: string): string {
   return `${prefix}-${randomBytes(3).toString("hex")}`

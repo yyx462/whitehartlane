@@ -21,8 +21,9 @@
 // queue for a human.
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, normalize, resolve } from "node:path"
 import { loadPrompt, loadThreshold } from "../jev/jev-prompts.ts"
+import { homeRoot } from "./home.ts"
 import { jevNoulQ } from "../jev/jev.ts"
 
 // The deny cap every rail surface shares: a worker may be DENIED this
@@ -249,7 +250,13 @@ function normalizeDialogPath(raw: string, home: string, cwd?: string): string {
     }
   }
   // a directory rendered with its trailing slash is the same path
-  return p.replace(/\/+$/, "") || p
+  // LEXICAL NORMALIZATION (the tests-10302 receipt, 2026-11-01): a
+  // `..`-laden ask is a TRAVERSAL — the harness-tree rung matched the
+  // ask as TEXT, so `…/agentic-os/../../../../../etc/passwd` was
+  // under the harness home by spelling while RESOLVING outside it.
+  // Every comparison downstream sees the normalized path: dot-segments
+  // collapse before any rung or judge reads it.
+  return normalize(p.replace(/\/+$/, "")) || p
 }
 
 // THE verdict: one entry point for "may this worker touch this path?"
@@ -309,6 +316,32 @@ export function decidePermission(
       decision: "allow",
       path,
       message: `granted: ${path} is inside this Job's roots.`,
+    }
+  }
+  // THE HARNESS-TREE RUNG (the r12/r14/r15 receipts, 2026-11-01): a
+  // worker's whole world sits under the harness home (the lens panes'
+  // cwd is <sessions>/<sid>/jobs/<jid>/run/units/<lens>), and the
+  // asks that actually arrive are the harness's OWN territory — a
+  // coarse ANCESTOR (~/.local/share) the roots test can never match,
+  // or a SIBLING inside the job tree (…/jobs/<jid>/jobs) no root
+  // contains. Both fell to the tuned judge, whose coin denied them
+  // ("deny-unneeded") and starved three rounds to pane-reap. The
+  // harness's own tree is not user territory: an ask under the
+  // harness home, or an ancestor of the Job's own roots inside its
+  // parent, is allowed without the judge. Outside that bound (an ask
+  // for ~ itself, ~/Library, any user tree) the gray zone keeps its
+  // judge. The home is THE STORE'S resolution — the ONE function from
+  // core/home.ts (the momentum-1007 receipt: hand-spelling the disk
+  // path picked the LEGACY agentic-os spelling where the store
+  // resolves the ADR-0011 whitehartlane default, and the rung was
+  // inert on the exact disk it existed to guard).
+  const harnessHome = homeRoot()
+  const harnessTree = resolve(harnessHome, "..")
+  if (under(path, harnessHome) || (under(path, harnessTree) && allowedRoots.some((root) => under(root, path)))) {
+    return {
+      decision: "allow",
+      path,
+      message: `granted: ${path} is the harness's own tree (an ask inside AGENTIC_OS_HOME${allowedRoots.some((root) => under(root, path)) ? ", an ancestor of this Job's roots" : ""}) — territory the Job already lives in.`,
     }
   }
   // temp scratch is free OUTSIDE home only — a home planted under the

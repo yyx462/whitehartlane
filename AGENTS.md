@@ -67,3 +67,39 @@ meta.toml. -->
          git config user.email 52618739+yyx462@users.noreply.github.com
      - A pre-commit hook in .bear enforces the email allowlist on the
        origin machine; keep it in place when the bare repo is rebuilt. -->
+
+## the fixer's laws (the review loop's autopsies, 2026-11-02)
+
+Written after r22's autopsy — a 240-line fix push carried six real
+bugs, and the receipts named the habits that would have caught each.
+
+- **VERIFY THE DELIVERY.** When a change hands a value from one
+  program to another, run the RECEIVER and read what it actually got
+  before pushing. Two green seat-tests with a broken seam between
+  them shipped the r22 export bug. The reviewers' repro ran the
+  receiver; the fixer's did not.
+- **EVERY DOOR.** Before installing a guard, list every path the
+  guarded behavior can take. One arm guarded and one open is a
+  shipped bug, not a partial success (r22: the chain check guarded
+  one merge arm).
+- **WHO ELSE READS THIS.** Before changing what a file or list
+  MEANS, name every consumer. A record book mistaken for reading
+  material demoted still-unfixed findings to "pre-existing" (r22:
+  the fix classifier's file list).
+- **SIDE-NOTES ARE TRIAGED, NEVER DROPPED.** Every advisory is either
+  fixed or written off in the commit message with a reason. An
+  advisory silently ignored returns next round as a blocked finding
+  (r21's advisory questions-41 returned as r22's momentum-2102).
+- **THE FIXER IS THE FINAL DECISION MAKER.** Reviewer complaints can
+  be REJECTED — answer each rejected finding with a one-line why,
+  recorded on the PR and in the ledger (the overrule door). Two
+  rounds giving opposite orders is not a puzzle to satisfy
+  simultaneously: pick the sounder law, reject the other, and say
+  why (r21's momentum-2101 × r22's tests-30001 — the discriminator
+  was the verdict's value; the synthesis took a round that a
+  recorded rejection would have taken a line).
+- **WHY ARE WE NOT CONVERGING?** When the rail asks (three or more
+  rounds, stop criterion not holding), the answer must change the
+  MECHANISM — append a law here, edit the lens briefs, fix the gate.
+  A finding-fix alone does not answer it. The lenses read this file:
+  a law appended here is read back by the reviewers next round.

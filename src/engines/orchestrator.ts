@@ -1357,7 +1357,7 @@ export async function runOrchestrator(input: {
   const checkMs = input.checkMs ?? DEFAULT_CHECK_MS
   const logPollMs = input.logPollMs ?? LOG_POLL_MS
   const gateCheckMs = input.gateCheckMs ?? DEFAULT_GATE_CHECK_MS
-  const deadlineMs = input.deadlineMs ?? 2 * 60 * 60_000
+  const deadlineMs = input.deadlineMs ?? (manifest.workflow.deadline_s ? manifest.workflow.deadline_s * 1000 : undefined) ?? 2 * 60 * 60_000
   const now = input.now ?? Date.now
   const inFlight = new Map<string, Flight>()
   const attempts = new Map<string, number>()

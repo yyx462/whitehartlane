@@ -20,6 +20,19 @@ export function spawnRunner(
   orchestratorRoot: string,
   opts: { extraEnv?: Record<string, string> } = {},
 ): SpawnOutcome {
+  // BOX-IN-BOX (the leaked-lens receipt, 2026-10-30): a process running
+  // INSIDE a review job (the orchestrator exports AGENTIC_OS_SID/JID to
+  // every lens and gate shell) may not book another REAL workflow —
+  // reviewer-spawned reviewer panes are zombies grinding on sandboxes
+  // the reviewer already deleted. A set AGENTIC_OS_ORCHESTRATOR means
+  // the spawn targets a STUB (every repro that tests the levy path sets
+  // one) and passes: the ban is on recursion, not on verification
+  if (process.env.AGENTIC_OS_JID && !process.env.AGENTIC_OS_ORCHESTRATOR) {
+    return {
+      ok: false,
+      why: `box-in-box: this process runs inside review job ${process.env.AGENTIC_OS_JID}, and no orchestrator stub is set — a review run may not book another real workflow. Scratch drives export AGENTIC_OS_ORCHESTRATOR (a no-op stub) first; the lens preamble states this law.`,
+    }
+  }
   const door = runnerDoor(orchestratorRoot)
   if (!existsSync(door)) return { ok: false, why: `no orchestrator at ${door}` }
   // THE CLAIM PRECEDES THE SPAWN (gate-r22 momentum-50): the child's

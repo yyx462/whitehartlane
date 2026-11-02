@@ -98,18 +98,70 @@ export function spurIdOf(input: { spurId?: string; name?: string; toml: string }
 
 // the version of a program: sha1 over the staged files, sorted —
 // cheap, deterministic, and every content change is a new version.
-export function contentHashOf(dir: string): string {
+// the OUTPUT SEATS — files that land DURING a run as the chain's own
+// record (the verdict link, the merge marker). They are skipped at
+// EVERY root (principles-109): the program root hashes data/review/
+// merge.json, but the copyBeside site hashes with root = source/DATA,
+// where the same file's relative path is review/merge.json — a
+// root-relative skip set was neutral at one site and INPUT at the
+// other, and the identity moved mid-run exactly there.
+const OUTPUT_SEATS = ["data/review/verdict.json", "data/review/merge.json", "data/review/stop.json"]
+const isOutputSeat = (rel: string): boolean =>
+  OUTPUT_SEATS.some((s) => rel === s || rel.endsWith(`/${s}`) || rel === s.slice("data/".length))
+export function contentHashOf(dir: string, exclude: string[] = []): string {
   const h = createHash("sha1")
-  const walk = (d: string) => {
+  // the verdict SEAT is output, never input (questions-20): a symlink
+  // at data/review/verdict.json (into the job's run dir) must never
+  // move the program's identity — the consumer's receipt compares the
+  // hash and calls a moved seat "program changed since booking". The
+  // merge stage's outcome marker (questions-26) is the same kind of
+  // seat: it lands DURING the run, so it must be just as neutral.
+const skip = new Set([...OUTPUT_SEATS, ...exclude])
+  // EMPTY DIRECTORIES ARE NOT CONTENT (principles-5100, 2026-11-01 —
+  // git's own semantics: it tracks no empty dirs): a directory whose
+  // only children are skipped output seats contributes NOTHING — not
+  // even its name. The seat-minting mkdirSync(data/review) inside a
+  // staged program moved the identity AFTER booking, and every later
+  // comparison read "program changed since booking" for a program the
+  // door itself had merely staged. Bottom-up: a dir hashes its name
+  // only if something beneath it hashed first.
+  const walk = (d: string, rel: string): boolean => {
     const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
+    let contributed = false
     for (const e of entries) {
       const p = join(d, e.name)
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (skip.has(r) || isOutputSeat(r)) continue
+      if (e.isDirectory()) {
+        // the dir's NAME rides only when something beneath it
+        // contributed (empty-in-git-sense dirs are invisible)
+        if (walk(p, r)) {
+          h.update(`dir:${e.name}`)
+          contributed = true
+        }
+        continue
+      }
       h.update(e.name)
-      if (e.isDirectory()) walk(p)
-      else h.update(readFileSync(p))
+      contributed = true
+      if (e.isSymbolicLink()) {
+        // a LINK is a seat, not content (2026-10-30, principles-3000):
+        // the staged program's verdict seat points into the job's run
+        // dir and resolves only once the rail has judged. Hashing its
+        // TARGET would make every re-levy look like a different program
+        // (the settled fold then re-runs every lens).
+        h.update(`link:${e.name}`)
+      } else {
+        try {
+          h.update(readFileSync(p))
+        } catch (err) {
+          if ((err as { code?: string }).code !== "ENOENT") throw err
+          h.update(`link:${e.name}`)
+        }
+      }
     }
+    return contributed
   }
-  walk(dir)
+  walk(dir, "")
   return h.digest("hex").slice(0, 12)
 }
 

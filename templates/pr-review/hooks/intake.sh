@@ -53,8 +53,19 @@ git -C "$REPO" worktree add --detach "$prog/data/review/base" "$BASE_SHA" >/dev/
 # it demoted every corpus-test finding to 'pre-existing' advisory
 # forever, structurally killing the one class this corpus DID
 # generate (r2). Machine truth stays whole; only the reading shrank.
-git -C "$REPO" diff "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
-git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
+# DELTA ROUNDS (the owner's convergence ruling, 2026-11-02): the
+# reading is the commits since the LAST JUDGED HEAD, not the whole PR
+# — merge.sh's JUDGED_SPANS sweep proves the tiling before any accept
+# merges. The BASE worktree below stays the TRUNK base: repros prove
+# against it (prove.sh's "passes on BASE" law is unchanged).
+SPAN_FROM="${JUDGED_SPAN_FROM:-$BASE_SHA}"
+git -C "$REPO" diff "$SPAN_FROM" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
+git -C "$REPO" diff --name-only "$SPAN_FROM" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
+# files-all stays the FULL span (questions-3, r22): it is the fix
+# classifier's truth, not the lenses' reading — prove.sh decides
+# introduced-vs-preexisting from it, and a delta-narrowed list demoted
+# a still-unfixed P0/P1 from an earlier round to "pre-existing"
+# (advisory) and let the merge proceed over it.
 git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files-all.txt"
 
 # pr.md — the claims, not the story. The body (when the CLI was given

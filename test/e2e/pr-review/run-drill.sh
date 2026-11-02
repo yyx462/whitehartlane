@@ -14,7 +14,7 @@ whl="$repo_checkout/bin/whl"
 
 bash "$(dirname "$0")/fixtures.sh" "$root"
 
-DRILL_MODEL="${DRILL_MODEL:-zhipuai-coding-plan/glm-5.3-flash}" # the owner coding-plan integration; override per environment
+DRILL_MODEL="${DRILL_MODEL:-minimax-cn/MiniMax-M3.1-Flash}" # cheapest reviewer first (the owner's ladder, 2026-10-30); override per environment
 
 fails=0
 declare -a receipt=()

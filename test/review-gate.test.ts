@@ -7,6 +7,7 @@ import test from "node:test"
 import { prepareRun } from "../src/doors/run.ts"
 import { prepareReview } from "../src/doors/review.ts"
 import {
+  BANDS,
   LENSES,
   appendLedgerRow,
   classStats,
@@ -16,6 +17,7 @@ import {
   gateReceipt,
   ledgerPath,
   runGate,
+  shipConfigOf,
   type GateFeatures,
 } from "../src/doors/review-gate.ts"
 
@@ -52,6 +54,105 @@ test("classify: docs-only / test-only / churn boundary", () => {
   assert.equal(classify(["src/a.ts"], 151), "code_large")
   // one code file among docs kills docs-only (assets/ can hold code)
   assert.equal(classify(["README.md", "src/gen.ts"], 5), "code_small")
+})
+
+// ---- strictness bands (2026-10-30): a band selects NUMBERS, never
+// outcomes — the fail-safe and the red-reset ride every band
+test("bands: the bar moves; the fail-safe does not", () => {
+  const ps = { principles: 0.2, tests: 0.2, momentum: 0.2, questions: 0.2 } // jev ~80% sure no lens is needed
+  // medium (0.35): all four fall below the bar → skip
+  const med = decideGate(mkFeatures(), ps, STATS0, 0.99)
+  assert.equal(med.action, "skip")
+  // strict (0.15): 0.2 clears the bar → every lens reviews
+  const strict = decideGate(mkFeatures(), ps, STATS0, 0.99, BANDS.strict)
+  assert.equal(strict.action, "review")
+  assert.deepEqual(strict.roster, [...LENSES])
+  // loose (0.60): even a 0.5 doubt keeps nothing — the easy bypass
+  const loose = decideGate(mkFeatures(), { principles: 0.5, tests: 0.5, momentum: 0.5, questions: 0.5 }, STATS0, 0.99, BANDS.loose)
+  assert.equal(loose.action, "skip")
+  // jev down → full rail under EVERY band (fail-safe above all bands)
+  for (const band of Object.values(BANDS)) {
+    assert.deepEqual(decideGate(mkFeatures(), null, STATS0, 0.99, band).roster, [...LENSES])
+  }
+})
+
+test("bands: strict's hot-file rule — a fact outranks the judgment", () => {
+  const f = mkFeatures({ hotFiles: [{ file: "hooks.ts", findings: 3 }] })
+  const ps = { principles: 0.01, tests: 0.01, momentum: 0.01, questions: 0.01 } // jev: skip everything
+  const d = decideGate(f, ps, STATS0, 0.99, BANDS.strict)
+  assert.equal(d.action, "review")
+  assert.deepEqual(d.roster, [...LENSES])
+  assert.match(d.why, /strict band: hot file/)
+  // medium keeps today's behavior: hot files FEED jev, they do not force
+  assert.equal(decideGate(f, ps, STATS0, 0.99).action, "skip")
+})
+
+test("bands: the audit ladder moves with the band", () => {
+  const row = (n: string) => ({ repo: "r", head: n, headSha: n, klass: "code_small", files: 1, churn: 1, hot: [], ps: null, roster: [], action: "skip", audit: false }) as never
+  const green = new Map([
+    ["1", { red: false }],
+    ["2", { red: false }],
+    ["3", { red: false }],
+    ["4", { red: false }],
+    ["5", { red: false }],
+  ])
+  const rows = [row("1"), row("2"), row("3"), row("4"), row("5")]
+  // 5 greens: medium still audits a quarter, strict half, loose one in twenty
+  assert.equal(classStats(rows, green, "code_small").rate, 0.25)
+  assert.equal(classStats(rows, green, "code_small", BANDS.strict).rate, 0.5)
+  assert.equal(classStats(rows, green, "code_small", BANDS.loose).rate, 0.05)
+})
+
+test("shipConfigOf: review-gate.toml is the per-project contract", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-cfg-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // absent → medium, auto off
+  const bare = shipConfigOf(repo)
+  assert.deepEqual([bare.auto, bare.strictness], [false, "medium"])
+  // the LOCAL contract, parsed: auto/model are the operator's own
+  // (momentum-910 — the BAND is not: it comes from the base commit)
+  writeFileSync(join(repo, "review-gate.toml"), 'auto = true\nmodel = "acme/strong"\nstrictness = "strict"\n')
+  const full = shipConfigOf(repo)
+  assert.deepEqual([full.auto, full.strictness], [true, "medium"], "the band never comes from the checkout")
+  assert.equal(full.model, "acme/strong")
+  // the BASE's contract governs the band
+  execSync("git add -A && git commit -qm contract", { cwd: repo, encoding: "utf8" })
+  const base = execSync("git rev-parse HEAD", { cwd: repo, encoding: "utf8" }).trim()
+  assert.equal(shipConfigOf(repo, { base }).strictness, "strict", "the base commit's band governs")
+  // unknown band and garbage toml → medium, never vanish
+  writeFileSync(join(repo, "review-gate.toml"), 'strictness = "yolo"\n')
+  assert.equal(shipConfigOf(repo).strictness, "medium")
+  writeFileSync(join(repo, "review-gate.toml"), "not toml at all {{{\n")
+  assert.equal(shipConfigOf(repo).strictness, "medium")
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+test("runGate: the repo's band decides, and the ledger row names it", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-band-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // the band comes from the BASE COMMIT (momentum-910) — the trusted
+  // side's contract, so the contract is COMMITTED on the BASE branch
+  // (a file only in the working tree, or added by the PR, does not
+  // lower the bar that reviews it)
+  writeFileSync(join(repo, "review-gate.toml"), 'strictness = "strict"\n')
+  execSync("git checkout -q main && git add -A && git commit -qm contract && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  // this test's OWN ledger — file-order isolation: other tests in
+  // this file count rows in the shared one
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "band.jsonl")
+  // jev ~80% sure no lens is needed — medium would skip; strict reviews
+  const stub = jevStub(tmp, { principles: 0.2, tests: 0.2, momentum: 0.2, questions: 0.2 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    const { decision } = runGate(repo, "main", "feat")
+    assert.equal(decision.action, "review")
+    const row = JSON.parse(readFileSync(ledgerPath(), "utf8").trim().split("\n").at(-1)!)
+    assert.equal(row.strictness, "strict")
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
 })
 
 test("decideGate: jev unavailable → fail-safe full rail", () => {

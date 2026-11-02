@@ -33,7 +33,7 @@
   "scripts": {
     "build": "node build.mjs",
     "prepack": "npm run build",
-    "test": "SHEP_SCOPE=whl-test node --experimental-strip-types --test \"test/**/*.test.ts\""
+    "test": "SHEP_SCOPE=whl-test AGENTIC_OS_ORCHESTRATOR=\"$PWD/test/orchestrator-stub.mjs\" node --experimental-strip-types --test \"test/**/*.test.ts\"; rc=$?; node test/sweep-zombie-watchers.mjs; exit $rc"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

@@ -17,7 +17,7 @@
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
-export REPO BASE_SHA HEAD_SHA PROG="$prog"
+export REPO BASE_SHA HEAD_SHA JUDGED_SPAN_FROM PROG="$prog"
 
 node <<'EOF'
 const { execSync } = require("node:child_process")
@@ -177,6 +177,7 @@ const out = {
   verdict,
   repo: process.env.REPO,
   base: process.env.BASE_SHA,
+  judgedFrom: process.env.JUDGED_SPAN_FROM,
   head: process.env.HEAD_SHA,
   blocked: blocked.map(({ _unit, _line, ...f }) => f),
   advisory: advisory.map(({ _unit, _line, why, ...f }) => ({ ...f, why })),
