@@ -166,8 +166,20 @@ export class OpenCodeHost implements AgentHost {
         if (attempt < briefTries) sleepSync(backoffMs(briefPauseBase, attempt))
       }
       if ((prompt?.status ?? 1) !== 0) {
-        this.log(`brief submission failed for ${label} after ${briefTries} attempt(s) — birth fails honestly; no half-born member`)
-        return false
+        if (spec.resumeSession) {
+          // THE RESUME TWIN (r269 round-4 principles-1): a resumed
+          // session ALREADY carries its brief — the re-brief is a
+          // courtesy continue-prompt, not a birth. A transient refusal
+          // here must not fail the birth: the old arm let rail's
+          // !ok path retire a resumed pane that was still working,
+          // the brief-retry sleep doubling as a retire wait. Log it,
+          // keep the birth — agent_status, not this prompt, decides
+          // the resumed pane's life.
+          this.log(`brief re-prompt failed for resumed ${label} after ${briefTries} attempt(s) — the session carries its brief; the birth stands`)
+        } else {
+          this.log(`brief submission failed for ${label} after ${briefTries} attempt(s) — birth fails honestly; no half-born member`)
+          return false
+        }
       }
     }
     return true
