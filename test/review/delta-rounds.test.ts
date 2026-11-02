@@ -52,9 +52,10 @@ test("the delta span: a prior verdict narrows the levy to the commits since the 
     g("add -A && git commit -qm two")
     const headSha = g("rev-parse HEAD").trim()
 
-    // round 1 already judged base..judged1 (a pre-delta verdict: no
-    // judgedFrom — its span is base..head by construction)
-    writeVerdict(home, "s-r1", { verdict: "reject", repo, base: baseSha, head: judged1, blocked: [{ id: "x-1", severity: "P1", claim: "c" }] })
+    // round 1 already ACCEPTED base..judged1 — the delta law's narrow
+    // case: an accept vouches for everything before it, so the next
+    // round reads only judged1..head (the extension commits)
+    writeVerdict(home, "s-r1", { verdict: "accept", repo, base: baseSha, head: judged1, blocked: [] })
 
     const ready = prepareReview({ repo, base: "main", head: "feat", title: "t", mergeCmd: "true", model: "minimax-cn/MiniMax-M3.1-Flash" }, join(ROOT, "templates"))
     assert.ok(ready.ok && !ready.skipped, `the levy must prepare (why: ${ready.ok ? "" : ready.why})`)
@@ -63,8 +64,43 @@ test("the delta span: a prior verdict narrows the levy to the commits since the 
     // will diff from) and the verdict's judgedFrom stamp (prove.sh
     // reads JUDGED_SPAN_FROM from the same config)
     const cfg = readFileSync(join(ready.dir!, "data", "review", "config.sh"), "utf8")
-    assert.match(cfg, new RegExp(`JUDGED_SPAN_FROM='${judged1}'`), "the span start rides config.sh — intake.sh diffs from it, so the lenses read only the delta")
+    assert.match(cfg, new RegExp(`JUDGED_SPAN_FROM='${judged1}'`), "an ACCEPT vouches for its span — the next round reads only the delta since it")
     assert.match(cfg, new RegExp(`JUDGED_SPANS='[^']*${judged1}:${headSha}'`), "the chain carries the prior span plus this round's (merge.sh sweeps them)")
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test("the unresolved-era law: a REJECTING prior resets the span to the last accept (or base)", () => {
+  const home = process.env.AGENTIC_OS_HOME!
+  const tmp = mkdtempSync(join(tmpdir(), "aos-delta-era-"))
+  try {
+    const repo = join(tmp, "repo")
+    mkdirSync(join(repo, "src"), { recursive: true })
+    const g = (a: string) => execSync(`git ${a}`, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    g("init -q -b main .")
+    g("config user.email t@t.local")
+    g("config user.name t")
+    writeFileSync(join(repo, "src", "bug.ts"), "export const bug = true\n")
+    g("add -A && git commit -qm base")
+    const baseSha = g("rev-parse main").trim()
+    g("checkout -qb feat")
+    writeFileSync(join(repo, "src", "bug.ts"), "export const bug = false\n")
+    g("add -A && git commit -qm one")
+    const judged1 = g("rev-parse HEAD").trim()
+    writeFileSync(join(repo, "src", "other.ts"), "export const other = 1\n")
+    g("add -A && git commit -qm two")
+    const headSha = g("rev-parse HEAD").trim()
+
+    // the prior verdict REJECTED at judged1 — its blocked bytes must
+    // stay in the reading until some accept vouches for them
+    // (principles-3003: no accept exists → the span resets to base)
+    writeVerdict(home, "s-r1", { verdict: "reject", repo, base: baseSha, head: judged1, blocked: [{ id: "x-1", severity: "P1", claim: "c", location: { file: "src/bug.ts", line_start: 1 } }] })
+
+    const ready = prepareReview({ repo, base: "main", head: "feat", title: "t", mergeCmd: "true", model: "minimax-cn/MiniMax-M3.1-Flash" }, join(ROOT, "templates"))
+    assert.ok(ready.ok && !ready.skipped, `the levy must prepare (why: ${ready.ok ? "" : ready.why})`)
+    const cfg = readFileSync(join(ready.dir!, "data", "review", "config.sh"), "utf8")
+    assert.match(cfg, new RegExp(`JUDGED_SPAN_FROM='${baseSha}'`), "a rejecting prior with no accept after it → the span is the FULL unresolved era (base)")
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

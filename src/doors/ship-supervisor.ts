@@ -132,10 +132,12 @@ export function spawnSupervisor(opts: {
       `while [ ! -f "$OUT/data/review/merge.json" ]; do`,
       `  sleep 1; i=$((i+1))`,
       // a chain that died BEFORE the merge stage (the divide stage
-      // failed, the rail refused) leaves a verdict and no marker — the
-      // PR must still hear (momentum-908), so the verdict's presence
-      // ends the wait too (a POSITIVE test, not a poll: the law is
-      // about the seat the wait resolves on)
+      // failed, the rail refused) leaves a verdict and no marker —
+      // the PR still hears: a REJECT at once (the break below claims
+      // nothing unmerged), an ACCEPT at the deadline in truthful
+      // words (the timeout arm reports the landed outcome, never a
+      // false "timed out" — tests-30001). The wait itself never
+      // breaks early on an accept (momentum-2101's law, kept).
       // THE GONE-WORLD EXIT, LATCHED (the zombie receipt 2026-10-30 ×
       // the momentum-1000 receipt 2026-11-01): exit 4 only when a
       // world that WAS seen disappears. The --out seat dir does not
@@ -145,14 +147,19 @@ export function spawnSupervisor(opts: {
       // with no watcher at all.
       `  if [ -d "$OUT" ]; then seen=1; fi`,
       `  if [ "$seen" = "1" ] && [ ! -d "$OUT" ]; then exit 4; fi`,
-      // ONE SEAT (momentum-2101, 2026-11-02): there is NO verdict-seat
-      // break — the verdict lands three stages before the merge stage,
-      // and a watcher that wakes on it posts the outcome before the
-      // commission has ended (the twin-seat harm this file's own
-      // comments name). The loop waits for the MERGE seat alone; a
-      // dead agent's receipt lands either at the merge seat (the
-      // backstop below, reading the merge payload) or at the 2h
-      // deadline arm above (dead → it posts).
+      // THE SYNTHESIS (momentum-2101 × tests-30001, 2026-11-02): a
+      // dead agent with a landed verdict. A REJECT may speak at once —
+      // nothing merged and nothing will (the merge stage refuses a
+      // reject), so the receipt claims nothing that has not happened.
+      // An ACCEPT waits for the merge seat — announcing accept before
+      // the merge runs claims a merge that has not run (2101's exact
+      // harm: the divide stage sits between the verdict and the merge).
+      // The fixtures of the two pins are observationally identical
+      // except the verdict's value — the value IS the discriminator.
+      `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then`,
+      `    VV=$(sed -n 's/.*"verdict"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/verdict.json" 2>/dev/null | head -1)`,
+      `    [ "$VV" = "reject" ] && break`,
+      `  fi`,
       `  if [ "$i" -ge 7200 ]; then`,
       // A LIVE AGENT OWNS THE RECEIPT (principles-6001): the 2h arm
       // published over a supervisor that could still be alive — one
@@ -162,12 +169,26 @@ export function spawnSupervisor(opts: {
       // agent's own flow (its brief: "your process IS the watch")
       // finish the story.
       `    if ! kill -0 "$AGENT" 2>/dev/null; then`,
-      `      if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
-      `        (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
-      `      fi`,
+      // TRUTHFUL AT THE DEADLINE (tests-30001, r22): over a dead
+      // agent, report what LANDED — a verdict that exists means the
+      // chain died between prove and merge, and the honest receipt is
+      // the verdict's outcome, not a false "timed out". No verdict →
+      // the review itself never finished → the timeout words are
+      // true.
+      `      if [ -f "$OUT/data/review/verdict.json" ]; then`,
+      `        DV=$(sed -n 's/.*"verdict"[^"]*"\\([a-z]*\\)".*/\\1/p' "$OUT/data/review/verdict.json" 2>/dev/null | head -1)`,
+      `        if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      `          (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: \${DV:-unfinished} — the chain died before the merge stage; the verdict's outcome stands (the outcome is at $OUT/data/review/verdict.json)") >/dev/null 2>&1`,
+      `        fi`,
+      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR: \${DV:-unfinished} — the chain died before the merge stage" >/dev/null 2>&1; fi`,
+      `      else`,
+      `        if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
+      `          (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
+      `        fi`,
       // the notify only fires with a PR to name — a nameless timeout
       // DM is noise (the receipt: "PR # review timed out")
-      `      if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" >/dev/null 2>&1; fi`,
+      `      fi`,
       `    fi`,
       `    exit 3`,
       `  fi`,

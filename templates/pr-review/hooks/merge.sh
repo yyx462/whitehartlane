@@ -38,6 +38,61 @@ MERGE_OUTCOME=refused
 trap 'outcome "$MERGE_OUTCOME"' EXIT
 case "$verdict" in
   accept)
+    # SHARED ACCEPT FACT (momentum-3001): the judged head is the
+    # review's pinned sha — BOTH arms merge onto it, so the chain and
+    # P0 proofs below guard both, not just the MERGE_CMD arm.
+    judged_head="$HEAD_SHA"
+    # THE CHAIN CHECK (the owner's convergence ruling, 2026-11-02;
+    # hoisted to BOTH arms by momentum-3001): delta rounds judge only
+    # the commits since the last judged head; this sweep proves the
+    # TILING — folding the judged spans forward from BASE_SHA, the
+    # frontier must reach the judged head. Overlap is re-reading
+    # (sound); a GAP is bytes no verdict ever judged — refuse.
+    if [ -n "${JUDGED_SPANS:-}" ]; then
+      span_frontier="$BASE_SHA"
+      span_progress=1
+      while [ "$span_progress" = "1" ]; do
+        span_progress=0
+        for span_pair in $JUDGED_SPANS; do
+          span_f="${span_pair%%:*}"; span_h="${span_pair##*:}"
+          # starts at or before the frontier…
+          if [ "$span_f" != "$span_frontier" ] && ! git -C "$REPO" merge-base --is-ancestor "$span_f" "$span_frontier" 2>/dev/null; then continue; fi
+          # …and reaches past it
+          if git -C "$REPO" merge-base --is-ancestor "$span_h" "$span_frontier" 2>/dev/null; then continue; fi
+          span_frontier="$span_h"; span_progress=1
+        done
+      done
+      if [ "$span_frontier" != "$judged_head" ] && ! git -C "$REPO" merge-base --is-ancestor "$judged_head" "$span_frontier" 2>/dev/null; then
+        echo "merge: the judged spans leave a GAP — the frontier folds forward only to ${span_frontier:-(nothing)} but the review judged $judged_head; bytes no verdict judged would ride the merge; re-review the gap" >&2
+        exit 1
+      fi
+    fi
+    # THE UNANSWERED-P0 CHECK (momentum-3002, 2026-11-02): the chain
+    # proves READS; this proves ANSWERS. STOP_HISTORY carries each
+    # prior round's buckets and p0 flags; this verdict's judgedFrom
+    # names where its own reading began. A p0-flagged bucket's FILE
+    # untouched since that point was never fixed and never overruled —
+    # an accept that speaks only for its own span cannot carry it.
+    # (Fixed = the file changed after the reading began; overruled =
+    # the owner's override door, which does not pass through this arm.)
+    if [ -n "${STOP_HISTORY:-}" ]; then
+      p0_files="$(node -e '
+        const h = JSON.parse(process.argv[1])
+        const files = new Set()
+        for (const round of h) if (round.p0) for (const b of round.buckets) files.add(b.split(":")[0])
+        console.log([...files].join(" "))' "$STOP_HISTORY" 2>/dev/null || true)"
+      # where THIS verdict's reading began — the verdict's own
+      # judgedFrom, falling back to the trunk base (pre-delta verdicts
+      # read the full span)
+      p0_from="$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.judgedFrom || process.env.BASE_SHA || "")' "$prog/data/review/verdict.json" 2>/dev/null || true)"
+      if [ -n "$p0_from" ]; then
+        for p0_file in $p0_files; do
+          if ! git -C "$REPO" diff --quiet "$p0_from" "$judged_head" -- "$p0_file" 2>/dev/null; then continue; fi
+          echo "merge: an UNANSWERED P0 rides the merge — $p0_file was P0-flagged by a prior round and its bytes are unchanged since this reading began ($p0_from); fix it or overrule" >&2
+          exit 1
+        done
+      fi
+    fi
     if [ -n "${MERGE_CMD:-}" ]; then
       # THE HEAD-DRIFT GUARD (momentum-902, the base twin): the
       # MERGE_CMD arm merges the PR's CURRENT head — a push during the
@@ -46,7 +101,6 @@ case "$verdict" in
       # points at the judged sha before it hands the merge over. The
       # local ref is the proof we always have; the PR's remote head is
       # the stronger one when gh answers.
-      judged_head="$HEAD_SHA"
       # NO WITNESS, NO MERGE (tests-10301 / tests-20002): a HEAD_BRANCH
       # that is empty — or a legacy config holding the judged SHA
       # itself, which answers its own question forever — means the
@@ -135,31 +189,6 @@ case "$verdict" in
         fi
         if [ "$remote_head" != "$judged_head" ]; then
           echo "merge: PR #$PR_NUM is at $remote_head but the review judged $judged_head — unreviewed bytes would ride the merge; re-run the review" >&2
-          exit 1
-        fi
-      fi
-      # THE CHAIN CHECK (the owner's convergence ruling, 2026-11-02):
-      # delta rounds judge only the commits since the last judged
-      # head; this sweep proves the TILING — folding the judged spans
-      # forward from BASE_SHA, the frontier must reach the judged
-      # head. Overlap is re-reading (sound); a GAP is bytes no verdict
-      # ever judged — refuse.
-      if [ -n "${JUDGED_SPANS:-}" ]; then
-        span_frontier="$BASE_SHA"
-        span_progress=1
-        while [ "$span_progress" = "1" ]; do
-          span_progress=0
-          for span_pair in $JUDGED_SPANS; do
-            span_f="${span_pair%%:*}"; span_h="${span_pair##*:}"
-            # starts at or before the frontier…
-            if [ "$span_f" != "$span_frontier" ] && ! git -C "$REPO" merge-base --is-ancestor "$span_f" "$span_frontier" 2>/dev/null; then continue; fi
-            # …and reaches past it
-            if git -C "$REPO" merge-base --is-ancestor "$span_h" "$span_frontier" 2>/dev/null; then continue; fi
-            span_frontier="$span_h"; span_progress=1
-          done
-        done
-        if [ "$span_frontier" != "$judged_head" ] && ! git -C "$REPO" merge-base --is-ancestor "$judged_head" "$span_frontier" 2>/dev/null; then
-          echo "merge: the judged spans leave a GAP — the frontier folds forward only to ${span_frontier:-(nothing)} but the review judged $judged_head; bytes no verdict judged would ride the merge; re-review the gap" >&2
           exit 1
         fi
       fi

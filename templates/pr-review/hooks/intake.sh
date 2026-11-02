@@ -61,7 +61,12 @@ git -C "$REPO" worktree add --detach "$prog/data/review/base" "$BASE_SHA" >/dev/
 SPAN_FROM="${JUDGED_SPAN_FROM:-$BASE_SHA}"
 git -C "$REPO" diff "$SPAN_FROM" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/diff.patch"
 git -C "$REPO" diff --name-only "$SPAN_FROM" "$HEAD_SHA" -- . ':(exclude)test/review' > "$prog/data/review/files.txt"
-git -C "$REPO" diff --name-only "$SPAN_FROM" "$HEAD_SHA" > "$prog/data/review/files-all.txt"
+# files-all stays the FULL span (questions-3, r22): it is the fix
+# classifier's truth, not the lenses' reading — prove.sh decides
+# introduced-vs-preexisting from it, and a delta-narrowed list demoted
+# a still-unfixed P0/P1 from an earlier round to "pre-existing"
+# (advisory) and let the merge proceed over it.
+git -C "$REPO" diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$prog/data/review/files-all.txt"
 
 # pr.md — the claims, not the story. The body (when the CLI was given
 # one) is claims the author WROTE ABOUT THE CODE; the author's session

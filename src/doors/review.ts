@@ -758,20 +758,35 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   } catch {
     return { ok: false, why: `head ${head} is not ahead of base ${base} — merge or rebase base into head first (the review judges exactly base..head)`, code: 2 }
   }
-  // DELTA ROUNDS (the owner's convergence ruling, 2026-11-02): the
-  // round judges only what no verdict has judged — the commits since
-  // the last judged head on this branch. Round 1 (no prior verdict)
-  // reads the full span; a re-levy at an unchanged head re-reads that
-  // verdict's own span (its judgedFrom), never more. The merge
-  // boundary proves the tiling (merge.sh's JUDGED_SPANS sweep): the
-  // judged spans must fold forward from base to head with no gap —
-  // overlap is re-reading, sound; a gap is unjudged bytes, refused.
+  // DELTA ROUNDS (the owner's convergence ruling, 2026-11-02) with the
+  // UNRESOLVED-ERA law (principles-3003, r22): a round reads the
+  // commits no ACCEPT has vouched for.
+  //   - the newest prior verdict ACCEPTED at hA → the round reads the
+  //     delta hA..head (the fix/extension commits since the vouch)
+  //   - the newest prior verdict REJECTED (or the rail refused) → the
+  //     round re-reads from the LAST ACCEPT's head, or base when no
+  //     accept exists: the bytes a rejecting verdict blocked stay in
+  //     the reading until some accept vouches for them. The merge
+  //     boundary proves the tiling (merge.sh's JUDGED_SPANS sweep) and
+  //     answers P0s (STOP_HISTORY's p0 flags vs the verdict's
+  //     judgedFrom) — no unjudged, unanswered byte rides.
+  //   - a re-levy at an UNCHANGED head re-reads that verdict's own
+  //     span (its judgedFrom), never more.
   let spanFrom = baseSha
   try {
     const priors = verdictsForBranch(repo, headSha, { base: baseSha })
-    const priorOther = priors.find((r) => r.verdict.head !== headSha)
+    const newest = priors[0]
     const priorSame = priors.find((r) => r.verdict.head === headSha)
-    spanFrom = priorOther?.verdict.head ?? priorSame?.verdict.judgedFrom ?? baseSha
+    const lastAccept = priors.find((r) => r.verdict.verdict === "accept")
+    if (newest && newest.verdict.head === headSha && newest.verdict.judgedFrom) {
+      spanFrom = newest.verdict.judgedFrom
+    } else if (newest?.verdict.verdict === "accept") {
+      spanFrom = newest.verdict.head
+    } else if (newest) {
+      spanFrom = lastAccept?.verdict.head ?? baseSha
+    } else if (priorSame?.verdict.judgedFrom) {
+      spanFrom = priorSame.verdict.judgedFrom
+    }
   } catch {
     // no store reachable → the full span (fail-safe: review everything)
   }

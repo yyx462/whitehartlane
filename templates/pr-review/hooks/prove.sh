@@ -17,7 +17,7 @@
 set -euo pipefail
 prog="$(cd "$(dirname "$0")/.." && pwd)"
 . "$prog/data/review/config.sh"
-export REPO BASE_SHA HEAD_SHA PROG="$prog"
+export REPO BASE_SHA HEAD_SHA JUDGED_SPAN_FROM PROG="$prog"
 
 node <<'EOF'
 const { execSync } = require("node:child_process")
