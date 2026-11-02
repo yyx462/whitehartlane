@@ -133,9 +133,34 @@ export class OpenCodeHost implements AgentHost {
     }
     if (!spec.hold) {
       const brief = readFileSync(spec.briefPath, "utf8")
-      const prompt = this.transport.exec("agent", "prompt", label, brief)
-      if (prompt.status !== 0) {
-        this.log(`brief submission failed for ${label} — the grace reprompt will retry`)
+      // THE GRACE REPROMPT, made real (r269's four P1s — the #266 birth
+      // twin): the old log line promised "the grace reprompt will
+      // retry" but no seat ever retried, so a refused brief submission
+      // left a member born-and-never-briefed — its first user message
+      // a stall nudge, no booking marker, unbookable, dead at birth
+      // (coworker members AND the lab's actor, every non-hold birth).
+      // The brief's DELIVERY is a correctness law, not a perf knob:
+      // its scale is its OWN (the start loop's retries()/backoffBase()
+      // clamp to a single attempt under node:test, which silently
+      // disarmed the grace reprompt — an env knob still tunes it).
+      // Delivered here, or the birth FAILS HONESTLY: 'ok'/'prompted'
+      // must mean delivered on every path (the held shape carries no
+      // birth brief — its brief rides the first relay, which retries
+      // with the brief at the engine seat).
+      const briefTriesRaw = Number(process.env.AGENTIC_OS_BRIEF_TRIES ?? "")
+      const briefTries = Number.isInteger(briefTriesRaw) && briefTriesRaw >= 1 ? briefTriesRaw : 3
+      const briefPauseRaw = Number(process.env.AGENTIC_OS_BRIEF_BACKOFF_MS ?? "")
+      const briefPauseMs = Number.isFinite(briefPauseRaw) && briefPauseRaw >= 0 ? briefPauseRaw : 1_000
+      let prompt: CmdResult | null = null
+      for (let attempt = 1; attempt <= briefTries; attempt++) {
+        prompt = this.transport.exec("agent", "prompt", label, brief)
+        if (prompt.status === 0) break
+        this.log(`brief submission failed for ${label} (rc=${prompt.status}, attempt ${attempt}/${briefTries})`)
+        if (attempt < briefTries) sleepSync(briefPauseMs)
+      }
+      if ((prompt?.status ?? 1) !== 0) {
+        this.log(`brief submission failed for ${label} after ${briefTries} attempt(s) — birth fails honestly; no half-born member`)
+        return false
       }
     }
     return true
