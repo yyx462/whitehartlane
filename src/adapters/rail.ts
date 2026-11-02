@@ -203,6 +203,14 @@ export class Rail implements ShepPort {
     return this.host.usageOf(cwd, sinceMs)
   }
   private readonly briefOf = new Map<string, string>()
+  // the label each unit was born under (the one-label seat: every
+  // spelling of the name resolves to the label herdr knows)
+  private readonly labelOfUnit = new Map<string, string>()
+  // the bare-form alias of a w-prefixed unit's label (the fault lane's
+  // spelling) — consulted only when no exact birth claims the name
+  private readonly aliasOfUnit = new Map<string, string>()
+  // labels herdr could not resolve (the label seat drifted) — reported once
+  private readonly labelMiss = new Set<string>()
   // fleet tab state (layout tab = "new")
   private layout: { tab: "same" | "new"; orchestrator: "left" | "right" } = { tab: "same", orchestrator: "left" }
   private fleetRoot: string | null = null
@@ -391,9 +399,41 @@ export class Rail implements ShepPort {
   // -- helpers the bins reach through -----------------------------------------
 
   scopedName(name: string): string {
+    // THE ONE LABEL SEAT (2026-10-30, the blocked-divide receipt): the
+    // rail registers a pane under a SCOPED label ("w-divide-<runId>"),
+    // but callers reach it under two spellings — the engine's
+    // "w-<unit>" and the fault lane's bare "<unit>". Re-deriving a label
+    // from the bare spelling minted a label herdr never had: the
+    // privilege sweep asked for a name that does not exist, saw no
+    // status, and skipped a BLOCKED pane; the fault lane read the miss
+    // as "the worker is gone" and reprompted forever. The rail knows
+    // what it registered — resolve every spelling to THAT label.
+    // EXACT beats ALIAS (tests-300): a unit literally named "api" and a
+    // unit named "w-api" are two different panes — the alias never
+    // overwrites an exact birth.
+    const known = this.labelOfUnit.get(name) ?? this.aliasOfUnit.get(name)
+    if (known) {
+      this.unscopedOf.set(known, this.unscopedOf.get(known) ?? name)
+      return known
+    }
+    return this.deriveLabel(name)
+  }
+
+  // the label a NAME derives — the birth path's seat. A birth must
+  // NEVER inherit another unit's alias (tests-300): unit "api" born as
+  // "w-api" and unit "w-api" born as "w-w-api" are two panes; the
+  // second birth's name is the first unit's bare-form alias.
+  private deriveLabel(name: string): string {
     const scoped = this.scopedFn(name)
     this.unscopedOf.set(scoped, name)
     return scoped
+  }
+
+  // the birth seats call this: the label a unit was born under, under
+  // BOTH spellings (the engine's "w-<unit>", the fault lane's "<unit>")
+  private rememberLabel(rawName: string, label: string): void {
+    this.labelOfUnit.set(rawName, label)
+    this.aliasOfUnit.set(rawName.replace(/^w-/, ""), label)
   }
 
   // Pre-seed a worker sandbox's opencode.json from the scope (plus any
@@ -620,7 +660,11 @@ export class Rail implements ShepPort {
     temperature: number | undefined = undefined,
   ): boolean {
     const since = new Date().toISOString()
-    const name = this.scopedName(rawName)
+    const name = this.deriveLabel(rawName)
+    // the label this unit was born under — both spellings resolve to it
+    // (the seat: the engine says "w-<unit>", the fault lane says
+    // "<unit>"; herdr knows only the label)
+    this.rememberLabel(rawName, name)
     this.cwdOf.set(name, cwd)
     this.briefOf.set(name, briefPath)
     this.spawnedAtOf.set(name, since)
@@ -698,7 +742,7 @@ export class Rail implements ShepPort {
   }
 
   spawnWorker(name: string, kind: string, briefPath: string, cwd: string, model?: string, temperature?: number): boolean {
-    const label = this.scopedName(name)
+    const label = this.deriveLabel(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
     this.spawnedAtOf.set(label, new Date().toISOString())
@@ -762,6 +806,7 @@ export class Rail implements ShepPort {
       this.log(`spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
       return false
     }
+    this.rememberLabel(name, label)
     this.mine.add(label)
     this.workers.add(label)
     this.ledger?.attach(label, undefined, name, { tool: kind, cwd, since: new Date().toISOString() } as TranscriptPointer)
@@ -774,7 +819,7 @@ export class Rail implements ShepPort {
   // brief. The shep path has no arg pass-through — a fresh pane with the
   // continue brief covers it (the unit dir is the outliving memory).
   resumeWorker(name: string, session: ResumePointerLike, briefPath: string, cwd: string, model?: string, temperature?: number): boolean {
-    const label = this.scopedName(name)
+    const label = this.deriveLabel(name)
     this.cwdOf.set(label, cwd)
     this.briefOf.set(label, briefPath)
     this.spawnedAtOf.set(label, new Date().toISOString())
@@ -818,6 +863,7 @@ export class Rail implements ShepPort {
       this.log(`resume spawn failed for ${label} (rc=${r.status}) — ghost cleared`)
       return false
     }
+    this.rememberLabel(name, label)
     this.mine.add(label)
     this.workers.add(label)
     this.ledger?.attach(label, undefined, name, {
@@ -1030,6 +1076,17 @@ export class Rail implements ShepPort {
       const parent = verdict.path.replace(/\/[^/]*$/, "")
       addWorkerRoot(cwd, parent === "" || parent === "/" ? verdict.path : parent)
       this.transport.exec("agent", "send-keys", label, "enter")
+      // DELIVERY VERIFICATION for the ALLOW arm (the 2026-10-30
+      // receipt: the rail granted the path, sent enter, and the dialog
+      // STAYED UP — the worker waited at the prompt forever while the
+      // job's own log said "allow". One keystroke closed it). The deny
+      // arm has had this since issue #82; the allow arm needs it too:
+      // re-read, and if the dialog survived, send again and say so.
+      const allowStillUp = this.transport.exec("agent", "read", label).stdout.lastIndexOf("Permission required") >= 0
+      if (allowStillUp) {
+        this.transport.exec("agent", "send-keys", label, "enter")
+        this.log(`permission ${label}: dialog SURVIVED the allow — re-sent enter (the grant holds either way)`)
+      }
     } else {
       this.transport.exec("agent", "send-keys", label, "esc")
       // Delivery verification (issue #82): a verdict the pane cannot
@@ -1105,7 +1162,16 @@ export class Rail implements ShepPort {
     const capped = new Set<string>()
     for (const label of [...this.mine]) {
       const st = this.transport.exec("agent", "get", label).stdout
-      if (parseAgentStatus(st) !== "blocked") continue
+      const status = parseAgentStatus(st)
+      // A LABEL MISS is an infra fault, not a quiet skip (the
+      // blocked-divide receipt): herdr has no agent under a label the
+      // rail believes it owns — a blocked pane behind that name waits
+      // forever while the sweep reads "not blocked". Say it once.
+      if (status === "unknown" && st.trim() === "" && !this.labelMiss.has(label)) {
+        this.labelMiss.add(label)
+        this.log(`label miss: ${label} — herdr has no agent under that name (the label seat drifted); a blocked pane behind it would wait unanswered`)
+      }
+      if (status !== "blocked") continue
       const verdict = this.answerDialog(label)
       const name = this.unscopedOf.get(label) ?? label
       answered.add(name)
