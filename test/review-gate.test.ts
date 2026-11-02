@@ -207,6 +207,14 @@ test("shipConfigOf: the roster key — base governs, unknowns drop, empty = no c
   const typoCfg = shipConfigOf(repo, { base: "main" })
   assert.equal(typoCfg.roster, undefined, "an unknown id voids the roster key — never a silently narrower ceiling")
   assert.deepEqual(typoCfg.rosterUnknown, ["bogus"], "the offender is surfaced for the door's loud line")
+  // a scalar that is neither array nor valid csv (roster = true —
+  // r267 round-5 tests-2) is refused loudly too, never vanished
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), "roster = true\n")
+  execSync("git add -A && git commit -qm scalar && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const scalarCfg = shipConfigOf(repo, { base: "main" })
+  assert.equal(scalarCfg.roster, undefined, "a scalar roster voids the key — all four govern")
+  assert.deepEqual(scalarCfg.rosterUnknown, ["true"], "the scalar surfaces — refuse, never vanish")
   // empty roster = no contract — never a silent always-skip
   execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
   writeFileSync(join(repo, "review-gate.toml"), "roster = []\n")

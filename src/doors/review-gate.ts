@@ -384,18 +384,21 @@ export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness
 // universe, which would be a silent always-skip.
 function parseRosterKey(v: unknown): { roster?: Lens[]; unknown?: string[] } {
   // a STRING value is the CLI's csv spelling in the toml's seat
-  // (roster = "principles,tests" — r267 principles-1/tests-3): the
-  // owner's INTENT is honored (valid ids become the ceiling — the
-  // fail-safe fills to what they wrote, never past it) and the
-  // SPELLING is refused loudly (the raw string surfaces as unknown —
-  // the door's line fires; refuse, never vanish). A string with any
-  // invalid id voids the key like the array arm.
+  // (roster = "principles,tests"): with VALID ids it is HONORED as
+  // the ceiling — cleanly, with NO unknown flag (r267 round-5's law:
+  // honor+flag made the receipt lie — three lenses ran while the door
+  // printed ALL FOUR ARE THE CEILING; round-4's opposite order is
+  // rejected and recorded). Any invalid id, or any scalar that is
+  // neither array nor valid-csv (roster = true — round-5 tests-2),
+  // is REFUSED loudly: the key voids, all four govern, the offender
+  // surfaces for the door's line.
   if (typeof v === "string") {
     const ids = v.split(",").map((s) => s.trim()).filter(Boolean)
     const allValid = ids.length > 0 && ids.every((i) => LENSES.includes(i as Lens))
-    return { unknown: [v], roster: allValid ? LENSES.filter((l) => ids.includes(l)) : undefined }
+    if (allValid) return { roster: LENSES.filter((l) => ids.includes(l)) }
+    return { unknown: [v] }
   }
-  if (!Array.isArray(v)) return {}
+  if (!Array.isArray(v)) return { unknown: [String(v)] }
   const unknownIds = v.filter((x) => typeof x !== "string" || !LENSES.includes(x as Lens)).map((x) => String(x))
   if (unknownIds.length > 0) return { unknown: unknownIds }
   const keep = new Set(v as Lens[])

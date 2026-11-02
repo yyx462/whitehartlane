@@ -34,10 +34,18 @@ test("INV-2: a non-array roster is refused, not vanished into 'no contract'", ()
     execSync("git add -A && git commit -qm feat", { cwd: repo })
 
     const cfg = shipConfigOf(repo, { base: "main" })
-    assert.ok(
-      cfg.rosterUnknown && cfg.rosterUnknown.length > 0,
-      `INV-2: roster = "principles,tests,questions" is accepted by the toml parser then dropped — roster=${JSON.stringify(cfg.roster)} rosterUnknown=${JSON.stringify(cfg.rosterUnknown)}, indistinguishable from no contract, so the door's loud refusal never fires`,
+    // r267 round-5's ruling supersedes round-4's (the fixer's recorded
+    // rejection): a VALID csv spelling is HONORED cleanly — no unknown
+    // flag, because honor+flag made the door's receipt lie (three
+    // lenses ran under an ALL-FOUR-ARE-THE-CEILING banner). The
+    // assertion flips from "flagged" to "honored"; the deeper law
+    // below (fail-safe fills TO the declared ceiling) rides unchanged.
+    assert.deepEqual(
+      cfg.roster,
+      ["principles", "tests", "questions"],
+      `INV-2: a valid csv roster is the ceiling — honored, not vanished (rosterUnknown=${JSON.stringify(cfg.rosterUnknown)} must be empty: the receipt must not lie)`,
     )
+    assert.ok(!cfg.rosterUnknown || cfg.rosterUnknown.length === 0)
 
     // jev down: the fail-safe must fill TO the ceiling the owner wrote,
     // never past it. A vanished string is read as "no ceiling".

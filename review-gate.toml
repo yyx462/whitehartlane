@@ -22,9 +22,10 @@ strictness = "strict"
 # jev still trims WITHIN it (the band rides unchanged); the fail-safe
 # (jev down), the strict hot-file rule, and the dropout audit fill TO
 # this ceiling, never past it. The CLI's --roster still pins exactly.
-# Unknown ids VOID the key — all four lenses run and the door refuses
-# loudly (a typo must never shrink the universe); empty/absent = all
-# four lenses. Read from the BASE commit exactly like strictness: a PR
+# A csv spelling with valid ids is honored as the ceiling; unknown
+# ids, or any scalar the parse cannot honor, VOID the key — all four
+# lenses run and the door refuses loudly (a typo must never shrink
+# the universe); empty/absent = all four lenses. Read from the BASE commit exactly like strictness: a PR
 # cannot shrink the universe that reviews it. This repo declares none
 # — all four lenses, the strict flagship posture.
 # roster = ["principles", "tests", "momentum", "questions"]
