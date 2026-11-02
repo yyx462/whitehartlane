@@ -65,7 +65,7 @@ export type ReviewArgs = {
 }
 
 export type ReviewReady =
-  | { ok: true; dir: string; skipped: false; headShort: string; untuned?: true }
+  | { ok: true; dir: string; skipped: false; headShort: string; untuned?: true; model?: string; modelDefaulted?: true }
   | { ok: true; dir: null; skipped: true; why: string; files: number }
   | { ok: false; why: string; code: 1 | 2 }
 
@@ -586,6 +586,31 @@ function unresolvedTemperaturePins(parsed: unknown, cliModel: string | undefined
   return unresolved
 }
 
+// THE DEFAULT SEAT (the owner's ruling, 2026-11-02, on the j-ff8ead
+// receipt: a test-spawned review ran its lenses on the host's ambient
+// default — a coding-plan seat — because `whl review` without --model
+// pinned nothing and the spawn fell through to whatever opencode
+// config happened to be loaded): no review pane ever burns a paid
+// seat by DEFAULT. The [fallback] ladder's own comment already
+// declared the intent — "the ladder is also the DEFAULT story" — this
+// is its enforcement. The levy resolves --model > the template's own
+// [workflow].model > [fallback].order[0] (the cheapest rung), and the
+// door pins the result exactly as --model does, so every consumer
+// downstream (modelIn, the rail's workerModel, provenance, the
+// temperature pins' ride) reads ONE pin. A template with none of the
+// three stays model-less — its author's choice — and the
+// temperature-pin laws above govern it unchanged.
+function templateWorkflowModel(parsed: unknown): string | undefined {
+  const m = (parsed as { workflow?: { model?: unknown } })?.workflow?.model
+  return typeof m === "string" && m.length > 0 ? m : undefined
+}
+function cheapestFallbackRung(parsed: unknown): string | undefined {
+  const order = (parsed as { fallback?: { order?: unknown } })?.fallback?.order
+  if (!Array.isArray(order)) return undefined
+  const first = order[0]
+  return typeof first === "string" && /^[^/\s]+\/[^/\s]+$/.test(first) ? first : undefined
+}
+
 // A model-less dropout audit's untuned materialization (gate-r2
 // momentum-15): remove `temperature = <num>` keys — the pins are tuning
 // that needs a model to ride; without one the lenses spawn on the host
@@ -866,6 +891,11 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
   // set by the audit strip branch — the bin's receipt reports it
   // (gate-r26 principles-62)
   let untunedAudit = false
+  // THE DEFAULT SEAT's report: the resolved model + whether the
+  // ladder chose it (--model and template-declared pins are choices,
+  // not defaults — the receipt says which)
+  let levyModel: string | undefined
+  let modelDefaulted = false
   {
     const templateToml = readFileSync(join(template, "workflow.toml"), "utf8")
     let toml = templateToml
@@ -969,9 +999,16 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
       }
     }
     const hasTempPin = pinsSpawnTemperature(parsedTemplate)
+    // THE DEFAULT SEAT (above): the levy's model is --model > the
+    // template's [workflow].model > the [fallback] ladder's cheapest
+    // rung. Resolved BEFORE the temperature walk so a defaulted model
+    // gives every pin a seat exactly as --model does — a ladder-
+    // carrying template never refuses or strips for want of a model.
+    levyModel = args.model ?? templateWorkflowModel(parsedTemplate) ?? cheapestFallbackRung(parsedTemplate)
+    modelDefaulted = args.model === undefined && levyModel !== undefined && templateWorkflowModel(parsedTemplate) === undefined
     // gate-r27 principles-1: the nearest-declaration walk — see
     // unresolvedTemperaturePins above. hasModel = every pin rides.
-    const unresolvedPins = unresolvedTemperaturePins(parsedTemplate, args.model)
+    const unresolvedPins = unresolvedTemperaturePins(parsedTemplate, levyModel)
     const hasModel = unresolvedPins.size === 0
     if (hasTempPin && !hasModel) {
       if (args.auditLevy === true && args.model === undefined) {
@@ -989,7 +1026,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
           // the verify asks the SAME nearest-declaration question of
           // the stripped bytes (gate-r27 principles-1): every pin
           // either rides a model or is gone
-          clean = unresolvedTemperaturePins(parseToml(stripped), args.model).size === 0
+          clean = unresolvedTemperaturePins(parseToml(stripped), levyModel).size === 0
         } catch {
           clean = false
         }
@@ -1018,11 +1055,13 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
         }
       }
     }
-    if (typeof args.model === "string") {
+    if (typeof levyModel === "string") {
       // r19 tests-1: the landing must be inside the [workflow] table
       // THE RUN-TIME READS. Text-preserving landing + a parse of the
-      // result: the verification is the consumer's own read.
-      const pinned = pinIntoWorkflowTable(toml, args.model)
+      // result: the verification is the consumer's own read. (The
+      // DEFAULT SEAT rides this same arm: the ladder's rung 1 is
+      // pinned exactly as --model would — one law, one landing.)
+      const pinned = pinIntoWorkflowTable(toml, levyModel)
       let parsed: { workflow?: { model?: string } } | undefined
       try {
         parsed = pinned !== undefined ? (parseToml(pinned) as { workflow?: { model?: string } }) : undefined
@@ -1033,7 +1072,7 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
           code: 2,
         }
       }
-      if (parsed?.workflow?.model !== args.model) {
+      if (parsed?.workflow?.model !== levyModel) {
         return {
           ok: false,
           why: `the template's workflow.toml has no [workflow] table the door can pin text-preservingly (a [workflow] header block, dotted workflow.* keys, or a single-line inline table — re-serializing the whole document would mangle the units layout): rewrite the table in one of those forms, or pass --template pointing at one`,
@@ -1281,7 +1320,15 @@ export function prepareReview(args: ReviewArgs, templateRoot: string): ReviewRea
     if (!existsSync(args.traceDir)) return { ok: false, why: `--trace-dir ${args.traceDir} does not exist`, code: 2 }
     cpSync(args.traceDir, join(dir, "data", "trace"), { recursive: true })
   }
-  return { ok: true, dir, skipped: false, headShort, ...(untunedAudit ? { untuned: true as const } : {}) }
+  return {
+    ok: true,
+    dir,
+    skipped: false,
+    headShort,
+    ...(untunedAudit ? { untuned: true as const } : {}),
+    ...(levyModel !== undefined ? { model: levyModel } : {}),
+    ...(modelDefaulted ? { modelDefaulted: true as const } : {}),
+  }
 }
 
 // The receipt the door prints after materializing (before any levy) —
@@ -1291,6 +1338,9 @@ export function reviewReceipt(r: ReviewReady): string {
   if (!r.ok) return `review: ${r.why}`
   return [
     `review: program materialized at ${r.dir}`,
+    ...(r.model
+      ? [`review: model ${r.model}${r.modelDefaulted ? " (defaulted — rung 1 of the template's [fallback] ladder, the cheapest seat; --model overrides)" : ""}`]
+      : []),
     `review: levy it with: whl run ${r.dir} --from <tool>:<session-id>`,
     `review: the staged run dir carries the verdict (data/review/verdict.json); feedback/ lands beside it on reject`,
   ].join("\n")

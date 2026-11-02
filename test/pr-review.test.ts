@@ -149,11 +149,15 @@ const mat = (over: Partial<ReviewArgs> & { repo: string }) => prepareReview(over
 test("review verb: materializes a program the door's own screens accept", () => {
   const tmp = mkdtempSync(join(tmpdir(), "aos-rev-verb-"))
   const repo = fixtureRepo(join(tmp, "repo"))
-  // the template's temperature pins need a model — without one the door
-  // refuses, with the fix in the message (never vanish)
+  // THE DEFAULT SEAT (2026-11-02): a model-less levy no longer refuses
+  // on a ladder-carrying template — rung 1 (the cheapest seat) is pinned
+  // and reported. The refusal survives only for templates declaring no
+  // model anywhere (model-default.test.ts pins that arm).
   const bare = mat({ repo, base: "main", head: "feat", out: join(tmp, "bare") })
-  assert.ok(!bare.ok && bare.code === 2, JSON.stringify(bare))
-  assert.match(bare.why ?? "", /--model/)
+  assert.ok(bare.ok && !bare.skipped, JSON.stringify(bare))
+  assert.equal(bare.model, "minimax-cn/MiniMax-M3.1-Flash")
+  assert.equal(bare.modelDefaulted, true)
+  assert.match(readFileSync(join(bare.dir, "workflow.toml"), "utf8"), /^model = "minimax-cn\/MiniMax-M3\.1-Flash"$/m)
   const r = mat({ repo, base: "main", head: "feat", out: join(tmp, "prog"), model: "acme/strong" })
   assert.ok(r.ok && !r.skipped, JSON.stringify(r))
   assert.match(readFileSync(join(r.dir, "workflow.toml"), "utf8"), /^model = "acme\/strong"$/m)

@@ -57,6 +57,10 @@ born_ms = 300000
 # last resort. The ladder is also the DEFAULT story: a review that
 # costs a coding-plan seat when a flash model would do is the rail
 # burning the owner's budget on its own ceremony.
+# ENFORCED AT THE DOOR (2026-11-02, the j-ff8ead receipt): rung 1 is
+# the LEVY DEFAULT — `whl review` without --model pins order[0], so no
+# review pane (manual, auto re-levy, or test-spawned) ever falls
+# through to the host's ambient default seat again.
 mode = "auto"
 order = ["minimax-cn/MiniMax-M3.1-Flash", "zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"]
 

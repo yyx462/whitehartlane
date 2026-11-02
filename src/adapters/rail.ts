@@ -495,7 +495,7 @@ export class Rail implements ShepPort {
   }
 
   private agentState(name: string): string {
-    return this.transport.exec(["agent", "get", this.scopedFn(name)]).stdout
+    return this.transport.exec(["agent", "get", this.scopedName(name)]).stdout
   }
 
   // -- fleet tab layout --------------------------------------------------------
@@ -877,7 +877,7 @@ export class Rail implements ShepPort {
   }
 
   paneAlive(name: string): boolean {
-    return this.transport.exec("agent", "get", this.scopedFn(name)).status === 0
+    return this.transport.exec("agent", "get", this.scopedName(name)).status === 0
   }
 
   // completion-detection: the pane's own verdict — delegated to the
@@ -885,14 +885,14 @@ export class Rail implements ShepPort {
   // there; "done" folds to idle, anything else is unknown = the
   // fallback ladder).
   workerStatus(name: string): AgentStatus {
-    return this.host.status(this.scopedFn(name))
+    return this.host.status(this.scopedName(name))
   }
 
   reprompt(name: string, briefPath: string): boolean {
     try {
       const brief = readFileSync(briefPath, "utf8")
-      const r = this.transport.exec("agent", "prompt", this.scopedFn(name), brief)
-      if (r.status === 0) this.log(`reprompted ${this.scopedFn(name)} (brief re-submitted)`)
+      const r = this.transport.exec("agent", "prompt", this.scopedName(name), brief)
+      if (r.status === 0) this.log(`reprompted ${this.scopedName(name)} (brief re-submitted)`)
       return r.status === 0
     } catch {
       return false
@@ -900,7 +900,7 @@ export class Rail implements ShepPort {
   }
 
   retire(name: string): void {
-    const label = this.scopedFn(name)
+    const label = this.scopedName(name)
     const r = this.shep("retire", label)
     if (r.status !== 0) this.shep("prune")
     this.mine.delete(label)
@@ -1004,7 +1004,7 @@ export class Rail implements ShepPort {
     return new Promise((res) => {
       const started = Date.now()
       const child = spawn("herdr", [
-        "agent", "wait", this.scopedFn(name),
+        "agent", "wait", this.scopedName(name),
         "--until", "done", "--until", "blocked",
         "--timeout", String(timeoutMs),
       ], { stdio: "ignore" })
@@ -1192,7 +1192,7 @@ export class Rail implements ShepPort {
 
   // Engines prompt panes by name; the runner behind it is the seam.
   promptAgent(name: string, text: string): RunnerResult {
-    return this.host.prompt(this.scopedFn(name), text)
+    return this.host.prompt(this.scopedName(name), text)
   }
 
   // Latest session message whose error.type is a provider budget fault.
@@ -1352,7 +1352,7 @@ export class Rail implements ShepPort {
       const sid = marker
         ? this.resolveMarkedSession(kind, cwd, since, marker)
         : this.resolveLiveSession(kind, cwd, since)
-      if (sid) this.ledger?.setSession(this.scopedFn(name), sid)
+      if (sid) this.ledger?.setSession(this.scopedName(name), sid)
     }, 5_000).unref()
   }
 

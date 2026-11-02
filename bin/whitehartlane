@@ -706,6 +706,9 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     }
     console.log(`job: ${runReady.job.id}`)
     console.log(`workflow: ${runReady.kind}`)
+    if (ready.ok && !ready.skipped && ready.model) {
+      console.log(`model: ${ready.model}${ready.modelDefaulted ? " (defaulted: rung 1 of the [fallback] ladder — the cheapest seat; --model overrides)" : ""}`)
+    }
     console.log(`verdict: will land at ${join(ready.dir, "data", "review", "verdict.json")} (the staged run dir carries it)`)
     console.log(`log: ${runReady.log}`)
     console.log(`trace: ${runReady.trace}`)

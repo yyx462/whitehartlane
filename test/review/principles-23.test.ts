@@ -84,20 +84,18 @@ test("a model-less dropout audit's materialized program carries no temperature p
         }
       }
     })(parsed, "")
-    assert.deepEqual(
-      tempKeys,
-      [],
-      `INV-2/INV-4: the model-less dropout audit's receipt (bin/whitehartlane: "review: dropout audit without ` +
-        `--model — temperature pins dropped; the lenses run on the host default, untuned") is false. The door ` +
-        `accepted the audit (ok=true) and its pin-plan stripped the pins into the LOCAL templateToml ` +
-        `(review.ts, the auditLevy arm: templateToml = stripTemperaturePins(templateToml)) — but nothing writes ` +
-        `that variable: the pinned write is gated on pinnedWorkflowToml (assigned only for a string --model) and ` +
-        `the else-branch writes only the roster strip. The materialized program keeps the template's pins: ` +
-        `temperature keys at ${JSON.stringify(tempKeys)} with NO workflow.model — every lens spawn then refuses at ` +
-        `the host (opencode-host.ts: "temperature … has no model to pin against — refusing spawn"), the ` +
-        `four-lenses-late death this door block exists to refuse, on the audit path whose whole purpose is to ` +
-        `produce a verdict for the skipped class. Refuse, never vanish — or land the strip the receipt promises.`,
+    assert.ok(tempKeys.length > 0, "sanity: the template's temperature pins are present — riding the defaulted model")
+    const wf = (parseToml(toml) as { workflow?: { model?: string } }).workflow?.model
+    assert.equal(
+      wf,
+      "minimax-cn/MiniMax-M3.1-Flash",
+      `THE DEFAULT SEAT (2026-11-02): the model-less dropout audit stages a RUNNABLE program — the [fallback] ` +
+        `ladder's cheapest rung is pinned, the ${tempKeys.length} temperature key(s) at ` +
+        `${JSON.stringify(tempKeys)} ride it, and the host spawns every lens instead of refusing ` +
+        `("temperature … has no model to pin against"). The old strip/untuned workaround is dead: a runnable ` +
+        `audit beats a stripped one, and the cheapest seat beats the host default.`,
     )
+    assert.notEqual((r as { untuned?: true }).untuned, true, "no strip — no untuned flag")
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

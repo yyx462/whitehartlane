@@ -417,7 +417,7 @@ export function gradePlanFromStages(stages: Stage[]): Map<string, GradePlan> {
 }
 
 export type Manifest = {
-  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean; stall_ms?: number; born_ms?: number }
+  workflow: { name: string; worker_kind: "opencode" | "pi" | "mock"; slots?: number; model?: string; spur_id?: string; drain_timeout_ms?: number; canary?: boolean; retry?: number; settle_mode?: "marker" | "status-first"; fallback_ladder?: boolean; stall_ms?: number; born_ms?: number; deadline_s?: number }
   // ADR 0014: hooks.units is refused at load, never set; the field stays
   // only for coworker-run's legacy-toml warning (that file's concern)
   hooks: { units?: string; grade?: string; counts?: string; verdict?: string }
@@ -605,6 +605,22 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
       throw new HookError(`workflow.born_ms must be an integer 30000-600000 (ms): ${workflow.born_ms}`)
     }
   }
+  // THE ROUND CLIFF's manifest seat (the r25 receipt, 2026-11-02: the
+  // template declared deadline_s = 1800 and the ORCHESTRATOR read
+  // manifest.workflow.deadline_s — but this assembly never carried the
+  // key, so every live run fell to the 2h default while the bytes on
+  // disk said 30 minutes; the run reached 95 minutes on a 30-minute
+  // cliff. The receiver's read is the only truth — a key this loader
+  // does not carry does not exist). Seconds, 60..7200 (a minute to the
+  // 2h default); input.deadlineMs (engine.ts deadline_ms) stays the
+  // explicit per-run override ABOVE this declaration.
+  let deadlineS: number | undefined
+  if ((workflow as { deadline_s?: unknown }).deadline_s !== undefined) {
+    deadlineS = Number((workflow as { deadline_s?: unknown }).deadline_s)
+    if (!Number.isInteger(deadlineS) || deadlineS < 60 || deadlineS > 7200) {
+      throw new HookError(`workflow.deadline_s must be an integer 60-7200 (s): ${(workflow as { deadline_s?: unknown }).deadline_s}`)
+    }
+  }
   // completion-detection — the settle lane. "marker" (default) is the
   // worker-pen protocol, byte-identical to every run before this
   // option existed. "status-first" adds the platform pen: an idle
@@ -678,7 +694,7 @@ export function loadManifest(taskDir: string, warn?: (message: string) => void):
     throw new HookError('[gates] detectors are retired with the spur step file they served — the rail-acted verdict is a [[stage]] with topology = "gate" and run (docs/STAGES.md, ADR 0014)')
   }
   return {
-    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, born_ms: bornMs, ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}), ...(workflow.settle_mode !== undefined ? { settle_mode: workflow.settle_mode } : {}), ...(workflow.fallback_ladder !== undefined ? { fallback_ladder: workflow.fallback_ladder } : {}) },
+    workflow: { name, worker_kind: workerKind, slots, model, ...(spurId ? { spur_id: spurId } : {}), drain_timeout_ms: drainTimeoutMs, stall_ms: stallMs, born_ms: bornMs, ...(deadlineS !== undefined ? { deadline_s: deadlineS } : {}), ...(retry !== undefined ? { retry } : {}), ...(canary !== undefined ? { canary } : {}), ...(workflow.settle_mode !== undefined ? { settle_mode: workflow.settle_mode } : {}), ...(workflow.fallback_ladder !== undefined ? { fallback_ladder: workflow.fallback_ladder } : {}) },
     hooks: {
       grade: optHook(hooks.grade, "hooks.grade"),
       counts: optHook(hooks.counts, "hooks.counts", {

@@ -86,26 +86,20 @@ test("a model-less dropout audit materializes UNTUNED — the promised strip mus
     const dir = (r as { dir: string }).dir
     const toml = readFileSync(join(dir, "workflow.toml"), "utf8")
 
-    // THE LAW, in the consumer's own read: no temperature key may survive
-    // in the materialized program — the pins were promised DROPPED.
-    const pins = tempKeyPaths(toml)
-    assert.deepEqual(
-      pins,
-      [],
-      `INV-4/INV-2: the model-less dropout audit's own receipts promise the temperature pins never reach the ` +
-        `materialized program — bin/whitehartlane:365 ("temperature pins dropped; the lenses run on the host ` +
-        `default, untuned") and the door's audit branch ("strip them and the lenses spawn on the host default, ` +
-        `untuned"). The strip runs on the pin-plan's LOCAL templateToml (review.ts:353) while the only ` +
-        `materialization writes fire for pinnedWorkflowToml (undefined — no --model) or a roster<4 strip ` +
-        `(the audit's roster is all four lenses), so the STRIPPED BYTES NEVER REACH DISK: the staged ` +
-        `workflow.toml still carries the temperature keys ${JSON.stringify(pins)} with no [workflow].model. ` +
-        `The consumer named by both claims — opencode-host.ts:95 — refuses every such spawn ("temperature … ` +
-        `has no model to pin against … refusing spawn"): the audit levies a rail whose four lenses all die at ` +
-        `spawn refusal and measure nothing. The strip must land in the materialized bytes (or the door must ` +
-        `refuse) — never vanish into a program that cannot run.`,
+    // THE LAW, in the consumer's own read: the pins SURVIVE and a model
+    // rides them — the audit stages a runnable program on the cheapest
+    // seat (the strip arm is dead for ladder-carrying templates).
+    const wfModel = (parseToml(toml) as { workflow?: { model?: string } }).workflow?.model
+    assert.equal(
+      wfModel,
+      "minimax-cn/MiniMax-M3.1-Flash",
+      `THE DEFAULT SEAT (2026-11-02): the model-less dropout audit pins the [fallback] ladder's cheapest rung — ` +
+        `the materialized program is runnable as staged (every lens spawns, on the cheapest seat), not a ` +
+        `pin-stripped husk whose spawn the host would refuse. Temperature keys now present: ` +
+        `${JSON.stringify(tempKeyPaths(toml))}.`,
     )
 
-    // and the strip must be SURGICAL: dropping pins never drops units.
+    // and the staging stays SURGICAL: the roster is intact.
     const parsed = parseToml(toml) as { stage?: Array<{ units?: Array<{ id?: string }> }> }
     const ids = (parsed.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id)).filter(Boolean) as string[]
     assert.deepEqual(
