@@ -369,19 +369,26 @@ export const BANDS: Record<Strictness, GateBand> = {
 //                         own call outranks the file). Like the band, the
 //                         roster comes from the BASE commit — a PR cannot
 //                         shrink the universe that reviews it. Unknown
-//                         ids drop; an empty result means no contract —
-//                         the fail-safe direction is more review, never
-//                         less (a typo costs tokens, not coverage)
-export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness; roster?: Lens[] }
+//                         ids void the key (all four lenses — a typo must
+//                         never shrink the universe, and the door refuses
+//                         loudly); empty means no contract — the
+//                         fail-safe direction is more review, never less
+export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness; roster?: Lens[]; rosterUnknown?: string[] }
 
 // the roster key's ONE parse (the one-spelling law): LENSES-ordered,
-// deduped, unknown ids dropped. Empty result → undefined (no contract)
-// — never an empty universe, which would be a silent always-skip.
-function parseRosterKey(v: unknown): Lens[] | undefined {
-  if (!Array.isArray(v)) return undefined
-  const keep = new Set(v.filter((x): x is Lens => typeof x === "string" && LENSES.includes(x as Lens)))
+// deduped. An unknown id (or a non-string entry) is NOT dropped — a
+// typo must never SHRINK the ceiling (vanish, not fail-safe: the owner
+// who wrote "quetions" wanted questions reviewed); the whole roster
+// key is ignored (all four lenses) and the offenders are surfaced for
+// the door's loud line. Empty result → no contract — never an empty
+// universe, which would be a silent always-skip.
+function parseRosterKey(v: unknown): { roster?: Lens[]; unknown?: string[] } {
+  if (!Array.isArray(v)) return {}
+  const unknownIds = v.filter((x) => typeof x !== "string" || !LENSES.includes(x as Lens)).map((x) => String(x))
+  if (unknownIds.length > 0) return { unknown: unknownIds }
+  const keep = new Set(v as Lens[])
   const ordered = LENSES.filter((l) => keep.has(l))
-  return ordered.length > 0 ? ordered : undefined
+  return ordered.length > 0 ? { roster: ordered } : {}
 }
 
 export function shipConfigOf(repo: string, opts: { head?: string; base?: string } = {}): ShipConfig {
@@ -429,7 +436,8 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
       return { auto: local.auto, model: local.model, strictness: "medium" }
     }
     const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
-    return { auto: local.auto, model: local.model, strictness, roster: parseRosterKey(t.roster) }
+    const rk = parseRosterKey(t.roster)
+    return { auto: local.auto, model: local.model, strictness, roster: rk.roster, rosterUnknown: rk.unknown }
   }
   return { auto: local.auto, model: local.model, strictness: "medium" }
 }
@@ -486,7 +494,7 @@ export function decideGate(
     return { action: "review", roster: [...universe], ...capped, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `strict band: hot file(s) ${f.hotFiles.map((h) => h.file).join(", ")} — ${f.hotFiles.reduce((n, h) => n + h.findings, 0)} prior proven findings outrank the judgment` }
   }
   if (ps === null) {
-    return { action: "review", roster: [...universe], ...capped, ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev unavailable — fail-safe full rail" }
+    return { action: "review", roster: [...universe], ...capped, ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `jev unavailable — fail-safe full rail${universe.length < LENSES.length ? ` (the project ceiling: ${universe.join(",")})` : ""}` }
   }
   // a MISSING probability is never a reason to drop a lens (fail-safe)
   const roster = universe.filter((l) => (ps[l] ?? 1) >= band.keepP)

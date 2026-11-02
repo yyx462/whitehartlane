@@ -198,17 +198,43 @@ test("shipConfigOf: the roster key — base governs, unknowns drop, empty = no c
   // "main", not a pinned sha: the ref resolves at read time, so the
   // commits below (roster, empty) stay visible to every assertion
   assert.equal(shipConfigOf(repo, { base: "main" }).roster, undefined, "a PR cannot shrink the universe that reviews it")
-  // committed on the BASE → it governs; unknown ids drop; LENSES order wins over declaration order
+  // committed on the BASE → it governs; an unknown id VOIDS the key (all
+  // four lenses — a typo must never shrink the ceiling) and surfaces
+  // loudly; LENSES order wins over declaration order
   execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
   writeFileSync(join(repo, "review-gate.toml"), 'roster = ["questions", "bogus", "principles"]\n')
   execSync("git add -A && git commit -qm roster && git checkout -q feat", { cwd: repo, encoding: "utf8" })
-  assert.deepEqual(shipConfigOf(repo, { base: "main" }).roster, ["principles", "questions"])
+  const typoCfg = shipConfigOf(repo, { base: "main" })
+  assert.equal(typoCfg.roster, undefined, "an unknown id voids the roster key — never a silently narrower ceiling")
+  assert.deepEqual(typoCfg.rosterUnknown, ["bogus"], "the offender is surfaced for the door's loud line")
   // empty roster = no contract — never a silent always-skip
   execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
   writeFileSync(join(repo, "review-gate.toml"), "roster = []\n")
   execSync("git add -A && git commit -qm empty && git checkout -q feat", { cwd: repo, encoding: "utf8" })
   assert.equal(shipConfigOf(repo, { base: "main" }).roster, undefined)
   rmSync(tmp, { recursive: true, force: true })
+})
+
+test("runGate: the caller's roster pin outranks the file's ceiling (the --roster law's one seat)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-pin-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // the file says three lenses; the commissioner pins two
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "questions"]\n')
+  execSync("git add -A && git commit -qm roster && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "pin.jsonl")
+  const stub = jevStub(tmp, { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    const { decision } = runGate(repo, "main", "feat", { roster: ["principles", "tests"] })
+    assert.deepEqual(decision.universe, ["principles", "tests"], "the caller's pin IS the universe")
+    assert.deepEqual(decision.roster, ["principles", "tests"], "jev trims within the PIN, not the file")
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
 })
 
 test("runGate: the base's roster caps the decision, and the row round-trips", () => {

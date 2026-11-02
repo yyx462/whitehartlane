@@ -1,0 +1,22 @@
+# contract.toml — #205: every commission names its deliverables. The
+# review's human-readable surface is the verdict; the machine surface
+# is findings + coverage; the author-facing surface is feedback.
+[[contract.deliverables]]
+name = "verdict"
+path = "data/review/verdict.json"
+kind = "json"
+
+[[contract.deliverables]]
+name = "findings"
+path = "units/*/findings.jsonl"
+kind = "jsonl"
+
+[[contract.deliverables]]
+name = "coverage"
+path = "units/*/coverage.md"
+kind = "md"
+
+[[contract.deliverables]]
+name = "feedback"
+path = "feedback/*.md"
+kind = "md"
