@@ -688,8 +688,28 @@ export class Rail implements ShepPort {
     // ledger bookkeeping around it.
     const ok = this.host.inhabit(name, pane, { kind, briefPath, cwd, model, hold, resumeSession, temperature })
     if (!ok) {
-      this.shep("retire", name)
-      this.ledger?.emit("reject", { label: name, why: "agent start failed" })
+      // A REFUSED BRIEF IS NOT ITSELF A RETIRE (r269 round-6's four):
+      // a pane whose agent start already SUCCEEDED is retired only
+      // after agent_status is OBSERVED not-working — the brief-retry
+      // sleep was never that wait, and a blind shep-retire killed
+      // working agents (the fresh twin of round-5's resume fix). A
+      // start that never succeeded is still a ghost, cleared now; an
+      // observed-working pane is left for the run's own reap — the
+      // birth still FAILS honestly either way (the engine never
+      // reports done over it; the lab's fault row rides round-5).
+      let observed: AgentStatus | null = null
+      try {
+        observed = this.host.status(name)
+      } catch {
+        observed = null // an unstartable label answers nothing — a ghost
+      }
+      if (observed === "working" || observed === "blocked") {
+        this.ledger?.emit("reject", { label: name, why: `brief never landed (agent observed ${observed} — pane left to the run's reap)` })
+        this.log(`birth failed for ${name}: brief never landed, agent observed ${observed} — not retiring a live pane; the run's reap owns it`)
+      } else {
+        this.shep("retire", name)
+        this.ledger?.emit("reject", { label: name, why: "agent start failed" })
+      }
       return false
     }
     this.mine.add(name)
