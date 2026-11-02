@@ -177,6 +177,7 @@ const out = {
   verdict,
   repo: process.env.REPO,
   base: process.env.BASE_SHA,
+  judgedFrom: process.env.JUDGED_SPAN_FROM,
   head: process.env.HEAD_SHA,
   blocked: blocked.map(({ _unit, _line, ...f }) => f),
   advisory: advisory.map(({ _unit, _line, why, ...f }) => ({ ...f, why })),

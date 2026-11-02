@@ -106,6 +106,15 @@ test("the watcher must carry the verdict to the PR even when the agent is dead",
     join(out, "data", "review", "verdict.json"),
     JSON.stringify({ verdict: "reject", head: "a".repeat(40), blocked: [{ id: "m-1", severity: "P1", claim: "c" }] }),
   )
+  // THE MERGE SEAT TOO (momentum-2101's law, 2026-11-02): the watcher
+  // no longer breaks on the verdict seat — the verdict lands three
+  // stages before the merge stage, and breaking there posts the
+  // outcome before the commission has ended. The watcher waits for
+  // the MERGE seat; the backstop reads its payload for the receipt.
+  writeFileSync(
+    join(out, "data", "review", "merge.json"),
+    JSON.stringify({ outcome: "reject", at: new Date().toISOString() }),
+  )
 
   const env = {
     ...process.env,

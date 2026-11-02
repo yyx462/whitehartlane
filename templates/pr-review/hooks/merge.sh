@@ -122,13 +122,44 @@ case "$verdict" in
         exit 1
       fi
       if [ -n "${PR_NUM:-}" ] && command -v gh >/dev/null 2>&1; then
-        remote_head="$(gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+        # THE P0 WRAP (principles-1, r21): the probe ran from the gate's
+        # own run dir — not a git work tree — so live gh could not
+        # resolve a repository and every accept with a PR number
+        # refused while asserting the PR carried unreviewed bytes
+        # (fixture stubs ignored cwd, which is why no test ever saw
+        # it). gh answers from the REPO, or the witness is empty.
+        remote_head="$( { cd "$REPO" && gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid; } 2>/dev/null || true )"
         if [ -z "$remote_head" ]; then
           echo "merge: PR #$PR_NUM's head could not be read — the merge would land bytes no verdict judged; refusing" >&2
           exit 1
         fi
         if [ "$remote_head" != "$judged_head" ]; then
           echo "merge: PR #$PR_NUM is at $remote_head but the review judged $judged_head — unreviewed bytes would ride the merge; re-run the review" >&2
+          exit 1
+        fi
+      fi
+      # THE CHAIN CHECK (the owner's convergence ruling, 2026-11-02):
+      # delta rounds judge only the commits since the last judged
+      # head; this sweep proves the TILING — folding the judged spans
+      # forward from BASE_SHA, the frontier must reach the judged
+      # head. Overlap is re-reading (sound); a GAP is bytes no verdict
+      # ever judged — refuse.
+      if [ -n "${JUDGED_SPANS:-}" ]; then
+        span_frontier="$BASE_SHA"
+        span_progress=1
+        while [ "$span_progress" = "1" ]; do
+          span_progress=0
+          for span_pair in $JUDGED_SPANS; do
+            span_f="${span_pair%%:*}"; span_h="${span_pair##*:}"
+            # starts at or before the frontier…
+            if [ "$span_f" != "$span_frontier" ] && ! git -C "$REPO" merge-base --is-ancestor "$span_f" "$span_frontier" 2>/dev/null; then continue; fi
+            # …and reaches past it
+            if git -C "$REPO" merge-base --is-ancestor "$span_h" "$span_frontier" 2>/dev/null; then continue; fi
+            span_frontier="$span_h"; span_progress=1
+          done
+        done
+        if [ "$span_frontier" != "$judged_head" ] && ! git -C "$REPO" merge-base --is-ancestor "$judged_head" "$span_frontier" 2>/dev/null; then
+          echo "merge: the judged spans leave a GAP — the frontier folds forward only to ${span_frontier:-(nothing)} but the review judged $judged_head; bytes no verdict judged would ride the merge; re-review the gap" >&2
           exit 1
         fi
       fi

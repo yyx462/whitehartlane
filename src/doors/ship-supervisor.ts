@@ -145,7 +145,14 @@ export function spawnSupervisor(opts: {
       // with no watcher at all.
       `  if [ -d "$OUT" ]; then seen=1; fi`,
       `  if [ "$seen" = "1" ] && [ ! -d "$OUT" ]; then exit 4; fi`,
-      `  if [ -f "$OUT/data/review/verdict.json" ] && ! kill -0 "$AGENT" 2>/dev/null; then break; fi`,
+      // ONE SEAT (momentum-2101, 2026-11-02): there is NO verdict-seat
+      // break — the verdict lands three stages before the merge stage,
+      // and a watcher that wakes on it posts the outcome before the
+      // commission has ended (the twin-seat harm this file's own
+      // comments name). The loop waits for the MERGE seat alone; a
+      // dead agent's receipt lands either at the merge seat (the
+      // backstop below, reading the merge payload) or at the 2h
+      // deadline arm above (dead → it posts).
       `  if [ "$i" -ge 7200 ]; then`,
       // A LIVE AGENT OWNS THE RECEIPT (principles-6001): the 2h arm
       // published over a supervisor that could still be alive — one

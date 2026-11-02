@@ -24,6 +24,11 @@ export type Verdict = {
   verdict: string
   repo?: string
   base?: string
+  // DELTA ROUNDS (2026-11-02): the sha this verdict's round actually
+  // READ from — the commits since the last judged head. Absent on
+  // every pre-delta verdict (they read the full base..head; readers
+  // treat absent as base).
+  judgedFrom?: string
   head?: string
   blocked: BlockedFinding[]
   advisory?: unknown[]
@@ -155,7 +160,7 @@ export function shipCheck(opts: {
   if (missing.length > 0) {
     return { ok: false, code: 2, why: `unanswered blocked finding(s): ${missing.map((b) => b.id).join(", ")} — every rejection you reject carries a one-line why` }
   }
-  return { ok: true, verdict: latest, rounds: judgedHeads.size, overrules }
+  return { ok: true, verdict: latest, rounds, overrules }
 }
 
 export function overruleComment(opts: { pr: string; verdict: Verdict; overrules: Record<string, string>; by: string; stop?: string }): string {
