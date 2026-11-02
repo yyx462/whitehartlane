@@ -51,6 +51,9 @@ export type GateFeatures = {
 export type GateDecision = {
   action: "skip" | "review"
   roster: Lens[]
+  /** the project's configured universe (review-gate.toml roster);
+   * absent = all four lenses — the ceiling jev trims within */
+  universe?: Lens[]
   ps: Partial<Record<Lens, number>> | null
   klass: GateClass
   audit: boolean
@@ -136,6 +139,9 @@ type LedgerRow = {
   hot: { file: string; findings: number }[]
   ps: Partial<Record<Lens, number>> | null
   roster: Lens[]
+  /** the configured universe this decision trimmed within (absent on
+   * rows whose project declared no roster — all four by definition) */
+  universe?: Lens[]
   action: "skip" | "review" | "override"
   audit: boolean
   // the band that made the decision (absent on rows older than the
@@ -354,7 +360,29 @@ export const BANDS: Record<Strictness, GateBand> = {
 //   auto = true            levy the review after every gwt submit-pr
 //   model = "provider/m"  the levy's model pin (auto = true requires it)
 //   strictness = "medium" the band above
-export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness }
+//   roster = ["principles", "tests", "questions"]
+//                         the project's lens CEILING — the universe the
+//                         gate ever runs. jev still trims WITHIN it (the
+//                         band rides unchanged, the fail-safe fills to
+//                         the ceiling, never past it); the CLI's
+//                         --roster still pins exactly (the commissioner's
+//                         own call outranks the file). Like the band, the
+//                         roster comes from the BASE commit — a PR cannot
+//                         shrink the universe that reviews it. Unknown
+//                         ids drop; an empty result means no contract —
+//                         the fail-safe direction is more review, never
+//                         less (a typo costs tokens, not coverage)
+export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness; roster?: Lens[] }
+
+// the roster key's ONE parse (the one-spelling law): LENSES-ordered,
+// deduped, unknown ids dropped. Empty result → undefined (no contract)
+// — never an empty universe, which would be a silent always-skip.
+function parseRosterKey(v: unknown): Lens[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const keep = new Set(v.filter((x): x is Lens => typeof x === "string" && LENSES.includes(x as Lens)))
+  const ordered = LENSES.filter((l) => keep.has(l))
+  return ordered.length > 0 ? ordered : undefined
+}
 
 export function shipConfigOf(repo: string, opts: { head?: string; base?: string } = {}): ShipConfig {
   // the band comes from the TRUSTED SIDE — the BASE commit (momentum-910):
@@ -394,14 +422,14 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
     // only one of the three that did not guard the parse, and a
     // malformed review-gate.toml on the base branch killed the gate
     // instead of gating at the default band.
-    let t: { strictness?: unknown }
+    let t: { strictness?: unknown; roster?: unknown }
     try {
-      t = parseToml(raw) as { strictness?: unknown }
+      t = parseToml(raw) as { strictness?: unknown; roster?: unknown }
     } catch {
       return { auto: local.auto, model: local.model, strictness: "medium" }
     }
     const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
-    return { auto: local.auto, model: local.model, strictness }
+    return { auto: local.auto, model: local.model, strictness, roster: parseRosterKey(t.roster) }
   }
   return { auto: local.auto, model: local.model, strictness: "medium" }
 }
@@ -423,7 +451,16 @@ export function decideGate(
   stats: ClassStats,
   roll = Math.random(),
   band: GateBand = BANDS.medium,
+  // the project's ceiling (review-gate.toml roster; LENSES when the
+  // project declared none). Every "full" roster in this decision fills
+  // to the CEILING, never past it: the owner's declaration outranks
+  // both the fail-safe and the hot-file fact — a project that said
+  // "no momentum" has not become uncertain about that
+  universe: readonly Lens[] = LENSES,
 ): GateDecision {
+  // present on the decision only when the ceiling actually caps —
+  // absent means all four, the shape readers already know
+  const capped: Pick<GateDecision, "universe"> | {} = universe.length < LENSES.length ? { universe: [...universe] } : {}
   if (f.klass === "docs_only") {
     // the one mechanical rule, kept by construction: the blocking
     // class (code twins) cannot live in a docs-only diff. And it is
@@ -446,21 +483,21 @@ export function decideGate(
   // strict band's fact-beats-probability rule: a file with prior
   // PROVEN findings reviews in full whatever jev thinks of the diff
   if (band.hotFileForce && f.hotFiles.length > 0) {
-    return { action: "review", roster: [...LENSES], ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `strict band: hot file(s) ${f.hotFiles.map((h) => h.file).join(", ")} — ${f.hotFiles.reduce((n, h) => n + h.findings, 0)} prior proven findings outrank the judgment` }
+    return { action: "review", roster: [...universe], ...capped, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `strict band: hot file(s) ${f.hotFiles.map((h) => h.file).join(", ")} — ${f.hotFiles.reduce((n, h) => n + h.findings, 0)} prior proven findings outrank the judgment` }
   }
   if (ps === null) {
-    return { action: "review", roster: [...LENSES], ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev unavailable — fail-safe full rail" }
+    return { action: "review", roster: [...universe], ...capped, ps: null, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev unavailable — fail-safe full rail" }
   }
   // a MISSING probability is never a reason to drop a lens (fail-safe)
-  const roster = LENSES.filter((l) => (ps[l] ?? 1) >= band.keepP)
+  const roster = universe.filter((l) => (ps[l] ?? 1) >= band.keepP)
   if (roster.length === 0) {
     // same law as docs_only: the JUDGMENT is skip; the audit escalates
     const audit = roll < stats.rate
     return audit
-      ? { action: "skip", roster: [...LENSES], ps, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit — jev said skip, the sample says run" }
-      : { action: "skip", roster: [], ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev: no lens clears the bar" }
+      ? { action: "skip", roster: [...universe], ...capped, ps, klass: f.klass, audit: true, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "dropout audit — jev said skip, the sample says run" }
+      : { action: "skip", roster: [], ...capped, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: "jev: no lens clears the bar" }
   }
-  return { action: "review", roster, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `jev roster (${roster.join(",")})` }
+  return { action: "review", roster, ...capped, ps, klass: f.klass, audit: false, auditRate: stats.rate, greens: stats.greens, reds: stats.reds, why: `jev roster (${roster.join(",")})` }
 }
 
 // one gate evaluation: features → stats → jev → decision → ledger row.
@@ -470,17 +507,23 @@ export function runGate(
   repo: string,
   base: string,
   head: string,
-  opts: { jev?: boolean; strictness?: Strictness } = {},
+  opts: { jev?: boolean; strictness?: Strictness; roster?: Lens[] } = {},
 ): { features: GateFeatures; decision: GateDecision } {
   const features = gateFeatures(repo, base, head)
   // the band comes from the BASE COMMIT (momentum-910) — a PR must not
   // be able to add the file that lowers the bar gating it (the resolved
   // merge base, not the moving ref)
-  const strictness = opts.strictness ?? shipConfigOf(repo, { base: features.baseSha }).strictness
+  const cfg = shipConfigOf(repo, { base: features.baseSha })
+  const strictness = opts.strictness ?? cfg.strictness
   const band = BANDS[strictness]
+  // the universe rides the SAME trusted side (the roster's own law in
+  // the ShipConfig comment): a PR must not be able to add the file
+  // that shrinks the ceiling reviewing it. opts.roster is the caller's
+  // pin (tests, --roster's seat upstream) — it outranks the file.
+  const universe = opts.roster ?? cfg.roster ?? LENSES
   const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass, band)
   const ps = opts.jev === false || features.klass === "docs_only" ? null : jevLenses(features, stats)
-  const decision = decideGate(features, ps, stats, Math.random(), band)
+  const decision = decideGate(features, ps, stats, Math.random(), band, universe)
   appendLedgerRow({
     repo: features.repo,
     head: features.head,
@@ -491,6 +534,7 @@ export function runGate(
     hot: features.hotFiles,
     ps: decision.ps,
     roster: decision.roster,
+    universe: decision.universe,
     action: decision.action,
     audit: decision.audit,
     strictness,
@@ -500,11 +544,12 @@ export function runGate(
 
 export function gateReceipt(f: GateFeatures, d: GateDecision): string {
   const ps = d.ps ? ` ps ${LENSES.map((l) => `${l[0]}=${(d.ps?.[l] ?? -1).toFixed(2)}`).join(" ")}` : ""
+  const universe = d.universe ? ` · universe: ${d.universe.join(",")} (review-gate.toml roster)` : ""
   const head = `gate: ${d.action} — class ${f.klass} (${f.files.length} files, ${f.churn} churn${f.hotFiles.length ? `, hot: ${f.hotFiles.map((h) => `${h.file}×${h.findings}`).join(",")}` : ""})${ps}`
   const tail = d.action === "skip" && !d.audit
     ? ` · audit p=${d.auditRate} (greens ${d.greens}/reds ${d.reds}) · ledger row written`
     : d.audit
       ? ` · DROPOUT AUDIT (p=${d.auditRate}) — the skip region stays measured`
       : ` · roster: ${d.roster.join(", ")}`
-  return head + tail + `\ngate: ${d.why}`
+  return head + tail + universe + `\ngate: ${d.why}`
 }
