@@ -122,6 +122,16 @@ case "$verdict" in
     # overrule (overruled = the owner's override door, which does not
     # pass through this arm).
     if [ -n "${STOP_HISTORY:-}" ]; then
+      # THE GUARD'S OWN INPUT LAW (principles-48, r25): a guard that
+      # cannot read its input must fail LOUDLY — an unparsable stop
+      # history computing an EMPTY pair list is indistinguishable from
+      # "no history yet", and the accept arm would merge without ever
+      # asking the question. Parse-validate BEFORE computing; a broken
+      # receipt never reads as an answered question.
+      if ! node -e 'const h = JSON.parse(process.argv[1]); if (!Array.isArray(h)) process.exit(1)' "$STOP_HISTORY" 2>/dev/null; then
+        echo "merge: the stop history does not parse — the unanswered-P0 guard will not run blind; fix the receipt or overrule" >&2
+        exit 1
+      fi
       p0_from_default="$(node -e 'const v=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(v.judgedFrom || process.env.BASE_SHA || "")' "$prog/data/review/verdict.json" 2>/dev/null || true)"
       p0_pairs="$(node -e '
         const hist = JSON.parse(process.argv[1])
@@ -336,7 +346,8 @@ EOF
     if [ -f "$prog/data/review/stop.json" ]; then
       reflect="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.exit(s.rounds>=5 && (s.rounds-5)%3===0 && !s.eligible ? 0 : 1)' "$prog/data/review/stop.json" 2>/dev/null && echo ask || true)"
       if [ -n "$reflect" ]; then
-        echo "merge: THE REFLECTION ASK — round \$(node -e 'process.stdout.write(String(JSON.parse(require(\"node:fs\").readFileSync(process.argv[1],\"utf8\")).rounds))' "$prog/data/review/stop.json") and the stop criterion still does not hold (asked per the cadence: from round 5, every third round; see data/review/stop.json): WHY is this loop not converging? Answer by changing the MECHANISM — append a law to AGENTS.md, edit the lens briefs, or fix the gate. A finding-fix alone does not answer it." >&2
+        reflect_rounds="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).rounds))' "$prog/data/review/stop.json" 2>/dev/null || true)"
+        echo "merge: THE REFLECTION ASK — round ${reflect_rounds} and the stop criterion still does not hold (asked per the cadence: from round 5, every third round; see data/review/stop.json): WHY is this loop not converging? Answer by changing the MECHANISM — append a law to AGENTS.md, edit the lens briefs, or fix the gate. A finding-fix alone does not answer it." >&2
       fi
     fi
     exit 1
