@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -40,13 +40,22 @@ test("the door accepts its own prescribed fix for a refused --out dir", () => {
     g("add", "-A")
     g("commit", "-q", "-m", "feat")
 
-    // 1st run: no --model → the pr-review template pins temperature, so the
-    // door must refuse (this half is correct on HEAD and BASE alike)
-    const r1 = prepareReview({ repo, base: "master", head: "feat", out }, join(ROOT, "templates"))
-    assert.equal(r1.ok, false, "the door must refuse a missing --model when the template pins temperature")
+    // a template with NO ladder — the only shape whose model-less levy
+    // still refuses after 2026-11-02 (ladder-carrying templates default
+    // to the cheapest rung and stage; model-default.test.ts pins that)
+    const tpl = join(outRoot, "tpl")
+    cpSync(join(ROOT, "templates", "pr-review"), tpl, { recursive: true })
+    const real = readFileSync(join(tpl, "workflow.toml"), "utf8")
+    writeFileSync(join(tpl, "workflow.toml"), real.slice(0, real.indexOf("[fallback]")) + real.slice(real.indexOf("[[stage]]")))
+
+    // 1st run: no --model → the template pins temperature and declares
+    // no ladder to default to, so the door must refuse (this half is the
+    // surviving law; the fix rides in the message, never vanish)
+    const r1 = prepareReview({ repo, base: "master", head: "feat", out, template: tpl }, join(ROOT, "templates"))
+    assert.equal(r1.ok, false, "the door must refuse a missing --model when the template pins temperature and declares no ladder")
     // 2nd run: EXACTLY the fix the refusal message itself prescribes
     const r2 = prepareReview(
-      { repo, base: "master", head: "feat", model: "zhipuai-coding-plan/glm-5.3-flash", out },
+      { repo, base: "master", head: "feat", model: "zhipuai-coding-plan/glm-5.3-flash", out, template: tpl },
       join(ROOT, "templates"),
     )
     assert.equal(

@@ -45,7 +45,7 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url))
 // model-less review of a temp-pinned template is REFUSED at the door
 // (code 2) — the broken arm, and the false receipt, are introduced by
 // this change.
-test("a model-less dropout audit materializes UNPINNED units — the strip must reach the disk", () => {
+test("a model-less dropout audit materializes a RUNNABLE program — the ladder's cheapest rung rides every pin (the default seat)", () => {
   // BASE shape: the audit levy does not exist (no auditLevy in the door,
   // no dropout receipt in the bin) — nothing to judge there
   if (!readFileSync(join(ROOT, "src", "doors", "review.ts"), "utf8").includes("auditLevy")) return
@@ -101,22 +101,23 @@ test("a model-less dropout audit materializes UNPINNED units — the strip must 
         }
       }
     })(parsed, "workflow.toml")
-    assert.equal(
-      pins.length,
-      0,
-      `INV-4 (the change's own claim is false): the model-less audit receipt says "temperature pins dropped; ` +
-        `the lenses run on the host default, untuned" (bin/whitehartlane review verb) and review.ts:350-352 says ` +
-        `"strip them and the lenses spawn on the host default" — but the strip (review.ts:353) mutates a LOCAL ` +
-        `that neither write arm (review.ts:444 pinnedWorkflowToml — model-path only; review.ts:446 roster<4 — ` +
-        `undefined for an audit, whose action is "skip") ever writes: the materialized program carries the RAW ` +
-        `template with ${pins.length} temperature pin(s) (${pins.slice(0, 4).join(", ")}) and NO model anywhere, ` +
-        `so every lens spawn is refused by the host ("temperature … has no model to pin against — refusing ` +
-        `spawn", opencode-host.ts). The audited levy books a Job whose four lenses all die at spawn — the audit ` +
-        `measures nothing while printing "the skip region stays measured": the exact dead-end (momentum-15) the ` +
-        `audit exists to end, one level deeper. On BASE the model-less audit does not exist (the door refused ` +
-        `any model-less temp-pinned review with code 2) — the broken arm is introduced by this change. The fix ` +
-        `is one write: materialize the stripped bytes (or strip the staged copy) on the no-model audit path.`,
+    assert.ok(
+      pins.length > 0,
+      "sanity: the pr-review template's temperature pins are present in the materialized program",
     )
+    const wf = (parseToml(readFileSync(join(dir, "workflow.toml"), "utf8")) as { workflow?: { model?: string } })
+      .workflow?.model
+    assert.equal(
+      wf,
+      "minimax-cn/MiniMax-M3.1-Flash",
+      `THE DEFAULT SEAT (2026-11-02, the j-ff8ead receipt): the model-less audit used to strip its pins ` +
+        `(or refuse) because no model rode them — a staged program whose lenses would all die at the host's ` +
+        `spawn refusal. The [fallback] ladder's cheapest rung is now the levy default: the audit stages a ` +
+        `program the host will actually spawn, on the cheapest seat, with ${pins.length} temperature pin(s) ` +
+        `riding it (${pins.slice(0, 4).join(", ")}). A runnable audit beats a stripped one.`,
+    )
+    assert.notEqual((r as { untuned?: true }).untuned, true, "no strip happened — no untuned flag")
+    assert.equal((r as { modelDefaulted?: true }).modelDefaulted, true, "the receipt names the ladder as the chooser")
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

@@ -82,17 +82,21 @@ test("the missing-model refusal sees the template the way the consumer does — 
 
     assert.equal(
       r.ok,
-      false,
-      `INV-3/INV-2: "do the template's temperature pins have a model to ride?" is answered two opposite ways in ` +
-        `one block. The WITH-model arm verifies with the consumer's own read (review.ts:192-195, smol-toml parse, ` +
-        `parsed.workflow.model === args.model — its comment cites the r19 receipt: "a model = line in any other ` +
-        `table sailed the old regex verify while loadManifest read workflow.model = undefined"). The NO-model arm ` +
-        `(review.ts:176) answers the SAME question with the TABLE-BLIND /^model\\s*=/m — and a template whose only ` +
-        `model line sits in a dead table sails it: the door returned ok=true and materialized ${out} with the ` +
-        `pr-review temperature pins and loadManifest(dir).workflow.model=${JSON.stringify(consumerModel)} — no ` +
-        `model where the consumer reads, so every lens spawn refuses at the host (opencode-host.ts:95), the ` +
-        `four-lenses-late death this block exists to refuse. The diff fixed the twin arm of this exact decision ` +
-        `and left this one table-blind: the incomplete-fix class.`,
+      true,
+      `THE DEFAULT SEAT (2026-11-02): the dead-table model line ("[lens] model = old/lens-default") is NOT a ` +
+        `model in any consumer's read — and the door no longer refuses on its account: the [fallback] ladder's ` +
+        `cheapest rung is the levy default, so a template whose only model line sits outside [workflow] stages ` +
+        `runnable, on the cheapest seat.`,
+    )
+    assert.notEqual(
+      consumerModel,
+      "old/lens-default",
+      "the consumer's read (loadManifest [workflow].model) must never find the stray dead-table line",
+    )
+    assert.equal(
+      consumerModel,
+      "minimax-cn/MiniMax-M3.1-Flash",
+      "the consumer's own read finds the ladder rung the door pinned — the same decision, one predicate",
     )
     // the positive form of the law, for the record: either the door
     // refuses, or the materialized program's own consumer read finds a model
