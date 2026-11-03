@@ -35,7 +35,7 @@ export function supervisorBrief(opts: { levyCmd: string; runDir: string; pr: str
     `4. When the wait ends, read the outcome. If the seat exists (or its payload reached the job run dir): go to step 5. If the seat is ABSENT after the deadline (no outcome — the inner door refused, or infra failed): the levy carried --pr so its skip receipt may already be on PR #${pr}; post ONE comment yourself naming the outcome and the levy's printed reason — the PR is NEVER left silent.`,
     `5. Write ${runDir}/supervisor-comment.md, then post it as ONE comment on PR #${pr}: cd ${q(repo)} && gh pr comment ${pr} --body-file ${runDir}/supervisor-comment.md — the outcome, each blocked finding (id, severity, claim, location.file) if any, and the feedback pointers from the job run dir's feedback/MAP.md when it exists. ONLY AFTER the comment command SUCCEEDS, write ${runDir}/supervisor-posted.md (one line: the comment's url or id) — that file is the watcher's PROOF the PR heard; the comment FILE alone proves nothing (it exists before the post, and a post that dies on expired auth or a rate limit leaves the PR silent).`,
     `6. accept: the rail's merge command already merged the PR (the seat's payload is written AFTER the merge ran) — do NOT merge again. reject: do NOT merge, do NOT fix anything, do NOT re-run the review — the authors own the fixes.`,
-    `7. If the wait exceeds 2 hours: post a timeout comment on PR #${pr} and (best effort) run: notify "ship-gate" "PR #${pr} review timed out — supervisor log beside ${runDir}" --problem "ship-gate:pr${pr}:timeout" — so a human hears the silence. The --problem key is LOAD-BEARING (the 2026-11-03 burst receipt: five DMs in a minute for ONE stuck PR): every arm that reports this PR's timeout names the SAME key, and the notify channel latches it — one detect per problem, whatever the wording, whoever the sender. Keep the key verbatim.`,
+    `7. If the wait exceeds 2 hours: post a timeout comment on PR #${pr} and (best effort) run: PF=""; notify --help 2>&1 | grep -q -- --problem && PF="--problem ship-gate:pr${pr}:timeout"; notify "ship-gate" "PR #${pr} review timed out — supervisor log beside ${runDir}" $PF — so a human hears the silence. The probe is LOAD-BEARING twice (the 2026-11-03 burst receipt: five DMs in a minute for ONE stuck PR; the review round's momentum-1: a spelled --problem on an older notify exits 2 and the DM is DROPPED): the spelled call is plain so any notify delivers it, and the injected key makes every arm that reports this PR's timeout latch as ONE problem. Keep both verbatim.`,
     `8. Write one line to ${runDir}/supervisor-result.md (verdict or outcome + PR number). Then STOP — your commission is complete.`,
   ].join("\n")
 }
@@ -180,23 +180,29 @@ export function spawnSupervisor(opts: {
       `        if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
       `          (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: \${DV:-unfinished} — the chain died before the merge stage; the verdict's outcome stands (the outcome is at $OUT/data/review/verdict.json)") >/dev/null 2>&1`,
       `        fi`,
-      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR: \${DV:-unfinished} — the chain died before the merge stage" --problem "ship-gate:pr$PR:stalled" >/dev/null 2>&1; fi`,
+      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then`,
+      `          PF=""; notify --help 2>&1 | grep -q -- --problem && PF="--problem ship-gate:pr$PR:stalled"`,
+      `          notify "ship-gate" "PR #$PR: \${DV:-unfinished} — the chain died before the merge stage" $PF >/dev/null 2>&1`,
+      `        fi`,
       `      else`,
       `        if [ -n "$PR" ] && command -v gh >/dev/null 2>&1; then`,
       `          (cd "$REPO" && gh pr comment "$PR" --body "ship-gate: the review timed out (2h) — no outcome landed at $OUT/data/review/merge.json") >/dev/null 2>&1`,
       `        fi`,
       // the notify only fires with a PR to name — a nameless timeout
       // DM is noise (the receipt: "PR # review timed out")
-      // ONE DETECT PER PROBLEM (the 2026-11-03 burst: five DMs in a
-      // minute for one stuck PR — re-commissioned watchers and the
-      // supervisor brief's own timeout DM all re-pinged the human).
-      // The --problem key, not the wording, is the latch unit: the
-      // watcher's arm and the brief's step 7 name the SAME
-      // ship-gate:pr$PR:timeout, so the channel sends one DM per
-      // window no matter how many commissions or arms detect it.
-      // (needs notify >= 0.5.0 — yyxSkills#118; an older notify
-      // fails loud on the unknown flag and the DM is skipped.)
-      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" --problem "ship-gate:pr$PR:timeout" >/dev/null 2>&1; fi`,
+      // ONE DETECT PER PROBLEM, DELIVERED ON EVERY HOST (the review
+      // round of 2026-11-03, momentum-1 P1: the spelled --problem hit
+      // this host's notify v0.3.0, whose parser exits 2 on an unknown
+      // flag — the DM was dropped, stderr swallowed, and a stuck PR's
+      // silence went unreported). The spelled call is PLAIN — any
+      // notify delivers it; the capability probe injects the latch
+      // flag ONLY when the channel understands it. The probe and the
+      // brief's step 7 name the SAME key, so one detect per problem
+      // per window wherever the latch exists.
+      `        if [ -n "$PR" ] && command -v notify >/dev/null 2>&1; then`,
+      `          PF=""; notify --help 2>&1 | grep -q -- --problem && PF="--problem ship-gate:pr$PR:timeout"`,
+      `          notify "ship-gate" "PR #$PR review timed out — the watcher is the last word" $PF >/dev/null 2>&1`,
+      `        fi`,
       `      fi`,
       `    fi`,
       `    exit 3`,
