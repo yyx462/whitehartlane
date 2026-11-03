@@ -392,6 +392,7 @@ function parseRosterKey(v: unknown): { roster?: Lens[]; unknown?: string[] } {
   // neither array nor valid-csv (roster = true — round-5 tests-2),
   // is REFUSED loudly: the key voids, all four govern, the offender
   // surfaces for the door's line.
+  if (v === undefined) return {} // the ABSENT key is the no-ceiling contract (r267 round-7: the scalar arm caught undefined and fired the typo line on every review of a project that declared no ceiling)
   if (typeof v === "string") {
     const ids = v.split(",").map((s) => s.trim()).filter(Boolean)
     const allValid = ids.length > 0 && ids.every((i) => LENSES.includes(i as Lens))
@@ -564,9 +565,13 @@ export function runGate(
   // it rides the SAME parse law (r267 tests-1/tests-2): an empty pin
   // is no pin (never a zero-lens review), duplicates dedupe, order
   // normalizes to LENSES — a pin and a file that declare the same
-  // set cannot read as different universes.
+  // set cannot read as different universes. A PROVIDED pin the parse
+  // voids (a bad id) voids to ALL FOUR (round-7 tests-2): falling
+  // through to the file's NARROWER ceiling would let one bad id in a
+  // pin shrink the review the caller asked to widen.
+  const pinProvided = opts.roster !== undefined
   const pin = parseRosterKey(opts.roster).roster
-  const universe = pin ?? cfg.roster ?? LENSES
+  const universe = pin ?? (pinProvided ? LENSES : (cfg.roster ?? LENSES))
   const stats = classStats(readLedger(), verdictRedsByHeadSha(), features.klass, band)
   const ps = opts.jev === false || features.klass === "docs_only" ? null : jevLenses(features, stats)
   const decision = decideGate(features, ps, stats, Math.random(), band, universe)
