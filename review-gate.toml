@@ -17,6 +17,19 @@ model = "minimax-cn/MiniMax-M3.1-Flash"
 # the strict posture it sells.
 strictness = "strict"
 
+# the project's lens ceiling — the universe the gate ever runs, e.g.
+#   roster = ["principles", "tests", "questions"]
+# jev still trims WITHIN it (the band rides unchanged); the fail-safe
+# (jev down), the strict hot-file rule, and the dropout audit fill TO
+# this ceiling, never past it. The CLI's --roster still pins exactly.
+# A csv spelling with valid ids is honored as the ceiling; unknown
+# ids, or any scalar the parse cannot honor, VOID the key — all four
+# lenses run and the door refuses loudly (a typo must never shrink
+# the universe); empty/absent = all four lenses. Read from the BASE commit exactly like strictness: a PR
+# cannot shrink the universe that reviews it. This repo declares none
+# — all four lenses, the strict flagship posture.
+# roster = ["principles", "tests", "momentum", "questions"]
+
 # the owner's stop rule — the diminishing-returns criterion that ends
 # a review loop honestly (the 2026-10-31 diagnosis: "zero findings in
 # a growing diff" is not a reachable fixed point). Rides the TRUSTED

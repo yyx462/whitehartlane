@@ -162,6 +162,120 @@ test("decideGate: jev unavailable → fail-safe full rail", () => {
   assert.match(d.why, /fail-safe/)
 })
 
+// ---- the roster key (2026-11-03): review-gate.toml's lens CEILING —
+// the universe the gate ever runs. jev trims within it; every "full"
+// roster fills TO it, never past it
+test("decideGate: the universe caps every full roster — fail-safe, hot-file, dropout", () => {
+  const universe = ["principles", "tests", "questions"] as const
+  // jev down → the fail-safe fills TO the ceiling, never past it
+  const f = decideGate(mkFeatures(), null, STATS0, 0.99, BANDS.medium, universe)
+  assert.deepEqual(f.roster, ["principles", "tests", "questions"])
+  assert.deepEqual(f.universe, ["principles", "tests", "questions"])
+  // strict's hot-file rule: the fact outranks the judgment, not the
+  // owner's ceiling — momentum stays out
+  const hot = decideGate(mkFeatures({ hotFiles: [{ file: "hooks.ts", findings: 3 }] }), { principles: 0.01, tests: 0.01, momentum: 0.01, questions: 0.01 }, STATS0, 0.99, BANDS.strict, universe)
+  assert.deepEqual(hot.roster, ["principles", "tests", "questions"])
+  // jev's roster = universe ∩ (p ≥ keepP) — a 0.99 momentum never
+  // resurrects through the cap, and the trim still rides within it
+  const trim = decideGate(mkFeatures(), { principles: 0.9, tests: 0.3, momentum: 0.99, questions: 0.85 }, STATS0, 0.99, BANDS.medium, universe)
+  assert.deepEqual(trim.roster, ["principles", "questions"])
+  // a skip's dropout audit escalates to the CEILING (fresh class: every skip audited)
+  const audited = decideGate(mkFeatures(), { principles: 0.1, tests: 0.1, momentum: 0.1, questions: 0.1 }, STATS0, 0.999, BANDS.medium, universe)
+  assert.equal(audited.audit, true)
+  assert.deepEqual(audited.roster, ["principles", "tests", "questions"])
+  // no cap declared → the shape readers already know: universe absent
+  assert.equal(decideGate(mkFeatures(), { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 }, STATS0, 0.99).universe, undefined)
+})
+
+test("shipConfigOf: the roster key — base governs, unknowns drop, empty = no contract", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-roster-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // no file → all four (undefined = the default universe)
+  assert.equal(shipConfigOf(repo).roster, undefined)
+  // the PR's OWN roster (feat working tree only) does not shrink its
+  // gate: the universe comes from the BASE commit, the roster's own law
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests"]\n')
+  // "main", not a pinned sha: the ref resolves at read time, so the
+  // commits below (roster, empty) stay visible to every assertion
+  assert.equal(shipConfigOf(repo, { base: "main" }).roster, undefined, "a PR cannot shrink the universe that reviews it")
+  // committed on the BASE → it governs; an unknown id VOIDS the key (all
+  // four lenses — a typo must never shrink the ceiling) and surfaces
+  // loudly; LENSES order wins over declaration order
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["questions", "bogus", "principles"]\n')
+  execSync("git add -A && git commit -qm roster && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const typoCfg = shipConfigOf(repo, { base: "main" })
+  assert.equal(typoCfg.roster, undefined, "an unknown id voids the roster key — never a silently narrower ceiling")
+  assert.deepEqual(typoCfg.rosterUnknown, ["bogus"], "the offender is surfaced for the door's loud line")
+  // a scalar that is neither array nor valid csv (roster = true —
+  // r267 round-5 tests-2) is refused loudly too, never vanished
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), "roster = true\n")
+  execSync("git add -A && git commit -qm scalar && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const scalarCfg = shipConfigOf(repo, { base: "main" })
+  assert.equal(scalarCfg.roster, undefined, "a scalar roster voids the key — all four govern")
+  assert.deepEqual(scalarCfg.rosterUnknown, ["true"], "the scalar surfaces — refuse, never vanish")
+  // empty roster = no contract — never a silent always-skip
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), "roster = []\n")
+  execSync("git add -A && git commit -qm empty && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  assert.equal(shipConfigOf(repo, { base: "main" }).roster, undefined)
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+test("runGate: the caller's roster pin outranks the file's ceiling (the --roster law's one seat)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-pin-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // the file says three lenses; the commissioner pins two
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "questions"]\n')
+  execSync("git add -A && git commit -qm roster && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "pin.jsonl")
+  const stub = jevStub(tmp, { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    const { decision } = runGate(repo, "main", "feat", { roster: ["principles", "tests"] })
+    assert.deepEqual(decision.universe, ["principles", "tests"], "the caller's pin IS the universe")
+    assert.deepEqual(decision.roster, ["principles", "tests"], "jev trims within the PIN, not the file")
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test("runGate: the base's roster caps the decision, and the row round-trips", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-univ-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  // the ceiling committed on the BASE branch, exactly like the band
+  execSync("git checkout -q main", { cwd: repo, encoding: "utf8" })
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "questions"]\n')
+  execSync("git add -A && git commit -qm roster && git checkout -q feat", { cwd: repo, encoding: "utf8" })
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "univ.jsonl")
+  // momentum begs to run (p 0.99) — the ceiling says no. questions
+  // (0.3) falls below medium's bar → jev's trim rides within the cap
+  const stub = jevStub(tmp, { principles: 0.9, tests: 0.85, momentum: 0.99, questions: 0.3 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    const { features, decision } = runGate(repo, "main", "feat")
+    assert.equal(decision.action, "review")
+    assert.deepEqual(decision.universe, ["principles", "tests", "questions"])
+    assert.deepEqual(decision.roster, ["principles", "tests"], "jev trims within the ceiling; momentum never resurrects")
+    // writer ≡ reader: the ledger row's universe parses back equal
+    const row = JSON.parse(readFileSync(ledgerPath(), "utf8").trim().split("\n").at(-1)!)
+    assert.deepEqual(row.universe, ["principles", "tests", "questions"])
+    assert.deepEqual(row.roster, ["principles", "tests"])
+    // the receipt names the ceiling — the consumer's paper trail
+    assert.match(gateReceipt(features, decision), /universe: principles,tests,questions/)
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
 test("decideGate: roster = lenses clearing the bar; a MISSING p never drops a lens", () => {
   const ps = { principles: 0.9, tests: 0.8, momentum: 0.2, questions: 0.34 }
   const d = decideGate(mkFeatures(), ps, STATS0, 0.99)
@@ -319,4 +433,31 @@ test("appendLedgerRow: one JSON line per decision", () => {
   const lines = readFileSync(p, "utf8").trim().split("\n")
   assert.equal(lines.length, 1)
   assert.equal(JSON.parse(lines[0]).klass, "test_only")
+})
+
+test("the caller's pin rides the parse law: empty is no pin, duplicates dedupe, order normalizes (r267 tests-2/tests-4)", () => {
+  // reversed + duplicated valid roster — one set, one universe
+  const decision = decideGate(mkFeatures(), { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 }, STATS0, 0.99, BANDS.medium, ["questions", "principles", "tests", "principles"])
+  assert.deepEqual(decision.universe, ["principles", "tests", "questions"], "LENSES order wins, duplicates dedupe — the ceiling is a set with a canonical spelling")
+  assert.deepEqual(decision.roster, ["principles", "tests", "questions"])
+})
+
+test("an empty caller pin is no pin — the universe stays all four (r267 tests-1, at runGate's own seat)", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aos-gate-emptypin-"))
+  const repo = fixtureRepo(join(tmp, "repo"))
+  const prevLedger = process.env.WHL_GATE_LEDGER
+  process.env.WHL_GATE_LEDGER = join(tmp, "pin.jsonl")
+  const stub = jevStub(tmp, { principles: 0.9, tests: 0.9, momentum: 0.9, questions: 0.9 })
+  process.env.WHL_JEV_BIN = stub
+  try {
+    // jev down + roster: [] — the degenerate pin must not coalesce to a
+    // zero-lens universe; the fail-safe fills to ALL FOUR
+    const { decision } = runGate(repo, "main", "feat", { roster: [], jev: false })
+    assert.equal(decision.universe, undefined, "an empty pin reads as no ceiling")
+    assert.deepEqual(decision.roster, [...LENSES], "the fail-safe fills to all four — never to nothing")
+  } finally {
+    delete process.env.WHL_JEV_BIN
+    process.env.WHL_GATE_LEDGER = prevLedger
+    rmSync(tmp, { recursive: true, force: true })
+  }
 })
