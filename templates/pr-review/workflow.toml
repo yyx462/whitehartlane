@@ -62,7 +62,7 @@ born_ms = 300000
 # review pane (manual, auto re-levy, or test-spawned) ever falls
 # through to the host's ambient default seat again.
 mode = "auto"
-order = ["minimax-cn/MiniMax-M3.1-Flash", "zhipuai-coding-plan/glm-5.3-flash", "xai/grok-4.7"]
+order = ["minimax-cn/MiniMax-M3.1-Flash", "zhipuai-coding-plan/glm-5.3-flash"]
 
 [[stage]]
 id = "intake"
