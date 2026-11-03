@@ -688,28 +688,25 @@ export class Rail implements ShepPort {
     // ledger bookkeeping around it.
     const ok = this.host.inhabit(name, pane, { kind, briefPath, cwd, model, hold, resumeSession, temperature })
     if (!ok) {
-      // A REFUSED BRIEF IS NOT ITSELF A RETIRE (r269 round-6's four):
-      // a pane whose agent start already SUCCEEDED is retired only
-      // after agent_status is OBSERVED not-working — the brief-retry
-      // sleep was never that wait, and a blind shep-retire killed
-      // working agents (the fresh twin of round-5's resume fix). A
-      // start that never succeeded is still a ghost, cleared now; an
-      // observed-working pane is left for the run's own reap — the
-      // birth still FAILS honestly either way (the engine never
-      // reports done over it; the lab's fault row rides round-5).
+      // A REFUSED BRIEF IS NOT ITSELF A RETIRE (r269 round-6/7's class):
+      // NO status read ever retires here. An unreadable status is NOT
+      // an observed death (round-7 principles-2/questions-1 — the
+      // momentum-34 fail direction: the unverifiable pane spares), and
+      // a parsed one (working, idle, blocked, unknown) is not death
+      // either. The failed birth still fails HONESTLY (the engine
+      // never reports done over it; the lab's fault row rides round-5)
+      // — and the pane joins `mine` NOW (round-7 tests-1): retireAll,
+      // the run's own reap, owns the pane it was handed, started or
+      // not. Cleanup moves wholly to the reap; birth never kills.
       let observed: AgentStatus | null = null
       try {
         observed = this.host.status(name)
       } catch {
-        observed = null // an unstartable label answers nothing — a ghost
+        observed = null // unreadable is not dead
       }
-      if (observed === "working" || observed === "blocked") {
-        this.ledger?.emit("reject", { label: name, why: `brief never landed (agent observed ${observed} — pane left to the run's reap)` })
-        this.log(`birth failed for ${name}: brief never landed, agent observed ${observed} — not retiring a live pane; the run's reap owns it`)
-      } else {
-        this.shep("retire", name)
-        this.ledger?.emit("reject", { label: name, why: "agent start failed" })
-      }
+      this.mine.add(name)
+      this.ledger?.emit("reject", { label: name, why: `brief never landed${observed ? ` (agent observed ${observed})` : " (status unreadable)"} — pane owned by the run's reap` })
+      this.log(`birth failed for ${name}: brief never landed${observed ? `, agent observed ${observed}` : ", status unreadable"} — spared; the run's reap owns the pane`)
       return false
     }
     this.mine.add(name)

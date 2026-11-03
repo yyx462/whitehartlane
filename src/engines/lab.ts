@@ -418,7 +418,11 @@ export async function runLab(
   // ADR 5: parked — not a finish. No report; the pane ledger carries
   // the bookings (the actor's and every in-flight mock's); a typed
   // continue resumes them. The door books the pause.
-  if (parked) {
+  // a parked run with a FAILED actor birth cannot pause (r269 round-7
+  // principles-1): park returns null before the report seat, and the
+  // infra fault would never become a fault — there is no mind to
+  // resume, so the run falls through to the failed report instead
+  if (parked && !actorBirthFailed) {
     endOfExperimentSweep()
     log("lab: parked — paused; the actor's and in-flight mocks' sessions stay booked — continue resumes them")
     return null
