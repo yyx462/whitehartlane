@@ -15,6 +15,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSy
 import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { isProviderFault, parseModelRef } from "../jev/model-ladder.ts"
+import { teardownReviewLabs } from "./teardown.ts"
 import { landMockUnit, loadManifest, type Layout, type Manifest } from "../doors/hooks.ts"
 import { drop, note, place, type Board } from "../core/lanes.ts"
 import { paneLabeler, runIdFor, type AgentStatus, type ShepPort } from "../engines/orchestrator.ts"
@@ -358,11 +359,35 @@ export class Rail implements ShepPort {
           } catch (err) {
             this.log(`ledger: finish failed (${err instanceof Error ? err.message : String(err)})`)
           }
+          // #278 — the END owns the labs: teardown lived only in
+          // merge.sh's EXIT trap, so every round that died before the
+          // merge stage (deadline-killed lenses, divide failures —
+          // 64 registrations' worth) retired its panes and left its
+          // base/head labs behind. EVERY ending dematerializes now;
+          // pause stays exempt (a parked run's labs are continuable
+          // material, and continue's intake re-materializes from the
+          // pinned SHAs anyway).
+          try {
+            const labs = teardownReviewLabs(this.taskDir ?? "")
+            if (labs) {
+              this.log(
+                `labs dematerialized (#278): ${labs.rodeOut} repro(s) rode out, ${labs.removed.join(", ") || "no labs"} removed${labs.pruned ? ", worktree metadata pruned" : ""}`,
+              )
+            }
+          } catch {
+            /* teardown is infra — never fails the finish */
+          }
         },
         abort: (reason, panesRemaining) => {
           try {
             abortJobRec(booked, reason, panesRemaining)
             this.log(`job ${booked.id} aborted (${reason}) — panes remaining ${panesRemaining}`)
+          } catch {}
+          // the abort seat tears down too (#278): an aborted round is
+          // terminal — its labs are never coming back to it
+          try {
+            const labs = teardownReviewLabs(this.taskDir ?? "")
+            if (labs) this.log(`labs dematerialized (#278, abort): ${labs.rodeOut} repro(s) rode out, ${labs.removed.join(", ") || "no labs"} removed`)
           } catch {}
         },
         pause: (reason, panesRemaining) => {

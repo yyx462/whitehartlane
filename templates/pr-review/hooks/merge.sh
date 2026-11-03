@@ -303,9 +303,35 @@ EOF
         echo "merge: base $BASE_BRANCH moved ($BASE_SHA -> $now_base) since the review — re-run the review on the new base" >&2
         exit 1
       fi
-      git -C "$REPO" checkout -q "$BASE_BRANCH" || { echo "merge: cannot checkout $BASE_BRANCH" >&2; exit 1; }
-      git -C "$REPO" merge --no-ff --no-edit -m "pr-review: accept $TITLE" "$HEAD_SHA" \
-        || { echo "merge: git merge failed (conflicts? base moved?)" >&2; exit 1; }
+      # THE CHECKOUTLESS MERGE (#273, r267's final round): the old arm
+      # ran `git checkout $BASE_BRANCH` here — which dies whenever
+      # ANOTHER worktree holds the branch, and in a worktree-project
+      # world that is the LAYOUT, not the exception: the trunk
+      # worktree always holds the base, so every local-arm accept
+      # refused ("fatal: 'master' is already used by worktree at
+      # …/master") and a 0-blocked verdict landed as 'refused'. It
+      # also switched the author's own checkout to the base branch as
+      # a side effect nobody asked for. Plumbing checks NOTHING out:
+      # merge-tree computes the merge, commit-tree writes the
+      # two-parent commit, and update-ref moves the base branch with
+      # BASE_SHA as the compare-and-swap old value — a base that moved
+      # under the merge fails the update exactly as honestly as the
+      # drift checks above (and the worktree holding the branch sees a
+      # fast-forwardable behind, never a disturbed checkout).
+      mt_out=""
+      if ! mt_out="$(git -C "$REPO" merge-tree --write-tree --no-messages "$BASE_SHA" "$HEAD_SHA" 2>/dev/null)"; then
+        echo "merge: git merge failed (conflicts? base moved?) — merge-tree refused" >&2
+        exit 1
+      fi
+      mt_tree="${mt_out%%$'\n'*}"
+      if [ -z "$mt_tree" ]; then
+        echo "merge: git merge failed (conflicts? base moved?) — merge-tree produced no tree" >&2
+        exit 1
+      fi
+      merge_oid="$(git -C "$REPO" commit-tree "$mt_tree" -p "$BASE_SHA" -p "$HEAD_SHA" -m "pr-review: accept $TITLE")" \
+        || { echo "merge: commit-tree failed (no committer identity? set user.name/user.email)" >&2; exit 1; }
+      git -C "$REPO" update-ref "refs/heads/$BASE_BRANCH" "$merge_oid" "$BASE_SHA" \
+        || { echo "merge: the base branch moved under the merge — refusing (re-run the review on the new base)" >&2; exit 1; }
     fi
     echo "merge: accepted — $TITLE ($HEAD_SHA) merged"
     MERGE_OUTCOME=accept
