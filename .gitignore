@@ -6,3 +6,8 @@ dist
 # operator-local global model policy (never pushed)
 models.local.toml
 __pycache__/
+
+# the review rail's staged programs (never committed — r269 momentum-3105)
+.whl-review/
+# the authoring session's operator-local agent config (r269 momentum-3106)
+/opencode.json

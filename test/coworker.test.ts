@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import test from "node:test"
-import { combineFirstPrompt, memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/engines/coworker.ts"
+import { combineFirstPrompt, memberBriefPath, memberProtocol, parseMembers, parseMessage, readMessages, relayPlan } from "../src/engines/coworker.ts"
 
 test("members parse from [members.<name>] with model, seed, and initiates", () => {
   const toml = [
@@ -136,6 +136,16 @@ test("memberProtocol sends members through THE SEND TOOL — own outbox, peers o
   assert.match(text, /node \/run\/tools\/send\.mjs <peer> note\|stop <body text>/)
   assert.match(text, /NEVER write into messages\/ by hand/)
   assert.match(text, /your identity is your\nsandbox folder/)
+})
+
+test("memberProtocol carries the booking marker (#266): the first user message contains the briefs dir the resolver expects", () => {
+  const taskDir = "/sessions/s-cbf439/jobs/j-3dea37/run"
+  // exactly what coworker-run.ts composes into the brief file — and the
+  // brief file's content IS the first user message
+  const first = "the author's brief\n" + memberProtocol("critic", ["actor"], taskDir)
+  // rail.ts's three booking seats derive marker = dirname(briefPath) = <taskDir>/briefs
+  const marker = join(dirname(memberBriefPath(taskDir, "critic")), "")
+  assert.ok(first.includes(marker), "writer≡reader: the resolver's marker must appear in the message the writer writes — before #266 it never could, no member booked, and the birth judge killed live working members")
 })
 
 test("the relay plan delivers to the named pane only, then honors stop and cap", () => {

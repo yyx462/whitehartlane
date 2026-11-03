@@ -263,6 +263,24 @@ export function interruptedMember(messages: Message[], delivered: string[], init
 // member's write scope covers its own outbox and nothing else in
 // messages/, so the tool is not just the blessed path — hand-writing
 // a peer's mailbox is out of scope by construction.
+//
+// THE BOOKING MARKER RIDES HERE (issue #266): the marker at all three
+// of rail's booking seats is dirname(briefPath) = <taskDir>/briefs,
+// and the resolver matches it against the FIRST USER MESSAGE — which
+// is this text (the brief file's content, submitted as the prompt, or
+// composed into the first relay by combineFirstPrompt). Before the
+// brief-file line below, the marker was unmatchable by construction
+// (the protocol embedded only tools/send.mjs), no member ever booked,
+// and the birth judge killed live working members (j-3dea37: 16
+// messages, 3 relayed, dead at birth). Writer≡reader: the composer of
+// the first message is the one seat that knows what the marker can
+// truthfully be.
+
+// ONE SPELLING for the member brief path (momentum-4 / principles-2):
+// the engine writes it, the protocol speaks it, tests import it —
+// relocating briefs/ must un-book nobody silently.
+export const memberBriefPath = (taskDir: string, name: string): string => join(taskDir, "briefs", `${name}.md`)
+
 export function memberProtocol(name: string, peers: string[], dir: string): string {
   return [
     "",
@@ -277,6 +295,7 @@ export function memberProtocol(name: string, peers: string[], dir: string): stri
     "sandbox folder — never bytes you type), assigns the sequence, and",
     "refuses anything else. NEVER write into messages/ by hand and NEVER",
     "a peer's outbox — those paths are outside your write scope.",
+    `Your own brief for this exchange is filed at ${memberBriefPath(dir, name)} — if this conversation loses it, re-read it there.`,
     'When the exchange has fully reached its goal, send type "stop" with a',
     "one-paragraph summary as body, addressed to any peer.",
     "Everything you build goes in the target tree the task names.",

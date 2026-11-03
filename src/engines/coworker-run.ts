@@ -9,7 +9,7 @@
 import { execSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
+import { memberBriefPath, memberProtocol, parseMembers, readMessages, relayPlan, combineFirstPrompt, interruptedMember, readRelayLedger, writeRelayLedger } from "./coworker.ts"
 import { opencodeSessionActiveSince } from "../adapters/transcripts.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { chooseModel } from "../jev/model-chooser.ts"
@@ -197,7 +197,7 @@ export async function runCoworker(
       throw new Error(`no brief for ${m.name} — members/${m.name}.md is missing`)
     }
     writeFileSync(
-      join(taskDir, "briefs", `${m.name}.md`),
+      memberBriefPath(taskDir, m.name),
       brief + memberProtocol(m.name, names.filter((n) => n !== m.name), taskDir),
     )
     const slot = rail.ensureRole(board, m.name, dir)
@@ -226,7 +226,7 @@ export async function runCoworker(
     const resumeId = resumeOf.get(m.name)
     const ok = slot.pane
       ? rail.inhabitPane(
-          m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
+          m.name, memberKind, slot.pane, memberBriefPath(taskDir, m.name), dir,
           m.model, m.seed, !m.initiates || Boolean(resumeId), resumeId, m.temperature,
         )
       : false
@@ -270,7 +270,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     const resumeId = bookedSessionOf(m.name)
     const ok = slot.pane
       ? rail.inhabitPane(
-          m.name, memberKind, slot.pane, join(taskDir, "briefs", `${m.name}.md`), dir,
+          m.name, memberKind, slot.pane, memberBriefPath(taskDir, m.name), dir,
           m.model, m.seed, Boolean(resumeId), resumeId, m.temperature,
         )
       : false
@@ -708,15 +708,23 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
       // a working member takes mail on a later beat — never mid-turn
       if (rail.workerStatus(r.to) === "working") continue
       let text = `[relay] from ${r.from}:\n\n${r.body}`
-      if (!prompted.has(r.to)) {
-        text = combineFirstPrompt(readFileSync(join(taskDir, "briefs", `${r.to}.md`), "utf8"), r.from, r.body)
-        prompted.add(r.to)
+      const first = !prompted.has(r.to)
+      if (first) {
+        text = combineFirstPrompt(readFileSync(memberBriefPath(taskDir, r.to), "utf8"), r.from, r.body)
       }
       const rc = rail.promptAgent(r.to, text)
       if (rc.status !== 0) {
         log(`relay ${r.file} could not reach ${r.to} (rc=${rc.status}) — retrying next beat`)
         continue
       }
+      // 'prompted' stamps ONLY on success (momentum-1, the #266 twin
+      // path): a first prompt that fails must retry WITH the brief on
+      // the next beat — stamped early, the retry went out as a bare
+      // relay, the member's first user message carried no brief and
+      // no marker, the session never booked, and the birth judge
+      // killed the live member as dead-at-birth (the exact #266 death
+      // surviving one path over).
+      if (first) prompted.add(r.to)
       delivered.push(r.file)
       commitRelay()
       // #104 / #201: the sender's turn just completed — its cumulative

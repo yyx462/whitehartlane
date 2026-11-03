@@ -133,9 +133,53 @@ export class OpenCodeHost implements AgentHost {
     }
     if (!spec.hold) {
       const brief = readFileSync(spec.briefPath, "utf8")
-      const prompt = this.transport.exec("agent", "prompt", label, brief)
-      if (prompt.status !== 0) {
-        this.log(`brief submission failed for ${label} — the grace reprompt will retry`)
+      // THE GRACE REPROMPT, made real (r269's four P1s — the #266 birth
+      // twin): the old log line promised "the grace reprompt will
+      // retry" but no seat ever retried, so a refused brief submission
+      // left a member born-and-never-briefed — its first user message
+      // a stall nudge, no booking marker, unbookable, dead at birth
+      // (coworker members AND the lab's actor, every non-hold birth).
+      // The brief's DELIVERY is a correctness law, not a perf knob:
+      // its scale is its OWN (the start loop's retries()/backoffBase()
+      // clamp to a single attempt under node:test, which silently
+      // disarmed the grace reprompt — an env knob still tunes it).
+      // The knobs parse with backoffBase's OWN guard law (r269
+      // momentum-1/principles-1/tests-1): unset/empty must mean the
+      // production default, NEVER the 0 that Number("") produces —
+      // and the pause rides the START LOOP'S OWN scale (backoffMs on
+      // a 5_000 base, growing): a brownout the start guard survives
+      // must not retire a birth whose agent already started (INV-3,
+      // momentum-1: "the same pause scale as agent start"). Delivered
+      // here, or the birth FAILS HONESTLY: 'ok'/'prompted' must mean
+      // delivered on every path (the held shape carries no birth
+      // brief — its brief rides the first relay, which retries with
+      // the brief at the engine seat).
+      const briefTriesRaw = process.env.AGENTIC_OS_BRIEF_TRIES
+      const briefTries = briefTriesRaw !== undefined && briefTriesRaw !== "" && Number.isInteger(Number(briefTriesRaw)) && Number(briefTriesRaw) >= 1 ? Number(briefTriesRaw) : 3
+      const briefPauseRaw = process.env.AGENTIC_OS_BRIEF_BACKOFF_MS
+      const briefPauseBase = briefPauseRaw !== undefined && briefPauseRaw !== "" && Number.isFinite(Number(briefPauseRaw)) && Number(briefPauseRaw) >= 0 ? Number(briefPauseRaw) : 5_000
+      let prompt: CmdResult | null = null
+      for (let attempt = 1; attempt <= briefTries; attempt++) {
+        prompt = this.transport.exec("agent", "prompt", label, brief)
+        if (prompt.status === 0) break
+        this.log(`brief submission failed for ${label} (rc=${prompt.status}, attempt ${attempt}/${briefTries})`)
+        if (attempt < briefTries) sleepSync(backoffMs(briefPauseBase, attempt))
+      }
+      if ((prompt?.status ?? 1) !== 0) {
+        if (spec.resumeSession) {
+          // THE RESUME TWIN (r269 round-4 principles-1): a resumed
+          // session ALREADY carries its brief — the re-brief is a
+          // courtesy continue-prompt, not a birth. A transient refusal
+          // here must not fail the birth: the old arm let rail's
+          // !ok path retire a resumed pane that was still working,
+          // the brief-retry sleep doubling as a retire wait. Log it,
+          // keep the birth — agent_status, not this prompt, decides
+          // the resumed pane's life.
+          this.log(`brief re-prompt failed for resumed ${label} after ${briefTries} attempt(s) — the session carries its brief; the birth stands`)
+        } else {
+          this.log(`brief submission failed for ${label} after ${briefTries} attempt(s) — birth fails honestly; no half-born member`)
+          return false
+        }
       }
     }
     return true

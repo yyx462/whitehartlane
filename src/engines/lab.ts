@@ -24,7 +24,7 @@ import { runCounts, runEndDetector, runGrade, runSignalDetector } from "../doors
 import { emptyBoard } from "../core/lanes.ts"
 import { endOf, readSignal, wakesFor, waveClosed } from "./live-run.ts"
 import { gradeCall } from "../core/live-grade.ts"
-import { actorBrief, paneName } from "../core/roles.ts"
+import { actorBrief, actorBriefPath, paneName } from "../core/roles.ts"
 import { writeReport, type Report } from "../core/report.ts"
 import { drainDeadline } from "../adapters/levy.ts"
 import { waitChange, type Rail, type RailLedger } from "../adapters/rail.ts"
@@ -131,8 +131,8 @@ export async function runLab(
   // typed decider, and a deny-pattern block finished_by blocked — no
   // judgment seat with an unread output channel (decision.txt was
   // never consumed).
-  const actorPath = join(taskDir, "briefs", "actor.md")
-  writeFileSync(actorPath, actorBrief(jobText))
+  const actorPath = actorBriefPath(taskDir)
+  writeFileSync(actorPath, actorBrief(jobText, taskDir))
   // the entry fold (ADR 5): who an earlier generation birthed, and
   // which sessions they were. carried mocks have no pane here — the
   // wave re-inhabits them when protocol.json names them again.
@@ -243,11 +243,15 @@ export async function runLab(
     rail.say("rail", "prompt actor")
   }
 
+  // the actor's birth fault, carried to the report seat (r269
+  // momentum-1/tests-1: a missing mind is not an answer)
+  let actorBirthFailed = false
+
   function birthActor() {
     const actor = rail.ensureRole(board, "actor", taskDir)
     board = actor.board
     const resumeId = bookings.actor?.session_id
-    const ok = actor.pane
+    let ok = actor.pane
       ? rail.inhabitPane("actor", "pi", actor.pane, actorPath, taskDir, undefined, undefined, Boolean(resumeId), resumeId)
       : false
     if (actor.pane) rail.renamePane(actor.pane, "actor")
@@ -265,7 +269,17 @@ export async function runLab(
       log(`name actor pane ${actor.pane}`)
       rail.say("rail", "birth actor")
     } else {
-      log("actor pane failed")
+      ok = false
+    }
+    if (!ok) {
+      // A MISSING MIND IS NOT AN ANSWER (r269 round-4 momentum-1/
+      // tests-1): an actor whose brief never landed (inhabit false —
+      // the grace reprompt exhausted) must not ride a done report —
+      // a protocol.json stop or the empty-table deadline would close
+      // an experiment that never had its one mind briefed. The fault
+      // row + failed status at the report seat keep it honest.
+      actorBirthFailed = true
+      log("actor pane failed — the actor's brief never landed (infra); the experiment cannot report done")
     }
   }
 
@@ -404,7 +418,11 @@ export async function runLab(
   // ADR 5: parked — not a finish. No report; the pane ledger carries
   // the bookings (the actor's and every in-flight mock's); a typed
   // continue resumes them. The door books the pause.
-  if (parked) {
+  // a parked run with a FAILED actor birth cannot pause (r269 round-7
+  // principles-1): park returns null before the report seat, and the
+  // infra fault would never become a fault — there is no mind to
+  // resume, so the run falls through to the failed report instead
+  if (parked && !actorBirthFailed) {
     endOfExperimentSweep()
     log("lab: parked — paused; the actor's and in-flight mocks' sessions stay booked — continue resumes them")
     return null
@@ -422,12 +440,23 @@ export async function runLab(
     return { unit: row.id, result: grade?.row ?? row.end ?? "open", pass: grade ? grade.pass : row.end === "done" }
   })
   const stopped = readSignal(taskDir).kind === "stop"
+  // a missing mind is not an answer: the failed actor birth rides the
+  // report as a fault row + failed status, whatever the mocks said
+  const reportRows = actorBirthFailed
+    ? [...rows, { unit: "actor", result: "brief never landed (infra — the experiment's one mind was never briefed)", pass: false }]
+    : rows
   const report = writeReport(
     taskDir,
     taskDir,
-    rows,
+    reportRows,
     (table) => runCounts(taskDir, rail.manifest(), table),
-    stopped && rows.every((row) => row.pass) ? "done" : rows.length === 0 && stopped ? "done" : undefined,
+    actorBirthFailed
+      ? "failed"
+      : stopped && reportRows.every((row) => row.pass)
+        ? "done"
+        : reportRows.length === 0 && stopped
+          ? "done"
+          : undefined,
   )
   endOfExperimentSweep()
   return report
