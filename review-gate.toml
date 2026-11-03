@@ -3,7 +3,7 @@
 # it gates; absent/unparsable = medium + no auto levy.
 
 # every gwt submit-pr levies the review gate right after the PR opens
-auto = true
+auto = false
 
 # the levy's model pin (required when auto = true — the lenses must be pinned)
 # CHEAPEST FIRST (the owner's ruling, 2026-10-30): the flash model on
