@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url"
 /** @typedef {import("../src/store.ts").JobRecord} JobRecord */
 import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.ts"
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
-import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow } from "../src/doors/review-gate.ts"
+import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow, appendRefusalRow, offSwitchDecision } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
 import { overruleComment, shipCheck, verdictsForBranch, verdictsForHead } from "../src/doors/ship.ts"
 import { stopConfigOf, stopEligibility } from "../src/doors/stop-rule.ts"
@@ -375,7 +375,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     if (!positional) {
       console.error("usage: whitehartlane review <repo> [--base <ref>] [--head <ref>] [--model <provider/model>] [--title <s>] [--author <s>]")
       console.error("                               [--merge-cmd <cmd>] [--trace-dir <dir>] [--body-file <f>] [--out <dir>] [--gate-only]")
-      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto] [--roster <lenses>]")
+      console.error("                               [--from <tool>:<sid> | --unattended] [--pr <n>] [--auto] [--roster <lenses>] [--force]")
       process.exitCode = 2
       return
     }
@@ -395,6 +395,29 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         return
       }
       rosterPin = ids
+    }
+    // THE ONE SWITCH (#275): auto = false in the TRUNK's committed
+    // contract is the project's OFF for EVERY levy — manual included.
+    // Both 2026-11-03 receipts were a switch off in the human's hands
+    // and on at the door: a direct levy ran a full round over a false
+    // contract (j-8cf239), and an unmerged flip read as off while the
+    // committed truth said true (j-152880). The trunk decides (a PR
+    // cannot switch off its own review); --force is the commissioner's
+    // override, on record in the ledger.
+    const offSwitch = offSwitchDecision(
+      resolve(positional),
+      val("base") ?? detectTrunk(resolve(positional)) ?? "master",
+      args.includes("--force"),
+    )
+    if (offSwitch.refuse) {
+      appendRefusalRow(resolve(positional), val("head") ?? "HEAD", "contract auto = false — the door refused")
+      console.error(`review: ${offSwitch.why}`)
+      process.exitCode = 2
+      return
+    }
+    if (args.includes("--force")) {
+      console.log("review: --force — the commissioner overrides the project contract on record (auto = false noted in the ledger)")
+      appendRefusalRow(resolve(positional), val("head") ?? "HEAD", "--force override — the commissioner levied over auto = false; the contract stands")
     }
     // the gate runs FIRST (review-gate.ts): facts → one `jev run`
     // (four noul, one per lens) → roster + dropout audit + ledger row.
