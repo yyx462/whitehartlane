@@ -159,6 +159,16 @@ export function appendLedgerRow(row: Omit<LedgerRow, "ts">, path = ledgerPath())
   appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), ...row }) + "\n")
 }
 
+// #275 — the off-switch's own row: a REFUSAL is a gate decision the
+// audit trail must carry (who asked, what the contract said, why no
+// round ran). A distinct shape on purpose — no classed features, no
+// roster: nothing was reviewed, and the row must never read like a
+// decision that was.
+export function appendRefusalRow(repo: string, head: string, why: string, path = ledgerPath()): void {
+  mkdirSync(dirname(path), { recursive: true })
+  appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), repo, head, action: "refused", why }) + "\n")
+}
+
 function verdictRedsByHeadSha(): Map<string, { red: boolean }> {
   // one verdict per headSha: the NEWEST verdict.json wins (gate-r7
   // tests-1: "last one wins" was readdirSync enumeration order —
@@ -358,6 +368,15 @@ export const BANDS: Record<Strictness, GateBand> = {
 
 // the per-project ship contract, versioned with the code it gates:
 //   auto = true            levy the review after every gwt submit-pr
+//   auto = false           THE OFF SWITCH (#275): no auto-levy AND the
+//                          door refuses EVERY review levy — manual
+//                          included — until the trunk's committed
+//                          contract says otherwise (--force overrides
+//                          on record); read from the BASE commit, so a
+//                          PR cannot switch off the review of itself
+//   (absent)               no contract: no auto-levy, manual reviews
+//                          fine (the fail-safe direction for an off
+//                          switch is more review, never less)
 //   model = "provider/m"  the levy's model pin (auto = true requires it)
 //   strictness = "medium" the band above
 //   roster = ["principles", "tests", "questions"]
@@ -373,7 +392,35 @@ export const BANDS: Record<Strictness, GateBand> = {
 //                         never shrink the universe, and the door refuses
 //                         loudly); empty means no contract — the
 //                         fail-safe direction is more review, never less
-export type ShipConfig = { auto: boolean; model?: string; strictness: Strictness; roster?: Lens[]; rosterUnknown?: string[] }
+export type ShipConfig = { auto: boolean; autoOff?: boolean; model?: string; strictness: Strictness; roster?: Lens[]; rosterUnknown?: string[] }
+
+// #275 — the ONE SWITCH door decision (pure git reads; the bin prints,
+// ledgers, and exits). auto = false in the TRUNK's committed contract
+// is the project's OFF for EVERY levy — manual included — because both
+// 2026-11-03 receipts were a switch that was off in the human's hands
+// and on at the door: a direct `whl review` ran a full 4-lens round
+// over a contract that said false (j-8cf239), and an unmerged flip
+// read as off while the committed truth said true (j-152880). The
+// TRUNK decides (the base-commit law, the same seat as roster: a PR
+// cannot switch off the review of itself); an ABSENT key is no
+// contract (manual reviews fine — the fail-safe direction for an off
+// switch is MORE review, never less); --force is the commissioner's
+// override, on record.
+export function offSwitchDecision(repo: string, baseRef: string, forced: boolean): { refuse: boolean; why?: string } {
+  if (forced) return { refuse: false }
+  try {
+    const cfg = shipConfigOf(repo, { base: execFileSync("git", ["-C", repo, "rev-parse", `${baseRef}^{commit}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() })
+    if (cfg.autoOff === true) {
+      return { refuse: true, why: `the trunk's committed review-gate.toml says auto = false — the gate is OFF for this repo; every levy (this one included) is refused. Override on record: --force` }
+    }
+    return { refuse: false }
+  } catch {
+    // an unreadable trunk is not an off switch (the fail-safe
+    // direction: more review, never less) — the gate consult below
+    // owns broken refs honestly
+    return { refuse: false }
+  }
+}
 
 // the roster key's ONE parse (the one-spelling law): LENSES-ordered,
 // deduped. An unknown id (or a non-string entry) is NOT dropped — a
@@ -425,7 +472,7 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
       // it only stops the one external reader from reporting all-four
       // lenses over a contract that declares a ceiling
       const rk = parseRosterKey(t.roster)
-      return { auto: t.auto === true, model: typeof t.model === "string" ? t.model : undefined, roster: rk.roster, rosterUnknown: rk.unknown }
+      return { auto: t.auto === true, autoOff: t.auto === false, model: typeof t.model === "string" ? t.model : undefined, roster: rk.roster, rosterUnknown: rk.unknown }
     } catch {
       return { auto: false, model: undefined as string | undefined, roster: undefined as Lens[] | undefined, rosterUnknown: undefined as string[] | undefined }
     }
@@ -452,15 +499,23 @@ export function shipConfigOf(repo: string, opts: { head?: string; base?: string 
     // only one of the three that did not guard the parse, and a
     // malformed review-gate.toml on the base branch killed the gate
     // instead of gating at the default band.
-    let t: { strictness?: unknown; roster?: unknown }
+    let t: { strictness?: unknown; roster?: unknown; auto?: unknown }
     try {
-      t = parseToml(raw) as { strictness?: unknown; roster?: unknown }
+      t = parseToml(raw) as { strictness?: unknown; roster?: unknown; auto?: unknown }
     } catch {
-      return { auto: local.auto, model: local.model, strictness: "medium" }
+      return { auto: local.auto, autoOff: local.autoOff, model: local.model, strictness: "medium" }
     }
     const strictness: Strictness = t.strictness === "strict" || t.strictness === "loose" ? t.strictness : "medium"
     const rk = parseRosterKey(t.roster)
-    return { auto: local.auto, model: local.model, strictness, roster: rk.roster, rosterUnknown: rk.unknown }
+    // #275 — auto rides the TRUSTED side now: the base arm's own law
+    // ("the PR's own 'loose' file lowering the bar that reviews it")
+    // killed the working-tree fallback for strictness and roster, but
+    // auto kept leaking from local — the checkout-dependence that let
+    // a PR's own tree answer the off-switch question for its own
+    // review. autoOff is EXPLICIT false only (absent = no contract:
+    // manual reviews fine, the fail-safe direction for an off switch).
+    const baseAutoOff = t.auto === false
+    return { auto: local.auto, autoOff: baseAutoOff, model: local.model, strictness, roster: rk.roster, rosterUnknown: rk.unknown }
   }
   // the NO-COMMIT reader (the ship-config probe): the local contract
   // IS the evidence there is — auto/model were always read this way;
