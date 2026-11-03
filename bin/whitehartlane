@@ -29,6 +29,7 @@ import { stopConfigOf, stopEligibility } from "../src/doors/stop-rule.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
 import { defaultRunner, jsonAt } from "../src/doors/runners.ts"
 import { forkLevy } from "../src/adapters/fork.ts"
+import { retirePanesVerified, retroClosure, teardownReviewLabs } from "../src/adapters/teardown.ts"
 import { regradeJob } from "../src/doors/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/adapters/levy-pane.ts"
 import { rebirthExitCode, rebirthRunner, runnerDoor, spawnRunner } from "../src/adapters/levy.ts"
@@ -78,6 +79,19 @@ function parseDuration(raw) {
 /** @typedef {{ label: string, pane: string }} LivePane */
 
 /** @returns {LivePane[]} */
+// the shep runner adapter (#119): every shep call answers as a
+// {status, stdout, stderr} triple — the verified retire and the retro
+// pass decide on STATUS, and a refusal's stderr becomes the loud line
+const shepRun = (args) => {
+  try {
+    const stdout = execFileSync("shep", args, { encoding: "utf8", timeout: 30_000 })
+    return { status: 0, stdout, stderr: "" }
+  } catch (err) {
+    const e = err
+    return { status: e.status ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? e.message ?? "" }
+  }
+}
+
 function shepStatus() {
   try {
     const out = execFileSync("shep", ["status"], { encoding: "utf8", timeout: 30_000 })
@@ -1179,7 +1193,29 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         console.log(`  straggler panes still live (continue retires them): ${orphans.map((p) => p.label).join(", ")}`)
       }
     }
-    console.log(swept === 0 ? "sweep: nothing to finish" : `sweep: ${swept} Job(s) parked for a continue decision`)
+    // RETRO PASS (#143, the 2026-10-17 hand-sweep): dead surface from
+    // dead jobs — every close path is forward-looking (retireAll, the
+    // courier reaper, abort), and nothing ever looked BACK at panes
+    // whose job already ended. The decision is conservative by
+    // construction (retroClosure): only terminal-and-not-continuable
+    // owners (retired/failed) and owner-less whl chrome close;
+    // paused/aborted/orphaned panes stay — continue rebirths them, and
+    // the retro pass must never kill a park's restart material.
+    const retro = retroClosure(live, jobs)
+    let retroClosed = 0
+    for (const d of retro.filter((x) => x.close)) {
+      const r = retirePanesVerified([d.label], shepRun)
+      if (r.closed.length > 0) {
+        retroClosed += 1
+        console.log(`retro: closed ${d.label} — ${d.why}`)
+      } else {
+        console.error(`retro: ${d.label} retire REFUSED (${r.refused[0]?.why}) — close by hand: shep retire ${d.label}`)
+      }
+    }
+    const parts = []
+    if (swept > 0) parts.push(`${swept} Job(s) parked for a continue decision`)
+    if (retroClosed > 0) parts.push(`${retroClosed} dead pane(s) closed (retro, #143)`)
+    console.log(parts.length === 0 ? "sweep: nothing to finish" : `sweep: ${parts.join("; ")}`)
     return
   }
 
@@ -1677,10 +1713,20 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
         console.error(`abort: could not kill pid ${job.pid} (${err.message}) — declining on record`)
       }
       const live = shepStatus()
+      // #119 — a retire that can fail, NAMED: the old swallow-catch ran
+      // `shep retire` in a try{}, booked the pane dead via killPane
+      // anyway, and a refused retire read as success while the real
+      // pane lived on as a zombie (eight survived overnight,
+      // 2026-10-14). The verified retire prunes and retries once; a
+      // pane that still refuses is printed LOUDLY — a booked death is
+      // never silent, and the record's killPane booking is the job
+      // record's own truth, not the fleet's.
+      const pending = job.panes.filter((p) => p.died === undefined).map((p) => p.label)
+      const { refused } = retirePanesVerified(pending, shepRun)
+      for (const r of refused) {
+        console.error(`abort: pane ${r.label} retire REFUSED (${r.why}) — it survives as a zombie; close by hand: shep retire ${r.label}`)
+      }
       for (const pane of job.panes.filter((p) => p.died === undefined)) {
-        try {
-          execFileSync("shep", ["retire", pane.label], { timeout: 30_000 })
-        } catch {}
         killPane(job, pane.label)
       }
       // process-level guarantee (2026-10-17 ghost-worker incident): herdr's
@@ -1690,11 +1736,26 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
       try {
         execFileSync("pkill", ["-9", "-f", job.dir], { timeout: 10_000 })
       } catch {}
+      // #278 — abort owns its labs too: the killed orchestrator never
+      // reaches its finish seat, and merge.sh's trap never runs (no
+      // merge stage); without this, every CLI abort leaks 2
+      // registrations (the j-152880 receipt: killed, aborted, and the
+      // base/head labs still stood)
+      const labs = teardownReviewLabs(job.dir)
+      if (labs) {
+        console.log(`abort: labs dematerialized (#278) — ${labs.rodeOut} repro(s) rode out, ${labs.removed.join(", ")} removed${labs.pruned ? ", worktree metadata pruned" : ""}`)
+      }
       abortJob(job, `killed pid ${job.pid}`, 0, "levy")
       console.log(`aborted ${job.id} (killed orchestrator; sessions kept — continue resumes) — ${job.dir}`)
       return
     }
     const live = shepStatus()
+    // the DECLINE is terminal too (#278): a parked job's labs die with
+    // the decision to not continue — repros ride out first, as ever
+    const labs = teardownReviewLabs(job.dir)
+    if (labs) {
+      console.log(`abort: labs dematerialized (#278, decline) — ${labs.rodeOut} repro(s) rode out, ${labs.removed.join(", ")} removed${labs.pruned ? ", worktree metadata pruned" : ""}`)
+    }
     abortJob(job, "declined by user", livePanesOf(job, live).length, "levy")
     console.log(`aborted ${job.id} (declined) — ${job.dir}`)
     return
