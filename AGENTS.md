@@ -52,6 +52,13 @@ meta.toml. -->
      package-lock.json/node_modules breaks `gwt verify`
      ("root entry 'package-lock.json' is not a registered worktree"). -->
 
+<!-- test runs: single-file test runs go through `npm run test:one --
+     <file>` — --import loads test/sweep-on-exit.mjs, the per-process
+     zombie-watcher cleaner. A bare `node --test <file>` skips every
+     teardown and can leave a REAL detached watcher that rides a real
+     2h clock and DMs a human (receipt: 2026-11-04, the 18:46→20:46
+     burst). Full lane: npm test (lane-final sweep stays). -->
+
 <!-- commit identity: history carries exactly TWO authors, both under the
      owner's GitHub noreply email — attribution is email-only on GitHub,
      and the plus-tag form does NOT attribute (probe-tested 2026-10-14):
