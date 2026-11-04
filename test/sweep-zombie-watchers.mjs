@@ -6,40 +6,22 @@
 // sweep ends it for whatever the run left mid-flight (old-spell
 // watchers, tests that failed before their rm). npm test runs this
 // LAST — the runner owns its teardown.
-import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
-import { dirname } from "node:path"
-import { tmpdir } from "node:os"
+//
+// THE RULE lives in src/doors/watcher-sweep.ts (one law, three seats:
+// this lane-final tail, the per-exit pass, and the whl sweep janitor —
+// momentum-3105). This file keeps the CLI seat and the test-lane
+// import path stable; every kill lands in the janitor kill log.
+const mod = await import("../src/doors/watcher-sweep.ts")
 
-let killed = 0
-let lines = ""
-try {
-  lines = execFileSync("ps", ["ax", "-o", "pid=,command="], { encoding: "utf8" })
-} catch {
-  process.exit(0) // no ps, nothing to sweep — never fail the suite for this
+export const sweepZombies = mod.sweepZombies
+export const killLogPath = mod.killLogPath
+export const FIXTURE_ORPHAN_GRACE_S = mod.FIXTURE_ORPHAN_GRACE_S
+
+// CLI (npm test's lane-final pass): the total rule — nothing is in
+// flight when the whole lane has ended. Actor names the seat in the
+// kill log.
+import { pathToFileURL } from "node:url"
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (invokedDirectly && !mod.sweepZombies({ actor: "lane-final" })) {
+  console.log("no zombie watchers (the suite leaves none behind)")
 }
-for (const line of lines.split("\n")) {
-  // every watcher spell ends in ".log.watch" (sup.log.watch,
-  // supervisor.log.watch, autorun.supervisor.log.watch — the name is
-  // the watcher's, whatever prefixed it)
-  const m = line.match(/^\s*(\d+)\s+(.*)$/)
-  if (!m) continue
-  const [, pid, cmd] = m
-  const script = cmd.trim().split(/\s+/).at(-1) ?? ""
-  if (!/[.]log[.]watch$/.test(script)) continue
-  // KILL only what a test minted, never a live levy's real watcher:
-  // the script's dir is GONE (the gone world), or it lives under the
-  // system tmpdir (a fixture — real levies stage under
-  // ~/.local/share/agentic-os, never $TMPDIR)
-  const gone = !existsSync(dirname(script))
-  const fixture = script.startsWith(tmpdir())
-  if (!gone && !fixture) continue
-  try {
-    process.kill(Number(pid), "SIGTERM")
-    killed++
-    console.log(`swept zombie watcher pid ${pid} (${gone ? "world gone" : "fixture"}): ${script}`)
-  } catch {
-    // already dead — the outcome we wanted
-  }
-}
-if (!killed) console.log("no zombie watchers (the suite leaves none behind)")
