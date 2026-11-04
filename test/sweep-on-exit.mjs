@@ -16,7 +16,7 @@ import { sweepZombies } from "./sweep-zombie-watchers.mjs"
 
 process.on("exit", () => {
   try {
-    sweepZombies({ spareInFlight: true })
+    sweepZombies({ spareInFlight: true, actor: "exit-pass" })
   } catch {
     // never fail a test run for its own cleanup
   }

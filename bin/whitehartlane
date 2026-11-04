@@ -24,6 +24,7 @@ import { linkVerdictSeat, prepareRun, spawnerFromArgs } from "../src/doors/run.t
 import { detectTrunk, prepareReview, reviewReceipt } from "../src/doors/review.ts"
 import { gateReceipt, LENSES, runGate, shipConfigOf, gateFeatures, appendLedgerRow, appendRefusalRow, offSwitchDecision } from "../src/doors/review-gate.ts"
 import { ghPrComment, q, resolveCaller, spawnSupervisor, supervisorBrief } from "../src/doors/ship-supervisor.ts"
+import { killLogPath, sweepZombies } from "../src/doors/watcher-sweep.ts"
 import { overruleComment, shipCheck, verdictsForBranch, verdictsForHead } from "../src/doors/ship.ts"
 import { stopConfigOf, stopEligibility } from "../src/doors/stop-rule.ts"
 import { refreshWait } from "../src/doors/refresh.ts"
@@ -193,6 +194,12 @@ async function main() {
   events | audit | sweep | promote     observation and care
   pause | continue | regrade | fork    the resume ladder
   help [stages]                        this text / the stage cheat-sheet
+
+  janitor: whl sweep also reaps orphaned zombie watchers (.log.watch
+  scripts) and logs EVERY kill to <os-home>/janitor.log.jsonl
+  (rotating .1-.3) — a kill is a symptom, not routine care: some
+  commission died uncleanly, and the entry names where to trace (the
+  world dir, the mint brief beside the script, the notify diary)
 
 stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
 
@@ -1238,6 +1245,13 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     const parts = []
     if (swept > 0) parts.push(`${swept} Job(s) parked for a continue decision`)
     if (retroClosed > 0) parts.push(`${retroClosed} dead pane(s) closed (retro, #143)`)
+    // THE JANITOR (momentum-3105/3106): the every-end watcher rule on
+    // the daemon's own clock — a hard-killed run's orphaned fixture
+    // watcher is reaped here even if no test ever runs again. Every
+    // kill lands in the janitor kill log (a kill is a symptom: a
+    // commission died uncleanly — the entry names where to trace).
+    const reaped = sweepZombies({ spareInFlight: true, actor: "janitor", quiet: true })
+    if (reaped > 0) parts.push(`${reaped} zombie watcher(s) reaped (janitor kill log: ${killLogPath()})`)
     console.log(parts.length === 0 ? "sweep: nothing to finish" : `sweep: ${parts.join("; ")}`)
     return
   }

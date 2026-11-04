@@ -166,8 +166,10 @@ test("the per-exit sweep reaps the bomb and the aged leftover, spares every legi
     rmSync(cTmp, { recursive: true, force: true }) // C's world dies with its owner already gone — the bomb shape
 
     // THE EXIT PASS, scoped to MY watchers (node --test runs files
-    // concurrently — a test body never runs the global sweep)
-    sweepZombies({ spareInFlight: true, onlyPids: [aPid, bPid, cPid, dPid] })
+    // concurrently — a test body never runs the global sweep). The
+    // kill log rides a stub: the pin's kills are test fixtures, never
+    // real symptoms for the janitor's diary.
+    sweepZombies({ spareInFlight: true, onlyPids: [aPid, bPid, cPid, dPid], actor: "pin", killLog: join(aTmp, "kills.jsonl") })
     assert.ok(alive(aPid), `an owned, in-flight watcher must be SPARED (pid ${aPid})`)
     assert.ok(alive(bPid), `a world-gone watcher with a LIVE owner must be SPARED — the owner's teardown owns it (pid ${bPid})`)
     assert.ok(alive(dPid), `a young fixture orphan still working must be SPARED — orphaned-by-design is not a leak (pid ${dPid})`)
@@ -176,7 +178,7 @@ test("the per-exit sweep reaps the bomb and the aged leftover, spares every legi
     // THE LANE-FINAL RULE (total, no sparing) — pinned on my own
     // watchers; its global seat stays in the runner tail (npm test's
     // sweep step), never inside a concurrent test body
-    sweepZombies({ onlyPids: [aPid, bPid, dPid] })
+    sweepZombies({ onlyPids: [aPid, bPid, dPid], actor: "pin", killLog: join(aTmp, "kills.jsonl") })
     assert.ok(await waitDead(aPid, 5000), `the lane-final rule still reaps every fixture watcher (pid ${aPid})`)
     assert.ok(await waitDead(bPid, 5000), `the lane-final rule still reaps every fixture watcher (pid ${bPid})`)
     assert.ok(await waitDead(dPid, 5000), `the lane-final rule still reaps every fixture watcher (pid ${dPid})`)

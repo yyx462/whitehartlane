@@ -212,6 +212,29 @@ contract. One law for this manual: a dead unit re-levies the SAME
 program dir, never a fresh materialization. The weekly drill:
 `PR_DRILL=1 test/e2e/pr-review/run-drill.sh <checkout>`.
 
+## The janitor (zombie watchers — `whl sweep`, every 10 min)
+
+Orphaned `.log.watch` scripts are reaped by three seats of ONE rule
+(`src/doors/watcher-sweep.ts`): every test-process exit, the test
+lane's final tail, and the `whl sweep` daemon (the janitor — it
+covers hard-killed runs no exit hook can clean). Spared: anything
+with a live spawner, and young fixture orphans still working
+(door-minted watchers are orphaned BY DESIGN — ppid 1 is normal).
+Reaped: world-gone orphans and fixture orphans older than 5 minutes.
+
+**Every kill is logged** — `<os-home>/janitor.log.jsonl`, the OS
+disk's own resolution (default `~/.local/share/whitehartlane/`, the
+legacy `~/.local/share/agentic-os/` while it is the only one that
+exists; rotating `.1`–`.3` at 1MB). **A kill is a symptom, not
+routine care**: most kills should not happen — some commission died
+uncleanly. An agent finding a dead watcher reads the log entry and
+traces from it: the `world` dir names the commission, the mint brief
+sits beside the script (`<script>.brief`), and the notify diary
+(`~/.local/state/notify/log.jsonl`) names any DM the watcher managed
+to send (its `caller` field IS this script). Actors in the log:
+`janitor` (the daemon), `exit-pass` (a test process), `lane-final`
+(the suite tail), `pin` (a test's scoped call).
+
 ## Stop
 
 Levied and handed back → STOP. The next event in this session is the
