@@ -600,6 +600,31 @@ function rebirthCountOf(shep: object): Map<string, number> {
   return s
 }
 
+// P0 economics, the ONE sampler: every path that finishes a unit's
+// ledger row — the fan-out's close ceremony AND the deadline cliff's
+// chain ceremony — passes here for the cost row (momentum-4102: a
+// burned round is exactly the spend the economics table exists to
+// price; the cliff used to finish units with no row). Best-effort by
+// law (#104): a throwing host store loses its row, never the settle
+// (momentum-4101 / tests-21003 — the probe must never abort the
+// close: the pane retires, the flight map empties, the levy wakes).
+// Worktree mode is exempt: sessions key by the shared cwd, so a
+// per-unit row would re-count the whole run under each unit's name.
+function emitUnitTokens(
+  usageOf: ((unitId: string, sinceMs: number) => UsageRow | null) | undefined,
+  emit: ((kind: string, payload: Record<string, unknown>) => void) | undefined,
+  id: string,
+  worktree: string | undefined,
+): void {
+  if (worktree) return
+  try {
+    const usage = usageOf?.(id, 0)
+    if (usage) emit?.("unit.tokens", { unit: id, ...usage })
+  } catch {
+    /* the trace surface never gates the run — the row is lost, not the settle */
+  }
+}
+
 export function cycle(deps: CycleDeps): boolean {
   const slots = deps.slots ?? DEFAULT_SLOTS
   const stallMs = deps.stallMs ?? DEFAULT_STALL_MS
@@ -631,16 +656,7 @@ export function cycle(deps: CycleDeps): boolean {
   ): void => {
     settle(deps.taskDir, id, `${stage}:${id}`, pass, detail ?? row.result, fault, trigger)
     deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
-    // P0 economics: the finish is the only place a unit's full cost is
-    // final — cumulative since 0 (a rebirth re-spawns in the same cwd;
-    // a re-levy is a separate job dir, so no cross-run double count).
-    // Worktree mode is exempt: every unit's session keys by the SHARED
-    // worktree cwd, so a per-unit row would re-count the whole run
-    // under each unit's name.
-    if (!deps.worktree) {
-      const usage = deps.usageOf?.(id, 0)
-      if (usage) deps.emit?.("unit.tokens", { unit: id, ...usage })
-    }
+    emitUnitTokens(deps.usageOf, deps.emit, id, deps.worktree)
     if (faultsCanary && deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
       else deps.canary.failed = true
@@ -1522,6 +1538,7 @@ export async function runOrchestrator(input: {
         log("orchestrator: deadline passed; settling the rest failed")
         for (const [id] of [...inFlight]) {
           record(id, "deadline", false, "deadline")
+          emitUnitTokens(input.usageOf, emit, id, input.worktree)
           input.shep.retire(`w-${id}`)
           inFlight.delete(id)
         }
