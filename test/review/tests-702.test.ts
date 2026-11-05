@@ -65,7 +65,7 @@ test("an out-of-domain noul must fail safe to the full rail, never to a silent s
 
     // ── the broken judge: finite numbers, outside [0,1]
     const stub = join(tmp, "jev-neg.sh")
-    const answers = ["principles", "tests", "momentum", "questions"]
+    const answers = ["principles", "tests", "momentum"]
       .map((l) => `"l_${l}":{"type":"noul","noul":-1}`)
       .join(",")
     writeFileSync(stub, `#!/bin/sh\necho '{"answers":{${answers}}}'\n`)
@@ -118,7 +118,7 @@ test("an out-of-domain noul must fail safe to the full rail, never to a silent s
     )
     assert.deepEqual(
       decision.roster,
-      ["principles", "tests", "momentum", "questions"],
+      ["principles", "tests", "momentum"],
       "the fail-safe roster is ALL FOUR lenses — a garbage judgment must not pick a roster",
     )
   } finally {

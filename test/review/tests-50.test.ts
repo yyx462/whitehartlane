@@ -104,7 +104,7 @@ test("a model-less dropout audit materializes UNTUNED — the promised strip mus
     const ids = (parsed.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id)).filter(Boolean) as string[]
     assert.deepEqual(
       ids.sort(),
-      ["momentum", "principles", "questions", "tests"],
+      ["momentum", "principles", "tests"],
       "sanity: the audit materialization keeps the full lens roster — the fix drops the pins, not the units",
     )
   } finally {

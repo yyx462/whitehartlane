@@ -326,7 +326,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   what it does
     materializes templates/pr-review for BASE..HEAD of <repo> and
     (with --from/--unattended) levies it: intake gate → 4 lenses
-    (principles / tests / momentum / questions, temperature-spread) →
+    (principles / tests / momentum, temperature-spread — questions retired 2026-11-05) →
     prove gate (a finding blocks ONLY with a repro failing 2× on HEAD
     and clean on base) → responsibility divide → cold merge gate
     (accept merges — base drift refuses; reject divides feedback per
@@ -347,7 +347,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
   review-gate.toml (the per-project contract, at the repo root):
     auto / model / strictness / roster — the roster key is the
     project's lens CEILING (e.g. roster = ["principles","tests",
-    "questions"] drops momentum for this repo): jev still trims within
+    "momentum"] drops momentum for this repo): jev still trims within
     it, the fail-safe and the dropout audit fill TO it never past it,
     and like strictness it is read from the BASE commit (a PR cannot
     shrink the universe that reviews it). Unknown ids void the key —

@@ -71,7 +71,7 @@ if (!readFileSync(BIN, "utf8").includes("gateRoster")) {
     return (parsed.stage ?? []).flatMap((s) => (s.units ?? []).map((u) => u.id)).filter((x): x is string => !!x)
   }
 
-  test("the bin hands the gate's four-lens roster to the door — the door's own subset law, not the length-4 magic constant", () => {
+  test("the bin hands the gate's roster to the door — the door's set-difference law, retired lens included", () => {
     const tmp = mkdtempSync(join(tmpdir(), "whl-p41-"))
     const out = join(tmp, "program") // must NOT exist beforehand
     try {
@@ -85,7 +85,7 @@ if (!readFileSync(BIN, "utf8").includes("gateRoster")) {
       // template DECLARES?" answered against the template's parse).
       const doorDir = join(tmp, "door-dir")
       const door = prepareReview(
-        { repo, base: "master", head: "feat", out: doorDir, template: tpl, roster: ["principles", "tests", "momentum", "questions"] },
+        { repo, base: "master", head: "feat", out: doorDir, template: tpl, roster: ["principles", "tests", "momentum"] },
         join(ROOT, "templates"),
       )
       assert.ok(
@@ -94,8 +94,8 @@ if (!readFileSync(BIN, "utf8").includes("gateRoster")) {
       )
       assert.deepEqual(
         unitIds(join((door as { dir: string }).dir, "workflow.toml")).sort(),
-        ["momentum", "principles", "questions", "tests"],
-        "premise: handed the roster, the door materializes ONLY the rostered lenses — summarize is stripped",
+        ["momentum", "principles", "tests"],
+        "premise: handed the roster, the door materializes ONLY the rostered lenses — summarize AND the retired questions unit strip",
       )
 
       // ── THE BIN half: the same gate decision (jev down → fail-safe
@@ -107,21 +107,17 @@ if (!readFileSync(BIN, "utf8").includes("gateRoster")) {
       const r = spawnBin(repo, tpl, out, tmp)
       assert.equal(r.status, 0, `sanity: the bin review completed: ${r.stdout}\n${r.stderr}`)
       assert.match(r.stdout, /gate: review/, "sanity: the gate decided review (fail-safe full rail — jev down)")
-      assert.match(r.stdout, /principles, tests, momentum, questions/, "sanity: the gate's receipt names the four-lens roster")
+      assert.match(r.stdout, /principles, tests, momentum/, "sanity: the gate's receipt names the full three-lens roster")
       assert.deepEqual(
         unitIds(join(out, "workflow.toml")).sort(),
-        ["momentum", "principles", "questions", "tests"],
-        `INV-3/INV-4: "does this roster subset the template?" is answered by TWO predicates that disagree at ` +
-          `exactly length 4 — the door's set-difference against the template's own parse (proven above: handed ` +
-          `the four-lens roster it strips summarize) and the bin's handoff guard \`g.decision.roster.length < 4\` ` +
-          `(bin/whitehartlane review verb), which never hands a length-4 roster. With jev down (fail-safe full ` +
-          `rail) the gate decided roster [principles, tests, momentum, questions] over this FIVE-unit template, ` +
-          `the bin dropped the handoff, and the materialized program carries ` +
-          `[${unitIds(join(out, "workflow.toml")).sort().join(", ")}] — summarize runs though no gate decision ` +
-          `ever named it, the exact silent-inversion shape the door's own fix comment describes ("a four-element ` +
-          `roster over a FIVE-unit template … materialized all five units — silently running a lens the gate's ` +
-          `decision excluded") surviving one site later. The handoff must key on the same set-difference the door ` +
-          `enforces (or always hand the roster and let the door decide).`,
+        ["momentum", "principles", "tests"],
+        `INV-3/INV-4 (reworked for the three-lens roster, 2026-11-05): the bin hands every ` +
+          `non-empty decision roster to the door (the old length-4 magic constant is gone) and the ` +
+          `door's set-difference strips BOTH the un-rostered summarize unit AND the retired ` +
+          `questions unit — with jev down (fail-safe full rail = [principles, tests, momentum]) ` +
+          `over this FIVE-unit template, the materialized program carries exactly the decision's ` +
+          `[${unitIds(join(out, "workflow.toml")).sort().join(", ")}]: no lens the gate never ` +
+          `named ever runs, and a retired lens cannot resurrect through the template.`,
       )
     } finally {
       rmSync(tmp, { recursive: true, force: true })

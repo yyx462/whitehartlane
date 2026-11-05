@@ -15,7 +15,7 @@ import test from "node:test"
 import { BANDS, decideGate, gateReceipt, type GateFeatures } from "../../src/doors/review-gate.ts"
 
 const ROOT = resolve(import.meta.dirname, "..", "..")
-const CEILING = ["principles", "tests", "questions"] as const
+const CEILING = ["principles", "tests"] as const
 
 const docs: GateFeatures = {
   repo: "/tmp/r",
@@ -37,11 +37,11 @@ test("momentum-1: a capped docs-only decision records the ceiling (absent means 
   assert.deepEqual(
     d.universe,
     [...CEILING],
-    "INV-4: docs-only skip omitted universe — absent means all four, but the project ceiling is principles,tests,questions",
+    "INV-4: docs-only skip omitted universe — absent means all four, but the project ceiling is principles,tests",
   )
   assert.match(
     gateReceipt(docs, d),
-    /universe: principles,tests,questions/,
+    /universe: principles,tests/,
     "INV-4: the docs-only receipt must name the ceiling; a missing universe reads as all four",
   )
 })

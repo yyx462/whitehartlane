@@ -76,7 +76,7 @@ test("the materialized workflow.toml still yields the lens roster to intake.sh's
     const ids = [...block.matchAll(/\{ id = "([a-z]+)"/g)].map((m) => m[1])
     assert.deepEqual(
       ids.sort(),
-      ["momentum", "principles", "questions", "tests"],
+      ["momentum", "principles", "tests"],
       "intake.sh's lens loop finds every materialized lens — one shuffle order file per lens gets written",
     )
   } finally {

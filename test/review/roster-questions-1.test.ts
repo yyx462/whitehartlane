@@ -19,14 +19,14 @@ test("shipConfigOf() without a commit surfaces the working-tree roster (ship-con
   g("init -q -b main .")
   g("config user.email t@t.local")
   g("config user.name t")
-  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "questions"]\nstrictness = "strict"\n')
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "momentum"]\nstrictness = "strict"\n')
   g("add -A")
   g("commit -qm roster")
   try {
     const cfg = shipConfigOf(repo)
     assert.deepEqual(
       cfg.roster,
-      ["principles", "tests", "questions"],
+      ["principles", "tests", "momentum"],
       "INV-2: the roster field the parser accepts must reach ship-config's reader (shipConfigOf with no commit)",
     )
   } finally {

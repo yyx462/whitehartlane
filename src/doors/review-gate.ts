@@ -31,7 +31,14 @@ import { homeRoot, sessionsRoot } from "../adapters/store.ts"
 import { DOCS_ONLY, DOCS_PATH } from "./review.ts"
 import { parse as parseToml } from "smol-toml"
 
-export const LENSES = ["principles", "tests", "momentum", "questions"] as const
+// THE ROSTER SHRANK (2026-11-05, the owner's ruling): questions is
+// gone. Receipt: three live rounds on the telemetry PR — principles
+// caught the one real P1 (the board's dead path), questions' output
+// was restatements (questions-1 = the blocked finding refiled;
+// q-42..49 = advisories the other lenses also filed). The fixed
+// questions survive as a checklist for any lens that wants them,
+// not as a pane the rail pays for.
+export const LENSES = ["principles", "tests", "momentum"] as const
 export type Lens = (typeof LENSES)[number]
 
 export type GateClass = "docs_only" | "test_only" | "code_small" | "code_large"

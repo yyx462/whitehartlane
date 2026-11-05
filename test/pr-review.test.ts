@@ -502,7 +502,7 @@ test("self-review round 1 fixes: multi-file orders stay block-safe; body-file re
     writeFileSync(join(x.dir, "data", "review", "config.sh"), `REPO='${repo}'\nBASE_BRANCH='main'\nBASE_SHA='${base}'\nHEAD_BRANCH='feat'\nHEAD_SHA='${head}'\nTITLE='t'\nAUTHOR=''\nMERGE_CMD=''\n`)
   })
   assert.equal(hook("intake.sh", p.dir).code, 0)
-  for (const lens of ["principles", "tests", "momentum", "questions"]) {
+  for (const lens of ["principles", "tests", "momentum"]) {
     const order = readFileSync(join(p.dir, "data", "review", `order-${lens}.txt`), "utf8")
     const diff = readFileSync(join(p.dir, "data", "review", "diff.patch"), "utf8")
     assert.equal((order.match(/^diff --git/gm) ?? []).length, 2, `${lens}: both file headers present`)
@@ -557,7 +557,7 @@ test("intake: builds both checkouts, the diff, and one shuffled hunk order per l
   assert.ok(readFileSync(join(p.dir, "data", "review", "diff.patch"), "utf8").includes("waitFast"))
   assert.equal(readFileSync(join(p.dir, "data", "review", "files.txt"), "utf8").trim(), "src/wait.ts")
   assert.match(readFileSync(join(p.dir, "data", "review", "pr.md"), "utf8"), /# feat -> main/)
-  for (const lens of ["principles", "tests", "momentum", "questions"]) {
+  for (const lens of ["principles", "tests", "momentum"]) {
     const order = readFileSync(join(p.dir, "data", "review", `order-${lens}.txt`), "utf8")
     assert.equal((order.match(/^@@/gm) ?? []).length, 1, "every order carries all hunks")
   }

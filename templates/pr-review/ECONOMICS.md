@@ -29,7 +29,7 @@ spend.**
 
 Per lens (healthy rounds): principles 129–190k, tests 126–177k,
 momentum 101–153k, questions 101–161k input; divide is noise (23–38k).
-The four lenses are ~92% of a round's cost.
+The lens panes are ~92% of a round's cost (three since the 2026-11-05 roster ruling — questions was cut).
 
 ## Duplicates — the measured recursion bottleneck
 

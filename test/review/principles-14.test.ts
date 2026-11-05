@@ -59,7 +59,7 @@ test("intake's lens loop derives every lens from the MATERIALIZED workflow.toml"
     ).trim().split("\n").filter(Boolean)
     assert.deepEqual(
       [...derived].sort(),
-      ["momentum", "principles", "questions", "tests"],
+      ["momentum", "principles", "tests"],
       `intake derived [${derived.join(", ")}] from the materialized bytes — zero order files means every lens reads the diff in the SAME order`,
     )
   } finally {
