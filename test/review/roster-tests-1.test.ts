@@ -18,17 +18,17 @@ test("tests-1: ship-config's call must surface a committed roster, not report th
   const repo = join(tmp, "repo")
   execSync("git init -q -b main repo", { cwd: tmp })
   execSync("git config user.email t@t.local && git config user.name t", { cwd: repo })
-  writeFileSync(join(repo, "review-gate.toml"), 'auto = true\nroster = ["questions", "principles", "tests"]\nstrictness = "strict"\n')
+  writeFileSync(join(repo, "review-gate.toml"), 'auto = true\nroster = ["momentum", "principles", "tests"]\nstrictness = "strict"\n')
   execSync("git add -A && git commit -qm roster", { cwd: repo })
   try {
     // twin: the commit seat sees it (LENSES order, not declaration order)
     const trusted = shipConfigOf(repo, { base: "main" })
-    assert.deepEqual(trusted.roster, ["principles", "tests", "questions"], "sanity: the base commit parses the key")
+    assert.deepEqual(trusted.roster, ["principles", "tests", "momentum"], "sanity: the base commit parses the key")
     // the seat the printer actually calls
     const probe = shipConfigOf(repo)
     assert.deepEqual(
       probe.roster,
-      ["principles", "tests", "questions"],
+      ["principles", "tests", "momentum"],
       "INV-2: roster accepted on the commit path must reach shipConfigOf() with no commit — the call whl ship-config makes — not vanish",
     )
     const out = execFileSync(process.execPath, ["--experimental-strip-types", BIN, "ship-config", repo], {
@@ -36,7 +36,7 @@ test("tests-1: ship-config's call must surface a committed roster, not report th
     })
     assert.match(
       out,
-      /roster: principles,tests,questions/,
+      /roster: principles,tests,momentum/,
       `INV-2: ship-config must print the declared ceiling; silence is a second decision (no ceiling). got:\n${out}`,
     )
   } finally {

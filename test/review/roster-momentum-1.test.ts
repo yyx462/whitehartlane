@@ -12,11 +12,11 @@ import { shipConfigOf } from "../../src/doors/review-gate.ts"
 test("momentum-1: shipConfigOf() with no commit surfaces a working-tree roster (INV-2)", () => {
   const tmp = mkdtempSync(join(tmpdir(), "mom-roster-"))
   try {
-    writeFileSync(join(tmp, "review-gate.toml"), 'auto = true\nstrictness = "strict"\nroster = ["principles", "tests", "questions"]\n')
+    writeFileSync(join(tmp, "review-gate.toml"), 'auto = true\nstrictness = "strict"\nroster = ["principles", "tests", "momentum"]\n')
     const cfg = shipConfigOf(tmp)
     assert.deepEqual(
       cfg.roster,
-      ["principles", "tests", "questions"],
+      ["principles", "tests", "momentum"],
       "INV-2: roster accepted by the contract parser must reach shipConfigOf() — the seat whl ship-config calls — not vanish",
     )
   } finally {

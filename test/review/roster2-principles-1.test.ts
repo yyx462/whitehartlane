@@ -27,7 +27,7 @@ test("INV-2: a non-array roster is refused, not vanished into 'no contract'", ()
     execSync("git config user.email t@t && git config user.name t", { cwd: repo })
     writeFileSync(join(repo, "src-wait.ts"), "export const wait = () => true\n")
     // the CLI spelling, pasted into the toml key this diff adds
-    writeFileSync(join(repo, "review-gate.toml"), 'roster = "principles,tests,questions"\nstrictness = "medium"\n')
+    writeFileSync(join(repo, "review-gate.toml"), 'roster = "principles,tests"\nstrictness = "medium"\n')
     execSync("git add -A && git commit -qm base", { cwd: repo })
     execSync("git checkout -q -b feat", { cwd: repo })
     writeFileSync(join(repo, "src-wait.ts"), "export const wait = () => false\nexport const waitFast = () => true\n")
@@ -42,7 +42,7 @@ test("INV-2: a non-array roster is refused, not vanished into 'no contract'", ()
     // below (fail-safe fills TO the declared ceiling) rides unchanged.
     assert.deepEqual(
       cfg.roster,
-      ["principles", "tests", "questions"],
+      ["principles", "tests"],
       `INV-2: a valid csv roster is the ceiling — honored, not vanished (rosterUnknown=${JSON.stringify(cfg.rosterUnknown)} must be empty: the receipt must not lie)`,
     )
     assert.ok(!cfg.rosterUnknown || cfg.rosterUnknown.length === 0)

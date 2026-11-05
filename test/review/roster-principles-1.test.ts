@@ -18,14 +18,14 @@ test("INV-3: ship-config's call shape returns the roster the file declares", () 
   execSync("git init -q -b main", { cwd: tmp })
   execSync("mkdir -p repo && git init -q -b main repo", { cwd: tmp })
   execSync("git config user.email t@t && git config user.name t", { cwd: repo })
-  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "questions"]\nstrictness = "strict"\n')
+  writeFileSync(join(repo, "review-gate.toml"), 'roster = ["principles", "tests", "momentum"]\nstrictness = "strict"\n')
   execSync("git add -A && git commit -qm roster", { cwd: repo })
   try {
     // the exact call ship-config makes (bin/whitehartlane:942)
     const probe = shipConfigOf(repo)
     assert.deepEqual(
       probe.roster,
-      ["principles", "tests", "questions"],
+      ["principles", "tests", "momentum"],
       "INV-3: ship-config's reader must see the declared ceiling; an absent roster is a second decision (no ceiling) that disagrees with parseRosterKey",
     )
   } finally {
