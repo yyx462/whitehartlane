@@ -87,10 +87,12 @@ re-bought every round.
   provider cache carrying the real weight; a re-prompted lens must
   get the byte-identical brief (today reprompt re-submits it — keep
   it that way, it is load-bearing).
-- **Usage telemetry in the rail** — this table required DB
-  archaeology (`scripts/review-trace.mjs`); the rail should record
-  per-unit token aggregates in `units.jsonl`/`table.json` so
-  `whl jobs` shows economics natively.
+- **Usage telemetry in the rail** — SHIPPED (2026-11-05): every unit
+  finish emits a `unit.tokens` event on the run trace (cumulative,
+  sampled off the host at settle; worktree runs exempt — their
+  sessions key by the shared cwd), and `whl jobs` folds it into a
+  `tok in/out×units` column. This table still required the DB
+  archaeology (`scripts/review-trace.mjs`); new runs will not.
 
 ### 3. Faster
 

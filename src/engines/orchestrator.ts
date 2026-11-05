@@ -7,6 +7,7 @@ import { chainOf, stepRecorder, type Chain } from "../core/orchestrator-chain.ts
 import { HookError, hooksFromDir, loadManifest, resolvedLayout, setHookRunNote, unitsFromStages, stepsFromStages, gradePlanFromStages, modelPlanFromStages, settingsPlanFromStages, type Hooks, type Layout, type Manifest, type Step, type GradePlan, type Unit } from "../doors/hooks.ts"
 import { readModelsFile } from "../jev/model-ladder.ts"
 import { runFaultLane, type FaultRail } from "./fault-lane.ts"
+import type { UsageRow } from "../ports/agent-host.ts"
 import { runCoworker } from "./coworker-run.ts"
 import { runLab } from "./lab.ts"
 import type { Member } from "./coworker.ts"
@@ -161,6 +162,11 @@ export type CycleDeps = {
   // manifest pin — byte-identical to the pre-stage rail.
   unitModels?: Map<string, string>
   unitTemperatures?: Map<string, number>
+  // P0 economics (ECONOMICS.md proposal 2.6): sample the unit's
+  // cumulative token usage off the host at finish — the `unit.tokens`
+  // event IS the record (run trace), the jobs board folds it. Null =
+  // no row (a host that keeps none) — never a fake zero (#104).
+  usageOf?: (unitId: string, sinceMs: number) => UsageRow | null
   // The provider-fault lane's rail seam (j-93d652 gap #4): fan-out
   // workers get the jev ladder coworker members always had. Optional —
   // a test shep without it simply runs lane-less, as before.
@@ -625,6 +631,16 @@ export function cycle(deps: CycleDeps): boolean {
   ): void => {
     settle(deps.taskDir, id, `${stage}:${id}`, pass, detail ?? row.result, fault, trigger)
     deps.emit?.("unit.finished", { unit: id, pass, result: row.result })
+    // P0 economics: the finish is the only place a unit's full cost is
+    // final — cumulative since 0 (a rebirth re-spawns in the same cwd;
+    // a re-levy is a separate job dir, so no cross-run double count).
+    // Worktree mode is exempt: every unit's session keys by the SHARED
+    // worktree cwd, so a per-unit row would re-count the whole run
+    // under each unit's name.
+    if (!deps.worktree) {
+      const usage = deps.usageOf?.(id, 0)
+      if (usage) deps.emit?.("unit.tokens", { unit: id, ...usage })
+    }
     if (faultsCanary && deps.canary?.enabled && !deps.canary.released && !deps.canary.failed) {
       if (pass) deps.canary.released = true
       else deps.canary.failed = true
@@ -1275,6 +1291,9 @@ export async function runOrchestrator(input: {
   // live child spur names the pane's session as its spawner, the wait
   // is booked and the stall stands down.
   bookedWait?: (unitId: string) => boolean
+  // P0 economics: forwarded to every cycle — the rail's per-unit usage
+  // seam (engine.ts wires it to rail.usageOf; tests inject fakes).
+  usageOf?: (unitId: string, sinceMs: number) => UsageRow | null
   // the provider-fault lane + the birth judge's rail seam — engine.ts
   // builds it; the run loop forwards it to every cycle (it used to
   // build it and drop it: the lane was dead code)
@@ -1428,6 +1447,7 @@ export async function runOrchestrator(input: {
         // crashed (faultStateOf was a WeakMap called as a function).
         // The birth judge rides the same seam: no faults, no birth seat.
         faults: input.faults,
+        usageOf: input.usageOf,
         worktree: input.worktree,
         canary,
         draining,
