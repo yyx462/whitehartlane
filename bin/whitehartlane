@@ -66,6 +66,7 @@ import { contentHashOf, duplicateStageIds, relSourceOf, scopeRootOf, spurIdOf, v
 import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
 import { jobTracePath, renderTraceTable } from "../src/adapters/trace.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
+import { reviewctl, REVIEWCTL_HELP } from "../src/doors/reviewctl.ts"
 import { resolve } from "node:path"
 
 // "90s", "2m", "1h", "5000" (ms) — the pause --wait one-shot ceiling.
@@ -191,6 +192,10 @@ async function main() {
                                        proven findings block, accept
                                        merges, reject divides feedback)
   jobs                                 the board
+  reviewctl <verb> [--json]            the review rail's lever: doctor,
+                                       stage, hook, verdict, lenses, gate,
+                                       cleanup (seam-testing CLI — see
+                                       reviewctl --help)
   events | audit | sweep | promote     observation and care
   pause | continue | regrade | fork    the resume ladder
   help [stages]                        this text / the stage cheat-sheet
@@ -307,6 +312,28 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     for (const w of ready.warnings) console.error(`warning: ${w}`)
     console.log(`log: ${ready.log}`)
     console.log(`trace: ${ready.trace}`)
+    return
+  }
+
+  if (cmd === "reviewctl") {
+    const rest = process.argv.slice(3)
+    if (rest.includes("--help") || rest.includes("-h")) {
+      console.log(REVIEWCTL_HELP)
+      return
+    }
+    const verb = rest.find((x) => !x.startsWith("--"))
+    const flags = {}
+    for (let i = 0; i < rest.length; i++) {
+      if (!rest[i].startsWith("--")) continue
+      const key = rest[i].slice(2)
+      const next = rest[i + 1]
+      if (next !== undefined && !next.startsWith("--")) {
+        flags[key] = next
+        i++
+      } else flags[key] = true
+    }
+    const positional = rest.filter((x) => !x.startsWith("--"))
+    reviewctl({ verb: positional[0] ?? "", target: positional[1], flags })
     return
   }
 
