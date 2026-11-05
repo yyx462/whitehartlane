@@ -35,7 +35,6 @@ import { regradeJob } from "../src/doors/resume.ts"
 import { allLevyPanes, levyPaneByPane, registerLevyPane } from "../src/adapters/levy-pane.ts"
 import { rebirthExitCode, rebirthRunner, runnerDoor, spawnRunner } from "../src/adapters/levy.ts"
 import { readState } from "../src/core/state.ts"
-import { sumUnitTokens } from "../src/adapters/trace.ts"
 import { seedSessionFile } from "../src/adapters/transcripts.ts"
 import { admitFork } from "../src/jev/policy.ts"
 import {
@@ -65,7 +64,7 @@ import {
 } from "../src/adapters/store.ts"
 import { contentHashOf, duplicateStageIds, relSourceOf, scopeRootOf, spurIdOf, validateSpurId } from "../src/doors/project.ts"
 import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
-import { jobTracePath, renderTraceTable } from "../src/adapters/trace.ts"
+import { jobTracePath, renderTraceTable, sumUnitTokens } from "../src/adapters/trace.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
 import { resolve } from "node:path"
 
@@ -133,6 +132,10 @@ function unitsOf(job) {
 // P0 economics: the run trace's unit.tokens rows, folded — in/out per
 // job, no DB archaeology. `-` when the run predates the seam, runs in
 // worktree mode, or the host keeps no usage (absence is honest).
+// PATH LAW (principles-7001): the trace file is owned by the trace
+// layer — jobTracePath(sid, jid) resolves <home>/sessions/<sid>/jobs/
+// <jid>/events.tsv. job.dir is the RUN dir (one below); joining it
+// here read a file no writer creates and every job printed `tok -`.
 function fmtTok(n) {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
   if (n >= 1e3) return `${Math.round(n / 1e3)}k`
@@ -142,7 +145,7 @@ function fmtTok(n) {
 /** @param {JobRecord} job */
 function tokensOf(job) {
   try {
-    return sumUnitTokens(join(job.dir, "events.tsv"))
+    return sumUnitTokens(jobTracePath(job.sid, job.id))
   } catch {
     return null
   }

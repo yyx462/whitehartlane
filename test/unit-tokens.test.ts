@@ -122,3 +122,35 @@ test("worktree mode is exempt: the shared cwd would re-count the run per unit", 
   const events = await settledDirWithUsage(() => ({ input: 1, output: 1, cacheRead: 1, cost: 0, sessions: 1 }), { worktree: "/tmp/some-worktree" })
   assert.ok(!events.some((e) => e.kind === "unit.tokens"), "worktree run → no per-unit row")
 })
+
+// -- the receiver (principles-7001, adopted): the BOARD must print what
+// the trace wrote — a path-spelling test around the fold proved nothing
+// while the board read a file no writer creates (job.dir is the RUN
+// dir, one below the trace). Run the real door, read its stdout.
+
+test("whl jobs prints the tok column from the trace the rail wrote", async () => {
+  const { execFileSync } = await import("node:child_process")
+  const home = process.env.AGENTIC_OS_HOME!
+  const boardSid = "s-board"
+  openSession({ cwd: tmpdir() })
+  const job = createJob({ sid: boardSid, stoodUpBy: "standalone", workflow: "fan-out", task: "board", runDir: true })
+  appendEvent(boardSid, { actor: "orchestrator", jid: job.id, kind: "unit.tokens", unit: "principles", input: 100_000, output: 10_000, cacheRead: 900_000, cost: 0, sessions: 1 })
+
+  const root = join(import.meta.dirname, "..")
+  const stdout = execFileSync("node", ["--experimental-strip-types", join(root, "bin", "whitehartlane"), "jobs"], {
+    env: { ...process.env, AGENTIC_OS_HOME: home },
+    encoding: "utf8",
+    timeout: 60_000,
+  })
+  const row = stdout.split("\n").find((l) => l.includes(job.id))
+  assert.ok(row, "the fixture job is on the board")
+  assert.match(row, /tok 100k\/10k×1/, `the board prints the trace's tokens — got: ${row}`)
+  // and a quiet job (no unit.tokens rows) stays honestly absent, not zero
+  const quiet = createJob({ sid: boardSid, stoodUpBy: "standalone", workflow: "fan-out", task: "quiet", runDir: true })
+  const again = execFileSync("node", ["--experimental-strip-types", join(root, "bin", "whitehartlane"), "jobs"], {
+    env: { ...process.env, AGENTIC_OS_HOME: home },
+    encoding: "utf8",
+    timeout: 60_000,
+  })
+  assert.match(again.split("\n").find((l) => l.includes(quiet.id)) ?? "", /tok -/, "no rows → tok -, never a fake zero")
+})
