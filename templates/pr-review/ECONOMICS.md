@@ -28,7 +28,7 @@ each on three already-green lenses. **Waste ≈ 2.2M input ≈ 31% of all
 spend.**
 
 Per lens (healthy rounds): principles 129–190k, tests 126–177k,
-momentum 101–153k, questions 101–161k input; divide is noise (23–38k).
+momentum 101–153k, questions 101–161k input; divide is now a script (2026-11-05) — zero tokens, zero wall time.
 The lens panes are ~92% of a round's cost (three since the 2026-11-05 roster ruling — questions was cut).
 
 ## Duplicates — the measured recursion bottleneck

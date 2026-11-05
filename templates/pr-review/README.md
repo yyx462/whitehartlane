@@ -42,12 +42,12 @@ prove (gate)     THE DECISION MODEL — a P0/P1 blocks only with a repro
                    fails both, diff touches the file → incomplete-fix  BLOCK
                    fails both, diff never touches it → pre-existing    advisory
                    load-error → bogus · one-of-two → flaky · passes → refuted
-divide (solo)    on reject: one mind reads the findings + the AUTHORING
-                 run's trace (trace/), maps each finding to the worker
-                 whose deliverable claims its file, writes one
-                 feedback/<name>.md per party (their findings ONLY +
-                 the please-check-and-refine contract) + MAP.md with
-                 the evidence. On accept: a no-op.
+divide (gate)   DETERMINISTIC broadcast (2026-11-05, the owner's ruling:
+                the divider LLM is retired): a script sends EVERY blocked
+                finding to EVERY source agent the authoring trace names
+                (no trace -> feedback/author.md). No pane, no tokens, no
+                deadline. Broadcast: every party gets every finding —
+                one fixer reads it all anyway (the owner's receipt).
 merge (gate)     accept → MERGE_CMD (or local git --no-ff). reject →
                  exit 1: the chain fails HONESTLY, the wake says why.
                  The one deliberately cold verdict.
@@ -100,8 +100,9 @@ Every PR-generating stage gets the same tail:
   ≤60s); the excess degrade to advisory with a receipt in verdict.json.
 - **Assert-vs-load heuristic**: a repro "fails on an assertion" iff it
   exits nonzero without a module/syntax error on stdout+stderr.
-- **The divider's floor is mechanical**: feedback must cover every
-  blocked finding exactly once and never invent one (divide-check);
+- **The divider IS mechanical now**: hooks/divide.sh broadcasts every
+  blocked finding to every party and self-verifies (every id in every
+  file, nothing invented, MAP carries the parties);
   the MAPPING's wisdom is the agent's, judged by you over time.
 - **Metrics**: every finding lands in `review/ledger.jsonl` (lens,
   severity, outcome, head sha). Weekly: proof rate per lens (low =
