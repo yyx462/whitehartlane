@@ -398,38 +398,50 @@ test("prove: zero blocking findings → accept, exit 0", () => {
   rmSync(p.dir, { recursive: true, force: true })
 })
 
-test("divide-check: the partition law", () => {
-  const mk = (blocked: unknown[], feedback: Record<string, string>, map: boolean) => {
+test("divide: the broadcast law — every source agent gets EVERY blocked finding, deterministically", () => {
+  const mk = (blocked: unknown[], opts: { trace?: string[]; residue?: boolean } = {}) => {
     const p = progFixture((x) => {
-      writeFileSync(join(x.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: blocked.length ? "reject" : "accept", blocked, advisory: [] }))
-      if (Object.keys(feedback).length) mkdirSync(join(x.dir, "feedback"), { recursive: true })
-      for (const [f, text] of Object.entries(feedback)) writeFileSync(join(x.dir, "feedback", f), text)
-      if (map) writeFileSync(join(x.dir, "feedback", "MAP.md"), "evidence\n")
+      writeFileSync(join(x.dir, "data", "review", "verdict.json"), JSON.stringify({ verdict: blocked.length ? "reject" : "accept", blocked, advisory: [], adopt: [] }))
+      if (opts.trace) for (const u of opts.trace) mkdirSync(join(x.dir, "data", "trace", "units", u), { recursive: true })
+      if (opts.residue) {
+        mkdirSync(join(x.dir, "feedback"), { recursive: true })
+        writeFileSync(join(x.dir, "feedback", "leftover.md"), "stale\n")
+      }
     })
     return p
   }
-  const blocked = [{ id: "principles-1", severity: "P0", claim: "c" }, { id: "tests-1", severity: "P1", claim: "c" }]
-  const good = mk(blocked, { "alice.md": "principles-1 yours\n", "bob.md": "tests-1 yours\n" }, true)
-  assert.match(hook("divide-check.sh", good.dir).out, /covered exactly once/)
+  const blocked = [
+    { id: "principles-1", severity: "P0", claim: "c1", location: { file: "src/a.ts", line_start: 1 }, repro: { command: "node --test t1.js" } },
+    { id: "tests-1", severity: "P1", claim: "c2", location: { file: "src/b.ts" }, repro: {} },
+  ]
+  // trace present: one broadcast file per authoring unit, ALL findings in each
+  const withTrace = mk(blocked, { trace: ["auth-fix", "auth-tests"] })
+  assert.equal(hook("divide.sh", withTrace.dir).code, 0)
+  assert.match(hook("divide.sh", withTrace.dir).out, /broadcast 2 blocked finding\(s\) to 2 party/)
+  for (const name of ["auth-fix", "auth-tests"]) {
+    const text = readFileSync(join(withTrace.dir, "feedback", `${name}.md`), "utf8")
+    assert.match(text, /principles-1/, `${name} carries principles-1`)
+    assert.match(text, /tests-1/, `${name} carries tests-1 — broadcast means ALL findings to ALL parties`)
+  }
+  const map = readFileSync(join(withTrace.dir, "feedback", "MAP.md"), "utf8")
+  assert.match(map, /principles-1 -> auth-fix, auth-tests/)
+  assert.match(map, /tests-1 -> auth-fix, auth-tests/)
 
-  const nobody = mk(blocked, { "alice.md": "principles-1 yours\n" }, true)
-  assert.match(hook("divide-check.sh", nobody.dir).out, /tests-1 reaches nobody/)
+  // no trace (the human-PR case): everything routes to author.md
+  const noTrace = mk(blocked)
+  assert.match(hook("divide.sh", noTrace.dir).out, /party file\(s\): author/)
+  const author = readFileSync(join(noTrace.dir, "feedback", "author.md"), "utf8")
+  assert.match(author, /principles-1/)
+  assert.match(author, /tests-1/)
 
-  const twice = mk(blocked, { "alice.md": "principles-1 tests-1\n", "bob.md": "tests-1\n" }, true)
-  assert.match(hook("divide-check.sh", twice.dir).out, /exactly one owner/)
+  // accept: nothing produced, residue refused
+  const acceptClean = mk([])
+  assert.match(hook("divide.sh", acceptClean.dir).out, /accept — no feedback/)
+  assert.equal(existsSync(join(acceptClean.dir, "feedback")), false)
+  const acceptResidue = mk([], { residue: true })
+  assert.match(hook("divide.sh", acceptResidue.dir).out, /accept but feedback/)
 
-  const invented = mk(blocked, { "alice.md": "principles-1 and principles-8\n" }, true)
-  assert.match(hook("divide-check.sh", invented.dir).out, /invents/)
-
-  const noMap = mk(blocked, { "alice.md": "principles-1 tests-1\n" }, false)
-  assert.match(hook("divide-check.sh", noMap.dir).out, /MAP.md missing/)
-
-  const accepted = mk([], { "alice.md": "leftover\n" }, false)
-  assert.match(hook("divide-check.sh", accepted.dir).out, /accept but feedback/)
-
-  const acceptClean = mk([], {}, false)
-  assert.match(hook("divide-check.sh", acceptClean.dir).out, /accept, no feedback/)
-  for (const p of [good, nobody, twice, invented, noMap, accepted, acceptClean]) rmSync(p.dir, { recursive: true, force: true })
+  for (const p of [withTrace, noTrace, acceptClean, acceptResidue]) rmSync(p.dir, { recursive: true, force: true })
 })
 
 test("merge: the cold verdict — accept merges, reject exits 1 honestly", () => {
