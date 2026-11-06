@@ -121,6 +121,10 @@ export function fanOutEngine(
       deadlineMs,
       resumes,
       emit: (kind, payload) => ledger?.emit(kind, payload),
+      // P0 economics (ECONOMICS.md 2.6): the rail knows each unit's
+      // sandbox cwd, the host knows its own usage store — the same
+      // seam coworker stations already ride (#104).
+      usageOf: (unitId, sinceMs) => rail.usageOf(unitId, sinceMs),
       existingRows: rail.existingRows(),
       // The worktree is the PROGRAM's tree, not the door's (j-battery):
       // env override, then the checkout holding the program (walk up
