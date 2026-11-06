@@ -1310,7 +1310,7 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     ].join("\n")
     let note = ""
     try {
-      note = submitPr(job.worktree, title, body).split("\n").slice(-3).join(" ")
+      note = submitPr(job.worktree, title, body, job.id).split("\n").slice(-3).join(" ")
     } catch (err) {
       console.log(formatGate(job.id, [{ check: "pr", detail: err instanceof Error ? err.message.split("\n")[0] : String(err) }]))
       process.exitCode = 1

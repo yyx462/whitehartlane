@@ -55,9 +55,27 @@ export function markPromoted(job: JobRecord, note: string): JobRecord {
   return job
 }
 
-export function submitPr(worktree: string, title: string, body: string): string {
+// gwt #127 made --seam required; the probe keeps older gwt working —
+// today's gwt rejects unknown flags, so an unconditional --seam would
+// break promote NOW (same probe shape gwt uses on whl: --help | grep).
+// Probed per submit, not memoized: promote submits once per process
+// (one Job per promote run, the bin's promote arm).
+function gwtKnowsSeam(bin: string, worktree: string): boolean {
+  try {
+    return execFileSync(bin, ["submit-pr", "--help"], { cwd: worktree, encoding: "utf8", timeout: 15_000 }).includes("--seam")
+  } catch {
+    return false // a gwt that cannot be asked keeps the old call shape; the submit itself surfaces real failures
+  }
+}
+
+export function submitPr(worktree: string, title: string, body: string, seam: string): string {
   const bin = process.env.AGENTIC_OS_SUBMIT ?? "gwt"
-  const args = bin === "gwt" ? ["submit-pr", title, body] : [title, body]
+  // seam = the Job id: one promote PR serves exactly one Job, and an id
+  // can never read as two names — a title is prose from the stored
+  // task, and gwt #127 refuses seams joined with , ; & + "and" (and
+  // whl offers no rename path: the title derives from job.task)
+  const seamArgs = bin === "gwt" && gwtKnowsSeam(bin, worktree) ? ["--seam", seam] : []
+  const args = bin === "gwt" ? ["submit-pr", title, body, ...seamArgs] : [title, body]
   return execFileSync(bin, args, { cwd: worktree, encoding: "utf8", timeout: 180_000 }).trim()
 }
 
