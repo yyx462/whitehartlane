@@ -155,6 +155,13 @@ Runs; the events trace pane shows every booked fact.
   mid-flight, the scaffold is wrong — fix the briefs, not your watch.
 - **Parked ≠ broken.** paused/aborted/orphaned are parks; the human
   (or you, when asked) types `whl continue` — nothing auto-continues.
+- **A stall is a claim about messaging, not work.** A stalled/failed
+  row means the pane stopped talking — the work may have finished and
+  pushed before the stall killed the report (2026-10-27 j-dea2bd
+  salvage). Before mourning or re-levying, check the panes' actual
+  artifacts: `shep status` for the fleet, the booked worktree's
+  branch and churn, the captures dir. Never re-do work a worktree can
+  prove done.
 - **No deliverable, no done.** Every commission ends with ONE
   readable artifact for the human (Deliverables below) — a report of
   pointers is a failed report, whatever the brief said or forgot.
