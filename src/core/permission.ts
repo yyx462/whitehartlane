@@ -419,5 +419,5 @@ export function permissionJudgeState(input: {
 // decider above catches it and denies restrictively.
 export function tunedPermissionJudge(): PermissionJudge {
   const question = loadPrompt("permission-needed")
-  return ({ path, ask, context }) => jevNoulQ(question, permissionJudgeState({ path, ask, context }))
+  return ({ path, ask, context }) => jevNoulQ(question, permissionJudgeState({ path, ask, context }), "permission-needed")
 }

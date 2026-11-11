@@ -30,5 +30,5 @@ export function ENOUGH_AT(): number {
 }
 
 export function jevNoul(task: string): number {
-  return jevNoulQ(loadPrompt("grill-enough"), task)
+  return jevNoulQ(loadPrompt("grill-enough"), task, "grill-enough")
 }
