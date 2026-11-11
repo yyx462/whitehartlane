@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copied call shape from yyx_jev. Not the skill. The question is the product policy.
-# The question and criteria are the jev-tuner's landed winner
+# The question and criteria are the tuning loop's landed winner (jev tune)
 # (src/jev-prompts/workflow-choice.*) — fallback embedded below.
 # Auth is read from the same files jev uses. The value is never printed.
 set -uo pipefail

@@ -1,4 +1,4 @@
-// Landed prompts. The jev-tuner's winner lands here; production
+// Landed prompts. The tuning loop's winner lands here (jev tune land); production
 // gates read this folder at call time and fall back to the compiled
 // defaults — a missing or deleted file never breaks a rail. Thresholds
 // land beside their prompt as <gate>.json so a tuned gate moves as one
