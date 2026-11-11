@@ -89,7 +89,7 @@ A Job started this way can finish with no person in the loop. A dead orchestrato
   reads the ask plus the member's brief and allows what is plausibly
   needed for the task (a vista job reads its session shots) — a dead
   jev fails restrictive. The prompt and threshold it asks with are
-  the jev-tuner's landed winner (`src/jev-prompts/`, read live,
+  the tuning loop's landed winner (`src/jev-prompts/`, read live,
   compiled fallback), so tuning lands without a deploy. And a repeat
   ask for the same non-dangerous path escalates to a durable allow:
   persistence is the asserted need, covering the judge's misses;

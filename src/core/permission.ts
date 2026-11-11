@@ -9,7 +9,7 @@
 // is a jev question, not a flat no: a tuned typed judgment reads the
 // ask plus the worker's task and decides plausibly-needed (a vista job
 // may read its session shots) against wandering. The prompt and
-// threshold it asks with are the jev-tuner's landed winner — a dead
+// threshold it asks with are the tuning loop's landed winner (jev tune, yyx-jev ledger) — a dead
 // jev fails restrictive. And a repeated ask for the same non-dangerous
 // path IS the assertion of need: escalateOnRepeat grants it on the
 // second ask, so the deny message's promise is true even when the

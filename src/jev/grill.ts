@@ -1,7 +1,7 @@
 // Grill gate. Jev answers one question: is this enough to write hooks
 // and run? Not enough stays in the First Mate chat. "just do it" skips.
 // "grill me" forces the questions. The chat is the grill; no pane.
-// The question and the bar are the jev-tuner's landed winner.
+// The question and the bar are the tuning loop's landed winner (jev tune).
 import { loadPrompt, loadThreshold } from "./jev-prompts.ts"
 import { jevNoulQ } from "./jev.ts"
 
