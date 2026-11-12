@@ -64,7 +64,7 @@ import {
 } from "../src/adapters/store.ts"
 import { contentHashOf, duplicateStageIds, relSourceOf, scopeRootOf, spurIdOf, validateSpurId } from "../src/doors/project.ts"
 import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
-import { jobTracePath, renderTraceTable } from "../src/adapters/trace.ts"
+import { jobTracePath, renderTraceTable, sumUnitTokens } from "../src/adapters/trace.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
 import { reviewctl, REVIEWCTL_HELP } from "../src/doors/reviewctl.ts"
 import { resolve } from "node:path"
@@ -130,12 +130,35 @@ function unitsOf(job) {
   }
 }
 
+// P0 economics: the run trace's unit.tokens rows, folded — in/out per
+// job, no DB archaeology. `-` when the run predates the seam, runs in
+// worktree mode, or the host keeps no usage (absence is honest).
+// PATH LAW (principles-7001): the trace file is owned by the trace
+// layer — jobTracePath(sid, jid) resolves <home>/sessions/<sid>/jobs/
+// <jid>/events.tsv. job.dir is the RUN dir (one below); joining it
+// here read a file no writer creates and every job printed `tok -`.
+function fmtTok(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`
+  return String(n)
+}
+
+/** @param {JobRecord} job */
+function tokensOf(job) {
+  try {
+    return sumUnitTokens(jobTracePath(job.sid, job.id))
+  } catch {
+    return null
+  }
+}
+
 /** @param {JobRecord[]} jobs */
 function fmtJobs(jobs) {
   const rows = jobs.map((job) => {
     const units = unitsOf(job)
     const born = job.panes.length
     const dead = job.panes.filter((p) => p.died).length
+    const tok = tokensOf(job)
     const outcome = job.receipt
       ? `receipt ${job.receipt.panesRemaining} left, ${job.receipt.unitsDone ?? "?"} done`
       : job.abort
@@ -151,11 +174,12 @@ function fmtJobs(jobs) {
       `${job.workflow} by ${job.stoodUpBy}`.padEnd(22),
       units ? `u ${units.done}d/${units.failed}f` : "u -",
       `p ${dead}/${born}`,
+      tok ? `tok ${fmtTok(tok.input)}/${fmtTok(tok.output)}×${tok.units}` : "tok -",
       `${job.continues ? `×${job.continues} ` : ""}${outcome}`,
       job.dir,
     ].join("  ")
   })
-  return [`job      state    stood up by           units    panes   outcome                     dir`, ...rows].join("\n")
+  return [`job      state    stood up by           units    panes   tok              outcome                     dir`, ...rows].join("\n")
 }
 
 /** @param {JobRecord} job @param {LivePane[]} live */
