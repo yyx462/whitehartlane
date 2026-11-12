@@ -1,1 +1,15 @@
-A worker agent is blocked on a permission dialog for a path inside its home but outside the job's roots. Answer whether the path is plausibly needed to complete the worker's stated task. It is needed when the task or brief names it or its kind: a screenshot the ticket points at wherever it landed, a checklist the brief says to follow, or a tool's own session, state, cache, or config directory when the task uses that tool (a vista job reads ~/.vista session shots; a notify job reads the notify config). It is never needed when the file is credential-shaped — key files, keychains, auth tokens, env files carrying API keys, gpg trust stores — whatever reason is given; credential plumbing is never a worker's job. It is also not needed when the path belongs to a different project the task never mentions, or to personal data with no role in the work.
+[background]
+A worker agent is blocked on a permission dialog for a path inside its home but outside the job's roots.
+[question]
+Is the path plausibly needed to complete the worker's stated task?
+[needed]
+The task or brief names it, or names its kind:
+1. a screenshot the ticket points at, wherever it landed
+2. a checklist the brief says to follow
+3. a tool's own session, state, cache, or config directory, when the task uses that tool
+[examples]
+A vista job reads ~/.vista session shots. A notify job reads the notify config.
+[never needed]
+The file is credential-shaped — key files, keychains, auth tokens, env files carrying API keys, gpg trust stores — whatever reason is given. Credential plumbing is never a worker's job.
+[also not needed]
+The path belongs to a different project the task never mentions, or to personal data with no role in the work.
