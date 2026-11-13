@@ -1,0 +1,41 @@
+name: jev landing receipts
+
+# The pre-push hook (CHECK 5) is local and self-satisfiable: an agent can
+# run `jev store register` itself and push. This check runs server-side:
+# a PR that changes a gate template must also carry a landing receipt
+# (landings/<sha7>.md, written by `jev tune land` after a desk approval
+# tap). Stricter than the hook on purpose — comment-only edits need an
+# admin override, and that override is visible.
+
+on:
+  pull_request:
+    paths:
+      - "src/jev/jev-prompts/**"
+
+jobs:
+  receipts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: template changes need a landing receipt
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          fail=0
+          changed="$(git diff --name-only "$BASE" HEAD -- 'src/jev/jev-prompts/*.txt')"
+          [ -z "$changed" ] && { echo "no template changes"; exit 0; }
+          for f in $changed; do
+            found=0
+            for s in $(git log --format='%H %h' "$BASE"..HEAD -- "$f"); do
+              if grep -rq -- "$s" src/jev/jev-prompts/landings/ 2>/dev/null; then
+                echo "ok: $f -> receipt naming $s"
+                found=1; break
+              fi
+            done
+            if [ "$found" = 0 ]; then
+              echo "::error file=$f::template changed without a landing receipt naming its commit sha. Run 'jev tune land <gate> <candidate> --note ...' (requires the desk approval tap) and commit landings/<sha7>.md with the change."
+              fail=1
+            fi
+          done
+          exit $fail
