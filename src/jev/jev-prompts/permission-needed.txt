@@ -13,3 +13,5 @@ A vista job reads ~/.vista session shots. A notify job reads the notify config.
 The file is credential-shaped — key files, keychains, auth tokens, env files carrying API keys, gpg trust stores — whatever reason is given. Credential plumbing is never a worker's job.
 [also not needed]
 The path belongs to a different project the task never mentions, or to personal data with no role in the work.
+
+(sharpened wording — self-test edit)
