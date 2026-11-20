@@ -1,6 +1,6 @@
 # ADR 0017 — program identity for "changed since booking" is the booked pages
 
-Date: 2026-11-20 · Zen: docs/zen/2026-11-20-zen-10-repair-ticket-identity.md · Ships: PR #299
+Date: 2026-11-20 · Zen: docs/zen/2026-11-20-zen-10-plain-laws.md · Ships: PR #299
 
 ## Decision
 
