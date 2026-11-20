@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
 import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -11,6 +10,7 @@ import { admitAnotherJob, admitFanOut } from "../jev/policy.ts"
 import { checkpoint, readState } from "../core/state.ts"
 import { findJobByDir } from "../adapters/store.ts"
 import {
+  buildProgramPages,
   contentHashOf,
   duplicateStageIds,
   ensureProject,
@@ -202,34 +202,13 @@ function copyBeside(source: string, store: string): void {
   // The precondition is conservative by design: a prior with no failed
   // rows (a unit killed before its first card) does not fold — the
   // full rail re-runs. Wrong-fresh beats wrong-replay.
-  const hooksHash = existsSync(join(source, "hooks"))
-    ? contentHashOf(join(source, "hooks"))
-    : ""
-  // EVERY program input copyBeside stages must join the identity
-  // (r13 principles-5/questions-1: questions.toml, task.txt, actor.md,
-  // roots.txt, project.json, contract.toml staged beside the program
-  // but hashed nowhere — a done unit folded forward across edited
-  // inputs, run 2's ledger claiming a settle its own inputs never
-  // made). A missing input hashes as its name only.
-  const beside = ["questions.toml", "task.txt", "actor.md", "roots.txt", "project.json", "contract.toml"]
-    .map((n) => {
-      const f = join(source, n)
-      if (!existsSync(f)) return `${n}:`
-      return `${n}:${createHash("sha1").update(readFileSync(f)).digest("hex")}`
-    })
-    .join("|")
-  const identity = {
-    source: resolve(source),
-    workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
-    hooks: hooksHash,
-    // the verdict SEAT is output, never input: its presence (a link
-    // into the run dir) or absence must not change the program's
-    // identity — the fold's "same program?" judgment cannot flip on a
-    // seat (2026-10-30, the "program changed since booking" strand)
-    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data"), ["review/verdict.json"]) : "",
-    members: existsSync(members) ? contentHashOf(members) : "",
-    beside,
-  }
+  // ONE shape, ONE home (the #296 seam): the identity's page fields
+  // build in project.ts (buildProgramPages) — this fold marker, the
+  // failed wake's repair hint, and the continue NOTE all read the same
+  // builder, so "which page changed?" has exactly one answer. Field
+  // order is the wire format: never reorder (fold kinship matches the
+  // JSON bytes, source first then the builder's order).
+  const identity = { source: resolve(source), ...buildProgramPages(source) }
   writeFileSync(join(store, ".whl-program"), JSON.stringify(identity))
   const prior = newestPriorRun(store, identity)
   // the fold's OWN precondition, decided (r23 momentum-12): the prior

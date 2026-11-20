@@ -165,6 +165,80 @@ const skip = new Set([...OUTPUT_SEATS, ...exclude])
   return h.digest("hex").slice(0, 12)
 }
 
+// The booked-pages photo: the page-level identity of a program's INPUTS
+// (run.ts stages it beside the program as .whl-program at booking). The
+// pile hash above versions the folder; the photo answers a different
+// question — "which PAGE changed since booking?" — because #296's wake
+// hint read the pile and called a run-dropped report.md a program edit
+// 0.1s after a red gate. A file the photo has no page for is a
+// dropping, not an edit.
+export type ProgramPages = {
+  workflow: string
+  hooks: string
+  data: string
+  members: string
+  beside: string
+}
+
+// ONE shape, ONE home: the fold's marker (run.ts copyBeside) and the
+// #296 compares (failedWakeWhy, the continue NOTE) all build through
+// this builder, so "which page changed?" has exactly one answer. Field
+// order is the marker's wire format — never reorder (fold kinship
+// matches the JSON bytes).
+export function buildProgramPages(source: string): ProgramPages {
+  // EVERY program input copyBeside stages must join the identity
+  // (r13 principles-5/questions-1: questions.toml, task.txt, actor.md,
+  // roots.txt, project.json, contract.toml staged beside the program
+  // but hashed nowhere — a done unit folded forward across edited
+  // inputs, run 2's ledger claiming a settle its own inputs never
+  // made). A missing input hashes as its name only.
+  const beside = ["questions.toml", "task.txt", "actor.md", "roots.txt", "project.json", "contract.toml"]
+    .map((n) => {
+      const f = join(source, n)
+      if (!existsSync(f)) return `${n}:`
+      return `${n}:${createHash("sha1").update(readFileSync(f)).digest("hex")}`
+    })
+    .join("|")
+  return {
+    workflow: createHash("sha1").update(readFileSync(join(source, "workflow.toml"))).digest("hex"),
+    hooks: existsSync(join(source, "hooks")) ? contentHashOf(join(source, "hooks")) : "",
+    // the verdict SEAT is output, never input: its presence (a link
+    // into the run dir) or absence must not change the program's
+    // identity — the fold's "same program?" judgment cannot flip on a
+    // seat (2026-10-30, the "program changed since booking" strand)
+    data: existsSync(join(source, "data")) ? contentHashOf(join(source, "data"), ["review/verdict.json"]) : "",
+    members: existsSync(join(source, "members")) ? contentHashOf(join(source, "members")) : "",
+    beside,
+  }
+}
+
+// The pages that moved between a booking's photo and the live source:
+// [] means "no booked page moved" — new files are droppings, not edits.
+// Throws when the live source is unreadable (a reaped worktree) — the
+// caller stays honest by claiming nothing.
+export function changedProgramPages(booked: ProgramPages, source: string): string[] {
+  const now = buildProgramPages(source)
+  const moved: string[] = []
+  if (now.workflow !== booked.workflow) moved.push("workflow.toml")
+  if (now.hooks !== booked.hooks) moved.push("hooks/")
+  if (now.data !== booked.data) moved.push("data/")
+  if (now.members !== booked.members) moved.push("members/")
+  if (now.beside !== booked.beside) {
+    const was = new Map(booked.beside.split("|").map((p) => [p.slice(0, p.indexOf(":")), p]))
+    for (const part of now.beside.split("|")) {
+      const name = part.slice(0, part.indexOf(":"))
+      if (was.get(name) !== part) moved.push(name)
+    }
+  }
+  return moved
+}
+
+// The photo's seat on the run dir (run.ts writes it at staging). A
+// missing marker is a legacy booking: proof impossible, claims none.
+export function readProgramPages(dir: string): ProgramPages {
+  return JSON.parse(readFileSync(join(dir, ".whl-program"), "utf8")) as ProgramPages
+}
+
 // branch and worktree are labels, best-effort, never identity: a .git
 // FILE is a worktree (its gitdir basename names the lane); a .git dir
 // carries HEAD's branch. A program folder often sits nested inside a

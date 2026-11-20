@@ -126,13 +126,15 @@ test("principles-5201: a program's identity must move when its layout changes", 
         `BASE's walker hashed every entry name (directories included), so BASE saw the rename.`,
     )
 
-    // the CONSUMER's receipt, on the job the booking wrote
-    const job = { spur: ready.job.spur } as never
+    // the CONSUMER's receipt, on the job the booking wrote (the real
+    // record — the photo lives in its run dir; a spur-only stand-in
+    // has no dir and honestly claims nothing, #296)
+    const job = ready.job
     const why = failedWakeWhy(job, "failed")
     assert.match(
       why,
       /program changed since booking/,
-      `the wake must name the change — the program was edited after the booking, so \`whl continue\` re-runs the verdict on the same work (src/adapters/store.ts:845-856). It says: "${why}".`,
+      `the wake must name the change — the program was edited after the booking (the booked-pages photo moved; since #296 the prescription names re-levy/regrade, verbs that accept a finished job) (src/adapters/store.ts failedWakeWhy). It says: "${why}".`,
     )
   } finally {
     if (prevHome === undefined) delete process.env.AGENTIC_OS_HOME

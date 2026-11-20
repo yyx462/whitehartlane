@@ -8,7 +8,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { execFileSync, spawnSync } from "node:child_process"
 import { loadManifest } from "../doors/hooks.ts"
-import { contentHashOf } from "../doors/project.ts"
+import { changedProgramPages, readProgramPages } from "../doors/project.ts"
 import { allowGlobs, grantRoot, under } from "../core/permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
@@ -835,22 +835,33 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   return job
 }
 
-// #197's second half — the repair-ticket hint: a failed run's wake
-// tells the commissioner the CHEAPEST next command when it can prove
-// one. The booking already carries the program's content hash; if the
-// source folder hashes differently now, the program was fixed after
-// the failure and `whl continue` re-runs the verdict on the same work
-// (proven live: j-93d652 re-reported green in ~30s, zero tokens).
+// #197's second half, #296's correction — the repair-ticket hint: a
+// failed run's wake tells the commissioner the CHEAPEST next command
+// when it can PROVE the program was edited. The proof is the staged
+// pages photo (.whl-program, written at booking): the old whole-folder
+// pile hash read run-dropped files as edits, and prescribed a verb no
+// failed finish can follow — j-dd28ac (2026-11-18) dropped report.md
+// into the program folder 2 minutes before a red gate, and the wake
+// said `whl continue` 0.1s after the red, though continue refuses
+// every retired job and finishJob books retired for ALL finishes. The
+// photo names the moved pages; the prescription names verbs that
+// accept a finished job: a re-levy runs the edited program (changed
+// pages never fold — momentum-4), a regrade re-runs the grade hook on
+// the same work. No photo (legacy) or no source → the plain honest
+// "failed" (refusal beats silence).
 export function failedWakeWhy(job: JobRecord, status: string): string {
   if (status !== "failed") return "done"
   let why = "failed"
   const src = job.spur?.source
-  const booked = job.spur?.content_hash
-  if (src && booked) {
+  if (src && job.dir) {
     try {
-      if (contentHashOf(src) !== booked) why += " — program changed since booking: `whl continue` re-runs the verdict on the same work"
+      const moved = changedProgramPages(readProgramPages(job.dir), src)
+      if (moved.length > 0) {
+        why += ` — program changed since booking (${moved.join(", ")}): re-levy the same program folder (a fresh \`whl run\`) to run the edited pages; a grade-hook fix alone: \`whl regrade ${job.id}\``
+      }
     } catch {
-      // the source folder vanished (a reaped worktree): the plain verdict is still honest
+      // no staged photo (a legacy booking) or the source folder
+      // vanished (a reaped worktree): the plain verdict is still honest
     }
   }
   return why

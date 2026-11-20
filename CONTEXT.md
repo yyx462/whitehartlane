@@ -244,7 +244,7 @@ One `[[stage]]` of a chain, ANY topology (solo, fan-out, coworker, lab, gate) �
 _Avoid_: child job, minted program, delegated stage
 
 **Repair ticket**:
-A parked run's wake when it carries the repair path, not just the verdict: the verbatim why, the failed artifact, and one line naming the cheapest next command (`continue` after a program fix — proven by the content-hash compare; resume with a repair note when panes still live).
+A finished run's wake when it carries the repair path, not just the verdict: the verbatim why, the failed artifact, and one line naming the cheapest next command that accepts a finished job (re-levy after a program edit — proven by the booked-pages compare against the staged `.whl-program` photo, never the whole-folder hash, #296; `regrade` when only the grade hook changed; resume with a repair note when panes still live).
 _Avoid_: failure notice, death certificate
 
 **Question bank**:
