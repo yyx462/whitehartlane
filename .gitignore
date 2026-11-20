@@ -11,3 +11,5 @@ __pycache__/
 .whl-review/
 # the authoring session's operator-local agent config (r269 momentum-3106)
 /opencode.json
+# the worktree's task scratchpad (operator-local — never committed)
+/TASK.md

@@ -284,3 +284,39 @@ export function renderTraceTable(file: string): string {
   for (const g of gaps) lines.push(`# gap: seq ${g} lost`)
   return lines.join("\n")
 }
+
+// P0 economics (ECONOMICS.md proposal 2.6): fold a job's unit.tokens
+// rows into one total. LAST row per unit wins — the sample is
+// cumulative-since-0, and a unit that settles twice (fail, then a
+// re-attempt's pass) carries its whole cost only in the final row.
+// Rides readTrace, the trace layer's ONE reader (momentum-3 /
+// principles-7004: a hand-rolled parser already disagreed with it on
+// torn and seq-invalid rows). A file with no unit.tokens rows is null
+// (a pre-economics run, a worktree run, or a host that keeps no
+// usage — absence is honest).
+export function sumUnitTokens(file: string): { input: number; output: number; cacheRead: number; units: number } | null {
+  const rows = readTrace(file).rows.filter((r) => r.kind === "unit.tokens")
+  if (rows.length === 0) return null
+  const last = new Map<string, { input: number; output: number; cacheRead: number }>()
+  for (const r of rows) {
+    let d: Record<string, unknown>
+    try {
+      d = JSON.parse(r.detail || "{}") as Record<string, unknown>
+    } catch {
+      continue
+    }
+    last.set(r.stage || "?", {
+      input: Number(d.input ?? 0) || 0,
+      output: Number(d.output ?? 0) || 0,
+      cacheRead: Number(d.cacheRead ?? 0) || 0,
+    })
+  }
+  if (last.size === 0) return null
+  const out = { input: 0, output: 0, cacheRead: 0 }
+  for (const v of last.values()) {
+    out.input += v.input
+    out.output += v.output
+    out.cacheRead += v.cacheRead
+  }
+  return { ...out, units: last.size }
+}
