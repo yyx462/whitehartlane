@@ -247,6 +247,14 @@ _Avoid_: child job, minted program, delegated stage
 A finished run's wake when it carries the repair path, not just the verdict: the verbatim why, the failed artifact, and one line naming the cheapest next command that accepts a finished job (re-levy after a program edit — proven by the booked-pages compare against the staged `.whl-program` photo, never the whole-folder hash, #296; `regrade` when only the grade hook changed; resume with a repair note when panes still live).
 _Avoid_: failure notice, death certificate
 
+**Booked-pages photo**:
+The `.whl-program` marker a booking stages — the page-level identity of a program's inputs at kickoff, and the only proof an "edited program since booking" claim may cite (ADR 0017). One builder feeds the fold marker, the failed wake's repair hint, and the continue NOTE.
+_Avoid_: snapshot, content hash, pile hash
+
+**Dropping**:
+A file in the program folder the photo has no page for — harmless to identity by construction; named in the report once seats are declared (#298). The run may leave them; the identity may not read them.
+_Avoid_: output seat (a declared, expected file), edit
+
 **Question bank**:
 The committed `questions.toml` a run inherits and grows: the interviewer asks banked questions, may append new ones (append-only; `retired = true`, never erasure), and the audit checks every asked question is banked. Makes "same questions every run" true by construction instead of by model discipline.
 _Avoid_: prompt library, FAQ

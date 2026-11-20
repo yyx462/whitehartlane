@@ -21,7 +21,7 @@ the PRD first.
 <!-- project-meta: zens are the decision inbox. A design session is not
 finished until its rulings exist as a zen entry (distilled by the
 yyx-project-meta skill); the refit consumes every zen newer than the
-last refit. Newest: docs/zen/2026-10-25-zen-7.md. Manifest + checkpoint:
+last refit. Newest: docs/zen/2026-11-20-zen-10-repair-ticket-identity.md. Manifest + checkpoint:
 meta.toml. -->
 
 <!-- agent-api: coding-agent and herdr state comes from API fields
