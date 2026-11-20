@@ -379,11 +379,11 @@ One word per concept, enforced — the full dictionary is
 
 ## The paper trail
 
-- [`GOAL.md`](GOAL.md) — the six rules, and
-  [`GOAL.decision.md`](GOAL.decision.md) — every dated branch from them.
+- [`docs/prd/OPTIMUM.md`](docs/prd/OPTIMUM.md) — the product
+  direction, one file, regenerated whole from the trajectory.
 - [`docs/RAILS.md`](docs/RAILS.md) — the rails/hooks inventory, written from
   use.
-- [`docs/adr/`](docs/adr/) — twelve accepted decisions, argued.
+- [`docs/adr/`](docs/adr/) — accepted decisions, argued.
 - [`docs/plans/eval-vs-single-agent.md`](docs/plans/eval-vs-single-agent.md)
   — how this OS gets evaluated against a single agent: paired arms,
   pre-registered hypotheses, attention and isolation instruments built

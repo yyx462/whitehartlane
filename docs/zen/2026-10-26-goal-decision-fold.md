@@ -2,8 +2,11 @@
 
 The dated branches that lived in GOAL.decision.md move HERE, into the
 zen records (their home — the zens are the design log; a second
-decision file split the trail in two). GOAL.decision.md stays as a
-pointer stub so old links land somewhere honest. Entries verbatim,
+decision file split the trail in two). ~~GOAL.decision.md stays as a
+pointer stub so old links land somewhere honest.~~ *(SUPERSEDED by
+zen-10, 2026-11-20: GOAL.md and GOAL.decision.md are retired —
+direction lives in docs/prd/OPTIMUM.md, history in the zens and ADRs;
+old links land on the zens.)* Entries verbatim,
 order preserved, nothing erased.
 
 

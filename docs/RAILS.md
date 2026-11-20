@@ -4,7 +4,7 @@ Zen 3 deferred naming the inventory until the system had been used.
 It has been: Phase A (the OS disk, JEV, receipts), Phase B (one home,
 one trace, unit dirs, resolvers), and one live provider 429 that killed
 a planner call. This is the list that use produced. Rails do not change
-per Job; hooks do (GOAL 3). A planner may write hooks; it may never
+per Job; hooks do. A planner may write hooks; it may never
 rewrite rails.
 
 ## Start
