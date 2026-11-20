@@ -34,6 +34,7 @@ import {
   openSession,
   bookingStale,
   orphanJob,
+  restoreGuardedConfigs,
   sessionsRoot,
   stampSpurKey,
   type JobRecord,
@@ -417,6 +418,12 @@ function book(
   stage: (store: string) => void,
   preWarnings: string[] = [],
 ): RunReady | RunRefused {
+  // issue #295 — repair config guards no live job claims before this
+  // run books anything: a crash between a guarded write and its retire
+  // left a project's committed opencode.json dirty, and the next run
+  // in that worktree is the one positioned to notice
+  const repair = restoreGuardedConfigs()
+  for (const r of repair.refused) warnings.push(`config guard refused: ${r.path} — ${r.why}`)
   const taskFile = join(dir, "task.txt")
   if (existsSync(taskFile)) {
     const line = readFileSync(taskFile, "utf8").split("\n")[0]?.trim()
