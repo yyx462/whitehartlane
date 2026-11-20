@@ -19,5 +19,5 @@ glossary = "CONTEXT.md"
 agents_pointer = "AGENTS.md"
 
 [checkpoint]
-last_session = "opencode:ses_e928a1f45ffea1bYcmnmOU3uTp"
+last_session = "opencode:#296-investigation-fix-2026-11-20"
 pending = []
