@@ -5,19 +5,19 @@
 // line per fact), and jobs/<jid>/{job.json,run/}. job.json is a
 // projection of events; records are never deleted (zen 5: retired is a
 // state, not rm).
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { execFileSync, spawnSync } from "node:child_process"
 import { loadManifest } from "../doors/hooks.ts"
 import { contentHashOf } from "../doors/project.ts"
-import { allowGlobs, grantRoot } from "../core/permission.ts"
+import { allowGlobs, grantRoot, under } from "../core/permission.ts"
 import { appendSpoolWake, spoolAlive } from "./wake-spool.ts"
 import { forkLevy } from "./fork.ts"
 import { backoffBase, backoffMs, retries, sleepSync } from "./backoff.ts"
 import { opencodeSessionTitle } from "./transcripts.ts"
 import { emitTrace } from "./trace.ts"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { randomBytes } from "node:crypto"
+import { join, resolve } from "node:path"
+import { createHash, randomBytes } from "node:crypto"
 
 export type HostBinding = {
   tool: string
@@ -826,6 +826,9 @@ export function finishJob(job: JobRecord, receipt: Omit<Receipt, "finished">): J
   job.receipt = { ...receipt, finished: job.finished }
   saveJob(job)
   appendEvent(job.sid, { actor: "orchestrator", kind: "job.retired", jid: job.id, receipt: job.receipt })
+  // issue #295 — retiring a run releases the project-config guards it
+  // (or a crash before it) left pending
+  releaseConfigsWithTrace(job, "orchestrator")
   // the wake names the true outcome — a failed job must not arrive
   // saying "done" (the spawner would read the all-clear and move on)
   wakeFirstMate(job, failedWakeWhy(job, receipt.status), job.receipt.report ?? null)
@@ -864,6 +867,7 @@ export function abortJob(
   job.abort = { reason, panesRemaining, finished: job.finished }
   saveJob(job)
   appendEvent(job.sid, { actor, kind: "job.aborted", jid: job.id, reason, panesRemaining })
+  releaseConfigsWithTrace(job, actor) // issue #295 — abort is terminal; guards release
   wakeFirstMate(job, `aborted (${reason})`, null)
   return job
 }
@@ -910,6 +914,7 @@ export function failJob(
   if (opts.again) job.woke = undefined
   saveJob(job)
   appendEvent(job.sid, { actor: "levy", kind: "job.fail-button", jid: job.id, reason, again: Boolean(opts.again) })
+  releaseConfigsWithTrace(job, "levy") // issue #295 — the fail button is terminal too
   // the fail button is the deterministic repro for the wake path — its
   // wake must say what a REAL failure's would: the cheapest repair
   // when the program changed after booking (#197/#204), the plain
@@ -1072,6 +1077,9 @@ export function pauseJob(job: JobRecord, reason: string, panesRemaining: number)
   job.pause = { reason, panesRemaining, at: new Date().toISOString() }
   saveJob(job)
   appendEvent(job.sid, { actor: "orchestrator", kind: "job.paused", jid: job.id, reason, panesRemaining })
+  // issue #295 — pause retires the panes (ADR 5); the parked worktree
+  // rests clean, and a continue re-seeds through the same guarded doors
+  releaseConfigsWithTrace(job, "orchestrator")
   return job
 }
 
@@ -1419,23 +1427,203 @@ export function writePiSettings(dir: string, model: string): void {
   )
 }
 
+// -- run-scoped project-config guard (issue #295) --------------------------
+//
+// The four writer doors below read-modify-write <dir>/opencode.json on
+// one premise: the worker's cwd is a harness-owned sandbox dir, where
+// the file is run-local debris that dies with the job dir. A spur
+// worktree breaks the premise (j-dd28ac, issue #295): the cwd IS a git
+// worktree, the file is the project's COMMITTED config, and one boot
+// left 23 allow-lines in it that no retire ever removed — a dirty tree
+// every clean-tree gate then trips. The file channel cannot move
+// (herdr's agent start carries no env, opencode no --config — the
+// spawn receipt in opencode-host), so the write is GUARDED instead:
+// when the target sits inside a git work tree, its pristine bytes (or
+// its absence) are snapshotted once under the harness home, the guard
+// fingerprints its own last write, and the terminal transitions —
+// finish, abort, fail, pause — restore the pristine state (the run
+// door repairs crash leftovers at its next boot). Restore REFUSES to
+// clobber bytes the guard did not write: a human edit mid-run stays,
+// the refusal logs and the snapshot stays visible. A guard that cannot
+// snapshot fails OPEN — the isolation write proceeds unguarded, the
+// pre-#295 behavior: losing isolation is the r4 auth-modal incident, a
+// dirty tree is the status quo.
+type ConfigGuard = {
+  path: string
+  // original bytes; null = the file did not exist (restore deletes it)
+  pristine: string | null
+  // sha256 of the last bytes a guarded writer wrote; "" until then
+  lastWritten: string
+  takenAt: string
+}
+
+function configGuardsRoot(): string {
+  return join(homeRoot(), "config-guards")
+}
+
+function guardPathFor(cfgPath: string): string {
+  return join(configGuardsRoot(), `${createHash("sha256").update(resolve(cfgPath)).digest("hex")}.json`)
+}
+
+function sha256Text(s: string): string {
+  return createHash("sha256").update(s).digest("hex")
+}
+
+// tracked or not does not matter — a NEW untracked opencode.json
+// dirties `git status` just the same (#295's sibling shape)
+function insideGitWorkTree(dir: string): boolean {
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
+      timeout: 5_000,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    return out.trim() === "true"
+  } catch {
+    return false // no git / unusable git: today's unguarded behavior
+  }
+}
+
+// TWIN WARNING: engines/engine.ts worktreeLadderOf walks spur source →
+// .git the same way (its env/ledger arms live rail-side; the store
+// sees only records) — keep the two walks in step.
+function worktreeRootOf(source: string): string | undefined {
+  let here = resolve(source)
+  for (let up = 0; up < 8; up++) {
+    if (existsSync(join(here, ".git"))) return here
+    const parent = resolve(join(here, ".."))
+    if (parent === here) break
+    here = parent
+  }
+  return undefined
+}
+
+// The ONE wrapper every writer door wraps its file write in: snapshot
+// before the first write, fingerprint after — restore (below) tells
+// ours from a human's by those two marks.
+function writeGuardedConfig(cfgPath: string, write: () => void): void {
+  let guarded = false
+  try {
+    if (insideGitWorkTree(join(cfgPath, ".."))) {
+      const g = guardPathFor(cfgPath)
+      if (!existsSync(g)) {
+        const pristine = existsSync(cfgPath) ? readFileSync(cfgPath, "utf8") : null
+        writeJson(g, { path: resolve(cfgPath), pristine, lastWritten: "", takenAt: new Date().toISOString() } satisfies ConfigGuard)
+      }
+      guarded = true
+    }
+  } catch (err) {
+    // fail open — see the block comment: the isolation write must not
+    // die because its guard could not be booked
+    console.error(`config guard: booking ${cfgPath} failed (${err instanceof Error ? err.message : String(err)}) — write proceeds unguarded`)
+  }
+  write()
+  if (!guarded) return
+  try {
+    const g = guardPathFor(cfgPath)
+    const guard = readJson<ConfigGuard>(g)
+    guard.lastWritten = existsSync(cfgPath) ? sha256Text(readFileSync(cfgPath, "utf8")) : ""
+    writeJson(g, guard)
+  } catch {
+    // the write stands unfingerprinted — restore then matches only
+    // pristine bytes (conservative: divergent bytes refuse, never
+    // clobber)
+  }
+}
+
+// Restore every guard no LIVE job claims. Claims: a running or
+// orphaned job's pane cwds (where the writers actually wrote), its
+// spur source, and the source's worktree root — orphaned counts as
+// claimed because its panes may still breathe; the terminal states
+// have already flipped the record away from running before calling
+// here. The run door calls this at boot to repair crash leftovers.
+export function restoreGuardedConfigs(): { restored: string[]; refused: { path: string; why: string }[] } {
+  const out = { restored: [] as string[], refused: [] as { path: string; why: string }[] }
+  const root = configGuardsRoot()
+  let files: string[]
+  try {
+    if (!existsSync(root)) return out
+    files = readdirSync(root)
+  } catch {
+    return out // an unreadable guard dir never blocks a door (book) or a retire
+  }
+  const claims: string[] = []
+  let jobs: ReturnType<typeof listJobs> = []
+  try {
+    jobs = listJobs()
+  } catch {
+    // no readable job records → nothing claims anything → all guards
+    // are stale (the boot-repair path after a store wipe)
+  }
+  for (const job of jobs) {
+    if (job.state !== "running" && job.state !== "orphaned") continue
+    for (const p of job.panes) if (p.transcript?.cwd) claims.push(p.transcript.cwd)
+    if (job.spur?.source) {
+      claims.push(job.spur.source)
+      const wt = worktreeRootOf(job.spur.source)
+      if (wt) claims.push(wt)
+    }
+  }
+  for (const f of readdirSync(root)) {
+    if (!f.endsWith(".json")) continue
+    const gpath = join(root, f)
+    let guard: ConfigGuard
+    try {
+      guard = readJson<ConfigGuard>(gpath)
+    } catch {
+      continue // an unreadable guard file is debris, never a blocker
+    }
+    const dir = join(guard.path, "..")
+    if (claims.some((c) => under(dir, resolve(c)))) continue // a live run still owns it
+    try {
+      const current = existsSync(guard.path) ? readFileSync(guard.path, "utf8") : null
+      const isPristine = guard.pristine === null ? current === null : current === guard.pristine
+      const isOurs = current !== null && guard.lastWritten !== "" && sha256Text(current) === guard.lastWritten
+      if (!isPristine && !isOurs) {
+        const why = "bytes this guard did not write (a human edit?) — left in place, snapshot kept"
+        console.error(`config guard: ${guard.path} — ${why}: ${gpath}`)
+        out.refused.push({ path: guard.path, why })
+        continue
+      }
+      if (guard.pristine === null) rmSync(guard.path, { force: true })
+      else writeFileSync(guard.path, guard.pristine)
+      rmSync(gpath, { force: true })
+      out.restored.push(guard.path)
+    } catch (err) {
+      console.error(`config guard: restoring ${guard.path} failed (${err instanceof Error ? err.message : String(err)}) — snapshot kept`)
+    }
+  }
+  return out
+}
+
+// the terminal transitions' release: guards go back, refusals surface
+// on the trace (zen 5 — the trace is the truth; the guard dir's
+// emptiness is the observable state)
+function releaseConfigsWithTrace(job: JobRecord, actor: string): void {
+  const out = restoreGuardedConfigs()
+  for (const path of out.restored) appendEvent(job.sid, { actor, kind: "config.restored", jid: job.id, path })
+  for (const r of out.refused) appendEvent(job.sid, { actor, kind: "config.restore-refused", jid: job.id, path: r.path, why: r.why })
+}
+
 // opencode's CLI dropped --model from the root command (2026-10
 // upgrade), so a worker's model — workflow-level or the per-member
 // override — rides the config layer instead: the sandbox opencode.json
 // the worker discovers from its startup cwd. Read-modify-write:
 // writeWorkerPermissions has usually already shaped this file.
 export function writeOpencodeModel(dir: string, model: string): void {
-  try {
-    const cfgPath = join(dir, "opencode.json")
-    const cfg = existsSync(cfgPath)
-      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
-      : {}
-    cfg.$schema ??= "https://opencode.ai/config.json"
-    cfg.model = model
-    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
-  } catch {
-    // model pinning is best-effort; the global default still applies
-  }
+  const cfgPath = join(dir, "opencode.json")
+  writeGuardedConfig(cfgPath, () => {
+    try {
+      const cfg = existsSync(cfgPath)
+        ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
+        : {}
+      cfg.$schema ??= "https://opencode.ai/config.json"
+      cfg.model = model
+      writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+    } catch {
+      // model pinning is best-effort; the global default still applies
+    }
+  })
 }
 
 // Per-mind model SETTINGS, same config layer as the pin: read-modify-
@@ -1448,28 +1636,30 @@ export function writeOpencodeModelSettings(
   model: string,
   settings: { temperature?: number },
 ): void {
-  try {
-    const cfgPath = join(dir, "opencode.json")
-    const cfg = existsSync(cfgPath)
-      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
-      : {}
-    cfg.$schema ??= "https://opencode.ai/config.json"
-    const { provider, id } = splitModel(model)
-    const providers = (cfg.provider ?? {}) as Record<string, unknown>
-    const entry = (providers[provider] ?? {}) as Record<string, unknown>
-    const models = (entry.models ?? {}) as Record<string, unknown>
-    const modelEntry = (models[id] ?? {}) as Record<string, unknown>
-    for (const [key, value] of Object.entries(settings)) {
-      if (value !== undefined) modelEntry[key] = value
+  const cfgPath = join(dir, "opencode.json")
+  writeGuardedConfig(cfgPath, () => {
+    try {
+      const cfg = existsSync(cfgPath)
+        ? (JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>)
+        : {}
+      cfg.$schema ??= "https://opencode.ai/config.json"
+      const { provider, id } = splitModel(model)
+      const providers = (cfg.provider ?? {}) as Record<string, unknown>
+      const entry = (providers[provider] ?? {}) as Record<string, unknown>
+      const models = (entry.models ?? {}) as Record<string, unknown>
+      const modelEntry = (models[id] ?? {}) as Record<string, unknown>
+      for (const [key, value] of Object.entries(settings)) {
+        if (value !== undefined) modelEntry[key] = value
+      }
+      models[id] = modelEntry
+      entry.models = models
+      providers[provider] = entry
+      cfg.provider = providers
+      writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+    } catch {
+      // settings pinning is best-effort; the model pin still applies
     }
-    models[id] = modelEntry
-    entry.models = models
-    providers[provider] = entry
-    cfg.provider = providers
-    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
-  } catch {
-    // settings pinning is best-effort; the model pin still applies
-  }
+  })
 }
 
 // Grant one more root to a live worker's permission file — durable for
@@ -1480,18 +1670,20 @@ export function writeOpencodeModelSettings(
 // predicate's (grantRoot) — one form-writer, not two.
 export function addWorkerRoot(runDir: string, root: string): void {
   if (root === "" || root === "/") return
-  try {
-    const cfgPath = join(runDir, "opencode.json")
-    const cfg = existsSync(cfgPath)
-      ? (JSON.parse(readFileSync(cfgPath, "utf8")) as { permission?: { external_directory?: Record<string, string> } })
-      : {}
-    cfg.permission ??= {}
-    cfg.permission.external_directory ??= { "*": "ask" }
-    grantRoot(cfg.permission.external_directory, root)
-    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
-  } catch {
-    // permissions are best-effort; the dialog decision still applies
-  }
+  const cfgPath = join(runDir, "opencode.json")
+  writeGuardedConfig(cfgPath, () => {
+    try {
+      const cfg = existsSync(cfgPath)
+        ? (JSON.parse(readFileSync(cfgPath, "utf8")) as { permission?: { external_directory?: Record<string, string> } })
+        : {}
+      cfg.permission ??= {}
+      cfg.permission.external_directory ??= { "*": "ask" }
+      grantRoot(cfg.permission.external_directory, root)
+      writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`)
+    } catch {
+      // permissions are best-effort; the dialog decision still applies
+    }
+  })
 }
 
 // Temp scratch is pre-seeded, not re-allowed beat after beat (j-b6067c:
@@ -1525,8 +1717,11 @@ export function globalMcpNames(): string[] {
 }
 
 export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []): void {
+  const cfgPath = join(runDir, "opencode.json")
+  // guarded (issue #295): in a spur worktree this file is the project's
+  // committed config — snapshot pristine, restore on retire
+  writeGuardedConfig(cfgPath, () => {
   try {
-    const cfgPath = join(runDir, "opencode.json")
     // MERGE, never clobber (issue #249): a unit dir may already carry
     // the model pin and provider settings from an earlier generation —
     // the isolation keys (permission, mcp) FORCE-win, everything else
@@ -1570,4 +1765,5 @@ export function writeWorkerPermissions(runDir: string, extraRoots: string[] = []
   } catch {
     // permissions scoping is best-effort; the run works without it
   }
+  })
 }

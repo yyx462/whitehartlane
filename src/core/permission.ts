@@ -90,7 +90,9 @@ const HARD_DENY = [
   /\.gpg/i,
 ]
 
-function under(path: string, root: string): boolean {
+// exported for the store's config guard (issue #295): one under-test,
+// no twin spelling (this file's own header law)
+export function under(path: string, root: string): boolean {
   const r = root.endsWith("/") ? root.slice(0, -1) : root
   return path === r || path.startsWith(`${r}/`)
 }
