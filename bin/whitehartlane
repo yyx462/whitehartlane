@@ -62,7 +62,7 @@ import {
   saveJob,
   wakeAudit,
 } from "../src/adapters/store.ts"
-import { contentHashOf, duplicateStageIds, relSourceOf, scopeRootOf, spurIdOf, validateSpurId } from "../src/doors/project.ts"
+import { changedProgramPages, contentHashOf, duplicateStageIds, relSourceOf, readProgramPages, scopeRootOf, spurIdOf, validateSpurId } from "../src/doors/project.ts"
 import { loadManifest, probeHooks } from "../src/doors/hooks.ts"
 import { jobTracePath, renderTraceTable, sumUnitTokens } from "../src/adapters/trace.ts"
 import { formatGate, markPromoted, promoteFindings, submitPr, worktreeHasWork } from "../src/doors/promote.ts"
@@ -1480,23 +1480,24 @@ stage programs ([[stage]] chains) — full manual in docs/STAGES.md:
     // both revival verbs land on. The lineage session is the kinship
     // (every booking mints its own run dir — j.dir is never equal).
     // #201 row 8: an edited declaration must not continue in silence —
-    // the booking carries the program's content hash; a source that
-    // hashes differently now means the rebirth runs DIFFERENT program
-    // bytes than the ones that produced the work so far. Say it, book
-    // it on the trace, and let the commissioner decide.
-    if (job.spur?.source && job.spur?.content_hash) {
-      let changed = false
+    // and (#296) "edited" means a BOOKED PAGE moved (the .whl-program
+    // photo), never the whole-folder pile hash: j-dd28ac's run dropped
+    // report.md beside the program and the pile read it as an edit. No
+    // photo (legacy) or vanished source → nothing provable → the plain
+    // continue works, unclaimed.
+    if (job.spur?.source && job.dir) {
+      let moved = []
       try {
-        changed = contentHashOf(job.spur.source) !== job.spur.content_hash
+        moved = changedProgramPages(readProgramPages(job.dir), job.spur.source)
       } catch {
-        /* the source vanished — the plain continue still works */
+        /* no staged photo or the source vanished — the plain continue still works */
       }
-      if (changed) {
+      if (moved.length > 0) {
         appendEvent(job.sid, {
           actor: "cli",
           kind: "program.changed",
           jid: job.id,
-          why: "the program source changed since booking — this continue runs edited bytes",
+          why: `booked pages moved since booking (${moved.join(", ")}) — this continue runs edited bytes`,
         })
         console.log(`continue: NOTE — ${job.spur.source} changed since booking; this rebirth runs the EDITED program (the staged copy in the job dir is untouched)`)
       }
